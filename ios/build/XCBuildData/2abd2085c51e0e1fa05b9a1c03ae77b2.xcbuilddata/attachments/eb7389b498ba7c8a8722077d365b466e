@@ -1,0 +1,638 @@
+{
+  "" : {
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMio-master.dia",
+    "emit-module-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMio-master-emit-module.d",
+    "emit-module-diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMio-master-emit-module.dia",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMio-master.swiftdeps"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/GeneratedAssetSymbols.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/GeneratedAssetSymbols.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/GeneratedAssetSymbols.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/GeneratedAssetSymbols~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/API/APIClient.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/APIClient.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/APIClient.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/APIClient.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/APIClient.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/APIClient.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/APIClient.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/APIClient.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/APIClient~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/API/DirectObjectStorageClient.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/DirectObjectStorageClient.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/DirectObjectStorageClient.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/DirectObjectStorageClient.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/DirectObjectStorageClient.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/DirectObjectStorageClient.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/DirectObjectStorageClient.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/DirectObjectStorageClient.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/DirectObjectStorageClient~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/API/MediaUploadAPI.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadAPI.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadAPI.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadAPI.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadAPI.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadAPI.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadAPI.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadAPI.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadAPI~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/App/AppDependencies.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppDependencies.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppDependencies.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppDependencies.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppDependencies.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppDependencies.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppDependencies.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppDependencies.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppDependencies~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/App/AppRootView.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppRootView.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppRootView.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppRootView.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppRootView.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppRootView.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppRootView.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppRootView.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppRootView~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/App/AppRoute.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppRoute.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppRoute.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppRoute.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppRoute.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppRoute.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppRoute.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppRoute.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppRoute~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/App/AppTab.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppTab.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppTab.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppTab.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppTab.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppTab.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppTab.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppTab.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppTab~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/DesignPlayground/DesignPlaygroundView.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/DesignPlaygroundView.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/DesignPlaygroundView.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/DesignPlaygroundView.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/DesignPlaygroundView.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/DesignPlaygroundView.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/DesignPlaygroundView.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/DesignPlaygroundView.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/DesignPlaygroundView~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/DesignSystem/Components/EmptyState.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/EmptyState.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/EmptyState.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/EmptyState.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/EmptyState.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/EmptyState.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/EmptyState.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/EmptyState.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/EmptyState~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/DesignSystem/Components/FrameMioProgressView.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioProgressView.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioProgressView.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioProgressView.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioProgressView.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioProgressView.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioProgressView.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioProgressView.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioProgressView~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/DesignSystem/Components/LoadingState.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/LoadingState.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/LoadingState.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/LoadingState.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/LoadingState.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/LoadingState.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/LoadingState.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/LoadingState.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/LoadingState~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/DesignSystem/Components/MediaThumbnail.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaThumbnail.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaThumbnail.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaThumbnail.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaThumbnail.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaThumbnail.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaThumbnail.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaThumbnail.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaThumbnail~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/DesignSystem/Components/PrimaryButton.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PrimaryButton.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PrimaryButton.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PrimaryButton.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PrimaryButton.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PrimaryButton.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PrimaryButton.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PrimaryButton.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PrimaryButton~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/DesignSystem/Components/SecondaryButton.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SecondaryButton.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SecondaryButton.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SecondaryButton.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SecondaryButton.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SecondaryButton.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SecondaryButton.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SecondaryButton.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SecondaryButton~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/DesignSystem/Components/SectionHeader.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SectionHeader.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SectionHeader.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SectionHeader.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SectionHeader.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SectionHeader.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SectionHeader.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SectionHeader.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SectionHeader~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/DesignSystem/Components/SelectionIndicator.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SelectionIndicator.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SelectionIndicator.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SelectionIndicator.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SelectionIndicator.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SelectionIndicator.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SelectionIndicator.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SelectionIndicator.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SelectionIndicator~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/DesignSystem/Components/StoryCard.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCard.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCard.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCard.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCard.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCard.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCard.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCard.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCard~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/DesignSystem/Components/Tag.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/Tag.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/Tag.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/Tag.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/Tag.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/Tag.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/Tag.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/Tag.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/Tag~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/DesignSystem/Components/VideoDurationBadge.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/VideoDurationBadge.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/VideoDurationBadge.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/VideoDurationBadge.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/VideoDurationBadge.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/VideoDurationBadge.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/VideoDurationBadge.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/VideoDurationBadge.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/VideoDurationBadge~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/DesignSystem/FrameMioAnimation.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioAnimation.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioAnimation.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioAnimation.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioAnimation.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioAnimation.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioAnimation.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioAnimation.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioAnimation~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/DesignSystem/FrameMioColors.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioColors.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioColors.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioColors.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioColors.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioColors.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioColors.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioColors.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioColors~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/DesignSystem/FrameMioHaptics.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioHaptics.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioHaptics.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioHaptics.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioHaptics.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioHaptics.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioHaptics.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioHaptics.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioHaptics~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/DesignSystem/FrameMioMetrics.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioMetrics.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioMetrics.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioMetrics.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioMetrics.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioMetrics.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioMetrics.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioMetrics.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioMetrics~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/DesignSystem/FrameMioOpacity.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioOpacity.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioOpacity.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioOpacity.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioOpacity.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioOpacity.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioOpacity.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioOpacity.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioOpacity~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/DesignSystem/FrameMioRadius.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioRadius.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioRadius.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioRadius.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioRadius.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioRadius.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioRadius.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioRadius.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioRadius~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/DesignSystem/FrameMioShadows.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioShadows.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioShadows.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioShadows.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioShadows.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioShadows.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioShadows.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioShadows.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioShadows~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/DesignSystem/FrameMioSpacing.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioSpacing.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioSpacing.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioSpacing.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioSpacing.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioSpacing.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioSpacing.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioSpacing.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioSpacing~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/DesignSystem/FrameMioTypography.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioTypography.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioTypography.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioTypography.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioTypography.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioTypography.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioTypography.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioTypography.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioTypography~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Features/Home/ContextTile.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ContextTile.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ContextTile.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ContextTile.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ContextTile.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ContextTile.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ContextTile.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ContextTile.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ContextTile~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Features/Home/HomeView.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/HomeView.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/HomeView.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/HomeView.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/HomeView.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/HomeView.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/HomeView.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/HomeView.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/HomeView~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Features/Home/HomeViewModel.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/HomeViewModel.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/HomeViewModel.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/HomeViewModel.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/HomeViewModel.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/HomeViewModel.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/HomeViewModel.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/HomeViewModel.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/HomeViewModel~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Features/Home/MomentContext.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MomentContext.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MomentContext.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MomentContext.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MomentContext.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MomentContext.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MomentContext.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MomentContext.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MomentContext~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Features/MediaPicker/MediaPickerView.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaPickerView.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaPickerView.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaPickerView.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaPickerView.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaPickerView.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaPickerView.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaPickerView.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaPickerView~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Features/MediaPicker/MediaPickerViewModel.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaPickerViewModel.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaPickerViewModel.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaPickerViewModel.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaPickerViewModel.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaPickerViewModel.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaPickerViewModel.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaPickerViewModel.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaPickerViewModel~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Features/Moments/MomentsView.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MomentsView.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MomentsView.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MomentsView.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MomentsView.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MomentsView.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MomentsView.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MomentsView.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MomentsView~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Features/Profile/ProfileView.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ProfileView.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ProfileView.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ProfileView.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ProfileView.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ProfileView.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ProfileView.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ProfileView.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ProfileView~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Features/Settings/SettingsView.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SettingsView.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SettingsView.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SettingsView.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SettingsView.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SettingsView.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SettingsView.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SettingsView.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SettingsView~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Features/Settings/SettingsViewModel.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SettingsViewModel.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SettingsViewModel.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SettingsViewModel.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SettingsViewModel.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SettingsViewModel.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SettingsViewModel.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SettingsViewModel.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/SettingsViewModel~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Features/Story/StoryView.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryView.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryView.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryView.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryView.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryView.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryView.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryView.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryView~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Features/StoryCreation/StoryCreationView.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCreationView.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCreationView.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCreationView.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCreationView.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCreationView.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCreationView.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCreationView.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCreationView~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Features/StoryCreation/StoryCreationViewModel.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCreationViewModel.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCreationViewModel.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCreationViewModel.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCreationViewModel.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCreationViewModel.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCreationViewModel.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCreationViewModel.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryCreationViewModel~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Features/StoryPreview/StoryPreviewView.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPreviewView.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPreviewView.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPreviewView.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPreviewView.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPreviewView.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPreviewView.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPreviewView.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPreviewView~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Features/StoryPreview/StoryPreviewViewModel.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPreviewViewModel.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPreviewViewModel.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPreviewViewModel.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPreviewViewModel.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPreviewViewModel.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPreviewViewModel.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPreviewViewModel.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPreviewViewModel~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/FrameMioApp.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioApp.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioApp.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioApp.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioApp.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioApp.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioApp.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioApp.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/FrameMioApp~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/MediaAnalysis/AVFoundationVideoMetadataService.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AVFoundationVideoMetadataService.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AVFoundationVideoMetadataService.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AVFoundationVideoMetadataService.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AVFoundationVideoMetadataService.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AVFoundationVideoMetadataService.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AVFoundationVideoMetadataService.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AVFoundationVideoMetadataService.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AVFoundationVideoMetadataService~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/MediaAnalysis/MediaClusterer.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaClusterer.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaClusterer.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaClusterer.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaClusterer.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaClusterer.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaClusterer.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaClusterer.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaClusterer~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/MediaAnalysis/PhotoKitMediaIntelligenceService.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PhotoKitMediaIntelligenceService.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PhotoKitMediaIntelligenceService.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PhotoKitMediaIntelligenceService.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PhotoKitMediaIntelligenceService.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PhotoKitMediaIntelligenceService.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PhotoKitMediaIntelligenceService.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PhotoKitMediaIntelligenceService.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PhotoKitMediaIntelligenceService~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/MediaAnalysis/VisionMediaAnalysisService.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/VisionMediaAnalysisService.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/VisionMediaAnalysisService.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/VisionMediaAnalysisService.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/VisionMediaAnalysisService.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/VisionMediaAnalysisService.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/VisionMediaAnalysisService.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/VisionMediaAnalysisService.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/VisionMediaAnalysisService~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Models/AppError.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppError.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppError.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppError.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppError.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppError.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppError.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppError.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/AppError~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Models/MediaModels.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaModels.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaModels.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaModels.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaModels.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaModels.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaModels.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaModels.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaModels~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Models/MediaUploadModels.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadModels.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadModels.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadModels.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadModels.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadModels.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadModels.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadModels.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadModels~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Models/StoryModels.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryModels.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryModels.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryModels.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryModels.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryModels.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryModels.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryModels.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryModels~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Persistence/MediaIntelligenceStore.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaIntelligenceStore.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaIntelligenceStore.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaIntelligenceStore.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaIntelligenceStore.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaIntelligenceStore.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaIntelligenceStore.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaIntelligenceStore.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaIntelligenceStore~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Persistence/MediaUploadStore.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadStore.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadStore.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadStore.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadStore.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadStore.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadStore.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadStore.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadStore~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Persistence/StoryPersistence.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPersistence.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPersistence.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPersistence.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPersistence.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPersistence.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPersistence.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPersistence.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryPersistence~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/PhotoLibrary/PhotoKitPhotoLibraryService.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PhotoKitPhotoLibraryService.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PhotoKitPhotoLibraryService.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PhotoKitPhotoLibraryService.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PhotoKitPhotoLibraryService.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PhotoKitPhotoLibraryService.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PhotoKitPhotoLibraryService.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PhotoKitPhotoLibraryService.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/PhotoKitPhotoLibraryService~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Services/MediaUploadMocks.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadMocks.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadMocks.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadMocks.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadMocks.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadMocks.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadMocks.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadMocks.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadMocks~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Services/MediaUploadService.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadService.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadService.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadService.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadService.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadService.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadService.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadService.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/MediaUploadService~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Services/ServiceProtocols.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ServiceProtocols.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ServiceProtocols.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ServiceProtocols.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ServiceProtocols.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ServiceProtocols.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ServiceProtocols.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ServiceProtocols.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/ServiceProtocols~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Shared/Components/EmptyStoryCard.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/EmptyStoryCard.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/EmptyStoryCard.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/EmptyStoryCard.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/EmptyStoryCard.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/EmptyStoryCard.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/EmptyStoryCard.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/EmptyStoryCard.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/EmptyStoryCard~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Story/StoryService.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryService.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryService.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryService.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryService.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryService.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryService.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryService.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/StoryService~partial.swiftmodule"
+  },
+  "/Users/chenyunshu/Desktop/Project/framemio/ios/FrameMio/Utilities/TaskCancellation.swift" : {
+    "const-values" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/TaskCancellation.swiftconstvalues",
+    "dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/TaskCancellation.d",
+    "diagnostics" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/TaskCancellation.dia",
+    "index-unit-output-path" : "/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/TaskCancellation.o",
+    "llvm-bc" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/TaskCancellation.bc",
+    "object" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/TaskCancellation.o",
+    "swift-dependencies" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/TaskCancellation.swiftdeps",
+    "swiftmodule" : "/Users/chenyunshu/Desktop/Project/framemio/ios/build/FrameMio.build/Debug-iphonesimulator/FrameMio.build/Objects-normal/arm64/TaskCancellation~partial.swiftmodule"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "streams": [
+    {
+      "codec_type": "video",
+      "codec_name": "hevc",
+      "width": 1920,
+      "height": 1080,
+      "avg_frame_rate": "120/1",
+      "r_frame_rate": "120/1",
+      "duration": "18.000000",
+      "bit_rate": "42000000",
+      "tags": {}
+    },
+    {"codec_type": "audio", "codec_name": "aac", "duration": "18.000000"}
+  ],
+  "format": {
+    "duration": "18.000000",
+    "size": "94500000",
+    "bit_rate": "42000000",
+    "format_name": "mov,mp4,m4a,3gp,3g2,mj2"
+  }
+}

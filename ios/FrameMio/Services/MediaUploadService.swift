@@ -1,0 +1,452 @@
+import Foundation
+
+final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
+    private let source: OriginalMediaSource
+    private let authorizer: MediaUploadAuthorizer
+    private let objectStorage: DirectObjectStorageClient
+    private let store: MediaUploadStore
+
+    init(
+        source: OriginalMediaSource,
+        authorizer: MediaUploadAuthorizer,
+        objectStorage: DirectObjectStorageClient,
+        store: MediaUploadStore
+    ) {
+        self.source = source
+        self.authorizer = authorizer
+        self.objectStorage = objectStorage
+        self.store = store
+    }
+
+    func upload(
+        selection: MediaSelection,
+        assets: [MediaAsset],
+        options: MediaUploadOptions = MediaUploadOptions(),
+        progress: @escaping @Sendable (MediaUploadProgress) -> Void = { _ in }
+    ) async throws -> [MediaUpload] {
+        guard options.optimization == .original else {
+            throw AppError.message("Media optimization is not implemented yet; the original is preserved.")
+        }
+
+        let eligibleIDs = Set(selection.uploadEligibleAssetIDs)
+        let eligibleAssets = assets.filter { eligibleIDs.contains($0.id) }
+        guard !eligibleAssets.isEmpty else {
+            return []
+        }
+        return try await uploadInBatches(
+            eligibleAssets,
+            options: options,
+            progress: progress
+        )
+    }
+
+    func resumePendingUploads(
+        options: MediaUploadOptions = MediaUploadOptions(),
+        progress: @escaping @Sendable (MediaUploadProgress) -> Void = { _ in }
+    ) async throws -> [MediaUpload] {
+        let pending = try await store.allUploads().filter {
+            $0.status != .completed && $0.status != .cancelled
+        }
+        let assets = pending.map(makeAsset(from:))
+        return try await uploadInBatches(assets, options: options, progress: progress)
+    }
+
+    private func uploadInBatches(
+        _ assets: [MediaAsset],
+        options: MediaUploadOptions,
+        progress: @escaping @Sendable (MediaUploadProgress) -> Void
+    ) async throws -> [MediaUpload] {
+        var results: [MediaUpload] = []
+        var firstError: AppError?
+        var wasCancelled = false
+        let batchSize = options.maximumConcurrentUploads
+
+        for start in stride(from: 0, to: assets.count, by: batchSize) {
+            let end = min(start + batchSize, assets.count)
+            let batch = Array(assets[start..<end])
+            await withTaskGroup(of: UploadOutcome.self) { group in
+                for asset in batch {
+                    group.addTask {
+                        do {
+                            return .success(
+                                try await self.uploadOne(
+                                    asset: asset,
+                                    options: options,
+                                    totalUploads: assets.count,
+                                    progress: progress
+                                )
+                            )
+                        } catch is CancellationError {
+                            return .cancelled
+                        } catch {
+                            return .failure(AppError.from(error))
+                        }
+                    }
+                }
+
+                for await outcome in group {
+                    switch outcome {
+                    case let .success(upload):
+                        results.append(upload)
+                    case let .failure(error):
+                        firstError = firstError ?? error
+                    case .cancelled:
+                        wasCancelled = true
+                        group.cancelAll()
+                    }
+                }
+            }
+            if wasCancelled {
+                throw CancellationError()
+            }
+            if let firstError {
+                throw firstError
+            }
+        }
+        return results.sorted { $0.assetID < $1.assetID }
+    }
+
+    private func uploadOne(
+        asset: MediaAsset,
+        options: MediaUploadOptions,
+        totalUploads: Int,
+        progress: @escaping @Sendable (MediaUploadProgress) -> Void
+    ) async throws -> MediaUpload {
+        let uploadID = MediaUpload.makeID(for: asset.id, optimization: options.optimization)
+        var record = try await store.upload(for: uploadID)
+
+        if let record, record.status == .completed {
+            progress(
+                MediaUploadProgress(
+                    uploadID: record.id,
+                    assetID: record.assetID,
+                    uploadedBytes: record.fileSizeBytes,
+                    totalBytes: record.fileSizeBytes,
+                    completedUploads: 1,
+                    totalUploads: totalUploads
+                )
+            )
+            return record
+        }
+
+        do {
+            let mediaFile = try await materializeFile(for: asset, existing: record, options: options)
+            if record == nil {
+                record = MediaUpload(
+                    id: uploadID,
+                    assetID: asset.id,
+                    localIdentifier: asset.localIdentifier,
+                    mediaID: nil,
+                    mediaType: uploadMediaType(for: asset),
+                    fileName: mediaFile.fileName,
+                    contentType: mediaFile.contentType,
+                    fileSizeBytes: mediaFile.fileSizeBytes,
+                    duration: asset.isVideo ? asset.duration : nil,
+                    creationDate: asset.creationDate,
+                    pixelWidth: asset.pixelWidth,
+                    pixelHeight: asset.pixelHeight,
+                    orientation: .from(pixelWidth: asset.pixelWidth, pixelHeight: asset.pixelHeight),
+                    optimization: options.optimization,
+                    status: .queued,
+                    uploadedBytes: 0,
+                    session: nil,
+                    stagedFileURL: mediaFile.url,
+                    lastError: nil,
+                    updatedAt: Date()
+                )
+            } else if record?.stagedFileURL == nil {
+                record?.stagedFileURL = mediaFile.url
+            }
+
+            guard var record else {
+                throw AppError.persistenceFailure
+            }
+            record.status = .authorizing
+            record.lastError = nil
+            record.updatedAt = Date()
+            try await store.save(record)
+
+            var session = record.session
+            if session == nil || session?.isUsable() == false {
+                let metadata = MediaUploadMetadata(
+                    assetID: record.assetID,
+                    mediaType: record.mediaType,
+                    contentType: record.contentType,
+                    fileName: record.fileName,
+                    fileSizeBytes: record.fileSizeBytes,
+                    duration: record.duration,
+                    creationDate: record.creationDate,
+                    pixelWidth: record.pixelWidth,
+                    pixelHeight: record.pixelHeight,
+                    orientation: record.orientation,
+                    optimization: record.optimization,
+                    preferredPartSizeBytes: options.partSizeBytes
+                )
+                session = try await authorizer.createUploadSession(
+                    metadata: metadata,
+                    idempotencyKey: record.id
+                )
+                record.session = session
+                record.mediaID = session?.mediaID
+                record.updatedAt = Date()
+                try await store.save(record)
+            }
+
+            guard var session, !session.parts.isEmpty else {
+                throw AppError.invalidResponse
+            }
+
+            record.status = .uploading
+            try await store.save(record)
+            try await uploadParts(
+                session: &session,
+                record: &record,
+                options: options,
+                totalUploads: totalUploads,
+                progress: progress
+            )
+
+            record.status = .completing
+            record.session = session
+            try await store.save(record)
+            if session.strategy == .multipart {
+                let completedParts = session.parts.compactMap { part -> MultipartPartCompletion? in
+                    guard let eTag = part.eTag else { return nil }
+                    return MultipartPartCompletion(partNumber: part.partNumber, eTag: eTag)
+                }
+                try await authorizer.completeMultipartUpload(session: session, parts: completedParts)
+            }
+
+            try await authorizer.notifyUploadCompleted(
+                UploadCompletionNotification(
+                    mediaId: session.mediaID,
+                    uploadId: session.uploadID,
+                    s3Key: session.s3Key,
+                    mediaType: record.mediaType,
+                    duration: record.duration
+                )
+            )
+
+            record.status = .completed
+            record.uploadedBytes = record.fileSizeBytes
+            record.stagedFileURL = nil
+            record.updatedAt = Date()
+            try await store.save(record)
+            await source.removeMaterializedMedia(at: mediaFile.url)
+            progress(
+                MediaUploadProgress(
+                    uploadID: record.id,
+                    assetID: record.assetID,
+                    uploadedBytes: record.fileSizeBytes,
+                    totalBytes: record.fileSizeBytes,
+                    completedUploads: 1,
+                    totalUploads: totalUploads
+                )
+            )
+            return record
+        } catch is CancellationError {
+            if var record {
+                record.status = .paused
+                record.updatedAt = Date()
+                try? await store.save(record)
+            }
+            throw CancellationError()
+        } catch {
+            if var record {
+                record.status = .failed
+                record.lastError = error.localizedDescription
+                record.updatedAt = Date()
+                try? await store.save(record)
+            }
+            throw error
+        }
+    }
+
+    private func uploadParts(
+        session: inout UploadSession,
+        record: inout MediaUpload,
+        options: MediaUploadOptions,
+        totalUploads: Int,
+        progress: @escaping @Sendable (MediaUploadProgress) -> Void
+    ) async throws {
+        guard let fileURL = record.stagedFileURL else {
+            throw AppError.unsupportedMedia
+        }
+
+        for index in session.parts.indices {
+            try Task.checkCancellation()
+            guard !session.parts[index].isCompleted else {
+                continue
+            }
+
+            let uploadFileURL = try makePartFileIfNeeded(
+                sourceURL: fileURL,
+                part: session.parts[index],
+                strategy: session.strategy
+            )
+            defer {
+                if uploadFileURL != fileURL {
+                    try? FileManager.default.removeItem(at: uploadFileURL)
+                }
+            }
+
+            var attempt = session.parts[index].attempts
+            while true {
+                try Task.checkCancellation()
+                attempt += 1
+                session.parts[index].attempts = attempt
+                session.parts[index].status = attempt == 1 ? .uploading : .retrying
+                record.session = session
+                record.status = attempt == 1 ? .uploading : .retrying
+                try await store.save(record)
+
+                let completedBefore = session.parts
+                    .filter(\.isCompleted)
+                    .reduce(0) { $0 + $1.lengthBytes }
+                let progressUploadID = record.id
+                let progressAssetID = record.assetID
+                let progressTotalBytes = record.fileSizeBytes
+                do {
+                    let result = try await objectStorage.upload(
+                        fileURL: uploadFileURL,
+                        to: session.parts[index].presignedURL,
+                        headers: ["Content-Type": record.contentType],
+                        usesBackgroundSession: options.usesBackgroundURLSession,
+                        progress: { sent, expected in
+                            progress(
+                                MediaUploadProgress(
+                                    uploadID: progressUploadID,
+                                    assetID: progressAssetID,
+                                    uploadedBytes: completedBefore + sent,
+                                    totalBytes: progressTotalBytes,
+                                    completedUploads: 0,
+                                    totalUploads: totalUploads
+                                )
+                            )
+                            _ = expected
+                        }
+                    )
+                    let eTag: String
+                    if session.strategy == .multipart {
+                        guard let resultETag = result.eTag else {
+                            throw AppError.invalidResponse
+                        }
+                        eTag = resultETag
+                    } else {
+                        eTag = result.eTag ?? "single-object"
+                    }
+                    session.parts[index].eTag = eTag
+                    session.parts[index].status = .completed
+                    record.uploadedBytes = session.parts
+                        .filter(\.isCompleted)
+                        .reduce(0) { $0 + $1.lengthBytes }
+                    record.session = session
+                    record.status = .uploading
+                    record.updatedAt = Date()
+                    try await store.save(record)
+                    break
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    session.parts[index].lastError = error.localizedDescription
+                    session.parts[index].status = .failed
+                    record.session = session
+                    record.lastError = error.localizedDescription
+                    try? await store.save(record)
+                    guard attempt < options.maximumPartRetries else {
+                        throw error
+                    }
+                    try await Task.sleep(for: .milliseconds(250 * (1 << min(attempt - 1, 4))))
+                }
+            }
+        }
+    }
+
+    private func materializeFile(
+        for asset: MediaAsset,
+        existing: MediaUpload?,
+        options: MediaUploadOptions
+    ) async throws -> OriginalMediaFile {
+        if let stagedURL = existing?.stagedFileURL,
+           FileManager.default.fileExists(atPath: stagedURL.path) {
+            return OriginalMediaFile(
+                url: stagedURL,
+                fileName: existing?.fileName ?? "media",
+                contentType: existing?.contentType ?? "application/octet-stream",
+                fileSizeBytes: existing?.fileSizeBytes ?? 0
+            )
+        }
+        return try await source.materializeOriginalMedia(
+            for: asset,
+            allowsNetworkAccess: options.allowsNetworkAccessToPhotos,
+            progress: nil
+        )
+    }
+
+    private func makePartFileIfNeeded(
+        sourceURL: URL,
+        part: UploadPart,
+        strategy: UploadStrategy
+    ) throws -> URL {
+        guard strategy == .multipart else {
+            return sourceURL
+        }
+
+        let fileManager = FileManager.default
+        let partURL = sourceURL.deletingLastPathComponent()
+            .appendingPathComponent("\(sourceURL.lastPathComponent).part-\(part.partNumber)")
+        guard fileManager.createFile(atPath: partURL.path, contents: nil) else {
+            throw AppError.persistenceFailure
+        }
+
+        do {
+            let sourceHandle = try FileHandle(forReadingFrom: sourceURL)
+            let destinationHandle = try FileHandle(forWritingTo: partURL)
+            defer {
+                try? sourceHandle.close()
+                try? destinationHandle.close()
+            }
+
+            try sourceHandle.seek(toOffset: UInt64(part.offsetBytes))
+            var remaining = part.lengthBytes
+            let chunkSize = 1_024 * 1_024
+            while remaining > 0 {
+                try Task.checkCancellation()
+                let requestedBytes = min(Int64(chunkSize), remaining)
+                guard let data = try sourceHandle.read(upToCount: Int(requestedBytes)), !data.isEmpty else {
+                    throw AppError.unsupportedMedia
+                }
+                try destinationHandle.write(contentsOf: data)
+                remaining -= Int64(data.count)
+            }
+            return partURL
+        } catch {
+            try? fileManager.removeItem(at: partURL)
+            throw error
+        }
+    }
+
+    private func makeAsset(from upload: MediaUpload) -> MediaAsset {
+        MediaAsset(
+            id: upload.assetID,
+            localIdentifier: upload.localIdentifier,
+            kind: upload.mediaType == .video ? .video : upload.mediaType == .livePhoto ? .livePhoto : .image,
+            creationDate: upload.creationDate,
+            duration: upload.duration ?? 0,
+            pixelWidth: upload.pixelWidth,
+            pixelHeight: upload.pixelHeight
+        )
+    }
+
+    private func uploadMediaType(for asset: MediaAsset) -> UploadMediaType {
+        if asset.isVideo { return .video }
+        if asset.isLivePhoto { return .livePhoto }
+        return .photo
+    }
+}
+
+private enum UploadOutcome: Sendable {
+    case success(MediaUpload)
+    case failure(AppError)
+    case cancelled
+}

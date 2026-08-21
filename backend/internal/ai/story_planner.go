@@ -1,0 +1,697 @@
+package ai
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"math"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/framemio/backend/internal/models"
+)
+
+type Request struct {
+	ProjectID        string
+	Version          int
+	DesiredDuration  time.Duration
+	StoryType        models.StoryType
+	VisualStyle      models.VisualStyle
+	UserInstructions string
+	SelectedMediaIDs []string
+	Timestamps       []time.Time
+	Locations        []string
+	PhotoAnalyses    []models.PhotoAnalysis
+	VideoAnalyses    []models.VideoAnalysis
+	MediaClusters    []models.MediaCluster
+}
+
+type Planner struct {
+	Now func() time.Time
+}
+
+type candidate struct {
+	moment     models.StoryMoment
+	sourceTime int64
+	score      float64
+	repetition string
+	mediaID    string
+	clusterID  string
+	isVideo    bool
+	isSelected bool
+	isEnding   bool
+}
+
+func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, error) {
+	if err := ctx.Err(); err != nil {
+		return models.StoryPlan{}, err
+	}
+	if err := validateRequest(request); err != nil {
+		return models.StoryPlan{}, err
+	}
+	now := p.now()
+	selected := make(map[string]struct{}, len(request.SelectedMediaIDs))
+	for _, mediaID := range request.SelectedMediaIDs {
+		selected[mediaID] = struct{}{}
+	}
+	clusterByMedia := buildClusterIndex(request.MediaClusters)
+	candidates := buildCandidates(request, selected, clusterByMedia)
+	if len(candidates) == 0 {
+		return models.StoryPlan{}, errors.New("story planner requires at least one usable analysis")
+	}
+	chosen := selectCandidates(candidates, request.DesiredDuration)
+	if len(chosen) == 0 {
+		return models.StoryPlan{}, errors.New("story planner could not assemble a coherent story")
+	}
+	sort.Slice(chosen, func(left, right int) bool {
+		if chosen[left].sourceTime == chosen[right].sourceTime {
+			return chosen[left].score > chosen[right].score
+		}
+		return chosen[left].sourceTime < chosen[right].sourceTime
+	})
+	moments := make([]models.StoryMoment, 0, len(chosen))
+	captions := make([]models.StoryCaption, 0, len(chosen))
+	totalDuration := 0
+	for index, entry := range chosen {
+		entry.moment.MomentID = momentID(entry)
+		if index > 0 {
+			entry.moment.Transition = transitionFor(chosen[index-1], entry, request.VisualStyle)
+		} else {
+			entry.moment.Transition = "fade_in"
+		}
+		if entry.isVideo {
+			entry.moment.CropIntent = "fill"
+		} else {
+			entry.moment.CropIntent = "fit"
+		}
+		if entry.moment.Caption == "" && shouldCaption(entry) {
+			entry.moment.Caption = entry.moment.Narrative
+		}
+		moments = append(moments, entry.moment)
+		totalDuration += entry.moment.DurationMS
+		if strings.TrimSpace(entry.moment.Caption) != "" {
+			captions = append(captions, models.StoryCaption{
+				MomentID: entry.moment.MomentID,
+				Text:     entry.moment.Caption,
+				StartMS:  totalDuration - entry.moment.DurationMS,
+				EndMS:    totalDuration,
+			})
+		}
+	}
+	storyType := normalizeStoryType(request.StoryType)
+	visualStyle := normalizeVisualStyle(request.VisualStyle)
+	titleText := titleFor(storyType, request, moments)
+	endingText := endingFor(storyType, request, moments)
+	musicMood := musicMoodFor(storyType, request, moments)
+	plan := models.StoryPlan{
+		SchemaVersion:       models.StoryPlanSchemaVersionV1,
+		ID:                  planID(request, moments),
+		ProjectID:           request.ProjectID,
+		Version:             versionFor(request.Version),
+		RequestedDurationMS: max(1, int(request.DesiredDuration.Milliseconds())),
+		StoryType:           storyType,
+		VisualStyle:         visualStyle,
+		TitleText:           titleText,
+		EndingText:          endingText,
+		MusicMood:           musicMood,
+		UserInstructions:    strings.TrimSpace(request.UserInstructions),
+		Moments:             moments,
+		Captions:            captions,
+		Audio:               &models.StoryAudio{Source: "adaptive", Mood: musicMood},
+		Output: models.StoryOutput{
+			AspectRatio:  "9:16",
+			MaxDurationS: max(1, int(math.Ceil(request.DesiredDuration.Seconds()))),
+			Preset:       "premium-memory",
+		},
+		TotalDurationMS: totalDuration,
+		CreatedAt:       now,
+	}
+	if err := ValidateStoryPlan(plan); err != nil {
+		return models.StoryPlan{}, err
+	}
+	return plan, nil
+}
+
+func ValidateStoryPlan(plan models.StoryPlan) error {
+	if strings.TrimSpace(plan.SchemaVersion) != models.StoryPlanSchemaVersionV1 {
+		return fmt.Errorf("invalid story plan schema %q", plan.SchemaVersion)
+	}
+	if strings.TrimSpace(plan.ID) == "" || strings.TrimSpace(plan.ProjectID) == "" || plan.Version <= 0 || plan.RequestedDurationMS <= 0 {
+		return errors.New("story plan requires identity, version, and requested duration")
+	}
+	if !validStoryType(plan.StoryType) {
+		return fmt.Errorf("invalid story type %q", plan.StoryType)
+	}
+	if !validVisualStyle(plan.VisualStyle) {
+		return fmt.Errorf("invalid visual style %q", plan.VisualStyle)
+	}
+	if strings.TrimSpace(plan.TitleText) == "" || strings.TrimSpace(plan.EndingText) == "" || strings.TrimSpace(plan.MusicMood) == "" {
+		return errors.New("story plan requires title, ending, and music mood")
+	}
+	if strings.TrimSpace(plan.Output.AspectRatio) == "" || strings.TrimSpace(plan.Output.Preset) == "" || plan.Output.MaxDurationS <= 0 {
+		return errors.New("story plan output is incomplete")
+	}
+	if len(plan.Moments) == 0 {
+		return errors.New("story plan requires at least one moment")
+	}
+	seenMoments := make(map[string]struct{}, len(plan.Moments))
+	durationMS := 0
+	for index, moment := range plan.Moments {
+		mediaID := moment.AssetID
+		if mediaID == "" {
+			mediaID = moment.MediaID
+		}
+		if strings.TrimSpace(mediaID) == "" || moment.DurationMS <= 0 {
+			return fmt.Errorf("moment %d requires a media reference and positive duration", index)
+		}
+		if _, exists := seenMoments[momentKey(moment)]; exists {
+			return fmt.Errorf("duplicate moment %s", momentKey(moment))
+		}
+		seenMoments[momentKey(moment)] = struct{}{}
+		if moment.MediaType == models.MediaTypeVideo {
+			if strings.TrimSpace(moment.VideoAnalysisVersion) == "" || moment.StartMicros < 0 || moment.EndMicros <= moment.StartMicros {
+				return fmt.Errorf("video moment %s is missing valid analysis references", mediaID)
+			}
+		}
+		if strings.TrimSpace(moment.CropIntent) == "" || strings.TrimSpace(moment.Transition) == "" {
+			return fmt.Errorf("moment %s requires crop intent and transition", mediaID)
+		}
+		durationMS += moment.DurationMS
+	}
+	if plan.TotalDurationMS > 0 && durationMS != plan.TotalDurationMS {
+		return fmt.Errorf("story plan duration mismatch: moments=%d total=%d", durationMS, plan.TotalDurationMS)
+	}
+	if len(plan.Captions) > 0 {
+		momentIDs := make(map[string]struct{}, len(plan.Moments))
+		for _, moment := range plan.Moments {
+			momentIDs[moment.MomentID] = struct{}{}
+		}
+		for _, caption := range plan.Captions {
+			if strings.TrimSpace(caption.MomentID) == "" || strings.TrimSpace(caption.Text) == "" {
+				return errors.New("captions require a moment reference and text")
+			}
+			if _, exists := momentIDs[caption.MomentID]; !exists {
+				return fmt.Errorf("caption references unknown moment %s", caption.MomentID)
+			}
+		}
+	}
+	return nil
+}
+
+func (p *Planner) now() time.Time {
+	if p != nil && p.Now != nil {
+		return p.Now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+func versionFor(value int) int {
+	if value > 0 {
+		return value
+	}
+	return 1
+}
+
+func buildCandidates(request Request, selected map[string]struct{}, clusters map[string]models.MediaCluster) []candidate {
+	candidates := make([]candidate, 0, len(request.PhotoAnalyses)+len(request.VideoAnalyses))
+	for _, photo := range request.PhotoAnalyses {
+		if photo.ProjectID != "" && photo.ProjectID != request.ProjectID {
+			continue
+		}
+		mediaID := strings.TrimSpace(photo.PhotoID)
+		if mediaID == "" {
+			continue
+		}
+		clusterID := strings.TrimSpace(photo.ClusterID)
+		if clusterID == "" {
+			clusterID = clusterForMedia(clusters, mediaID)
+		}
+		timestamp := photo.TimestampMicros
+		if timestamp == 0 && photo.TakenAt != nil {
+			timestamp = photo.TakenAt.UTC().UnixMicro()
+		}
+		if timestamp == 0 {
+			timestamp = requestTimestampFallback(request)
+		}
+		duration := photoDuration(request.StoryType, photo)
+		caption := strings.TrimSpace(photo.Caption)
+		if caption == "" {
+			caption = strings.TrimSpace(photo.Description)
+		}
+		candidates = append(candidates, candidate{
+			moment: models.StoryMoment{
+				AssetID: mediaID, MediaID: mediaID, MediaType: models.MediaTypePhoto,
+				Caption: caption, Narrative: caption, DurationMS: duration,
+				Reason: photoReason(photo), Score: photoScore(photo, selected, clusterID),
+			},
+			sourceTime: timestamp, score: photoScore(photo, selected, clusterID),
+			repetition: repetitionKey(mediaID, clusterID, timestamp, "photo"), mediaID: mediaID, clusterID: clusterID,
+			isSelected: hasMedia(selected, mediaID),
+		})
+	}
+	for _, analysis := range request.VideoAnalyses {
+		if analysis.ProjectID != "" && analysis.ProjectID != request.ProjectID {
+			continue
+		}
+		for _, segment := range analysis.Segments {
+			if strings.TrimSpace(segment.SegmentID) == "" || strings.TrimSpace(segment.SceneID) == "" {
+				continue
+			}
+			if segment.EndMicros <= segment.StartMicros || segment.StartMicros < 0 || segment.EndMicros > analysis.DurationMicros {
+				continue
+			}
+			mediaID := strings.TrimSpace(analysis.VideoID)
+			if mediaID == "" {
+				continue
+			}
+			clusterID := clusterForMedia(clusters, mediaID)
+			score := videoScore(analysis, segment, selected, clusterID)
+			moment := models.StoryMoment{
+				AssetID: mediaID, MediaID: mediaID, MediaType: models.MediaTypeVideo,
+				VideoAnalysisVersion: analysis.AnalysisVersion,
+				StartMicros:          segment.StartMicros, EndMicros: segment.EndMicros,
+				Narrative: segment.Description, Caption: captionFromSegment(segment),
+				DurationMS: videoDuration(segment), Reason: reasonFromSegment(segment), Score: score,
+				CropIntent: cropIntentFor(analysis, segment), Transition: "cut",
+			}
+			if clusterID != "" {
+				moment.Reason = moment.Reason + " · cluster:" + clusterID
+			}
+			candidates = append(candidates, candidate{
+				moment: moment, sourceTime: midpoint(segment.StartMicros, segment.EndMicros), score: score,
+				repetition: repetitionKey(mediaID, clusterID, midpoint(segment.StartMicros, segment.EndMicros), segment.SceneID),
+				mediaID:    mediaID, clusterID: clusterID, isVideo: true, isSelected: hasMedia(selected, mediaID),
+			})
+		}
+	}
+	return candidates
+}
+
+func selectCandidates(candidates []candidate, desired time.Duration) []candidate {
+	if len(candidates) == 0 {
+		return nil
+	}
+	sort.Slice(candidates, func(left, right int) bool {
+		if candidates[left].score == candidates[right].score {
+			return candidates[left].sourceTime < candidates[right].sourceTime
+		}
+		return candidates[left].score > candidates[right].score
+	})
+	selected := make([]candidate, 0, minInt(len(candidates), max(1, int(math.Ceil(desired.Seconds()/4)))))
+	seenKeys := make(map[string]struct{}, len(candidates))
+	selectedPerMedia := make(map[string]int, len(candidates))
+	targetMS := int(desired / time.Millisecond)
+	if targetMS <= 0 {
+		targetMS = 15000
+	}
+	totalMS := 0
+	for _, candidate := range candidates {
+		if totalMS >= targetMS && len(selected) > 0 {
+			break
+		}
+		if _, exists := seenKeys[candidate.repetition]; exists && !candidate.isSelected {
+			continue
+		}
+		if selectedPerMedia[candidate.mediaID] >= 2 && !candidate.isSelected {
+			continue
+		}
+		selected = append(selected, candidate)
+		seenKeys[candidate.repetition] = struct{}{}
+		selectedPerMedia[candidate.mediaID]++
+		totalMS += candidate.moment.DurationMS
+	}
+	if len(selected) == 0 {
+		selected = append(selected, candidates[0])
+	}
+	if totalMS > targetMS {
+		selected = trimToDuration(selected, targetMS)
+	}
+	return selected
+}
+
+func trimToDuration(candidates []candidate, targetMS int) []candidate {
+	sorted := append([]candidate(nil), candidates...)
+	sort.Slice(sorted, func(left, right int) bool {
+		if sorted[left].score == sorted[right].score {
+			return sorted[left].moment.DurationMS < sorted[right].moment.DurationMS
+		}
+		return sorted[left].score < sorted[right].score
+	})
+	total := 0
+	for _, candidate := range sorted {
+		total += candidate.moment.DurationMS
+	}
+	for total > targetMS && len(sorted) > 1 {
+		removed := sorted[0]
+		sorted = sorted[1:]
+		total -= removed.moment.DurationMS
+	}
+	sort.Slice(sorted, func(left, right int) bool {
+		if sorted[left].sourceTime == sorted[right].sourceTime {
+			return sorted[left].score > sorted[right].score
+		}
+		return sorted[left].sourceTime < sorted[right].sourceTime
+	})
+	return sorted
+}
+
+func validateRequest(request Request) error {
+	if strings.TrimSpace(request.ProjectID) == "" || request.DesiredDuration <= 0 {
+		return errors.New("story planner requires a project and duration")
+	}
+	if !validStoryType(request.StoryType) {
+		return fmt.Errorf("unsupported story type %q", request.StoryType)
+	}
+	if request.VisualStyle != "" && !validVisualStyle(request.VisualStyle) {
+		return fmt.Errorf("unsupported visual style %q", request.VisualStyle)
+	}
+	if len(request.PhotoAnalyses) == 0 && len(request.VideoAnalyses) == 0 {
+		return errors.New("story planner requires photo or video analyses")
+	}
+	return nil
+}
+
+func validStoryType(value models.StoryType) bool {
+	switch value {
+	case models.StoryTypeToday, models.StoryTypeWeekend, models.StoryTypeTrip, models.StoryTypeBirthday,
+		models.StoryTypeFamily, models.StoryTypeFriends, models.StoryTypePet, models.StoryTypeEvent, models.StoryTypeCustom:
+		return true
+	default:
+		return false
+	}
+}
+
+func validVisualStyle(value models.VisualStyle) bool {
+	switch value {
+	case "", models.VisualStyleCinematic, models.VisualStyleCalm, models.VisualStyleWarm, models.VisualStyleMinimal, models.VisualStyleElegant:
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeStoryType(value models.StoryType) models.StoryType {
+	if validStoryType(value) {
+		return value
+	}
+	return models.StoryTypeCustom
+}
+
+func normalizeVisualStyle(value models.VisualStyle) models.VisualStyle {
+	if validVisualStyle(value) && value != "" {
+		return value
+	}
+	return models.VisualStyleCinematic
+}
+
+func titleFor(storyType models.StoryType, request Request, moments []models.StoryMoment) string {
+	switch storyType {
+	case models.StoryTypeToday:
+		return "Your day in moments"
+	case models.StoryTypeWeekend:
+		return "A weekend to remember"
+	case models.StoryTypeTrip:
+		return titleWithLocation("A trip worth remembering", request)
+	case models.StoryTypeBirthday:
+		return "A birthday worth holding onto"
+	case models.StoryTypeFamily:
+		return "Family, remembered beautifully"
+	case models.StoryTypeFriends:
+		return "Moments with friends"
+	case models.StoryTypePet:
+		return "Little moments, big love"
+	case models.StoryTypeEvent:
+		return titleWithLocation("Event highlights", request)
+	case models.StoryTypeCustom:
+		if trimmed := strings.TrimSpace(request.UserInstructions); trimmed != "" {
+			return truncateText(trimmed, 42)
+		}
+		fallthrough
+	default:
+		if len(moments) > 0 {
+			return "Your moments"
+		}
+		return "A memory story"
+	}
+}
+
+func endingFor(storyType models.StoryType, request Request, moments []models.StoryMoment) string {
+	switch storyType {
+	case models.StoryTypeTrip:
+		return "A place, a feeling, a story to return to."
+	case models.StoryTypeBirthday:
+		return "One more candle, one more memory."
+	case models.StoryTypeFamily, models.StoryTypeFriends, models.StoryTypePet:
+		return "The moments that stay with us."
+	default:
+		if len(moments) > 0 {
+			return "A story made from the moments that mattered most."
+		}
+		return ""
+	}
+}
+
+func musicMoodFor(storyType models.StoryType, request Request, moments []models.StoryMoment) string {
+	switch storyType {
+	case models.StoryTypeBirthday, models.StoryTypeFriends, models.StoryTypePet:
+		return "warm and joyful"
+	case models.StoryTypeTrip, models.StoryTypeEvent:
+		return "cinematic and uplifting"
+	case models.StoryTypeFamily:
+		return "heartfelt and gentle"
+	case models.StoryTypeToday, models.StoryTypeWeekend:
+		return "calm and reflective"
+	default:
+		if strings.Contains(strings.ToLower(request.UserInstructions), "upbeat") {
+			return "uplifting"
+		}
+		return "cinematic and calm"
+	}
+}
+
+func titleWithLocation(prefix string, request Request) string {
+	if location := firstNonEmpty(request.Locations...); location != "" {
+		return prefix + " in " + location
+	}
+	return prefix
+}
+
+func buildClusterIndex(clusters []models.MediaCluster) map[string]models.MediaCluster {
+	index := make(map[string]models.MediaCluster, len(clusters))
+	for _, cluster := range clusters {
+		for _, mediaID := range cluster.MediaIDs {
+			if _, exists := index[mediaID]; !exists {
+				index[mediaID] = cluster
+			}
+		}
+	}
+	return index
+}
+
+func clusterForMedia(index map[string]models.MediaCluster, mediaID string) string {
+	if cluster, ok := index[mediaID]; ok {
+		return cluster.ID
+	}
+	return ""
+}
+
+func photoScore(photo models.PhotoAnalysis, selected map[string]struct{}, clusterID string) float64 {
+	score := 0.35*clamp(photo.MemoryValue) + 0.25*clamp(photo.EmotionalValue) + 0.2*clamp(photo.StoryRelevance) + 0.15*clamp(photo.VisualQuality)
+	if photo.Selected || hasMedia(selected, photo.PhotoID) {
+		score += 0.15
+	}
+	if clusterID != "" {
+		score += 0.05
+	}
+	return math.Min(1, score)
+}
+
+func videoScore(analysis models.VideoAnalysis, segment models.VideoSegment, selected map[string]struct{}, clusterID string) float64 {
+	score := 0.3*clamp(segment.Importance) + 0.2*clamp(segment.MemoryValue) + 0.2*clamp(segment.EmotionalValue) + 0.15*clamp(segment.StoryRelevance) + 0.1*clamp(segment.VisualQuality) + 0.05*clamp(analysis.QualitySignals.OverallScore)
+	if segment.Recommended {
+		score += 0.1
+	}
+	if hasMedia(selected, analysis.VideoID) {
+		score += 0.15
+	}
+	if clusterID != "" {
+		score += 0.05
+	}
+	return math.Min(1, score)
+}
+
+func photoDuration(storyType models.StoryType, photo models.PhotoAnalysis) int {
+	base := 3000
+	switch storyType {
+	case models.StoryTypeTrip, models.StoryTypeEvent:
+		base = 2600
+	case models.StoryTypeBirthday, models.StoryTypeFriends, models.StoryTypePet:
+		base = 3400
+	}
+	if photo.Caption != "" || photo.Description != "" {
+		base += 200
+	}
+	if photo.VisualQuality < 0.4 {
+		base -= 300
+	}
+	return clampInt(base, 2200, 4500)
+}
+
+func videoDuration(segment models.VideoSegment) int {
+	duration := int((segment.EndMicros - segment.StartMicros) / 1000)
+	if duration < 2500 {
+		duration = 2500
+	}
+	if duration > 7000 {
+		duration = 7000
+	}
+	return duration
+}
+
+func captionFromSegment(segment models.VideoSegment) string {
+	if text := strings.TrimSpace(segment.Description); text != "" && (segment.Recommended || segment.StoryRelevance >= 0.7) {
+		return text
+	}
+	if len(segment.Reasons) > 0 {
+		return segment.Reasons[0]
+	}
+	return ""
+}
+
+func reasonFromSegment(segment models.VideoSegment) string {
+	if len(segment.Reasons) > 0 {
+		return strings.Join(segment.Reasons, " · ")
+	}
+	return strings.TrimSpace(segment.Description)
+}
+
+func photoReason(photo models.PhotoAnalysis) string {
+	if strings.TrimSpace(photo.Description) != "" {
+		return strings.TrimSpace(photo.Description)
+	}
+	if strings.TrimSpace(photo.Caption) != "" {
+		return strings.TrimSpace(photo.Caption)
+	}
+	return "A meaningful photo moment"
+}
+
+func cropIntentFor(analysis models.VideoAnalysis, segment models.VideoSegment) string {
+	if analysis.QualitySignals.LikelyStatic || segment.VisualQuality >= 0.8 {
+		return "fit"
+	}
+	return "fill"
+}
+
+func transitionFor(previous, current candidate, style models.VisualStyle) string {
+	if previous.mediaID == current.mediaID {
+		return "soft_cut"
+	}
+	if style == models.VisualStyleCalm || style == models.VisualStyleMinimal {
+		return "crossfade"
+	}
+	return "cut"
+}
+
+func shouldCaption(entry candidate) bool {
+	return strings.TrimSpace(entry.moment.Caption) != "" && (entry.moment.MediaType == models.MediaTypePhoto || entry.moment.Score >= 0.75)
+}
+
+func planID(request Request, moments []models.StoryMoment) string {
+	hash := sha256.New()
+	for _, value := range []string{request.ProjectID, string(request.StoryType), string(request.VisualStyle), request.UserInstructions, fmt.Sprintf("%d", request.Version)} {
+		_, _ = hash.Write([]byte(value))
+	}
+	for _, moment := range moments {
+		_, _ = hash.Write([]byte(momentKey(moment)))
+	}
+	return "plan_" + hex.EncodeToString(hash.Sum(nil))[:24]
+}
+
+func momentID(entry candidate) string {
+	return momentKey(entry.moment)
+}
+
+func momentKey(moment models.StoryMoment) string {
+	mediaID := moment.AssetID
+	if mediaID == "" {
+		mediaID = moment.MediaID
+	}
+	return fmt.Sprintf("%s:%s:%d:%d", mediaID, moment.VideoAnalysisVersion, moment.StartMicros, moment.EndMicros)
+}
+
+func repetitionKey(mediaID, clusterID string, timestampMicros int64, suffix string) string {
+	if clusterID != "" {
+		return clusterID
+	}
+	bucket := timestampMicros / (15 * int64(time.Minute/time.Microsecond))
+	return fmt.Sprintf("%s:%s:%d", mediaID, suffix, bucket)
+}
+
+func requestTimestampFallback(request Request) int64 {
+	if len(request.Timestamps) > 0 {
+		return request.Timestamps[0].UTC().UnixMicro()
+	}
+	return time.Now().UTC().UnixMicro()
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func hasMedia(set map[string]struct{}, mediaID string) bool {
+	_, ok := set[mediaID]
+	return ok
+}
+
+func truncateText(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	return strings.TrimSpace(value[:limit-1]) + "…"
+}
+
+func clamp(value float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
+}
+
+func clampInt(value, minValue, maxValue int) int {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
+func max(left, right int) int {
+	if left > right {
+		return left
+	}
+	return right
+}
+
+func minInt(left, right int) int {
+	if left < right {
+		return left
+	}
+	return right
+}
+
+func midpoint(start, end int64) int64 {
+	return start + (end-start)/2
+}

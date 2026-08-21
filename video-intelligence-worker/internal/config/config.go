@@ -1,0 +1,182 @@
+package config
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strconv"
+	"time"
+)
+
+type Config struct {
+	DatabaseURL                       string
+	S3Bucket                          string
+	QueueURL                          string
+	AWSRegion                         string
+	FFmpegPath                        string
+	FFprobePath                       string
+	WorkRoot                          string
+	AnalysisVersion                   string
+	UnderstandingURL                  string
+	UnderstandingAPIKey               string
+	UnderstandingProvider             string
+	UnderstandingModel                string
+	UnderstandingVersion              string
+	UnderstandingRetries              int
+	UnderstandingTimeout              time.Duration
+	TranscriptionURL                  string
+	TranscriptionAPIKey               string
+	TranscriptionProvider             string
+	TranscriptionModel                string
+	TranscriptionVersion              string
+	EnableTranscription               bool
+	TranscriptionRetries              int
+	TranscriptionTimeout              time.Duration
+	TranscriptionRawArtifactThreshold int
+	SceneThreshold                    float64
+	MinSceneDuration                  time.Duration
+	MaxSegmentDuration                time.Duration
+	LongVideoThreshold                time.Duration
+	MaxFramesShort                    int
+	MaxFramesLong                     int
+	MaxSceneBoundaries                int
+	DuplicateHashDistance             int
+	FrameWidth                        int
+	StageRetries                      int
+	MaxJobAttempts                    int
+	VisibilityTimeout                 time.Duration
+	PresignedEvidenceExpiry           time.Duration
+}
+
+func Load() (Config, error) {
+	workRoot := environment("VIDEO_WORK_ROOT", filepath.Join(os.TempDir(), "framemio-video-intelligence"))
+	configuration := Config{
+		DatabaseURL:                       os.Getenv("DATABASE_URL"),
+		S3Bucket:                          os.Getenv("S3_MEDIA_BUCKET"),
+		QueueURL:                          os.Getenv("SQS_VIDEO_ANALYSIS_QUEUE_URL"),
+		AWSRegion:                         os.Getenv("AWS_REGION"),
+		FFmpegPath:                        environment("FFMPEG_PATH", "ffmpeg"),
+		FFprobePath:                       environment("FFPROBE_PATH", "ffprobe"),
+		WorkRoot:                          workRoot,
+		AnalysisVersion:                   environment("VIDEO_ANALYSIS_VERSION", "video-v1"),
+		UnderstandingURL:                  environmentFirst([]string{"VIDEO_UNDERSTANDING_API_URL", "MULTIMODAL_API_URL"}, ""),
+		UnderstandingAPIKey:               environmentFirst([]string{"VIDEO_UNDERSTANDING_API_KEY", "MULTIMODAL_API_KEY"}, ""),
+		UnderstandingProvider:             environmentFirst([]string{"VIDEO_UNDERSTANDING_PROVIDER", "MULTIMODAL_PROVIDER"}, "external"),
+		UnderstandingModel:                environmentFirst([]string{"VIDEO_UNDERSTANDING_MODEL", "MULTIMODAL_MODEL"}, "configured-model"),
+		UnderstandingVersion:              environment("VIDEO_UNDERSTANDING_VERSION", "video-understanding-v1"),
+		UnderstandingRetries:              environmentInt("VIDEO_UNDERSTANDING_RETRIES", 3),
+		UnderstandingTimeout:              environmentDurationFirst([]string{"VIDEO_UNDERSTANDING_PROVIDER_TIMEOUT", "PROVIDER_TIMEOUT"}, 2*time.Minute),
+		TranscriptionURL:                  environmentFirst([]string{"TRANSCRIPTION_API_URL", "SPEECH_API_URL"}, ""),
+		TranscriptionAPIKey:               environmentFirst([]string{"TRANSCRIPTION_API_KEY", "SPEECH_API_KEY"}, ""),
+		TranscriptionProvider:             environmentFirst([]string{"TRANSCRIPTION_PROVIDER", "SPEECH_PROVIDER"}, "external"),
+		TranscriptionModel:                environmentFirst([]string{"TRANSCRIPTION_MODEL", "SPEECH_MODEL"}, "configured-model"),
+		TranscriptionVersion:              environment("TRANSCRIPTION_VERSION", "transcription-v1"),
+		EnableTranscription:               environmentBoolFirst([]string{"ENABLE_TRANSCRIPTION", "ENABLE_SPEECH_TO_TEXT"}, true),
+		TranscriptionRetries:              environmentInt("TRANSCRIPTION_RETRIES", 3),
+		TranscriptionTimeout:              environmentDuration("TRANSCRIPTION_PROVIDER_TIMEOUT", 30*time.Minute),
+		TranscriptionRawArtifactThreshold: environmentInt("TRANSCRIPTION_RAW_ARTIFACT_THRESHOLD_BYTES", 256<<10),
+		SceneThreshold:                    environmentFloat("SCENE_CHANGE_THRESHOLD", 0.32),
+		MinSceneDuration:                  environmentDuration("MIN_SCENE_DURATION", 750*time.Millisecond),
+		MaxSegmentDuration:                environmentDuration("MAX_SEGMENT_DURATION", 12*time.Second),
+		LongVideoThreshold:                environmentDuration("LONG_VIDEO_THRESHOLD", 5*time.Minute),
+		MaxFramesShort:                    environmentInt("MAX_FRAMES_SHORT", 24),
+		MaxFramesLong:                     environmentInt("MAX_FRAMES_LONG", 48),
+		MaxSceneBoundaries:                environmentInt("MAX_SCENE_BOUNDARIES", 240),
+		DuplicateHashDistance:             environmentInt("DUPLICATE_HASH_DISTANCE", 6),
+		FrameWidth:                        environmentInt("ANALYSIS_FRAME_WIDTH", 1280),
+		StageRetries:                      environmentInt("STAGE_RETRIES", 3),
+		MaxJobAttempts:                    environmentInt("MAX_JOB_ATTEMPTS", 5),
+		VisibilityTimeout:                 environmentDuration("SQS_VISIBILITY_TIMEOUT", 5*time.Minute),
+		PresignedEvidenceExpiry:           environmentDuration("EVIDENCE_URL_EXPIRY", 30*time.Minute),
+	}
+	if configuration.DatabaseURL == "" || configuration.S3Bucket == "" || configuration.QueueURL == "" {
+		return Config{}, errors.New("DATABASE_URL, S3_MEDIA_BUCKET, and SQS_VIDEO_ANALYSIS_QUEUE_URL are required")
+	}
+	if configuration.UnderstandingURL == "" {
+		return Config{}, errors.New("VIDEO_UNDERSTANDING_API_URL is required")
+	}
+	if configuration.EnableTranscription && configuration.TranscriptionURL == "" {
+		return Config{}, errors.New("TRANSCRIPTION_API_URL is required when transcription is enabled")
+	}
+	if configuration.SceneThreshold <= 0 || configuration.SceneThreshold >= 1 {
+		return Config{}, errors.New("SCENE_CHANGE_THRESHOLD must be between zero and one")
+	}
+	if configuration.MaxFramesShort <= 0 || configuration.MaxFramesLong < configuration.MaxFramesShort || configuration.FrameWidth <= 0 {
+		return Config{}, errors.New("frame limits and ANALYSIS_FRAME_WIDTH are invalid")
+	}
+	return configuration, nil
+}
+
+func environment(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func environmentFirst(names []string, fallback string) string {
+	for _, name := range names {
+		if value := os.Getenv(name); value != "" {
+			return value
+		}
+	}
+	return fallback
+}
+
+func environmentInt(name string, fallback int) int {
+	value, err := strconv.Atoi(os.Getenv(name))
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+func environmentFloat(name string, fallback float64) float64 {
+	value, err := strconv.ParseFloat(os.Getenv(name), 64)
+	if err != nil {
+		return fallback
+	}
+	return value
+}
+
+func environmentBool(name string, fallback bool) bool {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func environmentBoolFirst(names []string, fallback bool) bool {
+	for _, name := range names {
+		if os.Getenv(name) != "" {
+			return environmentBool(name, fallback)
+		}
+	}
+	return fallback
+}
+
+func environmentDuration(name string, fallback time.Duration) time.Duration {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
+}
+
+func environmentDurationFirst(names []string, fallback time.Duration) time.Duration {
+	for _, name := range names {
+		if os.Getenv(name) != "" {
+			return environmentDuration(name, fallback)
+		}
+	}
+	return fallback
+}
