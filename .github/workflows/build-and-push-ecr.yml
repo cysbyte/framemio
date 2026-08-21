@@ -1,5 +1,7 @@
 name: Build and push images to ECR
 
+# Changing this workflow triggers backend, video worker, and render worker image builds.
+
 on:
   push:
     branches:
