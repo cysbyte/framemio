@@ -7,6 +7,7 @@ on:
     paths:
       - 'render-worker/**'
       - '.github/workflows/build-render-worker-and-push-ecr.yml'
+      - 'scripts/deploy-ecs-service.sh'
   workflow_dispatch:
 
 permissions:
@@ -19,6 +20,8 @@ env:
   ECS_SERVICE: framemio-render-worker-service-chw8cyt4
   ECS_TASK_DEFINITION: framemio-render-worker
   ECS_CONTAINER_NAME: Main
+  ECS_TASK_ROLE_ARN: arn:aws:iam::450876624497:role/FramemioECSTaskRole
+  ECS_EXECUTION_ROLE_ARN: arn:aws:iam::450876624497:role/ecsTaskExecutionRole
   ECS_SERVICE_DESIRED_COUNT: 0
   ECS_SUBNETS: ${{ vars.ECS_SUBNETS }}
   ECS_SECURITY_GROUPS: ${{ vars.ECS_SECURITY_GROUPS }}

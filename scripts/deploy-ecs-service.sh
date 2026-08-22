@@ -33,7 +33,7 @@ aws ecs describe-task-definition \
   --query 'taskDefinition' \
   --output json > task-definition.json
 
-IMAGE="$IMAGE" ECS_CONTAINER_NAME="$ECS_CONTAINER_NAME" ECS_TASK_CPU="${ECS_TASK_CPU:-}" ECS_TASK_MEMORY="${ECS_TASK_MEMORY:-}" ECS_SET_ENV_VARS="${ECS_SET_ENV_VARS:-}" node --input-type=module -e '
+IMAGE="$IMAGE" ECS_CONTAINER_NAME="$ECS_CONTAINER_NAME" ECS_TASK_CPU="${ECS_TASK_CPU:-}" ECS_TASK_MEMORY="${ECS_TASK_MEMORY:-}" ECS_TASK_ROLE_ARN="${ECS_TASK_ROLE_ARN:-}" ECS_EXECUTION_ROLE_ARN="${ECS_EXECUTION_ROLE_ARN:-}" ECS_SET_ENV_VARS="${ECS_SET_ENV_VARS:-}" node --input-type=module -e '
   import { readFileSync, writeFileSync } from "node:fs";
 
   const taskDefinition = JSON.parse(readFileSync("task-definition.json", "utf8"));
@@ -51,6 +51,14 @@ IMAGE="$IMAGE" ECS_CONTAINER_NAME="$ECS_CONTAINER_NAME" ECS_TASK_CPU="${ECS_TASK
 
   if (process.env.ECS_TASK_MEMORY) {
     taskDefinition.memory = process.env.ECS_TASK_MEMORY;
+  }
+
+  if (process.env.ECS_TASK_ROLE_ARN) {
+    taskDefinition.taskRoleArn = process.env.ECS_TASK_ROLE_ARN;
+  }
+
+  if (process.env.ECS_EXECUTION_ROLE_ARN) {
+    taskDefinition.executionRoleArn = process.env.ECS_EXECUTION_ROLE_ARN;
   }
 
   const environment = Array.isArray(container.environment) ? container.environment : [];

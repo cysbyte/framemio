@@ -7,6 +7,7 @@ on:
     paths:
       - 'video-intelligence-worker/**'
       - '.github/workflows/build-video-intelligence-worker-and-push-ecr.yml'
+      - 'scripts/deploy-ecs-service.sh'
   workflow_dispatch:
 
 permissions:
@@ -19,6 +20,8 @@ env:
   ECS_SERVICE: framemio-video-intelligence-worker-service-xuttbpns
   ECS_TASK_DEFINITION: framemio-video-intelligence-worker
   ECS_CONTAINER_NAME: Main
+  ECS_TASK_ROLE_ARN: arn:aws:iam::450876624497:role/FramemioECSTaskRole
+  ECS_EXECUTION_ROLE_ARN: arn:aws:iam::450876624497:role/ecsTaskExecutionRole
   ECS_SUBNETS: ${{ vars.ECS_SUBNETS }}
   ECS_SECURITY_GROUPS: ${{ vars.ECS_SECURITY_GROUPS }}
   ECS_ASSIGN_PUBLIC_IP: ${{ vars.ECS_ASSIGN_PUBLIC_IP }}

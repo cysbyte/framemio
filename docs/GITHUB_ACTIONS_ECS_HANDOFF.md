@@ -224,4 +224,4 @@ The RDS cluster `my-db-cluster` requires IAM database authentication because Int
 
 The RDS console Go snippet shows the same instance endpoint and master user `postgres`. For this app, keep that endpoint but use the least-privilege app role `framemio_app`. The app code generates the IAM token at connection time, so do not paste a static token into ECS or GitHub.
 
-The ECS task role must allow `rds-db:connect` for the `framemio_app` database user. The PostgreSQL role `framemio_app` must be a member of `rds_iam`. The GitHub repository variable `DATABASE_URL` must contain the no-password DSN above so workflows can upsert it into backend and video worker task definitions.
+The ECS task role is `arn:aws:iam::450876624497:role/FramemioECSTaskRole` and must allow `rds-db:connect` for the `framemio_app` database user. The PostgreSQL role `framemio_app` must be a member of `rds_iam`. The GitHub repository variable `DATABASE_URL` must contain the no-password DSN above so workflows can upsert it into backend and video worker task definitions.
