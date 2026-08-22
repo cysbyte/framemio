@@ -36,7 +36,7 @@ func newPostgresPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, er
 		return nil, fmt.Errorf("AWS_REGION is required for rds iam auth")
 	}
 
-	poolConfig.BeforeConnect = func(ctx context.Context, connConfig *pgx.ConnConfig) error {
+	buildAuthToken := func(ctx context.Context, connConfig *pgx.ConnConfig) (string, error) {
 		port := connConfig.Port
 		if port == 0 {
 			port = 5432
@@ -44,7 +44,20 @@ func newPostgresPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, er
 		endpoint := net.JoinHostPort(connConfig.Host, strconv.Itoa(int(port)))
 		token, err := auth.BuildAuthToken(ctx, endpoint, region, connConfig.User, awsConfig.Credentials)
 		if err != nil {
-			return fmt.Errorf("build rds iam auth token: %w", err)
+			return "", fmt.Errorf("build rds iam auth token: %w", err)
+		}
+		return token, nil
+	}
+
+	poolConfig.ConnConfig.Password, err = buildAuthToken(ctx, poolConfig.ConnConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	poolConfig.BeforeConnect = func(ctx context.Context, connConfig *pgx.ConnConfig) error {
+		token, err := buildAuthToken(ctx, connConfig)
+		if err != nil {
+			return err
 		}
 		connConfig.Password = token
 		return nil
