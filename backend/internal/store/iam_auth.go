@@ -46,7 +46,7 @@ func newPostgresPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, er
 		if err != nil {
 			return "", fmt.Errorf("build rds iam auth token: %w", err)
 		}
-		return token, nil
+		return normalizeRDSAuthToken(token), nil
 	}
 
 	poolConfig.ConnConfig.Password, err = buildAuthToken(ctx, poolConfig.ConnConfig)
@@ -64,6 +64,14 @@ func newPostgresPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, er
 	}
 
 	return pgxpool.NewWithConfig(ctx, poolConfig)
+}
+
+func normalizeRDSAuthToken(token string) string {
+	queryIndex := strings.IndexByte(token, '?')
+	if queryIndex > 0 && token[queryIndex-1] != '/' {
+		return token[:queryIndex] + "/" + token[queryIndex:]
+	}
+	return token
 }
 
 func useIAMDatabaseAuth() bool {
