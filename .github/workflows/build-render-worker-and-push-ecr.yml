@@ -1,0 +1,93 @@
+name: Build and push render worker image to ECR
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'render-worker/**'
+      - '.github/workflows/build-render-worker-and-push-ecr.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECS_CLUSTER: my-cluster
+  ECS_SERVICE: framemio-render-worker-service-chw8cyt4
+  ECS_TASK_DEFINITION: framemio-render-worker
+  ECS_CONTAINER_NAME: Main
+  ECS_SERVICE_DESIRED_COUNT: 0
+  ECS_SUBNETS: ${{ vars.ECS_SUBNETS }}
+  ECS_SECURITY_GROUPS: ${{ vars.ECS_SECURITY_GROUPS }}
+  ECS_ASSIGN_PUBLIC_IP: ${{ vars.ECS_ASSIGN_PUBLIC_IP }}
+
+jobs:
+  build-and-push:
+    name: Build and push render worker image
+    runs-on: ubuntu-latest
+    env:
+      ECR_REPOSITORY: ${{ vars.RENDER_WORKER_ECR_REPOSITORY }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate deployment variables
+        env:
+          ROLE_ARN: ${{ secrets.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+        run: |
+          test -n "$AWS_REGION" || { echo "Missing repository variable AWS_REGION"; exit 1; }
+          test -n "$ECR_REPOSITORY" || { echo "Missing repository variable RENDER_WORKER_ECR_REPOSITORY"; exit 1; }
+          test -n "$ROLE_ARN" || { echo "Missing repository secret AWS_GITHUB_ACTIONS_ROLE_ARN"; exit 1; }
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          role-skip-session-tagging: true
+          role-session-name: github-actions-render-worker-${{ github.run_id }}
+
+      - name: Verify ECR repository
+        run: |
+          aws ecr describe-repositories \
+            --region "$AWS_REGION" \
+            --repository-names "$ECR_REPOSITORY" >/dev/null
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image metadata
+        id: image
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          echo "image=$REGISTRY/$ECR_REPOSITORY" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Docker image
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+          SHA_TAG: ${{ steps.image.outputs.sha_tag }}
+        run: |
+          docker build \
+            --file render-worker/Dockerfile \
+            --tag "$IMAGE:$SHA_TAG" \
+            --tag "$IMAGE:latest" \
+            .
+
+      - name: Push Docker image
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+          SHA_TAG: ${{ steps.image.outputs.sha_tag }}
+        run: |
+          docker push "$IMAGE:$SHA_TAG"
+          docker push "$IMAGE:latest"
+
+      - name: Deploy ECS service
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}:${{ steps.image.outputs.sha_tag }}
+        run: bash ./scripts/deploy-ecs-service.sh

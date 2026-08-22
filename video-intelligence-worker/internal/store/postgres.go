@@ -90,7 +90,7 @@ const migrationSQL = `
 	WHERE kind = 'transcript'`
 
 func NewPostgres(ctx context.Context, databaseURL string) (*Postgres, error) {
-	pool, err := pgxpool.New(ctx, databaseURL)
+	pool, err := newPostgresPool(ctx, databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("connect postgres: %w", err)
 	}

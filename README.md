@@ -9,6 +9,6 @@ FrameMio is a premium iPhone-first memory companion that turns everyday photos a
 - `video-intelligence-worker/` — Go FFmpeg/FFprobe worker for asynchronous video evidence and semantic analysis.
 - `render-worker/` — Node.js Remotion/FFmpeg rendering worker.
 - `infrastructure/` — Docker and AWS ECS/Fargate, S3, SQS, ECR, and PostgreSQL deployment boundaries.
-- `docs/` — Product and architecture specifications.
+- `docs/` — Product, architecture, and operational handoff specifications.
 
 The Go API remains asynchronous and request-oriented. Long-running video understanding belongs in `video-intelligence-worker/`, while final video generation belongs only in `render-worker/`; these workloads deploy and scale independently.

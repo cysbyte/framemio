@@ -17,7 +17,7 @@ type PostgresStore struct {
 }
 
 func NewPostgresStore(ctx context.Context, dsn string) (*PostgresStore, error) {
-	pool, err := pgxpool.New(ctx, dsn)
+	pool, err := newPostgresPool(ctx, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("connect postgres: %w", err)
 	}
