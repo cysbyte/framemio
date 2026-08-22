@@ -91,7 +91,7 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 			InputVersion: inputVersion, UnderstandingVersion: analysisVersion,
 		})
 		if lookupErr == nil {
-			_, _ = p.Repository.UpdateJob(ctx, jobContext.Job.ID, "succeeded", 1, "", "", cached.Analysis.EvidenceS3Key)
+			_, _ = p.Repository.UpdateJob(ctx, jobContext.Job.ID, "COMPLETED", 1, "", "", cached.Analysis.EvidenceS3Key)
 			return Result{Analysis: cached.Analysis, Reused: true}, nil
 		}
 		if !errors.Is(lookupErr, domain.ErrNotFound) {
@@ -105,7 +105,7 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 	if err != nil {
 		return Result{}, err
 	}
-	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "running", 0.78, "", "", artifact.EvidenceS3Key); err != nil {
+	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "RUNNING", 0.78, "", "", artifact.EvidenceS3Key); err != nil {
 		return Result{}, err
 	}
 	understandingResult, err := p.Understanding.Analyze(ctx, understanding.Request{
@@ -119,11 +119,11 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 	if err != nil {
 		return Result{}, fmt.Errorf("understand video evidence: %w", err)
 	}
-	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "running", 0.92, "", "", artifact.EvidenceS3Key); err != nil {
+	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "RUNNING", 0.92, "", "", artifact.EvidenceS3Key); err != nil {
 		return Result{}, err
 	}
 	analysis := understandingResult.Analysis
-	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "succeeded", 1, "", "", analysis.EvidenceS3Key); err != nil {
+	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "COMPLETED", 1, "", "", analysis.EvidenceS3Key); err != nil {
 		return Result{}, err
 	}
 	return Result{Analysis: analysis, Reused: understandingResult.Reused}, nil
@@ -138,7 +138,7 @@ func (p *Processor) MarkFailed(ctx context.Context, message domain.JobMessage, e
 	if loadErr != nil {
 		return loadErr
 	}
-	if _, updateErr := p.Repository.UpdateJob(ctx, message.JobID, "failed", jobContext.Job.Progress, code, truncate(err.Error(), 2000), ""); updateErr != nil {
+	if _, updateErr := p.Repository.UpdateJob(ctx, message.JobID, "FAILED", jobContext.Job.Progress, code, truncate(err.Error(), 2000), ""); updateErr != nil {
 		return updateErr
 	}
 	return p.Repository.SetProjectStatus(ctx, jobContext.Job.UserID, jobContext.Project.ID, "failed")
@@ -166,7 +166,7 @@ func (p *Processor) loadOrPreprocess(ctx context.Context, jobContext domain.JobC
 	}); err != nil {
 		return domain.VideoEvidence{}, domain.PreprocessingArtifact{}, fmt.Errorf("download source video: %w", err)
 	}
-	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "running", 0.12, "", "", ""); err != nil {
+	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "RUNNING", 0.12, "", "", ""); err != nil {
 		return domain.VideoEvidence{}, domain.PreprocessingArtifact{}, err
 	}
 	metadata, err := p.Tools.Probe(ctx, sourcePath)
@@ -180,7 +180,7 @@ func (p *Processor) loadOrPreprocess(ctx context.Context, jobContext domain.JobC
 	scenes := BuildScenes(metadata, boundaries, p.Config.Planner.MinSceneDuration)
 	segments := BuildSegments(scenes, p.Config.Planner.MaxSegmentDuration)
 	candidates := PlanFrameCandidates(metadata, scenes, segments, p.Config.Planner)
-	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "running", 0.28, "", "", ""); err != nil {
+	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "RUNNING", 0.28, "", "", ""); err != nil {
 		return domain.VideoEvidence{}, domain.PreprocessingArtifact{}, err
 	}
 	analyzedFrames := make([]AnalyzedFrame, 0, len(candidates))
@@ -217,7 +217,7 @@ func (p *Processor) loadOrPreprocess(ctx context.Context, jobContext domain.JobC
 		}
 		selectedFrames[index].S3Key = key
 	}
-	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "running", 0.55, "", "", ""); err != nil {
+	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "RUNNING", 0.55, "", "", ""); err != nil {
 		return domain.VideoEvidence{}, domain.PreprocessingArtifact{}, err
 	}
 	transcript, audioKey, err := p.extractTranscript(ctx, workspace, sourcePath, prefix, jobContext, sourceETag, metadata)
@@ -305,10 +305,19 @@ func (p *Processor) logger() *slog.Logger {
 }
 
 func validateMessage(message domain.JobMessage) error {
-	if message.JobID == "" || message.ProjectID == "" || message.MediaID == "" || message.JobType != "analysis" {
-		return fmt.Errorf("analysis message requires jobId, projectId, mediaId, and jobType=analysis")
+	if message.JobID == "" || message.ProjectID == "" || message.MediaID == "" || !isVideoAnalysisJobType(message.JobType) {
+		return fmt.Errorf("analysis message requires jobId, projectId, mediaId, and a video analysis job type")
 	}
 	return nil
+}
+
+func isVideoAnalysisJobType(jobType string) bool {
+	switch jobType {
+	case "analysis", "MEDIA_PREPROCESS", "TRANSCRIBE", "VIDEO_UNDERSTAND":
+		return true
+	default:
+		return false
+	}
 }
 
 func validCachedEvidence(evidence domain.VideoEvidence, jobContext domain.JobContext, version, sourceETag string) bool {

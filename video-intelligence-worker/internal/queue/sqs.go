@@ -59,11 +59,7 @@ func (c *Consumer) Run(ctx context.Context, handler Handler) error {
 		if err := ctx.Err(); err != nil {
 			return nil
 		}
-		result, err := c.client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
-			QueueUrl: aws.String(c.queueURL), MaxNumberOfMessages: 1, WaitTimeSeconds: 20,
-			VisibilityTimeout:           int32(c.visibilityTimeout.Seconds()),
-			MessageSystemAttributeNames: []types.MessageSystemAttributeName{types.MessageSystemAttributeNameApproximateReceiveCount},
-		})
+		result, err := c.receive(ctx, 1)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return nil
@@ -80,14 +76,50 @@ func (c *Consumer) Run(ctx context.Context, handler Handler) error {
 	}
 }
 
+func (c *Consumer) RunOnce(ctx context.Context, handler Handler, targetJobID string, waitTimeout time.Duration) error {
+	if waitTimeout <= 0 {
+		waitTimeout = 2 * time.Minute
+	}
+	runContext, cancel := context.WithTimeout(ctx, waitTimeout)
+	defer cancel()
+	for {
+		result, err := c.receive(runContext, 10)
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				c.logger.Info("no matching video analysis job found", slog.String("target_job_id", targetJobID))
+				return nil
+			}
+			return err
+		}
+		for _, message := range result.Messages {
+			jobMessage, ok := c.decodeMessage(runContext, message)
+			if !ok {
+				continue
+			}
+			if targetJobID != "" && jobMessage.JobID != targetJobID {
+				c.release(runContext, message)
+				continue
+			}
+			c.handleMessage(ctx, handler, message)
+			return nil
+		}
+	}
+}
+
+func (c *Consumer) receive(ctx context.Context, maxMessages int32) (*sqs.ReceiveMessageOutput, error) {
+	return c.client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
+		QueueUrl: aws.String(c.queueURL), MaxNumberOfMessages: maxMessages, WaitTimeSeconds: 20,
+		VisibilityTimeout:           int32(c.visibilityTimeout.Seconds()),
+		MessageSystemAttributeNames: []types.MessageSystemAttributeName{types.MessageSystemAttributeNameApproximateReceiveCount},
+	})
+}
+
 func (c *Consumer) handleMessage(ctx context.Context, handler Handler, received types.Message) {
 	if received.Body == nil || received.ReceiptHandle == nil {
 		return
 	}
-	var message domain.JobMessage
-	if err := json.Unmarshal([]byte(*received.Body), &message); err != nil {
-		c.logger.Error("discard invalid video analysis message", slog.Any("error", err))
-		c.delete(ctx, *received.ReceiptHandle)
+	message, ok := c.decodeMessage(ctx, received)
+	if !ok {
 		return
 	}
 	receiveCount := 1
@@ -152,6 +184,31 @@ func (c *Consumer) extendVisibility(ctx context.Context, receiptHandle string, d
 				c.logger.Warn("extend video analysis visibility", slog.Any("error", err))
 			}
 		}
+	}
+}
+
+func (c *Consumer) decodeMessage(ctx context.Context, received types.Message) (domain.JobMessage, bool) {
+	if received.Body == nil || received.ReceiptHandle == nil {
+		return domain.JobMessage{}, false
+	}
+	var message domain.JobMessage
+	if err := json.Unmarshal([]byte(*received.Body), &message); err != nil {
+		c.logger.Error("discard invalid video analysis message", slog.Any("error", err))
+		c.delete(ctx, *received.ReceiptHandle)
+		return domain.JobMessage{}, false
+	}
+	return message, true
+}
+
+func (c *Consumer) release(ctx context.Context, received types.Message) {
+	if received.ReceiptHandle == nil {
+		return
+	}
+	_, err := c.client.ChangeMessageVisibility(ctx, &sqs.ChangeMessageVisibilityInput{
+		QueueUrl: aws.String(c.queueURL), ReceiptHandle: received.ReceiptHandle, VisibilityTimeout: 0,
+	})
+	if err != nil && ctx.Err() == nil {
+		c.logger.Warn("release unmatched video analysis message", slog.Any("error", err))
 	}
 }
 

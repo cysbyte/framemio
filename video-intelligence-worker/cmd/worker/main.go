@@ -96,8 +96,14 @@ func main() {
 		logger.Error("configure video analysis queue", slog.Any("error", err))
 		os.Exit(1)
 	}
-	logger.Info("video intelligence worker started", slog.String("analysis_version", configuration.AnalysisVersion))
-	if err := consumer.Run(ctx, worker.Handler{Processor: processor, Logger: logger}); err != nil && !errors.Is(err, context.Canceled) {
+	handler := worker.Handler{Processor: processor, Logger: logger}
+	logger.Info("video intelligence worker started", slog.String("analysis_version", configuration.AnalysisVersion), slog.Bool("run_once", configuration.RunOnce))
+	if configuration.RunOnce {
+		if err := consumer.RunOnce(ctx, handler, configuration.JobID, configuration.RunOnceWaitTimeout); err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error("video intelligence worker run-once failed", slog.Any("error", err))
+			os.Exit(1)
+		}
+	} else if err := consumer.Run(ctx, handler); err != nil && !errors.Is(err, context.Canceled) {
 		logger.Error("video intelligence worker stopped", slog.Any("error", err))
 		os.Exit(1)
 	}

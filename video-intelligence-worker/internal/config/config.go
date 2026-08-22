@@ -45,6 +45,9 @@ type Config struct {
 	StageRetries                      int
 	MaxJobAttempts                    int
 	VisibilityTimeout                 time.Duration
+	RunOnce                           bool
+	JobID                             string
+	RunOnceWaitTimeout                time.Duration
 	PresignedEvidenceExpiry           time.Duration
 }
 
@@ -87,6 +90,9 @@ func Load() (Config, error) {
 		StageRetries:                      environmentInt("STAGE_RETRIES", 3),
 		MaxJobAttempts:                    environmentInt("MAX_JOB_ATTEMPTS", 5),
 		VisibilityTimeout:                 environmentDuration("SQS_VISIBILITY_TIMEOUT", 5*time.Minute),
+		RunOnce:                           environmentBool("WORKER_RUN_ONCE", false),
+		JobID:                             os.Getenv("JOB_ID"),
+		RunOnceWaitTimeout:                environmentDuration("WORKER_RUN_ONCE_WAIT_TIMEOUT", 2*time.Minute),
 		PresignedEvidenceExpiry:           environmentDuration("EVIDENCE_URL_EXPIRY", 30*time.Minute),
 	}
 	if configuration.DatabaseURL == "" || configuration.S3Bucket == "" || configuration.QueueURL == "" {

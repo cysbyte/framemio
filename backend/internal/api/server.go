@@ -17,6 +17,7 @@ import (
 	"github.com/framemio/backend/internal/storage"
 	"github.com/framemio/backend/internal/store"
 	"github.com/framemio/backend/internal/storyvalidation"
+	"github.com/framemio/backend/internal/workeractivation"
 )
 
 const maxJSONBodyBytes = 1 << 20
@@ -26,6 +27,7 @@ type Server struct {
 	ObjectStorage      storage.ObjectStorage
 	StoryPlanValidator storyvalidation.Service
 	Publisher          queue.Publisher
+	Activator          workeractivation.Activator
 	Orchestrator       *orchestration.Coordinator
 	Authenticator      Authenticator
 	Logger             *slog.Logger
@@ -44,7 +46,7 @@ func NewServer(dependencies Server) *Server {
 		dependencies.StoryPlanValidator = storyvalidation.New(dependencies.Store, dependencies.ObjectStorage, storyvalidation.DefaultConfig())
 	}
 	if dependencies.Orchestrator == nil && dependencies.Store != nil && dependencies.Publisher != nil {
-		dependencies.Orchestrator = orchestration.New(orchestration.Coordinator{Store: dependencies.Store, Publisher: dependencies.Publisher, Logger: dependencies.Logger, Now: dependencies.Now})
+		dependencies.Orchestrator = orchestration.New(orchestration.Coordinator{Store: dependencies.Store, Publisher: dependencies.Publisher, Activator: dependencies.Activator, Logger: dependencies.Logger, Now: dependencies.Now})
 	}
 	return &dependencies
 }
@@ -480,8 +482,8 @@ func (s *Server) renderProject(response http.ResponseWriter, request *http.Reque
 	}
 	if !models.IsTerminalJobStatus(stored.Status) {
 		if err := s.Store.SetProjectStatus(request.Context(), user.ID, projectID, models.ProjectStatusRendering); err != nil {
-		s.internalError(response, err, "update project status")
-		return
+			s.internalError(response, err, "update project status")
+			return
 		}
 	}
 	s.writeJSON(response, http.StatusAccepted, jobsResponse{JobID: stored.ID, JobIDs: []string{stored.ID}, Jobs: []models.ProcessingJob{stored}})

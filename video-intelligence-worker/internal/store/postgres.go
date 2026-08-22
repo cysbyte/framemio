@@ -136,7 +136,7 @@ func (s *Postgres) LoadJobContext(ctx context.Context, message domain.JobMessage
 	if err := s.getByID(ctx, "job", message.JobID, &result.Job); err != nil {
 		return domain.JobContext{}, err
 	}
-	if result.Job.ProjectID != message.ProjectID || result.Job.MediaID != message.MediaID || result.Job.Type != "analysis" {
+	if result.Job.ProjectID != message.ProjectID || result.Job.MediaID != message.MediaID || !isVideoAnalysisJobType(result.Job.Type) || !isVideoAnalysisJobType(message.JobType) {
 		return domain.JobContext{}, domain.Permanent(fmt.Errorf("job identifiers do not match queue message"))
 	}
 	if err := s.getOwned(ctx, "media", result.Job.UserID, message.MediaID, &result.Media); err != nil {
@@ -240,10 +240,10 @@ func (s *Postgres) SavePreprocessing(ctx context.Context, artifact domain.Prepro
 
 func (s *Postgres) StartJobAttempt(ctx context.Context, jobID string) (domain.ProcessingJob, error) {
 	return s.mutateJob(ctx, jobID, func(job *domain.ProcessingJob, now time.Time) error {
-		if job.Status == "succeeded" || job.Status == "failed" {
+		if isTerminalJobStatus(job.Status) {
 			return domain.Permanent(fmt.Errorf("terminal job cannot start another attempt"))
 		}
-		job.Status = "running"
+		job.Status = "RUNNING"
 		job.Attempt++
 		job.Progress = max(job.Progress, 0.02)
 		job.ErrorCode = ""
@@ -255,7 +255,7 @@ func (s *Postgres) StartJobAttempt(ctx context.Context, jobID string) (domain.Pr
 
 func (s *Postgres) UpdateJob(ctx context.Context, jobID, status string, progress float64, errorCode, errorMessage, artifactS3Key string) (domain.ProcessingJob, error) {
 	return s.mutateJob(ctx, jobID, func(job *domain.ProcessingJob, now time.Time) error {
-		if job.Status == "succeeded" || job.Status == "failed" {
+		if isTerminalJobStatus(job.Status) {
 			if job.Status != status {
 				return domain.Permanent(fmt.Errorf("terminal job cannot transition from %s to %s", job.Status, status))
 			}
@@ -270,10 +270,10 @@ func (s *Postgres) UpdateJob(ctx context.Context, jobID, status string, progress
 			job.ArtifactType = "application/json"
 		}
 		job.UpdatedAt = now
-		if status == "succeeded" {
+		if status == "COMPLETED" {
 			job.Progress = 1
 			job.CompletedAt = &now
-		} else if status == "failed" {
+		} else if status == "FAILED" {
 			job.CompletedAt = &now
 		}
 		return nil
@@ -399,4 +399,22 @@ func logicalKey(values ...string) string {
 		_, _ = hash.Write([]byte(value))
 	}
 	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func isVideoAnalysisJobType(jobType string) bool {
+	switch jobType {
+	case "analysis", "MEDIA_PREPROCESS", "TRANSCRIBE", "VIDEO_UNDERSTAND":
+		return true
+	default:
+		return false
+	}
+}
+
+func isTerminalJobStatus(status string) bool {
+	switch status {
+	case "COMPLETED", "FAILED", "CANCELLED", "succeeded", "failed", "cancelled", "canceled":
+		return true
+	default:
+		return false
+	}
 }

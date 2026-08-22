@@ -215,6 +215,83 @@ aws logs tail <log-group-name> --region us-east-1 --follow
 - Record the final ECS cluster/service/task-definition values next to this document after deployment.
 - If you change the ECS network or IAM settings, update the repository variables and this doc together.
 
+## Zero-Idle Worker Activation
+
+FrameMio now follows the same zero-idle ECS pattern as `product-video/worker`:
+
+- Worker ECS services are deployed with `desiredCount=0` so they do not stay running while idle.
+- Worker workflows register Application Auto Scaling scalable targets with `min=0` and `max=1` for service DesiredCount. No queue-depth scaling policy is attached by default.
+- The backend publishes the durable SQS job message first, then starts a one-off Fargate task with `ecs:RunTask` when the queued job belongs to an external worker.
+- The one-off task receives `JOB_ID`, `JOB_TYPE`, and `WORKER_RUN_ONCE=true` as container overrides.
+- The video intelligence worker supports `WORKER_RUN_ONCE=true`; it polls SQS for the matching `JOB_ID`, processes one message, deletes it on success, and exits.
+
+Backend task-definition environment variables injected by `.github/workflows/build-backend-and-push-ecr.yml`:
+
+```text
+ECS_WORKER_RUN_TASK_ENABLED=true
+ECS_WORKER_CLUSTER=my-cluster
+ECS_WORKER_SUBNETS=<comma-separated subnet IDs>
+ECS_WORKER_SECURITY_GROUPS=<comma-separated security group IDs>
+ECS_WORKER_ASSIGN_PUBLIC_IP=ENABLED
+VIDEO_WORKER_TASK_DEFINITION=framemio-video-intelligence-worker
+VIDEO_WORKER_CONTAINER_NAME=Main
+RENDER_WORKER_TASK_DEFINITION=framemio-render-worker
+RENDER_WORKER_CONTAINER_NAME=Main
+```
+
+The backend ECS task role must allow starting worker tasks:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["ecs:RunTask"],
+  "Resource": [
+    "arn:aws:ecs:us-east-1:450876624497:task-definition/framemio-video-intelligence-worker:*",
+    "arn:aws:ecs:us-east-1:450876624497:task-definition/framemio-render-worker:*"
+  ]
+}
+```
+
+It also needs `iam:PassRole` for the task execution and task roles used by those task definitions:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": "iam:PassRole",
+  "Resource": [
+    "arn:aws:iam::450876624497:role/ecsTaskExecutionRole",
+    "arn:aws:iam::450876624497:role/FramemioECSTaskRole"
+  ]
+}
+```
+
+Verify scalable targets after a worker workflow succeeds:
+
+```bash
+aws application-autoscaling describe-scalable-targets \
+  --region us-east-1 \
+  --service-namespace ecs \
+  --resource-ids \
+    service/my-cluster/framemio-video-intelligence-worker-service-xuttbpns \
+    service/my-cluster/framemio-render-worker-service-chw8cyt4
+```
+
+Verify one-off tasks started by the backend:
+
+```bash
+aws ecs list-tasks \
+  --region us-east-1 \
+  --cluster my-cluster \
+  --started-by framemio-video-worker
+
+aws ecs list-tasks \
+  --region us-east-1 \
+  --cluster my-cluster \
+  --started-by framemio-render-worker
+```
+
+Important current limitation: the render worker image is deployment/activation-ready but still needs its SQS runner or callback integration to perform full render jobs. The existing `render-worker` package exports the deterministic render pipeline; it does not yet contain a queue-consuming executable like the video intelligence worker.
+
 ## Database Authentication
 
 The RDS cluster `my-db-cluster` requires IAM database authentication because Internet Access Gateway is enabled. Backend and video worker tasks should use:

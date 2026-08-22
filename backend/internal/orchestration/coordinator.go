@@ -13,6 +13,7 @@ import (
 	"github.com/framemio/backend/internal/models"
 	"github.com/framemio/backend/internal/queue"
 	"github.com/framemio/backend/internal/store"
+	"github.com/framemio/backend/internal/workeractivation"
 )
 
 const PipelineVersion = "async-pipeline-v1"
@@ -26,6 +27,7 @@ const (
 type Coordinator struct {
 	Store       store.Store
 	Publisher   queue.Publisher
+	Activator   workeractivation.Activator
 	Logger      *slog.Logger
 	Now         func() time.Time
 	MaxAttempts int
@@ -205,7 +207,16 @@ func (c *Coordinator) publishJob(ctx context.Context, job models.ProcessingJob) 
 	if c.Publisher == nil {
 		return fmt.Errorf("job publisher is not configured")
 	}
-	return c.Publisher.Publish(ctx, queue.JobMessage{JobID: job.ID, ProjectID: job.ProjectID, MediaID: job.MediaID, JobType: job.Type, Configuration: smallConfiguration(job.Configuration)})
+	message := queue.JobMessage{JobID: job.ID, ProjectID: job.ProjectID, MediaID: job.MediaID, JobType: job.Type, Configuration: smallConfiguration(job.Configuration)}
+	if err := c.Publisher.Publish(ctx, message); err != nil {
+		return err
+	}
+	if c.Activator != nil {
+		if err := c.Activator.Activate(ctx, message); err != nil {
+			c.Logger.Warn("worker activation failed", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.Any("error", err))
+		}
+	}
+	return nil
 }
 
 func shouldRetry(job models.ProcessingJob) bool {

@@ -15,6 +15,7 @@ import (
 	"github.com/framemio/backend/internal/queue"
 	"github.com/framemio/backend/internal/storage"
 	"github.com/framemio/backend/internal/store"
+	"github.com/framemio/backend/internal/workeractivation"
 )
 
 func main() {
@@ -49,11 +50,20 @@ func main() {
 		logger.Error("configure queue", slog.Any("error", err))
 		os.Exit(1)
 	}
+	activator, activationEnabled, err := workeractivation.NewECSRunTaskActivatorFromEnv(ctx, logger)
+	if err != nil {
+		logger.Error("configure worker activation", slog.Any("error", err))
+		os.Exit(1)
+	}
+	if activationEnabled {
+		logger.Info("ECS worker RunTask activation enabled")
+	}
 
 	application := api.NewServer(api.Server{
 		Store:         database,
 		ObjectStorage: objects,
 		Publisher:     publisher,
+		Activator:     activator,
 		Authenticator: api.HMACTokenAuthenticator{Secret: []byte(configuration.AuthHMACSecret)},
 		InternalToken: configuration.InternalAPIToken,
 		Logger:        logger,

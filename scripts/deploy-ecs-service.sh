@@ -18,13 +18,18 @@ require_var IMAGE
 
 : "${ECS_SERVICE_DESIRED_COUNT:=1}"
 : "${ECS_LAUNCH_TYPE:=FARGATE}"
+: "${ECS_REGISTER_SCALABLE_TARGET:=false}"
+: "${ECS_MIN_CAPACITY:=$ECS_SERVICE_DESIRED_COUNT}"
+: "${ECS_MAX_CAPACITY:=$ECS_SERVICE_DESIRED_COUNT}"
 
-if [[ "${ECS_SERVICE_DESIRED_COUNT}" =~ ^[0-9]+$ ]]; then
-  :
-else
-  echo "ECS_SERVICE_DESIRED_COUNT must be a non-negative integer" >&2
-  exit 1
-fi
+for numeric_var in ECS_SERVICE_DESIRED_COUNT ECS_MIN_CAPACITY ECS_MAX_CAPACITY; do
+  if [[ "${!numeric_var}" =~ ^[0-9]+$ ]]; then
+    :
+  else
+    echo "$numeric_var must be a non-negative integer" >&2
+    exit 1
+  fi
+done
 
 echo "Fetching task definition $ECS_TASK_DEFINITION"
 aws ecs describe-task-definition \
@@ -157,6 +162,17 @@ else
     --desired-count "$ECS_SERVICE_DESIRED_COUNT" \
     --launch-type "$ECS_LAUNCH_TYPE" \
     --network-configuration "$NETWORK_CONFIGURATION" >/dev/null
+fi
+
+if [[ "$ECS_REGISTER_SCALABLE_TARGET" == "true" ]]; then
+  echo "Registering ECS scalable target for $ECS_SERVICE min=$ECS_MIN_CAPACITY max=$ECS_MAX_CAPACITY"
+  aws application-autoscaling register-scalable-target \
+    --region "$AWS_REGION" \
+    --service-namespace ecs \
+    --scalable-dimension ecs:service:DesiredCount \
+    --resource-id "service/$ECS_CLUSTER/$ECS_SERVICE" \
+    --min-capacity "$ECS_MIN_CAPACITY" \
+    --max-capacity "$ECS_MAX_CAPACITY" >/dev/null
 fi
 
 aws ecs wait services-stable \
