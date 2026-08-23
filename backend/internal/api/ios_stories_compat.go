@@ -17,14 +17,14 @@ import (
 const iosMaxStoryUploadBytes int64 = 1_000_000_000
 
 type iosStory struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title"`
-	Context   string    `json:"context"`
-	CreatedAt time.Time `json:"createdAt"`
-	Duration  float64   `json:"duration"`
-	AssetIDs  []string  `json:"assetIDs"`
-	Status    string    `json:"status"`
-	VideoURL  *string   `json:"videoURL,omitempty"`
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	Context   string   `json:"context"`
+	CreatedAt string   `json:"createdAt"`
+	Duration  float64  `json:"duration"`
+	AssetIDs  []string `json:"assetIDs"`
+	Status    string   `json:"status"`
+	VideoURL  *string  `json:"videoURL,omitempty"`
 }
 
 type iosCreateStoryRequest struct {
@@ -267,7 +267,7 @@ func (s *Server) makeIOSStory(request *http.Request, userID string, project mode
 		ID:        project.ID,
 		Title:     project.Title,
 		Context:   project.Context,
-		CreatedAt: project.CreatedAt,
+		CreatedAt: iosTimeString(project.CreatedAt),
 		AssetIDs:  append([]string(nil), project.MediaIDs...),
 		Status:    iosStoryStatus(project.Status),
 	}

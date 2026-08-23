@@ -36,7 +36,7 @@ type iosUploadSessionResponse struct {
 	Strategy            models.UploadStrategy   `json:"strategy"`
 	PartSizeBytes       int64                   `json:"partSizeBytes"`
 	S3MultipartUploadID *string                 `json:"s3MultipartUploadID,omitempty"`
-	ExpiresAt           *time.Time              `json:"expiresAt,omitempty"`
+	ExpiresAt           *string                 `json:"expiresAt,omitempty"`
 	Parts               []iosUploadPartResponse `json:"parts"`
 }
 
@@ -251,10 +251,10 @@ func makeIOSUploadSession(session models.UploadSession) iosUploadSessionResponse
 	if session.MultipartUploadID != "" {
 		multipartUploadID = &session.MultipartUploadID
 	}
-	expiresAt := session.ExpiresAt
+	expiresAt := iosTimeString(session.ExpiresAt)
 	return iosUploadSessionResponse{
 		UploadID: session.ID, MediaID: session.MediaID, S3Key: session.S3Key, Strategy: session.Strategy,
-		PartSizeBytes: session.PartSizeBytes, S3MultipartUploadID: multipartUploadID, ExpiresAt: &expiresAt, Parts: parts,
+		PartSizeBytes: session.PartSizeBytes, S3MultipartUploadID: multipartUploadID, ExpiresAt: stringPointer(expiresAt), Parts: parts,
 	}
 }
 
@@ -278,4 +278,15 @@ func (s *Server) refreshIOSUploadSessionIfExpired(request *http.Request, userID 
 	}
 	s.Logger.Info("refreshed expired iOS upload session", "user_id", userID, "upload_id", refreshed.ID, "media_id", refreshed.MediaID, "strategy", string(refreshed.Strategy), "expires_at", refreshed.ExpiresAt)
 	return refreshed, true, nil
+}
+
+func iosTimeString(value time.Time) string {
+	return value.UTC().Truncate(time.Second).Format(time.RFC3339)
+}
+
+func stringPointer(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }
