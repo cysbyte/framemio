@@ -1,5 +1,11 @@
 import Foundation
 
+private func directUploadDebugLog(_ message: @autoclosure () -> String) {
+#if DEBUG
+    print("[FrameMio][DirectUpload] \(message())")
+#endif
+}
+
 final class URLSessionDirectObjectStorageClient: DirectObjectStorageClient, @unchecked Sendable {
     private let foregroundDelegate: DirectUploadSessionDelegate
     private let backgroundDelegate: DirectUploadSessionDelegate
@@ -46,6 +52,8 @@ final class URLSessionDirectObjectStorageClient: DirectObjectStorageClient, @unc
         let session = usesBackgroundSession ? backgroundSession : foregroundSession
         let delegate = usesBackgroundSession ? backgroundDelegate : foregroundDelegate
         let task = session.uploadTask(with: request, fromFile: fileURL)
+        let fileSize = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? NSNumber)?.int64Value ?? -1
+        directUploadDebugLog("task created id=\(task.taskIdentifier) background=\(usesBackgroundSession) host=\(presignedURL.host ?? "nil") file_bytes=\(fileSize) headers=\(headers.keys.sorted().joined(separator: ","))")
 
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -54,6 +62,7 @@ final class URLSessionDirectObjectStorageClient: DirectObjectStorageClient, @unc
                     continuation: continuation,
                     progress: progress
                 )
+                directUploadDebugLog("task resume id=\(task.taskIdentifier)")
                 task.resume()
             }
         } onCancel: {
@@ -104,6 +113,7 @@ private final class DirectUploadSessionDelegate: NSObject, URLSessionDataDelegat
         lock.lock()
         states[dataTask.taskIdentifier]?.statusCode = httpResponse.statusCode
         states[dataTask.taskIdentifier]?.eTag = httpResponse.value(forHTTPHeaderField: "ETag")
+        directUploadDebugLog("response received id=\(dataTask.taskIdentifier) status=\(httpResponse.statusCode) etag_present=\(httpResponse.value(forHTTPHeaderField: "ETag") != nil)")
         lock.unlock()
         completionHandler(.allow)
     }
@@ -134,6 +144,7 @@ private final class DirectUploadSessionDelegate: NSObject, URLSessionDataDelegat
         }
 
         if let error {
+            directUploadDebugLog("task failed id=\(task.taskIdentifier) error=\(error.localizedDescription)")
             state.continuation.resume(throwing: error)
             return
         }
@@ -141,9 +152,11 @@ private final class DirectUploadSessionDelegate: NSObject, URLSessionDataDelegat
         let httpResponse = task.response as? HTTPURLResponse
         let statusCode = state.statusCode ?? httpResponse?.statusCode ?? 0
         guard (200..<300).contains(statusCode) else {
+            directUploadDebugLog("task completed non2xx id=\(task.taskIdentifier) status=\(statusCode)")
             state.continuation.resume(throwing: AppError.server(statusCode: statusCode))
             return
         }
+        directUploadDebugLog("task completed id=\(task.taskIdentifier) status=\(statusCode) etag_present=\((state.eTag ?? httpResponse?.value(forHTTPHeaderField: "ETag")) != nil)")
         state.continuation.resume(
             returning: DirectObjectUploadResult(
                 statusCode: statusCode,

@@ -80,8 +80,31 @@ func (s *Server) createIOSUploadSession(response http.ResponseWriter, request *h
 			s.internalError(response, refreshErr, "refresh iOS upload session")
 			return
 		}
-		s.Logger.Info("replay iOS upload session", "user_id", user.ID, "upload_id", session.ID, "media_id", session.MediaID, "strategy", string(session.Strategy), "file_size_bytes", metadata.FileSizeBytes, "refreshed", refreshed)
-		s.writeJSON(response, http.StatusOK, makeIOSUploadSession(session))
+		replayResponse := makeIOSUploadSession(session)
+		mediaStatus := "unknown"
+		mediaFileSizeBytes := int64(0)
+		if media, mediaErr := s.Store.GetMedia(request.Context(), user.ID, session.MediaID); mediaErr == nil {
+			mediaStatus = string(media.Status)
+			mediaFileSizeBytes = media.FileSizeBytes
+		} else {
+			s.Logger.Warn("replay iOS upload session media lookup failed", "user_id", user.ID, "upload_id", session.ID, "media_id", session.MediaID, "error", mediaErr)
+		}
+		s.Logger.Info(
+			"replay iOS upload session",
+			"user_id", user.ID,
+			"upload_id", session.ID,
+			"media_id", session.MediaID,
+			"strategy", string(session.Strategy),
+			"metadata_file_size_bytes", metadata.FileSizeBytes,
+			"media_file_size_bytes", mediaFileSizeBytes,
+			"media_status", mediaStatus,
+			"session_completed", session.CompletedAt != nil,
+			"expires_at", session.ExpiresAt,
+			"part_count", len(session.Parts),
+			"response_part_count", len(replayResponse.Parts),
+			"refreshed", refreshed,
+		)
+		s.writeJSON(response, http.StatusOK, replayResponse)
 		return
 	}
 	mediaID := models.NewID("media")
@@ -259,7 +282,11 @@ func makeIOSUploadSession(session models.UploadSession) iosUploadSessionResponse
 }
 
 func (s *Server) refreshIOSUploadSessionIfExpired(request *http.Request, userID string, session models.UploadSession) (models.UploadSession, bool, error) {
-	if session.CompletedAt != nil || session.ExpiresAt.After(s.Now().UTC().Add(60*time.Second)) {
+	if session.CompletedAt != nil {
+		s.Logger.Info("skip refresh for completed iOS upload session", "user_id", userID, "upload_id", session.ID, "media_id", session.MediaID, "strategy", string(session.Strategy), "completed_at", session.CompletedAt)
+		return session, false, nil
+	}
+	if session.ExpiresAt.After(s.Now().UTC().Add(60 * time.Second)) {
 		return session, false, nil
 	}
 	media, err := s.Store.GetMedia(request.Context(), userID, session.MediaID)

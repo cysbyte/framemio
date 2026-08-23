@@ -1,5 +1,11 @@
 import Foundation
 
+private func mediaUploadDebugLog(_ message: @autoclosure () -> String) {
+#if DEBUG
+    print("[FrameMio][MediaUpload] \(message())")
+#endif
+}
+
 final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
     private let source: OriginalMediaSource
     private let authorizer: MediaUploadAuthorizer
@@ -30,10 +36,12 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
 
         let eligibleIDs = Set(selection.uploadEligibleAssetIDs)
         let eligibleAssets = assets.filter { eligibleIDs.contains($0.id) }
+        mediaUploadDebugLog("upload requested assets=\(assets.count) eligible=\(eligibleAssets.count) max_concurrent=\(options.maximumConcurrentUploads) part_size=\(options.partSizeBytes) background=\(options.usesBackgroundURLSession)")
         guard !eligibleAssets.isEmpty else {
             return []
         }
         let preparedAssets = try await prepareUploads(eligibleAssets, options: options)
+        mediaUploadDebugLog("prepared uploads count=\(preparedAssets.count)")
         return try await uploadInBatches(
             preparedAssets,
             options: options,
@@ -66,10 +74,12 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
 
                 if let existing, existing.status == .completed {
                     totalBytes += existing.fileSizeBytes
+                    mediaUploadDebugLog("prepare existing completed upload=\(existing.id) asset=\(asset.id) media=\(existing.mediaID ?? "nil") bytes=\(existing.fileSizeBytes)")
                     prepared.append(PreparedMediaUpload(asset: asset, record: existing, mediaFile: nil, isNewMaterialization: false))
                 } else {
                     let staged = try await materializePreparedFile(for: asset, existing: existing, options: options)
                     totalBytes += staged.file.fileSizeBytes
+                    mediaUploadDebugLog("prepare staged upload=\(MediaUpload.makeID(for: asset.id, optimization: options.optimization)) asset=\(asset.id) bytes=\(staged.file.fileSizeBytes) new_materialization=\(staged.isNewMaterialization)")
                     prepared.append(PreparedMediaUpload(asset: asset, record: existing, mediaFile: staged.file, isNewMaterialization: staged.isNewMaterialization))
                 }
 
@@ -154,6 +164,7 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         for start in stride(from: 0, to: assets.count, by: batchSize) {
             let end = min(start + batchSize, assets.count)
             let batch = Array(assets[start..<end])
+            mediaUploadDebugLog("batch start range=\(start)..<\(end) size=\(batch.count)")
             await withTaskGroup(of: UploadOutcome.self) { group in
                 for asset in batch {
                     group.addTask {
@@ -206,6 +217,7 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         var record = try await store.upload(for: uploadID)
 
         if let record, record.status == .completed {
+            mediaUploadDebugLog("uploadOne skipped completed upload=\(record.id) asset=\(record.assetID) media=\(record.mediaID ?? "nil") bytes=\(record.fileSizeBytes)")
             progress(
                 MediaUploadProgress(
                     uploadID: record.id,
@@ -220,7 +232,9 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         }
 
         do {
+            mediaUploadDebugLog("uploadOne start upload=\(uploadID) asset=\(asset.id) existing_status=\(record?.status.rawValue ?? "none")")
             let mediaFile = try await materializeFile(for: asset, existing: record, options: options)
+            mediaUploadDebugLog("uploadOne materialized upload=\(uploadID) asset=\(asset.id) bytes=\(mediaFile.fileSizeBytes) file=\(mediaFile.fileName)")
             if record == nil {
                 record = makeUploadRecord(asset: asset, mediaFile: mediaFile, options: options)
             } else if record?.stagedFileURL == nil {
@@ -251,10 +265,12 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
                     optimization: record.optimization,
                     preferredPartSizeBytes: options.partSizeBytes
                 )
+                mediaUploadDebugLog("authorizing session upload=\(record.id) asset=\(record.assetID) bytes=\(record.fileSizeBytes)")
                 session = try await authorizer.createUploadSession(
                     metadata: metadata,
                     idempotencyKey: record.id
                 )
+                mediaUploadDebugLog("authorized session upload=\(record.id) session=\(session?.uploadID ?? "nil") media=\(session?.mediaID ?? "nil") strategy=\(session?.strategy.rawValue ?? "nil") parts=\(session?.parts.count ?? 0) completed_parts=\(session?.parts.filter(\.isCompleted).count ?? 0) usable=\(session?.isUsable() ?? false)")
                 record.session = session
                 record.mediaID = session?.mediaID
                 record.updatedAt = Date()
@@ -262,8 +278,10 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
             }
 
             guard var session, !session.parts.isEmpty else {
+                mediaUploadDebugLog("invalid session upload=\(record.id) has_session=\(record.session != nil)")
                 throw AppError.invalidResponse
             }
+            mediaUploadDebugLog("using session upload=\(record.id) session=\(session.uploadID) media=\(session.mediaID) strategy=\(session.strategy.rawValue) parts=\(session.parts.count) completed_parts=\(session.parts.filter(\.isCompleted).count) usable=\(session.isUsable())")
 
             record.status = .uploading
             try await store.save(record)
@@ -278,14 +296,18 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
             record.status = .completing
             record.session = session
             try await store.save(record)
+            mediaUploadDebugLog("all parts uploaded upload=\(record.id) session=\(session.uploadID) strategy=\(session.strategy.rawValue) completed_parts=\(session.parts.filter(\.isCompleted).count)/\(session.parts.count)")
             if session.strategy == .multipart {
                 let completedParts = session.parts.compactMap { part -> MultipartPartCompletion? in
                     guard let eTag = part.eTag else { return nil }
                     return MultipartPartCompletion(partNumber: part.partNumber, eTag: eTag)
                 }
+                mediaUploadDebugLog("complete multipart start upload=\(record.id) session=\(session.uploadID) parts=\(completedParts.count)")
                 try await authorizer.completeMultipartUpload(session: session, parts: completedParts)
+                mediaUploadDebugLog("complete multipart done upload=\(record.id) session=\(session.uploadID)")
             }
 
+            mediaUploadDebugLog("notify completion start upload=\(record.id) session=\(session.uploadID) media=\(session.mediaID)")
             try await authorizer.notifyUploadCompleted(
                 UploadCompletionNotification(
                     mediaId: session.mediaID,
@@ -296,6 +318,7 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
                 )
             )
 
+            mediaUploadDebugLog("notify completion done upload=\(record.id) session=\(session.uploadID) media=\(session.mediaID)")
             record.status = .completed
             record.uploadedBytes = record.fileSizeBytes
             record.stagedFileURL = nil
@@ -325,6 +348,7 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
                 record.status = .failed
                 record.lastError = error.localizedDescription
                 record.updatedAt = Date()
+                mediaUploadDebugLog("uploadOne failed upload=\(record.id) asset=\(record.assetID) status=\(record.status.rawValue) error=\(error.localizedDescription)")
                 try? await store.save(record)
             }
             throw error
@@ -345,6 +369,7 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         for index in session.parts.indices {
             try Task.checkCancellation()
             guard !session.parts[index].isCompleted else {
+                mediaUploadDebugLog("part skipped completed session=\(session.uploadID) part=\(session.parts[index].partNumber)")
                 continue
             }
 
@@ -365,6 +390,7 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
                 attempt += 1
                 session.parts[index].attempts = attempt
                 session.parts[index].status = attempt == 1 ? .uploading : .retrying
+                mediaUploadDebugLog("part upload attempt session=\(session.uploadID) upload=\(record.id) part=\(session.parts[index].partNumber) attempt=\(attempt) length=\(session.parts[index].lengthBytes) strategy=\(session.strategy.rawValue)")
                 record.session = session
                 record.status = attempt == 1 ? .uploading : .retrying
                 try await store.save(record)
@@ -404,6 +430,7 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
                     } else {
                         eTag = result.eTag ?? "single-object"
                     }
+                    mediaUploadDebugLog("part upload complete session=\(session.uploadID) upload=\(record.id) part=\(session.parts[index].partNumber) status=\(result.statusCode) etag_present=\(!eTag.isEmpty)")
                     session.parts[index].eTag = eTag
                     session.parts[index].status = .completed
                     record.uploadedBytes = session.parts
@@ -417,6 +444,7 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
                 } catch is CancellationError {
                     throw CancellationError()
                 } catch {
+                    mediaUploadDebugLog("part upload failed session=\(session.uploadID) upload=\(record.id) part=\(session.parts[index].partNumber) attempt=\(attempt) error=\(error.localizedDescription)")
                     session.parts[index].lastError = error.localizedDescription
                     session.parts[index].status = .failed
                     record.session = session

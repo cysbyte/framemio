@@ -3,6 +3,12 @@ import Foundation
 import SwiftUI
 import UIKit
 
+private func storyCreationDebugLog(_ message: @autoclosure () -> String) {
+#if DEBUG
+    print("[FrameMio][StoryCreation] \(message())")
+#endif
+}
+
 @MainActor
 final class StoryCreationViewModel: ObservableObject {
     @Published private(set) var progress: Double = 0
@@ -66,7 +72,11 @@ final class StoryCreationViewModel: ObservableObject {
     }
 
     func createStory() {
-        guard !isCreating else { return }
+        guard !isCreating else {
+            storyCreationDebugLog("ignored duplicate create request while already creating")
+            return
+        }
+        storyCreationDebugLog("createStory requested assets=\(assets.count) videos=\(assets.filter(\.isVideo).count)")
         creationTask?.cancel()
         creationTask = Task { [weak self] in
             guard let self else { return }
@@ -77,6 +87,7 @@ final class StoryCreationViewModel: ObservableObject {
             defer { isCreating = false }
 
             do {
+                storyCreationDebugLog("phase=upload_start progress=\(progress)")
                 phaseTitle = "Looking through your videos..."
                 let selection = MediaSelection(explicitlySelectedAssetIDs: assets.map(\.id))
                 _ = try await mediaUploadService.upload(
@@ -86,29 +97,43 @@ final class StoryCreationViewModel: ObservableObject {
                     progress: { [weak self] uploadProgress in
                         Task { @MainActor [weak self] in
                             guard let self else { return }
-                            progress = min(
+                            let displayProgress = min(
                                 0.28,
                                 uploadProgress.fractionCompleted * 0.28
                             )
+                            let previousPercent = Int(progress * 100)
+                            progress = displayProgress
+                            let currentPercent = Int(displayProgress * 100)
+                            if currentPercent != previousPercent || currentPercent >= 28 {
+                                storyCreationDebugLog("phase=upload_progress app_percent=\(currentPercent) upload_fraction=\(uploadProgress.fractionCompleted) bytes=\(uploadProgress.uploadedBytes)/\(uploadProgress.totalBytes) completed_uploads=\(uploadProgress.completedUploads)/\(uploadProgress.totalUploads) asset=\(uploadProgress.assetID) upload=\(uploadProgress.uploadID)")
+                            }
                         }
                     }
                 )
+                storyCreationDebugLog("phase=upload_complete progress=\(progress)")
                 try Task.checkCancellation()
                 phaseTitle = "Finding meaningful moments..."
+                storyCreationDebugLog("phase=analysis_start assets=\(assets.count)")
                 let analyses = try await analyzeAssets()
+                storyCreationDebugLog("phase=analysis_complete count=\(analyses.count)")
                 try Task.checkCancellation()
                 phaseTitle = "Building your story..."
                 progress = max(progress, 0.86)
+                storyCreationDebugLog("phase=story_create_start app_percent=\(Int(progress * 100)) analyses=\(analyses.count)")
                 story = try await storyService.createStory(
                     request: CreateStoryRequest(context: context, assets: assets, analyses: analyses)
                 )
                 progress = 1
+                storyCreationDebugLog("phase=story_create_complete story=\(story?.id ?? "nil")")
                 phaseTitle = "Ready to watch."
                 FrameMioHaptics.success()
             } catch is CancellationError {
+                storyCreationDebugLog("phase=cancelled progress=\(progress)")
                 phaseTitle = "Preparing your memories..."
             } catch {
-                errorMessage = AppError.from(error).localizedDescription
+                let appError = AppError.from(error)
+                storyCreationDebugLog("phase=failed progress=\(progress) error=\(appError.localizedDescription) raw=\(error.localizedDescription)")
+                errorMessage = appError.localizedDescription
                 phaseTitle = "Something went wrong"
             }
         }
@@ -125,6 +150,7 @@ final class StoryCreationViewModel: ObservableObject {
 
         try await withThrowingTaskGroup(of: MediaAnalysis.self) { group in
             for asset in assets {
+                storyCreationDebugLog("phase=analysis_enqueue asset=\(asset.id) kind=\(asset.kind.rawValue)")
                 group.addTask { [analysisService] in
                     try Task.checkCancellation()
                     return try await analysisService.analyze(asset: asset)
@@ -134,6 +160,7 @@ final class StoryCreationViewModel: ObservableObject {
             for try await analysis in group {
                 analyses.append(analysis)
                 progress = min(0.82, Double(analyses.count) / Double(assets.count) * 0.82)
+                storyCreationDebugLog("phase=analysis_progress app_percent=\(Int(progress * 100)) completed=\(analyses.count)/\(assets.count) asset=\(analysis.assetID) labels=\(analysis.labels.joined(separator: ","))")
             }
         }
         return analyses.sorted { $0.assetID < $1.assetID }
