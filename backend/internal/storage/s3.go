@@ -24,8 +24,14 @@ type UploadAuthorizationRequest struct {
 	Optimization  string
 }
 
+type UploadRefreshRequest struct {
+	ContentType   string
+	FileSizeBytes int64
+}
+
 type ObjectStorage interface {
 	AuthorizeUpload(ctx context.Context, request UploadAuthorizationRequest) (models.UploadSession, error)
+	RefreshUpload(ctx context.Context, session models.UploadSession, request UploadRefreshRequest) (models.UploadSession, error)
 	CompleteUpload(ctx context.Context, session models.UploadSession, parts []models.CompletedUploadPart) (string, error)
 	AbortUpload(ctx context.Context, session models.UploadSession) error
 	ObjectExists(ctx context.Context, key string) (bool, error)
@@ -151,6 +157,54 @@ func (s *S3ObjectStorage) AuthorizeUpload(ctx context.Context, request UploadAut
 	}, nil
 }
 
+func (s *S3ObjectStorage) RefreshUpload(ctx context.Context, session models.UploadSession, request UploadRefreshRequest) (models.UploadSession, error) {
+	now := time.Now().UTC()
+	expiresAt := now.Add(s.expiry)
+	refreshed := session
+	refreshed.ExpiresAt = expiresAt
+	if refreshed.Strategy == models.UploadStrategySingle {
+		presigned, err := s.presigner.PresignPutObject(ctx, &s3.PutObjectInput{
+			Bucket:        aws.String(s.bucket),
+			Key:           aws.String(refreshed.S3Key),
+			ContentType:   aws.String(request.ContentType),
+			ContentLength: aws.Int64(request.FileSizeBytes),
+		}, func(options *s3.PresignOptions) {
+			options.Expires = s.expiry
+		})
+		if err != nil {
+			return models.UploadSession{}, fmt.Errorf("refresh s3 object upload: %w", err)
+		}
+		if len(refreshed.Parts) == 0 {
+			refreshed.Parts = []models.UploadPart{{PartNumber: 1, OffsetBytes: 0, LengthBytes: request.FileSizeBytes}}
+		}
+		refreshed.Parts[0].UploadURL = presigned.URL
+		refreshed.Parts[0].ExpiresAt = expiresAt
+		return refreshed, nil
+	}
+
+	if refreshed.MultipartUploadID == "" {
+		return models.UploadSession{}, fmt.Errorf("refresh multipart upload: missing upload id")
+	}
+	for index := range refreshed.Parts {
+		part := &refreshed.Parts[index]
+		presigned, err := s.presigner.PresignUploadPart(ctx, &s3.UploadPartInput{
+			Bucket:        aws.String(s.bucket),
+			Key:           aws.String(refreshed.S3Key),
+			UploadId:      aws.String(refreshed.MultipartUploadID),
+			PartNumber:    aws.Int32(int32(part.PartNumber)),
+			ContentLength: aws.Int64(part.LengthBytes),
+		}, func(options *s3.PresignOptions) {
+			options.Expires = s.expiry
+		})
+		if err != nil {
+			return models.UploadSession{}, fmt.Errorf("refresh s3 part %d: %w", part.PartNumber, err)
+		}
+		part.UploadURL = presigned.URL
+		part.ExpiresAt = expiresAt
+	}
+	return refreshed, nil
+}
+
 func (s *S3ObjectStorage) CompleteUpload(ctx context.Context, session models.UploadSession, parts []models.CompletedUploadPart) (string, error) {
 	if session.Strategy == models.UploadStrategySingle {
 		head, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(session.S3Key)})
@@ -273,6 +327,20 @@ func (s StaticObjectStorage) AuthorizeUpload(_ context.Context, request UploadAu
 		multipartUploadID = models.NewID("multipart")
 	}
 	return models.UploadSession{ID: models.NewID("upload"), UserID: request.UserID, MediaID: request.MediaID, S3Key: key, Strategy: strategy, MultipartUploadID: multipartUploadID, PartSizeBytes: partSize, Parts: parts, ExpiresAt: expiresAt, CreatedAt: now}, nil
+}
+
+func (s StaticObjectStorage) RefreshUpload(_ context.Context, session models.UploadSession, request UploadRefreshRequest) (models.UploadSession, error) {
+	expiresAt := time.Now().UTC().Add(15 * time.Minute)
+	refreshed := session
+	refreshed.ExpiresAt = expiresAt
+	if len(refreshed.Parts) == 0 && refreshed.Strategy == models.UploadStrategySingle {
+		refreshed.Parts = []models.UploadPart{{PartNumber: 1, OffsetBytes: 0, LengthBytes: request.FileSizeBytes}}
+	}
+	for index := range refreshed.Parts {
+		refreshed.Parts[index].UploadURL = fmt.Sprintf("%s/%s/part/%d?refresh=%d", s.BaseURL, refreshed.MediaID, refreshed.Parts[index].PartNumber, expiresAt.Unix())
+		refreshed.Parts[index].ExpiresAt = expiresAt
+	}
+	return refreshed, nil
 }
 
 func (s StaticObjectStorage) CompleteUpload(_ context.Context, session models.UploadSession, parts []models.CompletedUploadPart) (string, error) {

@@ -19,6 +19,7 @@ type Store interface {
 	EnsureUser(ctx context.Context, user models.User) (models.User, error)
 	GetMedia(ctx context.Context, userID, mediaID string) (models.MediaAsset, error)
 	CreateMediaUpload(ctx context.Context, media models.MediaAsset, session models.UploadSession) error
+	UpdateUploadSession(ctx context.Context, session models.UploadSession) error
 	GetUploadSessionByIdempotency(ctx context.Context, userID, key string) (models.UploadSession, error)
 	GetUploadSession(ctx context.Context, userID, uploadID string) (models.UploadSession, error)
 	MarkMediaReady(ctx context.Context, userID, mediaID, uploadID, s3Key, etag string) (models.MediaAsset, error)

@@ -18,6 +18,10 @@ func (s testObjectStorage) AuthorizeUpload(context.Context, storage.UploadAuthor
 	return models.UploadSession{}, nil
 }
 
+func (s testObjectStorage) RefreshUpload(context.Context, models.UploadSession, storage.UploadRefreshRequest) (models.UploadSession, error) {
+	return models.UploadSession{}, nil
+}
+
 func (s testObjectStorage) CompleteUpload(context.Context, models.UploadSession, []models.CompletedUploadPart) (string, error) {
 	return "", nil
 }

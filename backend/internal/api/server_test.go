@@ -549,6 +549,10 @@ func (s *countingObjectStorage) AuthorizeUpload(ctx context.Context, request sto
 	return s.base.AuthorizeUpload(ctx, request)
 }
 
+func (s *countingObjectStorage) RefreshUpload(ctx context.Context, session models.UploadSession, request storage.UploadRefreshRequest) (models.UploadSession, error) {
+	return s.base.RefreshUpload(ctx, session, request)
+}
+
 func (s *countingObjectStorage) CompleteUpload(ctx context.Context, session models.UploadSession, parts []models.CompletedUploadPart) (string, error) {
 	s.mu.Lock()
 	s.completions++

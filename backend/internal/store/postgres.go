@@ -172,6 +172,21 @@ func (s *PostgresStore) CreateMediaUpload(ctx context.Context, media models.Medi
 	return nil
 }
 
+func (s *PostgresStore) UpdateUploadSession(ctx context.Context, session models.UploadSession) error {
+	data, err := json.Marshal(session)
+	if err != nil {
+		return fmt.Errorf("encode upload: %w", err)
+	}
+	result, err := s.pool.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='upload' AND id=$3 AND user_id=$4`, data, time.Now().UTC(), session.ID, session.UserID)
+	if err != nil {
+		return fmt.Errorf("update upload: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *PostgresStore) GetUploadSessionByIdempotency(ctx context.Context, userID, key string) (models.UploadSession, error) {
 	var session models.UploadSession
 	if err := s.getByLogical(ctx, "upload", userID, key, &session); err != nil {

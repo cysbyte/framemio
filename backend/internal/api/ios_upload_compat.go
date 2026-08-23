@@ -75,8 +75,13 @@ func (s *Server) createIOSUploadSession(response http.ResponseWriter, request *h
 		return
 	}
 	if existing, err := s.Store.GetUploadSessionByIdempotency(request.Context(), user.ID, input.IdempotencyKey); err == nil {
-		s.Logger.Info("replay iOS upload session", "user_id", user.ID, "upload_id", existing.ID, "media_id", existing.MediaID, "strategy", string(existing.Strategy), "file_size_bytes", metadata.FileSizeBytes)
-		s.writeJSON(response, http.StatusOK, makeIOSUploadSession(existing))
+		session, refreshed, refreshErr := s.refreshIOSUploadSessionIfExpired(request, user.ID, existing)
+		if refreshErr != nil {
+			s.internalError(response, refreshErr, "refresh iOS upload session")
+			return
+		}
+		s.Logger.Info("replay iOS upload session", "user_id", user.ID, "upload_id", session.ID, "media_id", session.MediaID, "strategy", string(session.Strategy), "file_size_bytes", metadata.FileSizeBytes, "refreshed", refreshed)
+		s.writeJSON(response, http.StatusOK, makeIOSUploadSession(session))
 		return
 	}
 	mediaID := models.NewID("media")
@@ -251,4 +256,26 @@ func makeIOSUploadSession(session models.UploadSession) iosUploadSessionResponse
 		UploadID: session.ID, MediaID: session.MediaID, S3Key: session.S3Key, Strategy: session.Strategy,
 		PartSizeBytes: session.PartSizeBytes, S3MultipartUploadID: multipartUploadID, ExpiresAt: &expiresAt, Parts: parts,
 	}
+}
+
+func (s *Server) refreshIOSUploadSessionIfExpired(request *http.Request, userID string, session models.UploadSession) (models.UploadSession, bool, error) {
+	if session.CompletedAt != nil || session.ExpiresAt.After(s.Now().UTC().Add(60*time.Second)) {
+		return session, false, nil
+	}
+	media, err := s.Store.GetMedia(request.Context(), userID, session.MediaID)
+	if err != nil {
+		return models.UploadSession{}, false, err
+	}
+	refreshed, err := s.ObjectStorage.RefreshUpload(request.Context(), session, storage.UploadRefreshRequest{
+		ContentType:   media.ContentType,
+		FileSizeBytes: media.FileSizeBytes,
+	})
+	if err != nil {
+		return models.UploadSession{}, false, err
+	}
+	if err := s.Store.UpdateUploadSession(request.Context(), refreshed); err != nil {
+		return models.UploadSession{}, false, err
+	}
+	s.Logger.Info("refreshed expired iOS upload session", "user_id", userID, "upload_id", refreshed.ID, "media_id", refreshed.MediaID, "strategy", string(refreshed.Strategy), "expires_at", refreshed.ExpiresAt)
+	return refreshed, true, nil
 }

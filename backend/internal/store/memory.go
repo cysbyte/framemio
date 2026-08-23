@@ -86,6 +86,20 @@ func (s *MemoryStore) CreateMediaUpload(_ context.Context, media models.MediaAss
 	return nil
 }
 
+func (s *MemoryStore) UpdateUploadSession(_ context.Context, session models.UploadSession) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	existing, ok := s.uploads[session.ID]
+	if !ok {
+		return ErrNotFound
+	}
+	if existing.UserID != session.UserID {
+		return ErrInvalidOwner
+	}
+	s.uploads[session.ID] = session
+	return nil
+}
+
 func (s *MemoryStore) GetUploadSessionByIdempotency(_ context.Context, userID, key string) (models.UploadSession, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
