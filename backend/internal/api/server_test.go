@@ -493,6 +493,34 @@ func TestHMACTokenAuthenticator(t *testing.T) {
 	}
 }
 
+func TestAnonymousAuthIssuesUsableToken(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.August, 19, 10, 0, 0, 0, time.UTC)
+	secret := []byte("a-secret-with-at-least-thirty-two-characters")
+	handler := NewServer(Server{
+		Store:         store.NewMemoryStore(),
+		Authenticator: HMACTokenAuthenticator{Secret: secret, Now: func() time.Time { return now }},
+		InternalToken: testInternalToken,
+		Logger:        slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		Now:           func() time.Time { return now },
+	}).Handler()
+
+	issued := performJSON(t, handler, http.MethodPost, "/v1/auth/anonymous", map[string]any{"installation_id": "device-1"}, "", false, nil)
+	if issued.Code != http.StatusOK {
+		t.Fatalf("anonymous auth status = %d, body = %s", issued.Code, issued.Body.String())
+	}
+	var token authTokenResponse
+	decodeResponse(t, issued, &token)
+	if token.AccessToken == "" || token.User.ID != "ios-anon-device-1" {
+		t.Fatalf("unexpected token response: %+v", token)
+	}
+
+	stories := performJSON(t, handler, http.MethodGet, "/v1/stories", nil, "", false, map[string]string{"Authorization": "Bearer " + token.AccessToken})
+	if stories.Code != http.StatusOK {
+		t.Fatalf("list stories status = %d, body = %s", stories.Code, stories.Body.String())
+	}
+}
+
 func newTestServer(memoryStore *store.MemoryStore, publisher *queue.MemoryPublisher) *Server {
 	return newTestServerWithStorage(memoryStore, publisher, storage.StaticObjectStorage{
 		BaseURL: "https://uploads.example.test", PartSizeBytes: 5 * 1024 * 1024, MultipartThreshold: 10 * 1024 * 1024,

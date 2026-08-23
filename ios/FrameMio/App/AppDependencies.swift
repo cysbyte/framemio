@@ -19,7 +19,7 @@ struct AppDependencies {
 
     static func live() -> AppDependencies {
         let persistence = UserDefaultsStoryPersistence()
-        let tokenProvider = KeychainAuthTokenProvider()
+        let tokenProvider = KeychainAuthTokenProvider(baseURL: AppConfiguration.apiBaseURL)
         let photoLibrary = PhotoKitPhotoLibraryService()
         let mediaIntelligenceStore = FileMediaIntelligenceStore()
         let apiClient = URLSessionAPIClient(
@@ -93,6 +93,6 @@ struct AppDependencies {
 enum AppConfiguration {
     static var apiBaseURL: URL {
         let configuredValue = Bundle.main.object(forInfoDictionaryKey: "APIBaseURL") as? String
-        return URL(string: configuredValue ?? "https://api.framemio.app")!
+        return URL(string: configuredValue ?? "https://api.framemio.com")!
     }
 }

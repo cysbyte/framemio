@@ -46,6 +46,20 @@ type tokenClaims struct {
 	ExpiresAt int64  `json:"exp"`
 }
 
+func (a HMACTokenAuthenticator) IssueToken(user models.User, expiresAt time.Time) (string, error) {
+	if user.ID == "" || len(a.Secret) < 32 {
+		return "", ErrUnauthenticated
+	}
+	payload, err := json.Marshal(tokenClaims{Subject: user.ID, Email: user.Email, ExpiresAt: expiresAt.Unix()})
+	if err != nil {
+		return "", err
+	}
+	encoded := base64.RawURLEncoding.EncodeToString(payload)
+	mac := hmac.New(sha256.New, a.Secret)
+	_, _ = mac.Write([]byte(encoded))
+	return encoded + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
+}
+
 func (a HMACTokenAuthenticator) Authenticate(_ context.Context, request *http.Request) (models.User, error) {
 	header := request.Header.Get("Authorization")
 	prefix, token, ok := strings.Cut(header, " ")

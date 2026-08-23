@@ -64,6 +64,10 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 		s.writeJSON(response, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
+	if request.URL.Path == "/v1/auth/anonymous" {
+		s.createAnonymousToken(response, request)
+		return
+	}
 	if strings.HasPrefix(request.URL.Path, "/internal/jobs/") {
 		if request.Method == http.MethodPost {
 			parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")

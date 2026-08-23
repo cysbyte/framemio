@@ -132,6 +132,7 @@ protocol VideoMetadataService: Sendable {
 
 protocol AuthTokenProvider: Sendable {
     func accessToken() async -> String?
+    func invalidateAccessToken() async
 }
 
 struct APIRequest: Sendable {

@@ -644,7 +644,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = SRX8W875LC;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_APIBaseURL = "https://api.framemio.app";
+				INFOPLIST_KEY_APIBaseURL = "https://api.framemio.com";
 				INFOPLIST_KEY_CFBundleDisplayName = FrameMio;
 				INFOPLIST_KEY_CFBundleShortVersionString = 1.0;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photo-video";
@@ -676,7 +676,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = SRX8W875LC;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_APIBaseURL = "https://api.framemio.app";
+				INFOPLIST_KEY_APIBaseURL = "https://api.framemio.com";
 				INFOPLIST_KEY_CFBundleDisplayName = FrameMio;
 				INFOPLIST_KEY_CFBundleShortVersionString = 1.0;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photo-video";
