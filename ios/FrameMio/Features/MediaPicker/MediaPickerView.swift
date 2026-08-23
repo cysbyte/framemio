@@ -34,9 +34,16 @@ struct MediaPickerView: View {
                 mediaBrowser
             }
         }
-        .background(FrameMioColors.canvas)
+        .background {
+            LinearGradient(
+                colors: [FrameMioColors.canvas, FrameMioColors.accentMuted.opacity(0.26)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+        }
         .navigationTitle(viewModel.context.pickerTitle)
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Text("\(viewModel.selectedCount)")
@@ -62,6 +69,8 @@ struct MediaPickerView: View {
     private var mediaBrowser: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: FrameMioSpacing.xxl) {
+                pickerIntro
+
                 if viewModel.authorization == .limited {
                     limitedAccessNotice
                 }
@@ -99,6 +108,33 @@ struct MediaPickerView: View {
         .scrollIndicators(.hidden)
     }
 
+    private var pickerIntro: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
+            Tag(viewModel.context.rawValue, systemImage: viewModel.context.icon)
+
+            Text("Choose the moments that belong together.")
+                .font(FrameMioTypography.screenTitle)
+                .foregroundStyle(FrameMioColors.ink)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("Mix photos and videos from your camera roll. FrameMio will use your selection as the emotional starting point for the story.")
+                .font(FrameMioTypography.body)
+                .foregroundStyle(FrameMioColors.secondaryInk)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(FrameMioSpacing.xl)
+        .background(
+            FrameMioColors.surface.opacity(0.82),
+            in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+        }
+        .frameMioElevation(.subtle)
+        .accessibilityElement(children: .combine)
+    }
+
     private func mediaCell(for asset: MediaAsset) -> some View {
         MediaThumbnail(
             image: viewModel.image(for: asset),
@@ -133,6 +169,9 @@ struct MediaPickerView: View {
             }
         }
         .pickerStyle(.segmented)
+        .tint(FrameMioColors.accent)
+        .padding(FrameMioSpacing.xs)
+        .background(FrameMioColors.surface.opacity(0.72), in: RoundedRectangle(cornerRadius: FrameMioRadius.pill, style: .continuous))
         .accessibilityLabel("Filter media")
     }
 
@@ -147,7 +186,7 @@ struct MediaPickerView: View {
         }
         .padding(FrameMioSpacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(FrameMioColors.accentMuted, in: RoundedRectangle(cornerRadius: FrameMioRadius.medium, style: .continuous))
+        .background(FrameMioColors.accentMuted.opacity(0.74), in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 
@@ -168,15 +207,20 @@ struct MediaPickerView: View {
                 .font(FrameMioTypography.footnote)
                 .foregroundStyle(FrameMioColors.secondaryInk)
 
-            PrimaryButton(title: "Create Story", systemImage: "sparkles") {
+            PrimaryButton(title: "Confirm Selection", systemImage: "checkmark") {
                 onContinue(viewModel.selectedAssets)
             }
             .disabled(!viewModel.canContinue)
         }
         .padding(.horizontal, FrameMioSpacing.lg)
-        .padding(.top, FrameMioSpacing.sm)
-        .padding(.bottom, FrameMioSpacing.xs)
-        .background(.regularMaterial)
+        .padding(.top, FrameMioSpacing.md)
+        .padding(.bottom, FrameMioSpacing.md)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(FrameMioColors.divider.opacity(0.5))
+                .frame(height: FrameMioMetrics.borderWidth)
+        }
     }
 
     private var selectionSummary: String {

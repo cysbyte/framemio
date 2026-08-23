@@ -18,26 +18,41 @@ final class VisionMediaAnalysisService: MediaAnalysisService, @unchecked Sendabl
 
         return try await Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
-            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-            let classificationRequest = VNClassifyImageRequest()
-            let peopleRequest = VNDetectHumanRectanglesRequest()
-            try handler.perform([classificationRequest, peopleRequest])
-            try Task.checkCancellation()
+            do {
+                let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+                let classificationRequest = VNClassifyImageRequest()
+                let peopleRequest = VNDetectHumanRectanglesRequest()
+                try handler.perform([classificationRequest, peopleRequest])
+                try Task.checkCancellation()
 
-            let labels = (classificationRequest.results ?? [])
-                .prefix(3)
-                .filter { $0.confidence >= 0.15 }
-                .map(\.identifier)
-            let peopleCount = peopleRequest.results?.count ?? 0
-            let confidence = classificationRequest.results?.first?.confidence ?? 0
+                let labels = (classificationRequest.results ?? [])
+                    .prefix(3)
+                    .filter { $0.confidence >= 0.15 }
+                    .map(\.identifier)
+                let peopleCount = peopleRequest.results?.count ?? 0
+                let confidence = classificationRequest.results?.first?.confidence ?? 0
 
-            return MediaAnalysis(
-                assetID: asset.id,
-                labels: labels,
-                peopleCount: peopleCount,
-                confidence: Double(confidence)
-            )
+                return MediaAnalysis(
+                    assetID: asset.id,
+                    labels: labels.isEmpty ? Self.fallbackLabels(for: asset) : labels,
+                    peopleCount: peopleCount,
+                    confidence: max(Double(confidence), 0.35)
+                )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                return MediaAnalysis(
+                    assetID: asset.id,
+                    labels: Self.fallbackLabels(for: asset),
+                    peopleCount: 0,
+                    confidence: 0.35
+                )
+            }
         }.value
+    }
+
+    private static func fallbackLabels(for asset: MediaAsset) -> [String] {
+        asset.isVideo ? ["video", "memory"] : ["photo", "memory"]
     }
 }
 

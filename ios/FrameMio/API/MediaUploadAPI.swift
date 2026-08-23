@@ -18,12 +18,8 @@ final class RemoteMediaUploadAuthorizer: MediaUploadAuthorizer, @unchecked Senda
 
     init(apiClient: APIClient) {
         self.apiClient = apiClient
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        self.encoder = encoder
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        self.decoder = decoder
+        encoder = FrameMioJSONCoding.apiEncoder()
+        decoder = FrameMioJSONCoding.apiDecoder()
     }
 
     func createUploadSession(

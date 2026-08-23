@@ -1,13 +1,13 @@
 import CoreGraphics
 
 enum FrameMioRadius {
-    static let small: CGFloat = 8
-    static let medium: CGFloat = 14
-    static let large: CGFloat = 22
-    static let extraLarge: CGFloat = 30
+    static let small: CGFloat = 10
+    static let medium: CGFloat = 18
+    static let large: CGFloat = 28
+    static let extraLarge: CGFloat = 36
     static let pill: CGFloat = 999
 
-    static let control = medium
+    static let control = pill
     static let media = large
-    static let container = large
+    static let container = extraLarge
 }

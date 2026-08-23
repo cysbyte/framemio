@@ -8,44 +8,108 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        List {
-            Section {
-                VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
+                VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+                    Tag("Privacy", systemImage: "lock.fill")
                     Text("Your memories stay personal.")
-                        .font(FrameMioTypography.editorialTitle)
+                        .font(FrameMioTypography.screenTitle)
                         .foregroundStyle(FrameMioColors.ink)
-                    Text("FrameMio uses your iPhone library to understand moments, then sends only the information needed to create a story. No backend secrets live in the app.")
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("FrameMio is designed around clear choices, careful media handling, and user control over what gets selected and shared.")
                         .font(FrameMioTypography.body)
                         .foregroundStyle(FrameMioColors.secondaryInk)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(.vertical, FrameMioSpacing.sm)
-            }
+                .padding(FrameMioSpacing.xl)
+                .background(
+                    LinearGradient(
+                        colors: [FrameMioColors.surface.opacity(0.94), FrameMioColors.accentMuted.opacity(0.58)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                        .stroke(FrameMioColors.divider.opacity(0.58), lineWidth: FrameMioMetrics.borderWidth)
+                }
+                .frameMioElevation(.subtle)
 
-            Section("Photo Library") {
-                HStack {
-                    Label("Access", systemImage: "photo.on.rectangle")
-                    Spacer()
-                    Text(statusTitle)
-                        .foregroundStyle(FrameMioColors.secondaryInk)
-                }
-                .accessibilityElement(children: .combine)
+                VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+                    SectionHeader(title: "Photo Library", subtitle: "Control what FrameMio can see")
 
-                if viewModel.authorization != .authorized && viewModel.authorization != .limited {
-                    Button("Allow Photo Access") { viewModel.requestPhotoAccess() }
-                }
-            }
+                    HStack(spacing: FrameMioSpacing.md) {
+                        Image(systemName: "photo.on.rectangle")
+                            .foregroundStyle(FrameMioColors.accent)
+                            .frame(width: 44, height: 44)
+                            .background(FrameMioColors.accentMuted.opacity(0.7), in: Circle())
+                            .accessibilityHidden(true)
 
-            Section("About") {
-                HStack {
-                    Text("Version")
-                    Spacer()
-                    Text("1.0")
-                        .foregroundStyle(FrameMioColors.secondaryInk)
+                        VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
+                            Text("Access")
+                                .font(FrameMioTypography.headline)
+                                .foregroundStyle(FrameMioColors.ink)
+                            Text(statusTitle)
+                                .font(FrameMioTypography.footnote)
+                                .foregroundStyle(FrameMioColors.secondaryInk)
+                        }
+
+                        Spacer(minLength: FrameMioSpacing.sm)
+                    }
+                    .accessibilityElement(children: .combine)
+
+                    if viewModel.authorization != .authorized && viewModel.authorization != .limited {
+                        SecondaryButton(title: "Allow Photo Access", systemImage: "photo.badge.plus") {
+                            viewModel.requestPhotoAccess()
+                        }
+                    }
                 }
+                .padding(FrameMioSpacing.lg)
+                .background(
+                    FrameMioColors.surface.opacity(0.82),
+                    in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                        .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+                }
+                .frameMioElevation(.subtle)
+
+                VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+                    SectionHeader(title: "About", subtitle: "FrameMio for iPhone memories")
+                    HStack {
+                        Text("Version")
+                            .font(FrameMioTypography.body)
+                            .foregroundStyle(FrameMioColors.ink)
+                        Spacer()
+                        Text("1.0")
+                            .font(FrameMioTypography.body)
+                            .foregroundStyle(FrameMioColors.secondaryInk)
+                    }
+                }
+                .padding(FrameMioSpacing.lg)
+                .background(
+                    FrameMioColors.surface.opacity(0.82),
+                    in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                        .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+                }
+                .frameMioElevation(.subtle)
             }
+            .padding(FrameMioSpacing.lg)
+            .padding(.bottom, FrameMioSpacing.xxxl)
         }
-        .scrollContentBackground(.hidden)
-        .background(FrameMioColors.canvas)
+        .background {
+            LinearGradient(
+                colors: [FrameMioColors.canvas, FrameMioColors.accentMuted.opacity(0.26)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+        }
         .navigationTitle("Settings")
         .task { viewModel.refresh() }
         .alert("Photo access", isPresented: errorBinding) {

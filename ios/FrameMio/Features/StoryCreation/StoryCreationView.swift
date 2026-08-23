@@ -12,14 +12,31 @@ struct StoryCreationView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: FrameMioSpacing.section) {
-                VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
-                    Text("A story from \(viewModel.context.rawValue.lowercased()).")
-                        .font(FrameMioTypography.display)
+                VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+                    Tag(viewModel.context.rawValue, systemImage: viewModel.context.icon)
+                    Text("A cinematic story from \(viewModel.context.rawValue.lowercased()).")
+                        .font(FrameMioTypography.screenTitle)
                         .foregroundStyle(FrameMioColors.ink)
+                        .fixedSize(horizontal: false, vertical: true)
                     Text("FrameMio will look for the feeling that connects these moments, then shape them into something worth revisiting.")
                         .font(FrameMioTypography.body)
                         .foregroundStyle(FrameMioColors.secondaryInk)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .padding(FrameMioSpacing.xl)
+                .background(
+                    LinearGradient(
+                        colors: [FrameMioColors.surface.opacity(0.94), FrameMioColors.accentMuted.opacity(0.58)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                        .stroke(FrameMioColors.divider.opacity(0.58), lineWidth: FrameMioMetrics.borderWidth)
+                }
+                .frameMioElevation(.subtle)
 
                 SectionHeader(title: "Selected moments", subtitle: "\(viewModel.assets.count) photos and videos")
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: FrameMioSpacing.sm) {
@@ -65,7 +82,14 @@ struct StoryCreationView: View {
             .padding(.top, FrameMioSpacing.md)
             .padding(.bottom, FrameMioSpacing.xxxl)
         }
-        .background(FrameMioColors.canvas)
+        .background {
+            LinearGradient(
+                colors: [FrameMioColors.canvas, FrameMioColors.accentMuted.opacity(0.26)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+        }
         .navigationTitle("Create Story")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

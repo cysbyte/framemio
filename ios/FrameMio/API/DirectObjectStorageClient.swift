@@ -138,13 +138,17 @@ private final class DirectUploadSessionDelegate: NSObject, URLSessionDataDelegat
             return
         }
 
-        let statusCode = state.statusCode ?? (task.response as? HTTPURLResponse)?.statusCode ?? 0
+        let httpResponse = task.response as? HTTPURLResponse
+        let statusCode = state.statusCode ?? httpResponse?.statusCode ?? 0
         guard (200..<300).contains(statusCode) else {
             state.continuation.resume(throwing: AppError.server(statusCode: statusCode))
             return
         }
         state.continuation.resume(
-            returning: DirectObjectUploadResult(statusCode: statusCode, eTag: state.eTag)
+            returning: DirectObjectUploadResult(
+                statusCode: statusCode,
+                eTag: state.eTag ?? httpResponse?.value(forHTTPHeaderField: "ETag")
+            )
         )
     }
 }

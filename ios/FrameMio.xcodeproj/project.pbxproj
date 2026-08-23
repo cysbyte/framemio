@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D80000000000000000000001 /* HomeHeroPreview.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D80000000000000000000002 /* HomeHeroPreview.mp4 */; };
 		A10000000000000000000010 /* FrameMioApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000020 /* FrameMioApp.swift */; };
 		A10000000000000000000011 /* AppRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000021 /* AppRootView.swift */; };
 		A10000000000000000000012 /* AppTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000022 /* AppTab.swift */; };
@@ -85,6 +86,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		D80000000000000000000002 /* HomeHeroPreview.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = HomeHeroPreview.mp4; sourceTree = "<group>"; };
 		A10000000000000000000020 /* FrameMioApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameMioApp.swift; sourceTree = "<group>"; };
 		A10000000000000000000021 /* AppRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRootView.swift; sourceTree = "<group>"; };
 		A10000000000000000000022 /* AppTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTab.swift; sourceTree = "<group>"; };
@@ -236,6 +238,7 @@
 			isa = PBXGroup;
 			children = (
 				A1000000000000000000002C /* Assets.xcassets */,
+				D80000000000000000000002 /* HomeHeroPreview.mp4 */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -533,6 +536,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1000000000000000000001C /* Assets.xcassets in Resources */,
+				D80000000000000000000001 /* HomeHeroPreview.mp4 in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

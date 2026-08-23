@@ -30,7 +30,14 @@ struct StoryPreviewView: View {
             .padding(.top, FrameMioSpacing.md)
             .padding(.bottom, FrameMioSpacing.xxxl)
         }
-        .background(FrameMioColors.canvas)
+        .background {
+            LinearGradient(
+                colors: [FrameMioColors.canvas, FrameMioColors.accentMuted.opacity(0.26)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+        }
         .navigationTitle("Your Story")
         .navigationBarTitleDisplayMode(.inline)
         .task { viewModel.load() }
@@ -52,29 +59,48 @@ struct StoryPreviewView: View {
     }
 
     private func previewHero(_ story: Story) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: FrameMioRadius.media, style: .continuous)
-                .fill(FrameMioColors.memoryEarth)
-                .aspectRatio(FrameMioMetrics.storyAspectRatio, contentMode: .fit)
-                .overlay(alignment: .bottomLeading) {
+        ZStack(alignment: .bottomLeading) {
+            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                .fill(
                     LinearGradient(
-                        colors: [.clear, FrameMioColors.mediaScrim],
-                        startPoint: .center,
-                        endPoint: .bottom
+                        colors: [FrameMioColors.memoryLight, FrameMioColors.accent, FrameMioColors.memoryEarth],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
                     )
-                    .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.media, style: .continuous))
-                }
+                )
+                .aspectRatio(FrameMioMetrics.storyAspectRatio, contentMode: .fit)
 
-            VStack(spacing: FrameMioSpacing.sm) {
-                Image(systemName: story.status == .ready ? "play.circle.fill" : "sparkles")
+            Circle()
+                .fill(FrameMioColors.inverseInk.opacity(0.18))
+                .frame(width: 170, height: 170)
+                .offset(x: -44, y: -70)
+                .accessibilityHidden(true)
+
+            Circle()
+                .fill(FrameMioColors.ink.opacity(0.16))
+                .frame(width: 220, height: 220)
+                .offset(x: 168, y: 92)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
+                Image(systemName: story.status == .ready ? "play.fill" : "sparkles")
                     .font(FrameMioTypography.memorySymbol)
                     .foregroundStyle(FrameMioColors.inverseInk)
+                    .frame(width: 76, height: 76)
+                    .background(FrameMioColors.mediaScrim, in: Circle())
                     .accessibilityHidden(true)
+
                 Text(viewModel.progressTitle)
                     .font(FrameMioTypography.headline)
                     .foregroundStyle(FrameMioColors.inverseInk)
             }
+            .padding(FrameMioSpacing.xl)
         }
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                .stroke(FrameMioColors.inverseInk.opacity(0.2), lineWidth: FrameMioMetrics.borderWidth)
+        }
+        .frameMioElevation(.floating)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Story preview, \(story.status.rawValue)")
     }
@@ -85,6 +111,7 @@ struct StoryPreviewView: View {
             Text(story.title)
                 .font(FrameMioTypography.display)
                 .foregroundStyle(FrameMioColors.ink)
+                .fixedSize(horizontal: false, vertical: true)
             Text("\(story.assetIDs.count) moments · \(Int(story.duration.rounded())) seconds")
                 .font(FrameMioTypography.body)
                 .foregroundStyle(FrameMioColors.secondaryInk)
@@ -96,6 +123,16 @@ struct StoryPreviewView: View {
                     .foregroundStyle(FrameMioColors.secondaryInk)
             }
         }
+        .padding(FrameMioSpacing.xl)
+        .background(
+            FrameMioColors.surface.opacity(0.82),
+            in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+        }
+        .frameMioElevation(.subtle)
     }
 
     private func actionPanel(_ story: Story) -> some View {
@@ -128,6 +165,16 @@ struct StoryPreviewView: View {
                 }
             }
         }
+        .padding(FrameMioSpacing.lg)
+        .background(
+            FrameMioColors.surface.opacity(0.82),
+            in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+        }
+        .frameMioElevation(.subtle)
     }
 
     private func selectedMoments(_ story: Story) -> some View {
@@ -146,6 +193,16 @@ struct StoryPreviewView: View {
                 }
             }
         }
+        .padding(FrameMioSpacing.lg)
+        .background(
+            FrameMioColors.surface.opacity(0.78),
+            in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+        }
+        .frameMioElevation(.subtle)
     }
 
     private func momentRow(index: Int, assetID: String) -> some View {
@@ -183,9 +240,9 @@ struct StoryPreviewView: View {
                     .font(FrameMioTypography.headline)
                     .foregroundStyle(FrameMioColors.ink)
                     .frame(width: FrameMioMetrics.minimumTouchTarget, height: FrameMioMetrics.minimumTouchTarget)
-                    .background(FrameMioColors.surface, in: Circle())
+                    .background(FrameMioColors.surface.opacity(0.78), in: Circle())
                     .overlay {
-                        Circle().stroke(FrameMioColors.divider, lineWidth: FrameMioMetrics.borderWidth)
+                        Circle().stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
                     }
             }
             .disabled(viewModel.isPerformingAction)
@@ -193,12 +250,12 @@ struct StoryPreviewView: View {
         }
         .padding(FrameMioSpacing.sm)
         .background(
-            FrameMioColors.elevatedSurface,
+            FrameMioColors.elevatedSurface.opacity(0.86),
             in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
         )
         .overlay {
             RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
-                .stroke(FrameMioColors.divider, lineWidth: FrameMioMetrics.borderWidth)
+                .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
         }
     }
 
@@ -218,12 +275,12 @@ struct StoryPreviewView: View {
         .padding(.horizontal, FrameMioSpacing.lg)
         .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.compactButtonHeight)
         .background(
-            FrameMioColors.surface,
+            FrameMioColors.surface.opacity(0.78),
             in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous)
         )
         .overlay {
             RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous)
-                .stroke(FrameMioColors.divider, lineWidth: FrameMioMetrics.borderWidth)
+                .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
         }
     }
 

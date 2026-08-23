@@ -9,6 +9,8 @@ struct EmptyStoryCard: View {
             Image(systemName: "photo.stack")
                 .font(.title2.weight(.medium))
                 .foregroundStyle(FrameMioColors.accent)
+                .frame(width: 56, height: 56)
+                .background(FrameMioColors.accentMuted.opacity(0.7), in: Circle())
 
             Text(title)
                 .font(FrameMioTypography.title)
@@ -21,7 +23,12 @@ struct EmptyStoryCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(FrameMioSpacing.xl)
-        .background(FrameMioColors.surface, in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous))
+        .background(FrameMioColors.surface.opacity(0.82), in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+        }
+        .frameMioElevation(.subtle)
     }
 }
 

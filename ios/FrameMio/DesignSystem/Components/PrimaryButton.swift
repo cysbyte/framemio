@@ -5,6 +5,7 @@ struct PrimaryButton: View {
     let systemImage: String?
     let action: () -> Void
     var isDisabled = false
+    @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
         Button {
@@ -15,12 +16,13 @@ struct PrimaryButton: View {
                 .foregroundStyle(FrameMioColors.inverseInk)
                 .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.buttonHeight)
                 .background(
-                    FrameMioColors.ink,
+                    FrameMioColors.accent,
                     in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous)
                 )
+                .frameMioElevation(.subtle)
         }
         .buttonStyle(FrameMioPressButtonStyle())
-        .opacity(isDisabled ? FrameMioOpacity.disabled : 1)
+        .opacity(isDisabled || !isEnabled ? FrameMioOpacity.disabled : 1)
         .disabled(isDisabled)
         .accessibilityLabel(title)
     }

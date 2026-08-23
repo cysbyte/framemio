@@ -3,14 +3,14 @@ import Foundation
 final class RemoteStoryService: StoryService, @unchecked Sendable {
     private let apiClient: APIClient
     private let persistence: StoryPersistence
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
+    private let encoder: JSONEncoder
+    private let decoder: JSONDecoder
 
     init(apiClient: APIClient, persistence: StoryPersistence) {
         self.apiClient = apiClient
         self.persistence = persistence
-        encoder.dateEncodingStrategy = .iso8601
-        decoder.dateDecodingStrategy = .iso8601
+        encoder = FrameMioJSONCoding.apiEncoder()
+        decoder = FrameMioJSONCoding.apiDecoder()
     }
 
     func listStories() async throws -> [Story] {

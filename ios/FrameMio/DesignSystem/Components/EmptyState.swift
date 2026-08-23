@@ -27,6 +27,8 @@ struct EmptyState: View {
                 .font(.title2.weight(.medium))
                 .symbolRenderingMode(.monochrome)
                 .foregroundStyle(FrameMioColors.accent)
+                .frame(width: 56, height: 56)
+                .background(FrameMioColors.accentMuted.opacity(0.7), in: Circle())
                 .accessibilityHidden(true)
 
             Text(title)
@@ -48,6 +50,15 @@ struct EmptyState: View {
         }
         .frame(maxWidth: FrameMioMetrics.emptyStateMaxWidth)
         .padding(FrameMioSpacing.xl)
+        .background(
+            FrameMioColors.surface.opacity(0.78),
+            in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+        }
+        .frameMioElevation(.subtle)
         .accessibilityElement(children: .contain)
     }
 }

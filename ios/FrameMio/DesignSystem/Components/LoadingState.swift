@@ -28,6 +28,15 @@ struct LoadingState: View {
         }
         .frame(maxWidth: FrameMioMetrics.loadingStateMaxWidth)
         .padding(FrameMioSpacing.xl)
+        .background(
+            FrameMioColors.surface.opacity(0.78),
+            in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+        }
+        .frameMioElevation(.subtle)
         .accessibilityElement(children: .combine)
     }
 }

@@ -27,13 +27,13 @@ struct SecondaryButton: View {
             .padding(.horizontal, FrameMioSpacing.lg)
             .frame(minWidth: FrameMioMetrics.minimumTouchTarget, minHeight: FrameMioMetrics.compactButtonHeight)
             .background(
-                FrameMioColors.surface,
+                FrameMioColors.surface.opacity(0.78),
                 in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous)
                     .stroke(
-                        FrameMioColors.divider,
+                        FrameMioColors.divider.opacity(0.72),
                         lineWidth: colorSchemeContrast == .increased
                             ? FrameMioMetrics.increasedBorderWidth
                             : FrameMioMetrics.borderWidth

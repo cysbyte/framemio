@@ -67,7 +67,13 @@ struct MediaThumbnail: View {
     private var thumbnailContent: some View {
         ZStack(alignment: .topTrailing) {
             RoundedRectangle(cornerRadius: FrameMioRadius.media, style: .continuous)
-                .fill(FrameMioColors.mediaPlaceholder)
+                .fill(
+                    LinearGradient(
+                        colors: [FrameMioColors.accentMuted, FrameMioColors.memoryLight, FrameMioColors.memoryEarth],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
                 .aspectRatio(aspectRatio, contentMode: .fit)
                 .overlay {
                     if let image {
@@ -78,7 +84,7 @@ struct MediaThumbnail: View {
                         Image(systemName: placeholderSystemImage)
                             .font(.title2.weight(.medium))
                             .symbolRenderingMode(.monochrome)
-                            .foregroundStyle(FrameMioColors.secondaryInk)
+                            .foregroundStyle(FrameMioColors.inverseInk.opacity(FrameMioOpacity.artworkSymbol))
                             .accessibilityHidden(true)
                     }
                 }
@@ -122,7 +128,7 @@ struct MediaThumbnail: View {
         .frame(maxWidth: .infinity)
         .overlay {
             RoundedRectangle(cornerRadius: FrameMioRadius.media, style: .continuous)
-                .stroke(FrameMioColors.divider, lineWidth: FrameMioMetrics.borderWidth)
+                .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
         }
         .contentShape(RoundedRectangle(cornerRadius: FrameMioRadius.media, style: .continuous))
     }

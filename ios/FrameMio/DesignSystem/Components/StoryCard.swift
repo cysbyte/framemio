@@ -60,7 +60,19 @@ struct StoryCard: View {
                         .foregroundStyle(FrameMioColors.secondaryInk)
                 }
             }
+            .padding(.horizontal, FrameMioSpacing.xs)
+            .padding(.bottom, FrameMioSpacing.xs)
         }
+        .padding(FrameMioSpacing.xs)
+        .background(
+            FrameMioColors.surface.opacity(0.86),
+            in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+        }
+        .frameMioElevation(.subtle)
     }
 }
 

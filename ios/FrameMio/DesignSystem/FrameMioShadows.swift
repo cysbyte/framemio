@@ -19,9 +19,9 @@ enum FrameMioElevation {
         case .none:
             0
         case .subtle:
-            6
+            12
         case .floating:
-            14
+            24
         }
     }
 
@@ -30,9 +30,9 @@ enum FrameMioElevation {
         case .none:
             0
         case .subtle:
-            2
+            5
         case .floating:
-            6
+            12
         }
     }
 }

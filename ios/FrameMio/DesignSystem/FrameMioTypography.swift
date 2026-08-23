@@ -1,8 +1,9 @@
 import SwiftUI
 
 enum FrameMioTypography {
-    static let display = Font.system(.largeTitle, design: .serif).weight(.semibold)
-    static let editorialTitle = Font.system(.title2, design: .serif).weight(.semibold)
+    static let display = Font.system(.largeTitle, design: .default).weight(.semibold)
+    static let screenTitle = Font.system(.largeTitle, design: .default).weight(.semibold)
+    static let editorialTitle = Font.system(.title2, design: .default).weight(.semibold)
     static let title = Font.system(.title2, design: .default).weight(.semibold)
     static let headline = Font.system(.headline, design: .default).weight(.semibold)
     static let body = Font.system(.body, design: .default)

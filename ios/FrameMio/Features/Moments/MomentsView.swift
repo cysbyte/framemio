@@ -9,7 +9,14 @@ struct MomentsView: View {
             )
             .padding(FrameMioSpacing.lg)
             .frame(maxHeight: .infinity, alignment: .top)
-            .background(FrameMioColors.canvas)
+            .background {
+                LinearGradient(
+                    colors: [FrameMioColors.canvas, FrameMioColors.accentMuted.opacity(0.26)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+            }
             .navigationTitle("Moments")
             .navigationBarTitleDisplayMode(.large)
         }

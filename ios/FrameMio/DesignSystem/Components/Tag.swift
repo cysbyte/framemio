@@ -20,10 +20,10 @@ struct Tag: View {
             Text(title)
                 .font(FrameMioTypography.caption)
         }
-        .foregroundStyle(FrameMioColors.accent)
+        .foregroundStyle(FrameMioColors.memoryEarth)
         .padding(.horizontal, FrameMioSpacing.sm)
         .frame(minHeight: FrameMioMetrics.tagHeight)
-        .background(FrameMioColors.accentMuted, in: Capsule())
+        .background(FrameMioColors.accentMuted.opacity(0.72), in: Capsule())
         .accessibilityLabel(title)
     }
 }

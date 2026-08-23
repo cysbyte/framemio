@@ -13,7 +13,7 @@ enum MomentContext: String, CaseIterable, Codable, Hashable, Identifiable, Senda
     var id: String { rawValue }
 
     var pickerTitle: String {
-        self == .specialMoments ? "Select Photos" : rawValue
+        self == .specialMoments ? "Select Photos and Videos" : rawValue
     }
 
     var icon: String {
