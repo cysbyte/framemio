@@ -108,6 +108,9 @@ func NewECSRunTaskActivatorFromEnv(ctx context.Context, logger *slog.Logger) (*E
 }
 
 func (a *ECSRunTaskActivator) Activate(ctx context.Context, message queue.JobMessage) error {
+	if a == nil {
+		return nil
+	}
 	taskDefinition, containerName, reason, ok := a.workerFor(message.JobType)
 	if !ok {
 		return nil

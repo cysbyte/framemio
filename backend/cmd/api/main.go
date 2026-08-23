@@ -50,12 +50,14 @@ func main() {
 		logger.Error("configure queue", slog.Any("error", err))
 		os.Exit(1)
 	}
-	activator, activationEnabled, err := workeractivation.NewECSRunTaskActivatorFromEnv(ctx, logger)
+	ecsActivator, activationEnabled, err := workeractivation.NewECSRunTaskActivatorFromEnv(ctx, logger)
 	if err != nil {
 		logger.Error("configure worker activation", slog.Any("error", err))
 		os.Exit(1)
 	}
+	var activator workeractivation.Activator
 	if activationEnabled {
+		activator = ecsActivator
 		logger.Info("ECS worker RunTask activation enabled")
 	}
 
