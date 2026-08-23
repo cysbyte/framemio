@@ -126,6 +126,7 @@ struct MediaUploadOptions: Hashable, Sendable {
     let maximumConcurrentUploads: Int
     let maximumPartRetries: Int
     let partSizeBytes: Int64
+    let maximumTotalUploadBytes: Int64?
 
     init(
         optimization: MediaUploadOptimization = .original,
@@ -133,7 +134,8 @@ struct MediaUploadOptions: Hashable, Sendable {
         usesBackgroundURLSession: Bool = true,
         maximumConcurrentUploads: Int = 2,
         maximumPartRetries: Int = 3,
-        partSizeBytes: Int64 = 8 * 1_024 * 1_024
+        partSizeBytes: Int64 = 8 * 1_024 * 1_024,
+        maximumTotalUploadBytes: Int64? = 1_000_000_000
     ) {
         self.optimization = optimization
         self.allowsNetworkAccessToPhotos = allowsNetworkAccessToPhotos
@@ -141,6 +143,7 @@ struct MediaUploadOptions: Hashable, Sendable {
         self.maximumConcurrentUploads = max(1, maximumConcurrentUploads)
         self.maximumPartRetries = max(1, maximumPartRetries)
         self.partSizeBytes = max(5 * 1_024 * 1_024, partSizeBytes)
+        self.maximumTotalUploadBytes = maximumTotalUploadBytes.map { max(1, $0) }
     }
 }
 

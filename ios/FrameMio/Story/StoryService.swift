@@ -21,14 +21,13 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
             return stories
         } catch is CancellationError {
             throw CancellationError()
-        } catch let error as AppError {
-            throw error
         } catch {
             let cachedStories = try await persistence.loadStories()
-            if !cachedStories.isEmpty {
+            let appError = AppError.from(error)
+            if !cachedStories.isEmpty || appError == .networkUnavailable || appError == .invalidConfiguration {
                 return cachedStories
             }
-            throw AppError.from(error)
+            throw appError
         }
     }
 

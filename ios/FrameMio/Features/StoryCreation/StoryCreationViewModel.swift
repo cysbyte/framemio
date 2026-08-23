@@ -1,5 +1,7 @@
 import Combine
 import Foundation
+import SwiftUI
+import UIKit
 
 @MainActor
 final class StoryCreationViewModel: ObservableObject {
@@ -7,27 +9,60 @@ final class StoryCreationViewModel: ObservableObject {
     @Published private(set) var phaseTitle = "Preparing your memories..."
     @Published private(set) var isCreating = false
     @Published private(set) var story: Story?
+    @Published private(set) var thumbnails: [String: UIImage] = [:]
     @Published var errorMessage: String?
 
     let context: MomentContext
     let assets: [MediaAsset]
+    private let photoLibrary: PhotoLibraryService
     private let analysisService: MediaAnalysisService
     private let mediaUploadService: MediaUploadService
     private let storyService: StoryService
     private var creationTask: Task<Void, Never>?
+    private var thumbnailTasks: [String: Task<Void, Never>] = [:]
 
     init(
         context: MomentContext,
         assets: [MediaAsset],
+        photoLibrary: PhotoLibraryService,
         analysisService: MediaAnalysisService,
         mediaUploadService: MediaUploadService,
         storyService: StoryService
     ) {
         self.context = context
         self.assets = assets
+        self.photoLibrary = photoLibrary
         self.analysisService = analysisService
         self.mediaUploadService = mediaUploadService
         self.storyService = storyService
+    }
+
+    func image(for asset: MediaAsset) -> Image? {
+        guard let image = thumbnails[asset.id] else { return nil }
+        return Image(uiImage: image)
+    }
+
+    func loadThumbnail(for asset: MediaAsset, targetSize: CGSize) {
+        guard thumbnails[asset.id] == nil, thumbnailTasks[asset.id] == nil else { return }
+
+        let assetID = asset.id
+        thumbnailTasks[assetID] = Task { [weak self, photoLibrary] in
+            do {
+                let data = try await photoLibrary.requestThumbnail(for: asset, targetSize: targetSize)
+                try Task.checkCancellation()
+                if let image = UIImage(data: data) {
+                    self?.thumbnails[assetID] = image
+                }
+            } catch is CancellationError {
+            } catch {
+            }
+            self?.thumbnailTasks[assetID] = nil
+        }
+    }
+
+    func cancelThumbnail(for asset: MediaAsset) {
+        thumbnailTasks[asset.id]?.cancel()
+        thumbnailTasks[asset.id] = nil
     }
 
     func createStory() {
@@ -106,5 +141,6 @@ final class StoryCreationViewModel: ObservableObject {
 
     deinit {
         creationTask?.cancel()
+        thumbnailTasks.values.forEach { $0.cancel() }
     }
 }

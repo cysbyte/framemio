@@ -14,6 +14,8 @@ import (
 	"github.com/framemio/backend/internal/store"
 )
 
+const iosMaxStoryUploadBytes int64 = 1_000_000_000
+
 type iosStory struct {
 	ID        string    `json:"id"`
 	Title     string    `json:"title"`
@@ -101,6 +103,10 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 		s.internalError(response, err, "resolve iOS story media")
 		return
 	}
+	if totalIOSStoryUploadBytes(resolved) > iosMaxStoryUploadBytes {
+		s.writeError(response, http.StatusRequestEntityTooLarge, "story_too_large", "selected media must be under 1 GB per story")
+		return
+	}
 	mediaIDs := make([]string, 0, len(resolved))
 	assetIDsByMediaID := make(map[string]string, len(resolved))
 	for _, item := range resolved {
@@ -178,6 +184,14 @@ func (s *Server) resolveIOSStoryAssets(request *http.Request, userID string, ass
 		return nil, store.ErrConflict
 	}
 	return resolved, nil
+}
+
+func totalIOSStoryUploadBytes(assets []resolvedIOSStoryAsset) int64 {
+	var total int64
+	for _, asset := range assets {
+		total += asset.media.FileSizeBytes
+	}
+	return total
 }
 
 func (s *Server) mediaForIOSAsset(request *http.Request, userID, assetID string) (models.MediaAsset, error) {

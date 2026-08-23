@@ -25,10 +25,20 @@ struct StoryCreationView: View {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: FrameMioSpacing.sm) {
                     ForEach(viewModel.assets) { asset in
                         MediaThumbnail(
+                            image: viewModel.image(for: asset),
                             duration: asset.isVideo ? asset.duration : nil,
                             isLivePhoto: asset.isLivePhoto,
                             accessibilityTitle: asset.isVideo ? "Selected video" : "Selected photo"
                         )
+                        .onAppear {
+                            viewModel.loadThumbnail(
+                                for: asset,
+                                targetSize: FrameMioMetrics.mediaThumbnailRequestSize
+                            )
+                        }
+                        .onDisappear {
+                            viewModel.cancelThumbnail(for: asset)
+                        }
                     }
                 }
 

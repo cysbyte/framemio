@@ -33,8 +33,9 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         guard !eligibleAssets.isEmpty else {
             return []
         }
+        let preparedAssets = try await prepareUploads(eligibleAssets, options: options)
         return try await uploadInBatches(
-            eligibleAssets,
+            preparedAssets,
             options: options,
             progress: progress
         )
@@ -49,6 +50,95 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         }
         let assets = pending.map(makeAsset(from:))
         return try await uploadInBatches(assets, options: options, progress: progress)
+    }
+
+    private func prepareUploads(
+        _ assets: [MediaAsset],
+        options: MediaUploadOptions
+    ) async throws -> [MediaAsset] {
+        var prepared: [PreparedMediaUpload] = []
+        var totalBytes: Int64 = 0
+
+        do {
+            for asset in assets {
+                let uploadID = MediaUpload.makeID(for: asset.id, optimization: options.optimization)
+                let existing = try await store.upload(for: uploadID)
+
+                if let existing, existing.status == .completed {
+                    totalBytes += existing.fileSizeBytes
+                    prepared.append(PreparedMediaUpload(asset: asset, record: existing, mediaFile: nil, isNewMaterialization: false))
+                } else {
+                    let staged = try await materializePreparedFile(for: asset, existing: existing, options: options)
+                    totalBytes += staged.file.fileSizeBytes
+                    prepared.append(PreparedMediaUpload(asset: asset, record: existing, mediaFile: staged.file, isNewMaterialization: staged.isNewMaterialization))
+                }
+
+                if let maximumTotalUploadBytes = options.maximumTotalUploadBytes,
+                   totalBytes > maximumTotalUploadBytes {
+                    throw AppError.message("Selected media must be under 1 GB per story.")
+                }
+            }
+
+            for item in prepared {
+                guard let mediaFile = item.mediaFile else { continue }
+                var record = item.record ?? makeUploadRecord(
+                    asset: item.asset,
+                    mediaFile: mediaFile,
+                    options: options
+                )
+                record.stagedFileURL = mediaFile.url
+                if record.status == .failed || record.status == .cancelled {
+                    record.status = .queued
+                }
+                record.lastError = nil
+                record.updatedAt = Date()
+                try await store.save(record)
+            }
+            return assets
+        } catch is CancellationError {
+            await removeNewMaterializations(prepared)
+            throw CancellationError()
+        } catch {
+            await removeNewMaterializations(prepared)
+            throw error
+        }
+    }
+
+    private func makeUploadRecord(
+        asset: MediaAsset,
+        mediaFile: OriginalMediaFile,
+        options: MediaUploadOptions
+    ) -> MediaUpload {
+        MediaUpload(
+            id: MediaUpload.makeID(for: asset.id, optimization: options.optimization),
+            assetID: asset.id,
+            localIdentifier: asset.localIdentifier,
+            mediaID: nil,
+            mediaType: uploadMediaType(for: asset),
+            fileName: mediaFile.fileName,
+            contentType: mediaFile.contentType,
+            fileSizeBytes: mediaFile.fileSizeBytes,
+            duration: asset.isVideo ? asset.duration : nil,
+            creationDate: asset.creationDate,
+            pixelWidth: asset.pixelWidth,
+            pixelHeight: asset.pixelHeight,
+            orientation: .from(pixelWidth: asset.pixelWidth, pixelHeight: asset.pixelHeight),
+            optimization: options.optimization,
+            status: .queued,
+            uploadedBytes: 0,
+            session: nil,
+            stagedFileURL: mediaFile.url,
+            lastError: nil,
+            updatedAt: Date()
+        )
+    }
+
+    private func removeNewMaterializations(_ prepared: [PreparedMediaUpload]) async {
+        for item in prepared where item.isNewMaterialization {
+            if let url = item.mediaFile?.url {
+                await source.removeMaterializedMedia(at: url)
+            }
+        }
     }
 
     private func uploadInBatches(
@@ -132,28 +222,7 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         do {
             let mediaFile = try await materializeFile(for: asset, existing: record, options: options)
             if record == nil {
-                record = MediaUpload(
-                    id: uploadID,
-                    assetID: asset.id,
-                    localIdentifier: asset.localIdentifier,
-                    mediaID: nil,
-                    mediaType: uploadMediaType(for: asset),
-                    fileName: mediaFile.fileName,
-                    contentType: mediaFile.contentType,
-                    fileSizeBytes: mediaFile.fileSizeBytes,
-                    duration: asset.isVideo ? asset.duration : nil,
-                    creationDate: asset.creationDate,
-                    pixelWidth: asset.pixelWidth,
-                    pixelHeight: asset.pixelHeight,
-                    orientation: .from(pixelWidth: asset.pixelWidth, pixelHeight: asset.pixelHeight),
-                    optimization: options.optimization,
-                    status: .queued,
-                    uploadedBytes: 0,
-                    session: nil,
-                    stagedFileURL: mediaFile.url,
-                    lastError: nil,
-                    updatedAt: Date()
-                )
+                record = makeUploadRecord(asset: asset, mediaFile: mediaFile, options: options)
             } else if record?.stagedFileURL == nil {
                 record?.stagedFileURL = mediaFile.url
             }
@@ -367,20 +436,32 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         existing: MediaUpload?,
         options: MediaUploadOptions
     ) async throws -> OriginalMediaFile {
+        try await materializePreparedFile(for: asset, existing: existing, options: options).file
+    }
+
+    private func materializePreparedFile(
+        for asset: MediaAsset,
+        existing: MediaUpload?,
+        options: MediaUploadOptions
+    ) async throws -> (file: OriginalMediaFile, isNewMaterialization: Bool) {
         if let stagedURL = existing?.stagedFileURL,
            FileManager.default.fileExists(atPath: stagedURL.path) {
-            return OriginalMediaFile(
-                url: stagedURL,
-                fileName: existing?.fileName ?? "media",
-                contentType: existing?.contentType ?? "application/octet-stream",
-                fileSizeBytes: existing?.fileSizeBytes ?? 0
+            return (
+                OriginalMediaFile(
+                    url: stagedURL,
+                    fileName: existing?.fileName ?? "media",
+                    contentType: existing?.contentType ?? "application/octet-stream",
+                    fileSizeBytes: existing?.fileSizeBytes ?? 0
+                ),
+                false
             )
         }
-        return try await source.materializeOriginalMedia(
+        let file = try await source.materializeOriginalMedia(
             for: asset,
             allowsNetworkAccess: options.allowsNetworkAccessToPhotos,
             progress: nil
         )
+        return (file, true)
     }
 
     private func makePartFileIfNeeded(
@@ -443,6 +524,13 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         if asset.isLivePhoto { return .livePhoto }
         return .photo
     }
+}
+
+private struct PreparedMediaUpload: Sendable {
+    let asset: MediaAsset
+    let record: MediaUpload?
+    let mediaFile: OriginalMediaFile?
+    let isNewMaterialization: Bool
 }
 
 private enum UploadOutcome: Sendable {

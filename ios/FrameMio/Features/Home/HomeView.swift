@@ -23,7 +23,10 @@ struct HomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: FrameMioSpacing.xxl) {
                 hero
-                createAction
+                if !viewModel.stories.isEmpty {
+                    createAction
+                        .transition(FrameMioAnimation.transition(reduceMotion: reduceMotion))
+                }
                 shortcuts
 
                 if viewModel.isLoading && viewModel.stories.isEmpty {

@@ -149,6 +149,40 @@ final class MediaUploadTests: XCTestCase {
         XCTAssertEqual(maximumActiveUploads, 2)
     }
 
+    func testUploadRejectsSelectionOverTotalSizeLimitBeforeAuthorizing() async throws {
+        let assets = [
+            makeAsset(id: "small-video-1", kind: .video),
+            makeAsset(id: "small-video-2", kind: .video)
+        ]
+        let fixtures = Dictionary(uniqueKeysWithValues: assets.map { asset in
+            (asset.id, MockOriginalMediaSource.Fixture(data: Data(repeating: 1, count: 700)))
+        })
+        let source = MockOriginalMediaSource(fixtures: fixtures)
+        let authorizer = MockMediaUploadAuthorizer()
+        let storage = MockDirectObjectStorageClient()
+        let store = MockMediaUploadStore()
+        let service = makeService(source: source, authorizer: authorizer, storage: storage, store: store)
+
+        do {
+            _ = try await service.upload(
+                selection: selection(for: assets),
+                assets: assets,
+                options: makeOptions(maximumTotalUploadBytes: 1_000),
+                progress: { _ in }
+            )
+            XCTFail("Expected total-size limit failure")
+        } catch let AppError.message(message) {
+            XCTAssertEqual(message, "Selected media must be under 1 GB per story.")
+        }
+
+        let createSessionCallCount = await authorizer.createSessionCallCount
+        let requestCount = await storage.requests.count
+        let removedURLs = await source.removedURLs
+        XCTAssertEqual(createSessionCallCount, 0)
+        XCTAssertEqual(requestCount, 0)
+        XCTAssertEqual(removedURLs.count, 2)
+    }
+
     func testBackgroundUploadOptionReachesDirectStorageClient() async throws {
         let asset = makeAsset(id: "background-video", kind: .video)
         let source = makeSource(asset: asset, byteCount: 256 * 1_024)
@@ -217,14 +251,16 @@ final class MediaUploadTests: XCTestCase {
     private func makeOptions(
         usesBackgroundURLSession: Bool = false,
         maximumConcurrentUploads: Int = 2,
+        partSizeBytes: Int = 8 * 1_024 * 1_024,
         maximumPartRetries: Int = 3,
-        partSizeBytes: Int = 8 * 1_024 * 1_024
+        maximumTotalUploadBytes: Int64? = 1_000_000_000
     ) -> MediaUploadOptions {
         MediaUploadOptions(
             usesBackgroundURLSession: usesBackgroundURLSession,
             maximumConcurrentUploads: maximumConcurrentUploads,
             maximumPartRetries: maximumPartRetries,
-            partSizeBytes: Int64(partSizeBytes)
+            partSizeBytes: Int64(partSizeBytes),
+            maximumTotalUploadBytes: maximumTotalUploadBytes
         )
     }
 }

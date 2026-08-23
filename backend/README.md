@@ -128,7 +128,10 @@ PORT                                  # default: 8080
 UPLOAD_PART_SIZE_BYTES                # default: 8 MiB, minimum S3 part size enforced
 UPLOAD_MULTIPART_THRESHOLD_BYTES      # default: 16 MiB
 AWS_REGION / standard AWS credentials # consumed by AWS SDK default configuration
+DATABASE_AUTH_MODE                    # set to iam for production RDS
 ```
+
+Production RDS uses IAM database authentication. The ECS and GitHub Actions deployment runbook is maintained in `../docs/DB_ECS_DEPLOYMENT_SCALING.md`; use `DATABASE_AUTH_MODE=iam` with a no-password `DATABASE_URL` and do not paste generated IAM tokens into env files.
 
 ## Run Locally
 

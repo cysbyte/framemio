@@ -41,10 +41,19 @@ enum AppError: LocalizedError, Hashable, Sendable {
         if let appError = error as? AppError {
             return appError
         }
+        if let apiError = error as? APIClientError {
+            switch apiError {
+            case .invalidURL:
+                return .invalidConfiguration
+            case .invalidResponse:
+                return .invalidResponse
+            case let .server(statusCode):
+                return .server(statusCode: statusCode)
+            }
+        }
         if (error as NSError).domain == NSURLErrorDomain {
             return .networkUnavailable
         }
         return .message(error.localizedDescription)
     }
 }
-

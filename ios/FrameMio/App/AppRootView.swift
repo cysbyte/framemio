@@ -5,7 +5,7 @@ struct AppRootView: View {
     @State private var path: [AppRoute] = []
     @StateObject private var homeViewModel: HomeViewModel
 
-    init(dependencies: AppDependencies = .preview(), homeMockState: HomeMockState? = .populated) {
+    init(dependencies: AppDependencies = .preview(), homeMockState: HomeMockState? = nil) {
         self.dependencies = dependencies
         _homeViewModel = StateObject(wrappedValue: HomeViewModel(storyService: dependencies.storyService, mockState: homeMockState))
     }
@@ -50,6 +50,7 @@ struct AppRootView: View {
                 viewModel: StoryCreationViewModel(
                     context: context,
                     assets: assets,
+                    photoLibrary: dependencies.photoLibrary,
                     analysisService: dependencies.mediaAnalysis,
                     mediaUploadService: dependencies.mediaUploadService,
                     storyService: dependencies.storyService
@@ -69,5 +70,5 @@ struct AppRootView: View {
 }
 
 #Preview {
-    AppRootView(dependencies: .preview())
+    AppRootView(dependencies: .preview(), homeMockState: .populated)
 }

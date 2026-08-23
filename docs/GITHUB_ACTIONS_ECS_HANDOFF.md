@@ -2,6 +2,8 @@
 
 Use this document when a future agent needs to inspect deployment logs, verify image pushes, or inspect ECS once task definitions and services exist.
 
+For the consolidated DB, deployment, and scaling runbook, see `DB_ECS_DEPLOYMENT_SCALING.md`.
+
 ## Repository Context
 
 - GitHub repository: `cysbyte/framemio`
@@ -84,9 +86,10 @@ Repository variables:
 - `BACKEND_ECR_REPOSITORY`
 - `VIDEO_INTELLIGENCE_WORKER_ECR_REPOSITORY`
 - `RENDER_WORKER_ECR_REPOSITORY`
-- `ECS_SUBNETS` when GitHub Actions needs to create a new ECS service
-- `ECS_SECURITY_GROUPS` when GitHub Actions needs to create a new ECS service
-- `ECS_ASSIGN_PUBLIC_IP` if the ECS service should launch with a public IP
+- `DATABASE_URL` for backend and video worker RDS access
+- `ECS_SUBNETS` when overriding the workflow default ECS subnets
+- `ECS_SECURITY_GROUPS` when overriding the workflow default ECS security group
+- `ECS_ASSIGN_PUBLIC_IP` when overriding the workflow default public-IP setting
 
 Repository secret:
 
@@ -123,11 +126,12 @@ aws ecr describe-images \
 
 ## ECS Access
 
-This repository now uses GitHub Actions to build, push, and deploy each service automatically.
+This repository now uses GitHub Actions to build, push, and deploy each service automatically. See `DB_ECS_DEPLOYMENT_SCALING.md` for the full deployment and scaling runbook.
 
-- Backend and video worker workflows update their ECS services after pushing a new image.
-- Render worker workflow also updates its ECS service, but the service should stay at `desiredCount=0` and be started with `RunTask` when work arrives.
-- If a service does not exist yet, the workflow creates it in `my-cluster` using the network variables above.
+- Backend workflow keeps its ECS service at `desiredCount=1`.
+- Video and render worker workflows keep ECS services at `desiredCount=0` and register scalable targets with `min=0`, `max=1`.
+- Backend starts worker one-off tasks with `RunTask` when work arrives.
+- If a service does not exist yet, the workflow creates it in `my-cluster` using the workflow network defaults or repository variable overrides.
 
 When ECS exists, capture the following values in the deployment notes:
 

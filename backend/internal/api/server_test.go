@@ -422,6 +422,35 @@ func TestIOSStoriesCompatibilityCreatesProjectAndFetchesStories(t *testing.T) {
 	}
 }
 
+func TestIOSStoriesCompatibilityRejectsStoriesOverTotalUploadLimit(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	server := newTestServer(memoryStore, publisher)
+	handler := server.Handler()
+
+	createReadyIOSMediaInStore(t, memoryStore, "asset-video-1", models.MediaTypeVideo, 600_000_000)
+	createReadyIOSMediaInStore(t, memoryStore, "asset-video-2", models.MediaTypeVideo, 400_000_001)
+	storyResponse := performJSON(t, handler, http.MethodPost, "/v1/stories", map[string]any{
+		"context": "Too many clips",
+		"assets": []map[string]any{
+			{"id": "asset-video-1", "kind": "video", "duration": 60, "pixelWidth": 1920, "pixelHeight": 1080},
+			{"id": "asset-video-2", "kind": "video", "duration": 60, "pixelWidth": 1920, "pixelHeight": 1080},
+		},
+	}, "", true, nil)
+
+	if storyResponse.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("create oversized iOS story status = %d, body = %s", storyResponse.Code, storyResponse.Body.String())
+	}
+	if !strings.Contains(storyResponse.Body.String(), "story_too_large") {
+		t.Fatalf("expected story_too_large response, got %s", storyResponse.Body.String())
+	}
+	if messages := publisher.Messages(); len(messages) != 0 {
+		t.Fatalf("expected no queued jobs for rejected story, got %+v", messages)
+	}
+}
+
 func TestAuthenticationAndIdempotencyAreRequired(t *testing.T) {
 	t.Parallel()
 	server := newTestServer(store.NewMemoryStore(), queue.NewMemoryPublisher())
@@ -548,16 +577,65 @@ func decodeResponse(t *testing.T, response *httptest.ResponseRecorder, destinati
 	}
 }
 
+func createReadyIOSMediaInStore(t *testing.T, memoryStore *store.MemoryStore, assetID string, mediaType models.MediaType, fileSizeBytes int64) {
+	t.Helper()
+	now := time.Date(2026, time.August, 19, 10, 0, 0, 0, time.UTC)
+	mediaID := "media-" + assetID
+	uploadID := "upload-" + assetID
+	s3Key := "users/user-1/media/" + mediaID
+	media := models.MediaAsset{
+		ID:            mediaID,
+		UserID:        "user-1",
+		Type:          mediaType,
+		Status:        models.MediaStatusReady,
+		FileName:      assetID,
+		ContentType:   "application/octet-stream",
+		FileSizeBytes: fileSizeBytes,
+		PixelWidth:    1920,
+		PixelHeight:   1080,
+		S3Key:         s3Key,
+		UploadID:      uploadID,
+		ETag:          "etag-" + assetID,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	session := models.UploadSession{
+		ID:             uploadID,
+		UserID:         "user-1",
+		MediaID:        mediaID,
+		S3Key:          s3Key,
+		Strategy:       models.UploadStrategySingle,
+		PartSizeBytes:  5 * 1024 * 1024,
+		IdempotencyKey: "media-upload-original-" + assetID,
+		CreatedAt:      now,
+		CompletedAt:    &now,
+	}
+	if err := memoryStore.CreateMediaUpload(context.Background(), media, session); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func createReadyIOSMedia(t *testing.T, handler http.Handler, assetID string, mediaType models.MediaType) iosUploadSessionResponse {
 	t.Helper()
+	return createReadyIOSMediaWithSize(t, handler, assetID, mediaType, 1_024)
+}
+
+func createReadyIOSMediaWithSize(t *testing.T, handler http.Handler, assetID string, mediaType models.MediaType, fileSizeBytes int64) iosUploadSessionResponse {
+	t.Helper()
+	contentType := "image/jpeg"
+	fileExtension := ".jpg"
+	if mediaType == models.MediaTypeVideo {
+		contentType = "video/quicktime"
+		fileExtension = ".mov"
+	}
 	upload := performJSON(t, handler, http.MethodPost, "/v1/media/upload-sessions", map[string]any{
 		"idempotencyKey": "media-upload-original-" + assetID,
 		"metadata": map[string]any{
 			"assetID":                assetID,
 			"mediaType":              mediaType,
-			"contentType":            "image/jpeg",
-			"fileName":               assetID + ".jpg",
-			"fileSizeBytes":          1_024,
+			"contentType":            contentType,
+			"fileName":               assetID + fileExtension,
+			"fileSizeBytes":          fileSizeBytes,
 			"pixelWidth":             3024,
 			"pixelHeight":            4032,
 			"orientation":            "portrait",
