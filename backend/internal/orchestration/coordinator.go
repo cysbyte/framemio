@@ -242,8 +242,10 @@ func (c *Coordinator) createStageJob(ctx context.Context, userID, projectID, med
 	if err != nil {
 		return models.ProcessingJob{}, err
 	}
+	c.Logger.Info("stage job stored", slog.String("job_id", stored.ID), slog.String("job_type", string(stored.Type)), slog.String("project_id", stored.ProjectID), slog.String("media_id", stored.MediaID), slog.String("status", string(stored.Status)), slog.Bool("existing", existing), slog.Bool("publish", publish))
 	if publish && !existing && !models.IsTerminalJobStatus(stored.Status) {
 		if err := c.publishJob(ctx, stored); err != nil {
+			c.Logger.Error("publish stage job failed", slog.String("job_id", stored.ID), slog.String("job_type", string(stored.Type)), slog.Any("error", err))
 			return models.ProcessingJob{}, err
 		}
 	}
@@ -255,9 +257,11 @@ func (c *Coordinator) publishJob(ctx context.Context, job models.ProcessingJob) 
 		return fmt.Errorf("job publisher is not configured")
 	}
 	message := queue.JobMessage{JobID: job.ID, ProjectID: job.ProjectID, MediaID: job.MediaID, JobType: job.Type, Configuration: smallConfiguration(job.Configuration)}
+	c.Logger.Info("publishing job message", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID))
 	if err := c.Publisher.Publish(ctx, message); err != nil {
 		return err
 	}
+	c.Logger.Info("published job message", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)))
 	if c.Activator != nil {
 		if err := c.Activator.Activate(ctx, message); err != nil {
 			c.Logger.Warn("worker activation failed", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.Any("error", err))

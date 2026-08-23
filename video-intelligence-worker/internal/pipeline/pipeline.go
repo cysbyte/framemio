@@ -63,8 +63,10 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 	}
 	jobContext, err := p.Repository.LoadJobContext(ctx, message)
 	if err != nil {
+		p.logger().Error("load video job context failed", slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID), slog.String("media_id", message.MediaID), slog.Any("error", err))
 		return Result{}, err
 	}
+	p.logger().Info("loaded video job context", slog.String("job_id", jobContext.Job.ID), slog.String("project_id", jobContext.Project.ID), slog.String("media_id", jobContext.Media.ID), slog.String("media_status", jobContext.Media.Status), slog.Int64("file_size_bytes", jobContext.Media.FileSizeBytes), slog.String("s3_key", jobContext.Media.S3Key))
 	if jobContext.Media.Type != "video" || jobContext.Media.Status != "ready" {
 		return Result{}, domain.Permanent(fmt.Errorf("%w: media %s is %s/%s", domain.ErrUnsupportedMedia, jobContext.Media.ID, jobContext.Media.Type, jobContext.Media.Status))
 	}
@@ -76,8 +78,10 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 	force := parseBool(message.Configuration["force_reanalyze"])
 	sourceInfo, err := p.Objects.Head(ctx, jobContext.Media.S3Key)
 	if err != nil {
+		p.logger().Error("head source video failed", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.String("s3_key", jobContext.Media.S3Key), slog.Any("error", err))
 		return Result{}, err
 	}
+	p.logger().Info("source video found", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Int64("source_size_bytes", sourceInfo.SizeBytes), slog.String("source_etag", sourceInfo.ETag))
 	sourceETag := sourceInfo.ETag
 	if sourceETag == "" {
 		sourceETag = jobContext.Media.ETag
@@ -99,15 +103,20 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 		}
 	}
 	if _, err := p.Repository.StartJobAttempt(ctx, jobContext.Job.ID); err != nil {
+		p.logger().Error("start video job attempt failed", slog.String("job_id", jobContext.Job.ID), slog.Any("error", err))
 		return Result{}, err
 	}
+	p.logger().Info("started video job attempt", slog.String("job_id", jobContext.Job.ID), slog.Int("attempt", jobContext.Job.Attempt+1))
 	evidence, artifact, err := p.loadOrPreprocess(ctx, jobContext, inputVersion, sourceETag)
 	if err != nil {
+		p.logger().Error("video preprocess failed", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Any("error", err))
 		return Result{}, err
 	}
+	p.logger().Info("video preprocess ready", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Int("frame_count", artifact.FrameCount), slog.String("evidence_s3_key", artifact.EvidenceS3Key))
 	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "RUNNING", 0.78, "", "", artifact.EvidenceS3Key); err != nil {
 		return Result{}, err
 	}
+	p.logger().Info("starting video understanding", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.String("evidence_s3_key", artifact.EvidenceS3Key))
 	understandingResult, err := p.Understanding.Analyze(ctx, understanding.Request{
 		CacheRequest: understanding.CacheRequest{
 			UserID: jobContext.Job.UserID, MediaID: jobContext.Media.ID, SourceETag: sourceETag,
@@ -117,6 +126,7 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 		RunID: jobContext.Job.ID, Force: force,
 	})
 	if err != nil {
+		p.logger().Error("video understanding failed", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Any("error", err))
 		return Result{}, fmt.Errorf("understand video evidence: %w", err)
 	}
 	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "RUNNING", 0.92, "", "", artifact.EvidenceS3Key); err != nil {
@@ -171,15 +181,19 @@ func (p *Processor) loadOrPreprocess(ctx context.Context, jobContext domain.JobC
 	}
 	metadata, err := p.Tools.Probe(ctx, sourcePath)
 	if err != nil {
+		p.logger().Error("probe source video failed", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Any("error", err))
 		return domain.VideoEvidence{}, domain.PreprocessingArtifact{}, domain.Permanent(fmt.Errorf("probe source video: %w", err))
 	}
+	p.logger().Info("probed source video", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Int64("duration_micros", metadata.DurationMicros), slog.Bool("has_audio", metadata.HasAudio))
 	boundaries, err := p.Tools.DetectScenes(ctx, sourcePath, p.Config.SceneThreshold, p.Config.MaxSceneBoundaries)
 	if err != nil {
+		p.logger().Error("detect video scenes failed", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Any("error", err))
 		return domain.VideoEvidence{}, domain.PreprocessingArtifact{}, fmt.Errorf("detect video scenes: %w", err)
 	}
 	scenes := BuildScenes(metadata, boundaries, p.Config.Planner.MinSceneDuration)
 	segments := BuildSegments(scenes, p.Config.Planner.MaxSegmentDuration)
 	candidates := PlanFrameCandidates(metadata, scenes, segments, p.Config.Planner)
+	p.logger().Info("planned video frames", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Int("scene_count", len(scenes)), slog.Int("segment_count", len(segments)), slog.Int("candidate_count", len(candidates)))
 	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "RUNNING", 0.28, "", "", ""); err != nil {
 		return domain.VideoEvidence{}, domain.PreprocessingArtifact{}, err
 	}

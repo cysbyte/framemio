@@ -75,6 +75,7 @@ func (s *Server) createIOSUploadSession(response http.ResponseWriter, request *h
 		return
 	}
 	if existing, err := s.Store.GetUploadSessionByIdempotency(request.Context(), user.ID, input.IdempotencyKey); err == nil {
+		s.Logger.Info("replay iOS upload session", "user_id", user.ID, "upload_id", existing.ID, "media_id", existing.MediaID, "strategy", string(existing.Strategy), "file_size_bytes", metadata.FileSizeBytes)
 		s.writeJSON(response, http.StatusOK, makeIOSUploadSession(existing))
 		return
 	}
@@ -84,9 +85,11 @@ func (s *Server) createIOSUploadSession(response http.ResponseWriter, request *h
 		FileSizeBytes: metadata.FileSizeBytes, Optimization: metadata.Optimization,
 	})
 	if err != nil {
+		s.Logger.Error("authorize iOS upload failed", "user_id", user.ID, "asset_id", metadata.AssetID, "media_type", string(metadata.MediaType), "file_size_bytes", metadata.FileSizeBytes, "content_type", metadata.ContentType, "error", err)
 		s.internalError(response, err, "authorize iOS upload")
 		return
 	}
+	s.Logger.Info("authorized iOS upload", "user_id", user.ID, "asset_id", metadata.AssetID, "media_id", mediaID, "upload_id", session.ID, "strategy", string(session.Strategy), "part_count", len(session.Parts), "file_size_bytes", metadata.FileSizeBytes, "content_type", metadata.ContentType)
 	session.IdempotencyKey = input.IdempotencyKey
 	now := s.Now().UTC()
 	media := models.MediaAsset{
@@ -97,16 +100,19 @@ func (s *Server) createIOSUploadSession(response http.ResponseWriter, request *h
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.Store.CreateMediaUpload(request.Context(), media, session); err != nil {
+		s.Logger.Error("persist iOS upload session failed", "user_id", user.ID, "asset_id", metadata.AssetID, "media_id", mediaID, "upload_id", session.ID, "error", err)
 		if abortErr := s.ObjectStorage.AbortUpload(request.Context(), session); abortErr != nil {
 			s.Logger.Warn("abort unused iOS upload session", "error", abortErr, "upload_id", session.ID)
 		}
 		if existing, lookupErr := s.Store.GetUploadSessionByIdempotency(request.Context(), user.ID, input.IdempotencyKey); lookupErr == nil {
+			s.Logger.Info("recovered raced iOS upload session", "user_id", user.ID, "upload_id", existing.ID, "media_id", existing.MediaID)
 			s.writeJSON(response, http.StatusOK, makeIOSUploadSession(existing))
 			return
 		}
 		s.internalError(response, err, "persist iOS upload session")
 		return
 	}
+	s.Logger.Info("created iOS upload session", "user_id", user.ID, "asset_id", metadata.AssetID, "media_id", media.ID, "upload_id", session.ID, "strategy", string(session.Strategy), "part_count", len(session.Parts))
 	s.writeJSON(response, http.StatusCreated, makeIOSUploadSession(session))
 }
 
@@ -131,14 +137,17 @@ func (s *Server) completeIOSMultipartUpload(response http.ResponseWriter, reques
 		return
 	}
 	if input.UploadID != uploadID || input.S3Key == "" {
+		s.Logger.Warn("invalid iOS multipart completion reference", "user_id", user.ID, "route_upload_id", uploadID, "body_upload_id", input.UploadID, "s3_key_present", input.S3Key != "")
 		s.writeError(response, http.StatusConflict, "invalid_upload_reference", "upload reference does not match the route")
 		return
 	}
 	session, err := s.Store.GetUploadSession(request.Context(), user.ID, uploadID)
 	if err != nil || session.S3Key != input.S3Key || session.Strategy != models.UploadStrategyMultipart {
+		s.Logger.Warn("iOS multipart session mismatch", "user_id", user.ID, "upload_id", uploadID, "s3_key", input.S3Key, "error", err)
 		s.writeError(response, http.StatusConflict, "invalid_upload_reference", "multipart upload session does not match")
 		return
 	}
+	s.Logger.Info("completing iOS multipart upload", "user_id", user.ID, "upload_id", uploadID, "media_id", session.MediaID, "part_count", len(input.Parts), "s3_key", session.S3Key)
 	media, err := s.Store.GetMedia(request.Context(), user.ID, session.MediaID)
 	if err != nil {
 		s.mapStoreError(response, err)
@@ -154,14 +163,17 @@ func (s *Server) completeIOSMultipartUpload(response http.ResponseWriter, reques
 	}
 	etag, err := s.ObjectStorage.CompleteUpload(request.Context(), session, parts)
 	if err != nil {
+		s.Logger.Error("complete iOS multipart upload failed", "user_id", user.ID, "upload_id", uploadID, "media_id", session.MediaID, "part_count", len(parts), "error", err)
 		s.internalError(response, err, "complete iOS multipart upload")
 		return
 	}
 	media, err = s.Store.MarkMediaReady(request.Context(), user.ID, session.MediaID, session.ID, session.S3Key, etag)
 	if err != nil {
+		s.Logger.Error("mark iOS multipart media ready failed", "user_id", user.ID, "upload_id", uploadID, "media_id", session.MediaID, "error", err)
 		s.mapStoreError(response, err)
 		return
 	}
+	s.Logger.Info("completed iOS multipart upload", "user_id", user.ID, "upload_id", uploadID, "media_id", media.ID, "etag_present", etag != "")
 	s.writeJSON(response, http.StatusOK, media)
 }
 
@@ -188,9 +200,11 @@ func (s *Server) notifyIOSUploadComplete(response http.ResponseWriter, request *
 	}
 	session, err := s.Store.GetUploadSession(request.Context(), user.ID, input.UploadID)
 	if err != nil || session.MediaID != input.MediaID || session.S3Key != input.S3Key {
+		s.Logger.Warn("iOS upload completion session mismatch", "user_id", user.ID, "upload_id", input.UploadID, "media_id", input.MediaID, "s3_key", input.S3Key, "error", err)
 		s.writeError(response, http.StatusConflict, "invalid_upload_reference", "upload session does not match media")
 		return
 	}
+	s.Logger.Info("verifying iOS upload completion", "user_id", user.ID, "upload_id", input.UploadID, "media_id", input.MediaID, "media_type", string(input.MediaType), "strategy", string(session.Strategy), "s3_key", input.S3Key)
 	media, err := s.Store.GetMedia(request.Context(), user.ID, input.MediaID)
 	if err != nil {
 		s.mapStoreError(response, err)
@@ -206,14 +220,17 @@ func (s *Server) notifyIOSUploadComplete(response http.ResponseWriter, request *
 	}
 	etag, err := s.ObjectStorage.CompleteUpload(request.Context(), session, nil)
 	if err != nil {
+		s.Logger.Error("verify iOS object upload failed", "user_id", user.ID, "upload_id", input.UploadID, "media_id", input.MediaID, "error", err)
 		s.internalError(response, err, "verify iOS object upload")
 		return
 	}
 	media, err = s.Store.MarkMediaReady(request.Context(), user.ID, input.MediaID, input.UploadID, input.S3Key, etag)
 	if err != nil {
+		s.Logger.Error("mark iOS uploaded media ready failed", "user_id", user.ID, "upload_id", input.UploadID, "media_id", input.MediaID, "error", err)
 		s.mapStoreError(response, err)
 		return
 	}
+	s.Logger.Info("completed iOS upload notification", "user_id", user.ID, "upload_id", input.UploadID, "media_id", media.ID, "etag_present", etag != "")
 	s.writeJSON(response, http.StatusOK, media)
 }
 

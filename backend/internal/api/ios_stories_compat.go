@@ -94,8 +94,10 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 		s.writeError(response, http.StatusBadRequest, "invalid_story", "context and at least one asset are required")
 		return
 	}
+	s.Logger.Info("creating iOS story", "user_id", user.ID, "context", input.Context, "asset_count", len(input.Assets), "analysis_count", len(input.Analyses), "idempotency_key_present", strings.TrimSpace(request.Header.Get("Idempotency-Key")) != "")
 	resolved, err := s.resolveIOSStoryAssets(request, user.ID, input.Assets)
 	if err != nil {
+		s.Logger.Warn("resolve iOS story media failed", "user_id", user.ID, "asset_count", len(input.Assets), "error", err)
 		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrConflict) {
 			s.writeError(response, http.StatusConflict, "media_not_ready", "selected media must be uploaded before creating a story")
 			return
@@ -103,7 +105,9 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 		s.internalError(response, err, "resolve iOS story media")
 		return
 	}
-	if totalIOSStoryUploadBytes(resolved) > iosMaxStoryUploadBytes {
+	totalBytes := totalIOSStoryUploadBytes(resolved)
+	if totalBytes > iosMaxStoryUploadBytes {
+		s.Logger.Warn("iOS story media too large", "user_id", user.ID, "asset_count", len(resolved), "total_bytes", totalBytes, "limit_bytes", iosMaxStoryUploadBytes)
 		s.writeError(response, http.StatusRequestEntityTooLarge, "story_too_large", "selected media must be under 1 GB per story")
 		return
 	}
@@ -128,12 +132,15 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 	if idempotencyKey == "" {
 		idempotencyKey = stableIOSStoryKey(user.ID, input.Context, mediaIDs)
 	}
-	created, _, err := s.Store.CreateProject(request.Context(), project, idempotencyKey)
+	created, existingProject, err := s.Store.CreateProject(request.Context(), project, idempotencyKey)
 	if err != nil {
+		s.Logger.Error("create iOS story project failed", "user_id", user.ID, "asset_count", len(resolved), "total_bytes", totalBytes, "error", err)
 		s.mapStoreError(response, err)
 		return
 	}
+	s.Logger.Info("created iOS story project", "user_id", user.ID, "project_id", created.ID, "asset_count", len(resolved), "total_bytes", totalBytes, "existing", existingProject)
 	if err := s.saveIOSAnalyses(request, user.ID, created.ID, mediaIDs, assetIDsByMediaID, input.Analyses); err != nil {
+		s.Logger.Error("save iOS story analyses failed", "user_id", user.ID, "project_id", created.ID, "analysis_count", len(input.Analyses), "error", err)
 		s.mapStoreError(response, err)
 		return
 	}
@@ -141,16 +148,19 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 		s.internalError(response, errors.New("job orchestrator not configured"), "job orchestrator not configured")
 		return
 	}
-	_, err = s.Orchestrator.StartIOSAnalysis(request.Context(), user.ID, created.ID, idempotencyKey+":analysis")
+	jobs, err := s.Orchestrator.StartIOSAnalysis(request.Context(), user.ID, created.ID, idempotencyKey+":analysis")
 	if err != nil {
+		s.Logger.Error("start iOS story analysis failed", "user_id", user.ID, "project_id", created.ID, "error", err)
 		s.mapStoreError(response, err)
 		return
 	}
+	s.Logger.Info("started iOS story analysis", "user_id", user.ID, "project_id", created.ID, "job_count", len(jobs))
 	updated, err := s.Store.GetProject(request.Context(), user.ID, created.ID)
 	if err != nil {
 		s.mapStoreError(response, err)
 		return
 	}
+	s.Logger.Info("iOS story create response ready", "user_id", user.ID, "project_id", updated.ID, "status", string(updated.Status))
 	s.writeJSON(response, http.StatusCreated, s.makeIOSStory(request, user.ID, updated))
 }
 
@@ -173,9 +183,11 @@ func (s *Server) resolveIOSStoryAssets(request *http.Request, userID string, ass
 		seen[asset.ID] = struct{}{}
 		media, err := s.mediaForIOSAsset(request, userID, asset.ID)
 		if err != nil {
+			s.Logger.Warn("iOS story asset media lookup failed", "user_id", userID, "asset_id", asset.ID, "error", err)
 			return nil, err
 		}
 		if media.Status != models.MediaStatusReady {
+			s.Logger.Warn("iOS story asset media not ready", "user_id", userID, "asset_id", asset.ID, "media_id", media.ID, "status", string(media.Status))
 			return nil, store.ErrConflict
 		}
 		resolved = append(resolved, resolvedIOSStoryAsset{asset: asset, media: media})

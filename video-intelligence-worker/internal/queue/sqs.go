@@ -70,6 +70,9 @@ func (c *Consumer) Run(ctx context.Context, handler Handler) error {
 			}
 			continue
 		}
+		if len(result.Messages) > 0 {
+			c.logger.Info("received video analysis messages", slog.Int("count", len(result.Messages)))
+		}
 		for _, message := range result.Messages {
 			c.handleMessage(ctx, handler, message)
 		}
@@ -97,6 +100,7 @@ func (c *Consumer) RunOnce(ctx context.Context, handler Handler, targetJobID str
 				continue
 			}
 			if targetJobID != "" && jobMessage.JobID != targetJobID {
+				c.logger.Info("release non-target video analysis message", slog.String("target_job_id", targetJobID), slog.String("job_id", jobMessage.JobID))
 				c.release(runContext, message)
 				continue
 			}
@@ -128,6 +132,10 @@ func (c *Consumer) handleMessage(ctx context.Context, handler Handler, received 
 			receiveCount = parsed
 		}
 	}
+	c.logger.Info("handling video analysis message",
+		slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID),
+		slog.String("media_id", message.MediaID), slog.String("job_type", message.JobType), slog.Int("receive_count", receiveCount),
+	)
 	processingContext, cancel := context.WithCancel(ctx)
 	heartbeatDone := make(chan struct{})
 	go c.extendVisibility(processingContext, *received.ReceiptHandle, heartbeatDone)
@@ -135,6 +143,7 @@ func (c *Consumer) handleMessage(ctx context.Context, handler Handler, received 
 	cancel()
 	<-heartbeatDone
 	if err == nil {
+		c.logger.Info("video analysis message handled", slog.String("job_id", message.JobID), slog.String("media_id", message.MediaID))
 		c.delete(ctx, *received.ReceiptHandle)
 		return
 	}

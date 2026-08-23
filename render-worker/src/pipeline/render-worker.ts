@@ -22,16 +22,22 @@ export class DeterministicRenderWorker {
 
   async render(input: RenderInput): Promise<RenderResult> {
     const rendererVersion = input.renderer_version ?? RENDER_VERSION;
+    console.info(JSON.stringify({level: 'info', msg: 'render job started', job_id: input.job_id, project_id: input.project_id, media_count: input.media_assets.length, output_s3_key: input.output_s3_key, renderer_version: rendererVersion}));
     validateInput(input, rendererVersion);
     const fingerprint = renderFingerprint(input, rendererVersion);
     const paths = await ensureRenderDirs(this.dependencies.workRoot, fingerprint);
+    console.info(JSON.stringify({level: 'info', msg: 'render workspace ready', job_id: input.job_id, project_id: input.project_id, fingerprint, work_dir: paths.work_dir}));
     const assetsByID = indexAssets(input.media_assets);
     const assetPaths = await this.downloadRequiredAssets(input, assetsByID, paths.assets_dir);
+    console.info(JSON.stringify({level: 'info', msg: 'render source assets downloaded', job_id: input.job_id, project_id: input.project_id, downloaded_count: assetPaths.size}));
     const preparedPaths = await this.prepareClips(input, assetsByID, assetPaths, paths.clips_dir);
+    console.info(JSON.stringify({level: 'info', msg: 'render clips prepared', job_id: input.job_id, project_id: input.project_id, prepared_count: preparedPaths.size}));
     const composition = buildComposition(input.story_plan, input.media_assets, assetPaths, preparedPaths, paths, {rendererVersion, fps: DEFAULT_FPS});
     await writeFile(paths.composition_file, JSON.stringify(composition, null, 2), 'utf8');
+    console.info(JSON.stringify({level: 'info', msg: 'render composition built', job_id: input.job_id, project_id: input.project_id, duration_ms: composition.duration_ms, width: composition.resolution.width, height: composition.resolution.height}));
     const remotionIntermediate = path.join(paths.work_dir, 'remotion-output.mp4');
     await this.dependencies.remotion.renderComposition(composition, remotionIntermediate);
+    console.info(JSON.stringify({level: 'info', msg: 'remotion render completed', job_id: input.job_id, project_id: input.project_id}));
     await this.dependencies.ffmpeg.encodeMp4({
       compositionPath: paths.composition_file,
       intermediateVideoPath: remotionIntermediate,
@@ -40,7 +46,9 @@ export class DeterministicRenderWorker {
       height: composition.resolution.height,
       durationMs: composition.duration_ms,
     });
+    console.info(JSON.stringify({level: 'info', msg: 'ffmpeg encode completed', job_id: input.job_id, project_id: input.project_id}));
     await this.dependencies.objectStore.uploadObject(paths.output_file, input.output_s3_key, 'video/mp4');
+    console.info(JSON.stringify({level: 'info', msg: 'render artifact uploaded', job_id: input.job_id, project_id: input.project_id, output_s3_key: input.output_s3_key}));
     const now = this.nowISO();
     const record: RenderRecord = {
       job_id: input.job_id,
@@ -69,9 +77,11 @@ export class DeterministicRenderWorker {
         throw new RenderInputError(`story plan references asset that was not supplied: ${assetID}`);
       }
       if (!(await this.dependencies.objectStore.objectExists(asset.s3_key))) {
+        console.error(JSON.stringify({level: 'error', msg: 'render source media missing', asset_id: asset.id, s3_key: asset.s3_key}));
         throw new RenderAssetError(`required source media is missing from S3: ${asset.s3_key}`);
       }
       const destination = path.join(assetsDir, `${asset.id}${mediaExtension(asset)}`);
+      console.info(JSON.stringify({level: 'info', msg: 'downloading render source media', asset_id: asset.id, media_type: asset.media_type, s3_key: asset.s3_key}));
       await this.dependencies.objectStore.downloadObject(asset.s3_key, destination);
       downloaded.set(asset.id, destination);
     }
