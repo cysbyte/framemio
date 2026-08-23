@@ -124,8 +124,8 @@ final class StoryCreationViewModel: ObservableObject {
                     request: CreateStoryRequest(context: context, assets: assets, analyses: analyses)
                 )
                 progress = 1
-                storyCreationDebugLog("phase=story_create_complete story=\(story?.id ?? "nil")")
-                phaseTitle = "Ready to watch."
+                storyCreationDebugLog("phase=story_create_complete story=\(story?.id ?? "nil") status=\(story?.status.rawValue ?? "nil")")
+                phaseTitle = "Story is processing."
                 FrameMioHaptics.success()
             } catch is CancellationError {
                 storyCreationDebugLog("phase=cancelled progress=\(progress)")

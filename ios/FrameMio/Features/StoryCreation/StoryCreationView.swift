@@ -65,7 +65,9 @@ struct StoryCreationView: View {
                             .frame(maxWidth: .infinity)
                         FrameMioProgressView(value: viewModel.progress, title: "Creating your story")
                     }
-                } else if viewModel.story == nil {
+                } else if let story = viewModel.story {
+                    processingStartedCard(story)
+                } else {
                     PrimaryButton(title: "Create Story", systemImage: "sparkles") {
                         viewModel.createStory()
                     }
@@ -99,8 +101,57 @@ struct StoryCreationView: View {
                 }
             }
         }
-        .onChange(of: viewModel.story) { _, story in
-            if let story { onCreated(story) }
+    }
+
+    private func processingStartedCard(_ story: Story) -> some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            HStack(alignment: .top, spacing: FrameMioSpacing.md) {
+                Image(systemName: "sparkles")
+                    .font(FrameMioTypography.headline)
+                    .foregroundStyle(FrameMioColors.accent)
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: FrameMioSpacing.xs) {
+                    Text("Story creation started")
+                        .font(FrameMioTypography.headline)
+                        .foregroundStyle(FrameMioColors.ink)
+                    Text(processingMessage(for: story.status))
+                        .font(FrameMioTypography.body)
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            FrameMioProgressView(value: 1, title: "Submitted to FrameMio")
+
+            PrimaryButton(title: "View Story Status", systemImage: "arrow.right") {
+                onCreated(story)
+            }
+        }
+        .padding(FrameMioSpacing.xl)
+        .background(
+            FrameMioColors.surface.opacity(0.9),
+            in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+        }
+        .frameMioElevation(.subtle)
+    }
+
+    private func processingMessage(for status: StoryStatus) -> String {
+        switch status {
+        case .queued:
+            "Your media uploaded successfully. FrameMio will continue processing it in the background."
+        case .analyzing:
+            "FrameMio is finding meaningful moments. You can open the status view when you want to check progress."
+        case .rendering:
+            "FrameMio is rendering your story video. You can open the status view to follow along."
+        case .ready:
+            "Your story is ready to watch."
+        case .failed:
+            "FrameMio started the story, but it needs another try. Open the status view for details."
         }
     }
 }
