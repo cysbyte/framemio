@@ -363,6 +363,65 @@ func TestIOSUploadContractCompatibility(t *testing.T) {
 	}
 }
 
+func TestIOSStoriesCompatibilityCreatesProjectAndFetchesStories(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	handler := newTestServer(memoryStore, publisher).Handler()
+
+	uploadResponse := createReadyIOSMedia(t, handler, "asset-photo-1", models.MediaTypePhoto)
+	storyResponse := performJSON(t, handler, http.MethodPost, "/v1/stories", map[string]any{
+		"context": "Special moments",
+		"assets": []map[string]any{
+			{
+				"id":           "asset-photo-1",
+				"kind":         "image",
+				"duration":     0,
+				"pixelWidth":   3024,
+				"pixelHeight":  4032,
+				"creationDate": "2026-08-19T10:00:00Z",
+			},
+		},
+		"analyses": []map[string]any{
+			{"assetID": "asset-photo-1", "labels": []string{"beach", "friends"}, "peopleCount": 2, "confidence": 0.91},
+		},
+	}, "", true, nil)
+	if storyResponse.Code != http.StatusCreated {
+		t.Fatalf("create iOS story status = %d, body = %s", storyResponse.Code, storyResponse.Body.String())
+	}
+	var story iosStory
+	decodeResponse(t, storyResponse, &story)
+	if story.ID == "" || story.Context != "Special moments" || story.Status != "analyzing" || len(story.AssetIDs) != 1 || story.AssetIDs[0] != uploadResponse.MediaID {
+		t.Fatalf("unexpected iOS story response: %+v", story)
+	}
+
+	listResponse := performJSON(t, handler, http.MethodGet, "/v1/stories", nil, "", true, nil)
+	if listResponse.Code != http.StatusOK {
+		t.Fatalf("list iOS stories status = %d, body = %s", listResponse.Code, listResponse.Body.String())
+	}
+	var stories []iosStory
+	decodeResponse(t, listResponse, &stories)
+	if len(stories) != 1 || stories[0].ID != story.ID {
+		t.Fatalf("unexpected iOS story list: %+v", stories)
+	}
+
+	getResponse := performJSON(t, handler, http.MethodGet, "/v1/stories/"+story.ID, nil, "", true, nil)
+	if getResponse.Code != http.StatusOK {
+		t.Fatalf("get iOS story status = %d, body = %s", getResponse.Code, getResponse.Body.String())
+	}
+	var fetched iosStory
+	decodeResponse(t, getResponse, &fetched)
+	if fetched.ID != story.ID || fetched.Status != "analyzing" {
+		t.Fatalf("unexpected fetched iOS story: %+v", fetched)
+	}
+
+	messages := publisher.Messages()
+	if len(messages) != 1 || messages[0].JobType != models.JobTypeStoryPlan {
+		t.Fatalf("expected only a story-plan queue message for photo-only story, got %+v", messages)
+	}
+}
+
 func TestAuthenticationAndIdempotencyAreRequired(t *testing.T) {
 	t.Parallel()
 	server := newTestServer(store.NewMemoryStore(), queue.NewMemoryPublisher())
@@ -487,6 +546,41 @@ func decodeResponse(t *testing.T, response *httptest.ResponseRecorder, destinati
 	if err := json.NewDecoder(response.Body).Decode(destination); err != nil {
 		t.Fatalf("decode response: %v, body = %s", err, response.Body.String())
 	}
+}
+
+func createReadyIOSMedia(t *testing.T, handler http.Handler, assetID string, mediaType models.MediaType) iosUploadSessionResponse {
+	t.Helper()
+	upload := performJSON(t, handler, http.MethodPost, "/v1/media/upload-sessions", map[string]any{
+		"idempotencyKey": "media-upload-original-" + assetID,
+		"metadata": map[string]any{
+			"assetID":                assetID,
+			"mediaType":              mediaType,
+			"contentType":            "image/jpeg",
+			"fileName":               assetID + ".jpg",
+			"fileSizeBytes":          1_024,
+			"pixelWidth":             3024,
+			"pixelHeight":            4032,
+			"orientation":            "portrait",
+			"optimization":           "original",
+			"preferredPartSizeBytes": 5 * 1024 * 1024,
+			"creationDate":           "2026-08-19T10:00:00Z",
+		},
+	}, "", true, nil)
+	if upload.Code != http.StatusCreated {
+		t.Fatalf("create iOS upload status = %d, body = %s", upload.Code, upload.Body.String())
+	}
+	var uploadResponse iosUploadSessionResponse
+	decodeResponse(t, upload, &uploadResponse)
+	complete := performJSON(t, handler, http.MethodPost, "/v1/media/uploads/complete", map[string]any{
+		"mediaId":   uploadResponse.MediaID,
+		"uploadId":  uploadResponse.UploadID,
+		"s3Key":     uploadResponse.S3Key,
+		"mediaType": mediaType,
+	}, "", true, nil)
+	if complete.Code != http.StatusOK {
+		t.Fatalf("complete iOS upload status = %d, body = %s", complete.Code, complete.Body.String())
+	}
+	return uploadResponse
 }
 
 func assertSmallIdentifierOnlyMessage(t *testing.T, message queue.JobMessage) {

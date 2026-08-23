@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -172,6 +173,21 @@ func (s *MemoryStore) GetProject(_ context.Context, userID, projectID string) (m
 		return models.StoryProject{}, ErrInvalidOwner
 	}
 	return project, nil
+}
+
+func (s *MemoryStore) ListProjects(_ context.Context, userID string) ([]models.StoryProject, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	projects := make([]models.StoryProject, 0)
+	for _, project := range s.projects {
+		if project.UserID == userID {
+			projects = append(projects, project)
+		}
+	}
+	slices.SortFunc(projects, func(a, b models.StoryProject) int {
+		return b.CreatedAt.Compare(a.CreatedAt)
+	})
+	return projects, nil
 }
 
 func (s *MemoryStore) SetProjectStatus(_ context.Context, userID, projectID string, status models.ProjectStatus) error {

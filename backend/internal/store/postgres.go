@@ -284,6 +284,27 @@ func (s *PostgresStore) GetProject(ctx context.Context, userID, projectID string
 	return project, nil
 }
 
+func (s *PostgresStore) ListProjects(ctx context.Context, userID string) ([]models.StoryProject, error) {
+	rows, err := s.pool.Query(ctx, `SELECT data FROM framemio_domain_records WHERE kind='project' AND user_id=$1 ORDER BY created_at DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list projects: %w", err)
+	}
+	defer rows.Close()
+	projects := make([]models.StoryProject, 0)
+	for rows.Next() {
+		var data []byte
+		if err := rows.Scan(&data); err != nil {
+			return nil, err
+		}
+		var project models.StoryProject
+		if err := json.Unmarshal(data, &project); err != nil {
+			return nil, fmt.Errorf("decode project: %w", err)
+		}
+		projects = append(projects, project)
+	}
+	return projects, rows.Err()
+}
+
 func (s *PostgresStore) SetProjectStatus(ctx context.Context, userID, projectID string, status models.ProjectStatus) error {
 	var project models.StoryProject
 	if err := s.get(ctx, "project", userID, projectID, &project); err != nil {

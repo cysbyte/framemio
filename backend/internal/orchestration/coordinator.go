@@ -79,6 +79,53 @@ func (c *Coordinator) StartAnalysis(ctx context.Context, userID, projectID, idem
 	return jobs, nil
 }
 
+func (c *Coordinator) StartIOSAnalysis(ctx context.Context, userID, projectID, idempotencyKey string) ([]models.ProcessingJob, error) {
+	project, err := c.Store.GetProject(ctx, userID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	jobs := make([]models.ProcessingJob, 0, len(project.MediaIDs))
+	markAnalyzing := false
+	for _, mediaID := range project.MediaIDs {
+		media, err := c.Store.GetMedia(ctx, userID, mediaID)
+		if err != nil {
+			return nil, err
+		}
+		job, err := c.createStageJob(ctx, userID, projectID, mediaID, models.JobTypeMediaPreprocess, map[string]string{"pipeline_version": PipelineVersion}, stableStageKey(projectID, mediaID, models.JobTypeMediaPreprocess), media.Type == models.MediaTypeVideo)
+		if err != nil {
+			return nil, err
+		}
+		if media.Type != models.MediaTypeVideo && !models.IsTerminalJobStatus(job.Status) {
+			job, err = c.UpdateJobStatus(ctx, job.ID, models.JobStatusCompleted, 1, "", "", "", "")
+			if err != nil {
+				return nil, err
+			}
+		}
+		jobs = append(jobs, job)
+		if !models.IsTerminalJobStatus(job.Status) {
+			markAnalyzing = true
+		}
+	}
+	if !markAnalyzing {
+		projectJobs, err := c.Store.ListProjectJobs(ctx, userID, projectID)
+		if err != nil {
+			return nil, err
+		}
+		for _, job := range projectJobs {
+			if !models.IsTerminalJobStatus(job.Status) {
+				markAnalyzing = true
+				break
+			}
+		}
+	}
+	if markAnalyzing {
+		if err := c.Store.SetProjectStatus(ctx, userID, projectID, models.ProjectStatusAnalyzing); err != nil {
+			return nil, err
+		}
+	}
+	return jobs, nil
+}
+
 func (c *Coordinator) RecordValidationAndQueueRender(ctx context.Context, userID, projectID, idempotencyKey string, storyPlanVersion int, outputPreset string) (models.ProcessingJob, error) {
 	configuration := map[string]string{"pipeline_version": PipelineVersion, "story_plan_version": strconv.Itoa(storyPlanVersion), "output_preset": outputPreset}
 	validationJob, err := c.createStageJob(ctx, userID, projectID, "", models.JobTypeStoryValidate, configuration, idempotencyKey+":"+string(models.JobTypeStoryValidate), false)
