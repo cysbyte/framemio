@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/framemio/backend/internal/models"
@@ -80,6 +81,10 @@ func (s *PostgresStore) getByLogical(ctx context.Context, kind, userID, logicalK
 		return fmt.Errorf("decode %s: %w", kind, err)
 	}
 	return nil
+}
+
+func postgresLogicalKey(parts ...string) string {
+	return strings.Join(parts, ":")
 }
 
 func (s *PostgresStore) put(ctx context.Context, kind, id, userID, projectID, mediaID, logicalKey string, value any) (bool, error) {
@@ -536,7 +541,7 @@ func (s *PostgresStore) SaveAnalysis(ctx context.Context, userID string, analysi
 	if _, err := s.GetMedia(ctx, userID, analysis.MediaID); err != nil {
 		return err
 	}
-	_, err := s.put(ctx, "analysis", analysis.ID, userID, analysis.ProjectID, analysis.MediaID, analysis.ProjectID+"\x00"+analysis.MediaID, analysis)
+	_, err := s.put(ctx, "analysis", analysis.ID, userID, analysis.ProjectID, analysis.MediaID, postgresLogicalKey(analysis.ProjectID, analysis.MediaID), analysis)
 	return err
 }
 
@@ -549,7 +554,7 @@ func (s *PostgresStore) SaveVideoAnalysis(ctx context.Context, userID string, an
 	} else if media.Type != models.MediaTypeVideo {
 		return ErrConflict
 	}
-	_, err := s.put(ctx, "video_analysis", analysis.ID, userID, analysis.ProjectID, analysis.VideoID, analysis.VideoID+"\x00"+analysis.AnalysisVersion, analysis)
+	_, err := s.put(ctx, "video_analysis", analysis.ID, userID, analysis.ProjectID, analysis.VideoID, postgresLogicalKey(analysis.VideoID, analysis.AnalysisVersion), analysis)
 	return err
 }
 
@@ -558,7 +563,7 @@ func (s *PostgresStore) GetVideoAnalysis(ctx context.Context, userID, videoID, a
 		return models.VideoAnalysis{}, err
 	}
 	var data []byte
-	if err := s.pool.QueryRow(ctx, `SELECT data FROM framemio_domain_records WHERE kind='video_analysis' AND user_id=$1 AND logical_key=$2`, userID, videoID+"\x00"+analysisVersion).Scan(&data); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT data FROM framemio_domain_records WHERE kind='video_analysis' AND user_id=$1 AND logical_key=$2`, userID, postgresLogicalKey(videoID, analysisVersion)).Scan(&data); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return models.VideoAnalysis{}, ErrNotFound
 		}
