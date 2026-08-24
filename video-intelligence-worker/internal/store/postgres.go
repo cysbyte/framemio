@@ -104,7 +104,18 @@ func NewPostgres(ctx context.Context, databaseURL string) (*Postgres, error) {
 func (s *Postgres) Close() { s.pool.Close() }
 
 func (s *Postgres) Migrate(ctx context.Context) error {
-	_, err := s.pool.Exec(ctx, migrationSQL)
+	connection, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire migration connection: %w", err)
+	}
+	defer connection.Release()
+
+	if _, err := connection.Exec(ctx, "SELECT pg_advisory_lock(450876624497)"); err != nil {
+		return fmt.Errorf("acquire video analysis migration lock: %w", err)
+	}
+	defer connection.Exec(context.Background(), "SELECT pg_advisory_unlock(450876624497)")
+
+	_, err = connection.Exec(ctx, migrationSQL)
 	if err != nil {
 		return fmt.Errorf("create video analysis index: %w", err)
 	}

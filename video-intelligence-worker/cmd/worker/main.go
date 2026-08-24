@@ -39,6 +39,10 @@ func main() {
 		logger.Error("video tools unavailable", slog.Any("error", err))
 		os.Exit(1)
 	}
+	if err := os.MkdirAll(configuration.WorkRoot, 0o700); err != nil {
+		logger.Error("create video intelligence work root", slog.String("work_root", configuration.WorkRoot), slog.Any("error", err))
+		os.Exit(1)
+	}
 	repository, err := store.NewPostgres(ctx, configuration.DatabaseURL)
 	if err != nil {
 		logger.Error("connect video analysis database", slog.Any("error", err))
