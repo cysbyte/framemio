@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -85,6 +87,21 @@ func (s *PostgresStore) getByLogical(ctx context.Context, kind, userID, logicalK
 
 func postgresLogicalKey(parts ...string) string {
 	return strings.Join(parts, ":")
+}
+
+// videoAnalysisLogicalKey must stay byte-identical to logicalKey in
+// video-intelligence-worker/internal/store/postgres.go. VideoAnalysis rows are
+// written by that worker and read back here, so the two services have to derive
+// the same logical_key or every lookup misses and the StoryPlan validator
+// rejects plans whose analysis is present. The length prefix keeps the digest
+// unambiguous for values that could otherwise concatenate the same way.
+func videoAnalysisLogicalKey(values ...string) string {
+	hash := sha256.New()
+	for _, value := range values {
+		_, _ = fmt.Fprintf(hash, "%d:", len(value))
+		_, _ = hash.Write([]byte(value))
+	}
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 func (s *PostgresStore) put(ctx context.Context, kind, id, userID, projectID, mediaID, logicalKey string, value any) (bool, error) {
@@ -554,7 +571,7 @@ func (s *PostgresStore) SaveVideoAnalysis(ctx context.Context, userID string, an
 	} else if media.Type != models.MediaTypeVideo {
 		return ErrConflict
 	}
-	_, err := s.put(ctx, "video_analysis", analysis.ID, userID, analysis.ProjectID, analysis.VideoID, postgresLogicalKey(analysis.VideoID, analysis.AnalysisVersion), analysis)
+	_, err := s.put(ctx, "video_analysis", analysis.ID, userID, analysis.ProjectID, analysis.VideoID, videoAnalysisLogicalKey(analysis.VideoID, analysis.AnalysisVersion), analysis)
 	return err
 }
 
@@ -563,7 +580,7 @@ func (s *PostgresStore) GetVideoAnalysis(ctx context.Context, userID, videoID, a
 		return models.VideoAnalysis{}, err
 	}
 	var data []byte
-	if err := s.pool.QueryRow(ctx, `SELECT data FROM framemio_domain_records WHERE kind='video_analysis' AND user_id=$1 AND logical_key=$2`, userID, postgresLogicalKey(videoID, analysisVersion)).Scan(&data); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT data FROM framemio_domain_records WHERE kind='video_analysis' AND user_id=$1 AND logical_key=$2`, userID, videoAnalysisLogicalKey(videoID, analysisVersion)).Scan(&data); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return models.VideoAnalysis{}, ErrNotFound
 		}
