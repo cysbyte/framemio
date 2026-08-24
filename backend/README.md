@@ -64,6 +64,7 @@ Internal routes require `X-FrameMio-Internal-Token` and derive ownership/project
 
 | Method | Path | Purpose |
 | --- | --- | --- |
+| `GET` | `/internal/jobs/:id/render-input` | Return identifier-only render input for render workers: StoryPlan, source S3 keys, metadata, and output key. |
 | `POST` | `/internal/jobs/:id/status` | Update queued/running/succeeded/failed state, progress, errors, and render artifact reference. |
 | `POST` | `/internal/jobs/:id/analysis` | Save idempotent media-analysis results for an analysis job. |
 | `POST` | `/internal/jobs/:id/story-plan` | Save a versioned StoryPlan and mark it ready for rendering. |

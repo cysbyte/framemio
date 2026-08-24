@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/framemio/backend/internal/models"
@@ -100,6 +101,10 @@ func (c *Coordinator) StartIOSAnalysis(ctx context.Context, userID, projectID, i
 			if err != nil {
 				return nil, err
 			}
+		} else if job.Status == models.JobStatusCompleted {
+			if err := c.AdvanceAfterJob(ctx, job); err != nil {
+				return nil, err
+			}
 		}
 		jobs = append(jobs, job)
 		if !models.IsTerminalJobStatus(job.Status) {
@@ -127,7 +132,7 @@ func (c *Coordinator) StartIOSAnalysis(ctx context.Context, userID, projectID, i
 }
 
 func (c *Coordinator) RecordValidationAndQueueRender(ctx context.Context, userID, projectID, idempotencyKey string, storyPlanVersion int, outputPreset string) (models.ProcessingJob, error) {
-	configuration := map[string]string{"pipeline_version": PipelineVersion, "story_plan_version": strconv.Itoa(storyPlanVersion), "output_preset": outputPreset}
+	configuration := map[string]string{"pipeline_version": PipelineVersion, "story_plan_version": strconv.Itoa(storyPlanVersion), "output_preset": outputPreset, "output_s3_key": renderOutputKey(userID, projectID, storyPlanVersion, outputPreset)}
 	validationJob, err := c.createStageJob(ctx, userID, projectID, "", models.JobTypeStoryValidate, configuration, idempotencyKey+":"+string(models.JobTypeStoryValidate), false)
 	if err != nil {
 		return models.ProcessingJob{}, err
@@ -339,4 +344,12 @@ func valueOrDefault(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func renderOutputKey(userID, projectID string, storyPlanVersion int, outputPreset string) string {
+	preset := strings.TrimSpace(outputPreset)
+	if preset == "" {
+		preset = "social"
+	}
+	return "users/" + userID + "/projects/" + projectID + "/renders/story-plan-v" + strconv.Itoa(storyPlanVersion) + "-" + preset + ".mp4"
 }

@@ -39,6 +39,23 @@ final class StoryPreviewViewModel: ObservableObject {
         }
     }
 
+    var progressValue: Double {
+        switch story?.status {
+        case .queued:
+            0.18
+        case .analyzing:
+            0.58
+        case .rendering:
+            0.86
+        case .ready:
+            1
+        case .failed:
+            0
+        case nil:
+            0.08
+        }
+    }
+
     func load() {
         loadTask?.cancel()
         loadTask = Task { [weak self] in

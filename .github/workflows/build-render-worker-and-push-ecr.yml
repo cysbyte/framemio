@@ -29,6 +29,12 @@ env:
   ECS_SUBNETS: ${{ vars.ECS_SUBNETS || 'subnet-00d486ccc47c106c3,subnet-049030ce471097336,subnet-09957911ba06c489f,subnet-0207cfb1b59d111c0,subnet-059002c34faa60a13,subnet-0b38a6af4a720b169' }}
   ECS_SECURITY_GROUPS: ${{ vars.ECS_SECURITY_GROUPS || 'sg-0621dd1b1173bd1c0' }}
   ECS_ASSIGN_PUBLIC_IP: ${{ vars.ECS_ASSIGN_PUBLIC_IP || 'ENABLED' }}
+  S3_MEDIA_BUCKET: ${{ vars.S3_MEDIA_BUCKET }}
+  SQS_PROCESSING_QUEUE_URL: ${{ vars.SQS_PROCESSING_QUEUE_URL || 'https://sqs.us-east-1.amazonaws.com/450876624497/framemio-processing' }}
+  BACKEND_INTERNAL_API_URL: ${{ vars.BACKEND_INTERNAL_API_URL }}
+  INTERNAL_API_TOKEN: ${{ secrets.INTERNAL_API_TOKEN }}
+  RENDERER_MODE: ffmpeg
+  ECS_SET_ENV_VARS: S3_MEDIA_BUCKET,AWS_REGION,SQS_PROCESSING_QUEUE_URL,BACKEND_INTERNAL_API_URL,INTERNAL_API_TOKEN,RENDERER_MODE
 
 jobs:
   build-and-push:
@@ -47,6 +53,10 @@ jobs:
           test -n "$AWS_REGION" || { echo "Missing repository variable AWS_REGION"; exit 1; }
           test -n "$ECR_REPOSITORY" || { echo "Missing repository variable RENDER_WORKER_ECR_REPOSITORY"; exit 1; }
           test -n "$ROLE_ARN" || { echo "Missing repository secret AWS_GITHUB_ACTIONS_ROLE_ARN"; exit 1; }
+          test -n "$S3_MEDIA_BUCKET" || { echo "Missing repository variable S3_MEDIA_BUCKET"; exit 1; }
+          test -n "$SQS_PROCESSING_QUEUE_URL" || { echo "Missing repository variable SQS_PROCESSING_QUEUE_URL"; exit 1; }
+          test -n "$BACKEND_INTERNAL_API_URL" || { echo "Missing repository variable BACKEND_INTERNAL_API_URL"; exit 1; }
+          test -n "$INTERNAL_API_TOKEN" || { echo "Missing repository secret INTERNAL_API_TOKEN"; exit 1; }
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6

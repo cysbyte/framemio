@@ -75,6 +75,50 @@ func TestCoordinatorChainsReusableVideoStages(t *testing.T) {
 	}
 }
 
+func TestStartIOSAnalysisAdvancesExistingCompletedVideoJob(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore, publisher, coordinator, project, video := setupProject(t, models.MediaTypeVideo)
+	now := time.Date(2026, time.August, 21, 11, 0, 0, 0, time.UTC)
+	completedPreprocess := models.ProcessingJob{
+		ID:             "job-existing-video-preprocess",
+		UserID:         project.UserID,
+		ProjectID:      project.ID,
+		MediaID:        video.ID,
+		Type:           models.JobTypeMediaPreprocess,
+		Status:         models.JobStatusCompleted,
+		Progress:       1,
+		MaxAttempts:    2,
+		Configuration:  map[string]string{"pipeline_version": PipelineVersion, "job_type": string(models.JobTypeMediaPreprocess)},
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		CompletedAt:    &now,
+		IdempotencyKey: stableStageKey(project.ID, video.ID, models.JobTypeMediaPreprocess),
+	}
+	if _, _, err := memoryStore.CreateJob(ctx, completedPreprocess, stableStageKey(project.ID, video.ID, models.JobTypeMediaPreprocess)); err != nil {
+		t.Fatal(err)
+	}
+
+	jobs, err := coordinator.StartIOSAnalysis(ctx, project.UserID, project.ID, "ios-analysis-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 || jobs[0].ID != completedPreprocess.ID || jobs[0].Status != models.JobStatusCompleted {
+		t.Fatalf("expected existing completed preprocess job, got %+v", jobs)
+	}
+	transcribe := latestMessageOfType(t, publisher, models.JobTypeTranscribe)
+	if transcribe.MediaID != video.ID || transcribe.ProjectID != project.ID {
+		t.Fatalf("existing completed video preprocess did not advance to transcribe: %+v", transcribe)
+	}
+	projectAfter, err := memoryStore.GetProject(ctx, project.UserID, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projectAfter.Status != models.ProjectStatusAnalyzing {
+		t.Fatalf("project status = %s, want analyzing", projectAfter.Status)
+	}
+}
+
 func TestCoordinatorRetriesWithBackoffBeforeFailingTerminally(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

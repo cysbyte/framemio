@@ -74,3 +74,38 @@ async function run(command: string, args: string[], timeoutMs: number): Promise<
     });
   });
 }
+
+
+export interface FfmpegCompositionRendererOptions {
+  ffmpegBinary?: string;
+}
+
+export class FfmpegCompositionRenderer implements RemotionRenderer {
+  private readonly ffmpegBinary: string;
+
+  constructor(options: FfmpegCompositionRendererOptions = {}) {
+    this.ffmpegBinary = options.ffmpegBinary ?? 'ffmpeg';
+  }
+
+  async renderComposition(composition: CompositionSpec, outputPath: string): Promise<void> {
+    await mkdir(path.dirname(outputPath), {recursive: true});
+    const clip = composition.clips[0];
+    const durationSeconds = Math.max(0.1, composition.duration_ms / 1000);
+    if (!clip) {
+      await run(this.ffmpegBinary, [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'lavfi', '-i', `color=c=0x111111:s=${composition.resolution.width}x${composition.resolution.height}:r=${composition.fps}:d=${durationSeconds.toFixed(3)}`,
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', outputPath,
+      ], 15 * 60 * 1000);
+      return;
+    }
+    const inputPath = clip.media_type === 'photo' ? clip.source_path : clip.prepared_path;
+    const videoFilter = `scale=${composition.resolution.width}:${composition.resolution.height}:force_original_aspect_ratio=increase,crop=${composition.resolution.width}:${composition.resolution.height},format=yuv420p`;
+    const args = ['-hide_banner', '-loglevel', 'error', '-y'];
+    if (clip.media_type === 'photo') {
+      args.push('-loop', '1');
+    }
+    args.push('-i', inputPath, '-t', durationSeconds.toFixed(3), '-vf', videoFilter, '-r', String(composition.fps), '-an', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', outputPath);
+    await run(this.ffmpegBinary, args, 15 * 60 * 1000);
+  }
+}

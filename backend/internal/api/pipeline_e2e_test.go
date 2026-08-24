@@ -47,13 +47,19 @@ func TestEndToEndMemoryVideoPipelineReusesCompletedStages(t *testing.T) {
 
 	project := models.StoryProject{ID: "project-1", UserID: userID, Title: "Weekend memories", Context: "weekend", MediaIDs: []string{photo.ID, video.ID}, Status: models.ProjectStatusDraft, CreatedAt: now, UpdatedAt: now}
 	createdProject, _, err := memoryStore.CreateProject(ctx, project, "project-key")
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	analysisResponse := performJSON(t, handler, http.MethodPost, "/projects/"+createdProject.ID+"/analyze", nil, "analysis-key", true, nil)
-	if analysisResponse.Code != http.StatusAccepted { t.Fatalf("analysis status = %d, body = %s", analysisResponse.Code, analysisResponse.Body.String()) }
+	if analysisResponse.Code != http.StatusAccepted {
+		t.Fatalf("analysis status = %d, body = %s", analysisResponse.Code, analysisResponse.Body.String())
+	}
 	var analysisJobs jobsResponse
 	decodeResponse(t, analysisResponse, &analysisJobs)
-	if len(analysisJobs.Jobs) != 2 { t.Fatalf("analysis jobs = %+v", analysisJobs) }
+	if len(analysisJobs.Jobs) != 2 {
+		t.Fatalf("analysis jobs = %+v", analysisJobs)
+	}
 
 	var photoAnalysisJobs []string
 	var videoPreprocessJobID string
@@ -65,7 +71,9 @@ func TestEndToEndMemoryVideoPipelineReusesCompletedStages(t *testing.T) {
 			videoPreprocessJobID = job.ID
 		}
 	}
-	if len(photoAnalysisJobs) != 1 || videoPreprocessJobID == "" { t.Fatalf("unexpected initial jobs: %+v", analysisJobs.Jobs) }
+	if len(photoAnalysisJobs) != 1 || videoPreprocessJobID == "" {
+		t.Fatalf("unexpected initial jobs: %+v", analysisJobs.Jobs)
+	}
 
 	photoAnalysisRecord := models.MediaAnalysis{ID: "analysis-photo-1", ProjectID: createdProject.ID, MediaID: photo.ID, Labels: []string{"friends"}, PeopleCount: 3, QualityScore: 0.91, CreatedAt: now, UpdatedAt: now}
 	photoAnalysis := models.PhotoAnalysis{ID: "analysis-photo-1", PhotoID: photo.ID, ProjectID: createdProject.ID, AnalysisVersion: "photo-analysis-v1", TimestampMicros: 1_000_000, Location: "home", People: []string{"friends"}, Labels: []string{"weekend", "friends"}, Caption: "A warm moment", Description: "Friends together", MemoryValue: 0.9, EmotionalValue: 0.88, VisualQuality: 0.76, StoryRelevance: 0.92, Selected: true, CreatedAt: now}
@@ -88,8 +96,8 @@ func TestEndToEndMemoryVideoPipelineReusesCompletedStages(t *testing.T) {
 	videoAnalysis := models.VideoAnalysis{
 		ID: "video-analysis-1", VideoID: video.ID, ProjectID: createdProject.ID, AnalysisVersion: videoAnalysisVersion,
 		DurationMicros: 8_000_000, Transcript: models.VideoTranscript{HasSpeech: true, Segments: []models.VideoTranscriptSegment{{StartMicros: 1_000_000, EndMicros: 2_500_000, Text: "We made it."}}},
-		Scenes: []models.VideoScene{{SceneID: "scene-1", StartMicros: 0, EndMicros: 8_000_000, RepresentativeFrames: []models.Frame{{FrameID: "frame-1", TimestampMicros: 1_500_000, S3Key: "users/user-1/video-analysis/video-1/frame-1.jpg"}}}},
-		Segments: []models.VideoSegment{{SegmentID: "segment-1", SceneID: "scene-1", StartMicros: 1_000_000, EndMicros: 4_000_000, Description: "Friends laughing", Importance: 0.96, VisualQuality: 0.54, MemoryValue: 0.95, EmotionalValue: 0.97, StoryRelevance: 0.94, Recommended: true, Reasons: []string{"warm laughter"}, RecommendedUsage: "story"}},
+		Scenes:         []models.VideoScene{{SceneID: "scene-1", StartMicros: 0, EndMicros: 8_000_000, RepresentativeFrames: []models.Frame{{FrameID: "frame-1", TimestampMicros: 1_500_000, S3Key: "users/user-1/video-analysis/video-1/frame-1.jpg"}}}},
+		Segments:       []models.VideoSegment{{SegmentID: "segment-1", SceneID: "scene-1", StartMicros: 1_000_000, EndMicros: 4_000_000, Description: "Friends laughing", Importance: 0.96, VisualQuality: 0.54, MemoryValue: 0.95, EmotionalValue: 0.97, StoryRelevance: 0.94, Recommended: true, Reasons: []string{"warm laughter"}, RecommendedUsage: "story"}},
 		DetectedPeople: []string{"friends"}, DetectedActivities: []string{"laughing"}, DetectedLocations: []string{"home"},
 		QualitySignals: models.VideoQualitySignals{OverallScore: 0.78, SceneChangesPM: 1.2, AverageSharpness: 0.72, AverageBrightness: 0.66}, CreatedAt: now,
 	}
@@ -108,7 +116,9 @@ func TestEndToEndMemoryVideoPipelineReusesCompletedStages(t *testing.T) {
 	}
 
 	projectStatus := performJSON(t, handler, http.MethodGet, "/projects/"+createdProject.ID+"/status", nil, "", true, nil)
-	if projectStatus.Code != http.StatusOK { t.Fatalf("project status = %d, body = %s", projectStatus.Code, projectStatus.Body.String()) }
+	if projectStatus.Code != http.StatusOK {
+		t.Fatalf("project status = %d, body = %s", projectStatus.Code, projectStatus.Body.String())
+	}
 	var statusBody struct {
 		Project models.StoryProject    `json:"project"`
 		Jobs    []models.ProcessingJob `json:"jobs"`
@@ -123,15 +133,15 @@ func TestEndToEndMemoryVideoPipelineReusesCompletedStages(t *testing.T) {
 
 	planner := &ai.Planner{Now: func() time.Time { return now }}
 	plan, err := planner.Plan(ctx, ai.Request{
-		ProjectID: createdProject.ID,
-		Version: 1,
-		DesiredDuration: 14 * time.Second,
-		StoryType: models.StoryTypeWeekend,
-		VisualStyle: models.VisualStyleCinematic,
+		ProjectID:        createdProject.ID,
+		Version:          1,
+		DesiredDuration:  14 * time.Second,
+		StoryType:        models.StoryTypeWeekend,
+		VisualStyle:      models.VisualStyleCinematic,
 		SelectedMediaIDs: []string{photo.ID, video.ID},
-		PhotoAnalyses: []models.PhotoAnalysis{photoAnalysis},
-		VideoAnalyses: []models.VideoAnalysis{videoAnalysis},
-		MediaClusters: []models.MediaCluster{{ID: "cluster-1", ProjectID: createdProject.ID, MediaIDs: []string{photo.ID, video.ID}, Label: "weekend"}},
+		PhotoAnalyses:    []models.PhotoAnalysis{photoAnalysis},
+		VideoAnalyses:    []models.VideoAnalysis{videoAnalysis},
+		MediaClusters:    []models.MediaCluster{{ID: "cluster-1", ProjectID: createdProject.ID, MediaIDs: []string{photo.ID, video.ID}, Label: "weekend"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -196,7 +206,35 @@ func TestEndToEndMemoryVideoPipelineReusesCompletedStages(t *testing.T) {
 	if videoRenderJob.JobType != models.JobTypeVideoRender {
 		t.Fatalf("latest job = %+v", videoRenderJob)
 	}
-	if _, err := server.Orchestrator.UpdateJobStatus(ctx, videoRenderJob.JobID, models.JobStatusCompleted, 1, "", "", "users/user-1/projects/project-1/story.mp4", "video/mp4"); err != nil {
+	renderInputResponse := performJSON(t, handler, http.MethodGet, "/internal/jobs/"+videoRenderJob.JobID+"/render-input", nil, "", false, map[string]string{"X-FrameMio-Internal-Token": testInternalToken})
+	if renderInputResponse.Code != http.StatusOK {
+		t.Fatalf("render input status = %d, body = %s", renderInputResponse.Code, renderInputResponse.Body.String())
+	}
+	var renderInput struct {
+		JobID       string `json:"job_id"`
+		ProjectID   string `json:"project_id"`
+		OutputS3Key string `json:"output_s3_key"`
+		StoryPlan   struct {
+			ID      string `json:"id"`
+			Version int    `json:"version"`
+		} `json:"story_plan"`
+		MediaAssets []struct {
+			ID              string  `json:"id"`
+			S3Key           string  `json:"s3_key"`
+			DurationSeconds float64 `json:"duration_seconds"`
+		} `json:"media_assets"`
+	}
+	decodeResponse(t, renderInputResponse, &renderInput)
+	if renderInput.JobID != videoRenderJob.JobID || renderInput.ProjectID != createdProject.ID || renderInput.StoryPlan.ID != plan.ID {
+		t.Fatalf("unexpected render input: %+v", renderInput)
+	}
+	if len(renderInput.MediaAssets) != 2 || renderInput.MediaAssets[1].S3Key == "" {
+		t.Fatalf("render input media assets missing source references: %+v", renderInput.MediaAssets)
+	}
+	if renderInput.OutputS3Key == "" || renderInput.OutputS3Key != renderJob.Configuration["output_s3_key"] {
+		t.Fatalf("render output key = %q, job config = %+v", renderInput.OutputS3Key, renderJob.Configuration)
+	}
+	if _, err := server.Orchestrator.UpdateJobStatus(ctx, videoRenderJob.JobID, models.JobStatusCompleted, 1, "", "", renderInput.OutputS3Key, "video/mp4"); err != nil {
 		t.Fatal(err)
 	}
 

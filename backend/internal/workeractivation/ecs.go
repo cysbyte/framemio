@@ -152,12 +152,6 @@ func (a *ECSRunTaskActivator) Activate(ctx context.Context, message queue.JobMes
 			}},
 		},
 		StartedBy: aws.String("framemio-" + reason),
-		Tags: []types.Tag{
-			{Key: aws.String("product"), Value: aws.String("framemio")},
-			{Key: aws.String("jobId"), Value: aws.String(message.JobID)},
-			{Key: aws.String("jobType"), Value: aws.String(string(message.JobType))},
-			{Key: aws.String("reason"), Value: aws.String(reason)},
-		},
 	}
 	output, err := a.client.RunTask(ctx, input)
 	if err != nil {

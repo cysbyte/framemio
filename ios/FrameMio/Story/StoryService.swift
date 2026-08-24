@@ -80,9 +80,21 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
     }
 
     func renderAgain(id: String) async throws -> Story {
-        try await updateCachedStory(id: id) { story in
-            story.status = .rendering
+        let body: Data
+        do {
+            body = try encoder.encode(["output_preset": "social"])
+        } catch {
+            throw AppError.invalidResponse
         }
+        _ = try await apiClient.data(
+            for: APIRequest(
+                method: .post,
+                path: "/projects/\(id)/render",
+                body: body,
+                headers: ["Idempotency-Key": "ios-render-\(id)"]
+            )
+        )
+        return try await story(id: id)
     }
 
     func replaceMoment(storyID: String, assetID: String) async throws -> Story {

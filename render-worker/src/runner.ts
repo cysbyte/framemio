@@ -1,0 +1,153 @@
+import {setTimeout as sleep} from 'node:timers/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {AwsCliQueue, type ReceivedJobMessage} from './aws-cli.js';
+import {BackendClient} from './backend-client.js';
+import {ShellFfmpegClient} from './ffmpeg/client.js';
+import {FfmpegCompositionRenderer, RemotionCliRenderer} from './remotion/renderer.js';
+import {AwsCliObjectStore} from './storage/object-store.js';
+import {DeterministicRenderWorker} from './pipeline/render-worker.js';
+
+interface RunnerConfig {
+  queueURL: string;
+  backendURL: string;
+  internalToken: string;
+  bucket: string;
+  workRoot: string;
+  jobID?: string;
+  runOnce: boolean;
+  waitTimeoutMs: number;
+  visibilityTimeoutSeconds: number;
+  maxReceiveCount: number;
+  rendererMode: 'ffmpeg' | 'remotion';
+  remotionEntryPoint?: string;
+}
+
+export async function runRenderWorker(config = loadConfig()): Promise<void> {
+  const queue = new AwsCliQueue({queueURL: config.queueURL});
+  const backend = new BackendClient(config.backendURL, config.internalToken);
+  const worker = new DeterministicRenderWorker({
+    objectStore: new AwsCliObjectStore({bucket: config.bucket}),
+    ffmpeg: new ShellFfmpegClient(),
+    remotion: config.rendererMode === 'remotion'
+      ? new RemotionCliRenderer({entryPoint: required(config.remotionEntryPoint, 'REMOTION_ENTRY_POINT')})
+      : new FfmpegCompositionRenderer(),
+    workRoot: config.workRoot,
+  });
+  const startedAt = Date.now();
+  console.info(JSON.stringify({level: 'info', msg: 'render worker started', run_once: config.runOnce, job_id: config.jobID ?? '', renderer_mode: config.rendererMode}));
+
+  do {
+    const received = await queue.receive(10, 20, config.visibilityTimeoutSeconds);
+    for (const message of received) {
+      if (await handleMessage(message, {queue, backend, worker, config})) {
+        if (config.runOnce) {
+          return;
+        }
+      }
+    }
+    if (config.runOnce && Date.now() - startedAt >= config.waitTimeoutMs) {
+      throw new Error(`timed out waiting for render job ${config.jobID ?? ''}`);
+    }
+    if (!config.runOnce) {
+      await sleep(1000);
+    }
+  } while (!config.runOnce || Date.now() - startedAt < config.waitTimeoutMs);
+}
+
+async function handleMessage(received: ReceivedJobMessage, dependencies: {
+  queue: AwsCliQueue;
+  backend: BackendClient;
+  worker: DeterministicRenderWorker;
+  config: RunnerConfig;
+}): Promise<boolean> {
+  const {queue, backend, worker, config} = dependencies;
+  const message = received.message;
+  if (message.jobType !== 'VIDEO_RENDER' || (config.jobID && message.jobId !== config.jobID)) {
+    await queue.release(received.receiptHandle);
+    return false;
+  }
+  console.info(JSON.stringify({level: 'info', msg: 'handling render message', job_id: message.jobId, project_id: message.projectId, receive_count: received.receiveCount}));
+  if (received.receiveCount > config.maxReceiveCount) {
+    await backend.markFailed(message.jobId, new Error('render job exceeded queue receive limit'));
+    await queue.delete(received.receiptHandle);
+    return true;
+  }
+  try {
+    await backend.markRunning(message.jobId, 0.08);
+    const input = await backend.renderInput(message.jobId);
+    const result = await worker.render(input);
+    await backend.markCompleted(message.jobId, result.record.s3_key);
+    await queue.delete(received.receiptHandle);
+    console.info(JSON.stringify({level: 'info', msg: 'render message handled', job_id: message.jobId, output_s3_key: result.record.s3_key}));
+    return true;
+  } catch (error) {
+    console.error(JSON.stringify({level: 'error', msg: 'render message failed', job_id: message.jobId, error: error instanceof Error ? error.message : String(error)}));
+    await backend.markFailed(message.jobId, error);
+    await queue.delete(received.receiptHandle);
+    return true;
+  }
+}
+
+export function loadConfig(environment = process.env): RunnerConfig {
+  const rendererMode = (environment.RENDERER_MODE ?? environment.RENDER_MODE ?? 'ffmpeg').trim().toLowerCase();
+  if (rendererMode !== 'ffmpeg' && rendererMode !== 'remotion') {
+    throw new Error('RENDERER_MODE must be ffmpeg or remotion');
+  }
+  return {
+    queueURL: required(first(environment.SQS_RENDER_QUEUE_URL, environment.SQS_PROCESSING_QUEUE_URL, environment.SQS_VIDEO_ANALYSIS_QUEUE_URL), 'SQS_PROCESSING_QUEUE_URL'),
+    backendURL: required(first(environment.BACKEND_INTERNAL_API_URL, environment.BACKEND_URL, environment.API_BASE_URL), 'BACKEND_INTERNAL_API_URL'),
+    internalToken: required(environment.INTERNAL_API_TOKEN, 'INTERNAL_API_TOKEN'),
+    bucket: required(environment.S3_MEDIA_BUCKET, 'S3_MEDIA_BUCKET'),
+    workRoot: environment.RENDER_WORK_ROOT ?? path.join(tmpdir(), 'framemio-render-worker'),
+    jobID: environment.JOB_ID,
+    runOnce: bool(environment.WORKER_RUN_ONCE, false),
+    waitTimeoutMs: durationMs(environment.WORKER_RUN_ONCE_WAIT_TIMEOUT, 2 * 60 * 1000),
+    visibilityTimeoutSeconds: Math.round(durationMs(environment.SQS_VISIBILITY_TIMEOUT, 15 * 60 * 1000) / 1000),
+    maxReceiveCount: number(environment.MAX_JOB_ATTEMPTS, 5),
+    rendererMode,
+    remotionEntryPoint: environment.REMOTION_ENTRY_POINT,
+  };
+}
+
+function first(...values: Array<string | undefined>): string | undefined {
+  return values.find((value) => value && value.trim() !== '');
+}
+
+function required(value: string | undefined, name: string): string {
+  if (!value || value.trim() === '') {
+    throw new Error(`${name} is required`);
+  }
+  return value.trim();
+}
+
+function bool(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined || value === '') {
+    return fallback;
+  }
+  return ['1', 'true', 'yes', 'enabled'].includes(value.trim().toLowerCase());
+}
+
+function number(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function durationMs(value: string | undefined, fallback: number): number {
+  if (!value || value.trim() === '') {
+    return fallback;
+  }
+  const match = value.trim().match(/^(\d+)(ms|s|m)?$/);
+  if (!match) {
+    return fallback;
+  }
+  const amount = Number(match[1]);
+  const unit = match[2] ?? 'ms';
+  if (unit === 'm') {
+    return amount * 60_000;
+  }
+  if (unit === 's') {
+    return amount * 1000;
+  }
+  return amount;
+}

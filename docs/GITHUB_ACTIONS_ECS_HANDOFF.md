@@ -294,7 +294,7 @@ aws ecs list-tasks \
   --started-by framemio-render-worker
 ```
 
-Important current limitation: the render worker image is deployment/activation-ready but still needs its SQS runner or callback integration to perform full render jobs. The existing `render-worker` package exports the deterministic render pipeline; it does not yet contain a queue-consuming executable like the video intelligence worker.
+The render worker image now includes a queue-consuming executable. It uses `WORKER_RUN_ONCE=true` plus the backend-provided `JOB_ID` override to fetch the matching `VIDEO_RENDER` SQS message, call the backend render-input endpoint, upload the MP4 to S3, report status back to the backend, delete the SQS message, and exit.
 
 ## Database Authentication
 

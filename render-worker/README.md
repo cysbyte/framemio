@@ -25,3 +25,17 @@ For the same `StoryPlan`, source asset metadata, and renderer version, the worke
 - No StoryPlan validation beyond defensive input checks; invalid plans must be blocked by the backend validator before queueing render jobs.
 - No large media in API requests, SQS messages, or database records.
 - No PostgreSQL access; the backend persists render jobs and status before this worker runs.
+
+## Runtime
+
+The production entrypoint is `npm start`. It polls the shared processing SQS queue for `VIDEO_RENDER` messages, fetches render input from `GET /internal/jobs/:id/render-input`, downloads source objects from S3, uploads the MP4 output to S3, and reports completion through `POST /internal/jobs/:id/status`.
+
+Required ECS environment variables:
+
+- `SQS_PROCESSING_QUEUE_URL`
+- `BACKEND_INTERNAL_API_URL`
+- `INTERNAL_API_TOKEN`
+- `S3_MEDIA_BUCKET`
+- `AWS_REGION`
+
+For one-off ECS activation, the backend overrides `JOB_ID` and `WORKER_RUN_ONCE=true` so the render task drains exactly the queued render message and exits. `RENDERER_MODE=ffmpeg` is the current integration renderer; `RENDERER_MODE=remotion` can be enabled with `REMOTION_ENTRY_POINT` once the Remotion composition entrypoint is packaged.

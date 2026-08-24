@@ -11,7 +11,7 @@ struct StoryPreviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: FrameMioSpacing.section) {
                 if viewModel.isLoading && viewModel.story == nil {
-                    LoadingState(title: "Preparing your memories...", message: "Your story is being assembled securely in the background.")
+                    initialLoadingProgress
                         .frame(maxWidth: .infinity)
                 } else if let story = viewModel.story {
                     storyContent(story)
@@ -46,6 +46,30 @@ struct StoryPreviewView: View {
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
+    }
+
+    private var initialLoadingProgress: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            FrameMioProgressView(value: viewModel.progressValue, title: viewModel.progressTitle)
+
+            Text("Your story is being assembled securely in the background.")
+                .font(FrameMioTypography.footnote)
+                .foregroundStyle(FrameMioColors.secondaryInk)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: FrameMioMetrics.loadingStateMaxWidth)
+        .padding(FrameMioSpacing.xl)
+        .background(
+            FrameMioColors.surface.opacity(0.78),
+            in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+        }
+        .frameMioElevation(.subtle)
+        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder
@@ -117,7 +141,7 @@ struct StoryPreviewView: View {
                 .foregroundStyle(FrameMioColors.secondaryInk)
 
             if story.status != .ready {
-                FrameMioProgressView(value: nil, title: viewModel.progressTitle)
+                FrameMioProgressView(value: viewModel.progressValue, title: viewModel.progressTitle)
                 Text("Your story is finished outside the app, so the interface stays calm and responsive.")
                     .font(FrameMioTypography.footnote)
                     .foregroundStyle(FrameMioColors.secondaryInk)

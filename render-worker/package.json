@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc --noEmit",
     "start": "tsx src/index.ts",
-    "test": "node --test --import tsx src/**/*.test.ts",
+    "test": "node --test --import tsx src/*.test.ts src/**/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

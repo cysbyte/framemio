@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,9 +70,13 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if strings.HasPrefix(request.URL.Path, "/internal/jobs/") {
-		if request.Method == http.MethodPost {
-			parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
-			if len(parts) == 4 {
+		parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
+		if len(parts) == 4 {
+			if request.Method == http.MethodGet && parts[3] == "render-input" {
+				s.getRenderInput(response, request, parts[2])
+				return
+			}
+			if request.Method == http.MethodPost {
 				switch parts[3] {
 				case "status":
 					s.updateJobStatus(response, request, parts[2])
@@ -513,6 +518,109 @@ func (s *Server) renderProject(response http.ResponseWriter, request *http.Reque
 		}
 	}
 	s.writeJSON(response, http.StatusAccepted, jobsResponse{JobID: stored.ID, JobIDs: []string{stored.ID}, Jobs: []models.ProcessingJob{stored}})
+}
+
+type renderInputMediaAsset struct {
+	ID              string           `json:"id"`
+	MediaType       models.MediaType `json:"media_type"`
+	S3Key           string           `json:"s3_key"`
+	ContentType     string           `json:"content_type"`
+	DurationSeconds *float64         `json:"duration_seconds,omitempty"`
+	Width           int              `json:"width,omitempty"`
+	Height          int              `json:"height,omitempty"`
+	FileName        string           `json:"file_name,omitempty"`
+	ETag            string           `json:"etag,omitempty"`
+}
+
+type renderInputResponse struct {
+	JobID           string                  `json:"job_id"`
+	ProjectID       string                  `json:"project_id"`
+	StoryPlan       models.StoryPlan        `json:"story_plan"`
+	MediaAssets     []renderInputMediaAsset `json:"media_assets"`
+	OutputS3Key     string                  `json:"output_s3_key"`
+	RendererVersion string                  `json:"renderer_version,omitempty"`
+}
+
+func (s *Server) getRenderInput(response http.ResponseWriter, request *http.Request, jobID string) {
+	if !s.authenticateInternal(response, request) {
+		return
+	}
+	job, err := s.Store.GetJobByID(request.Context(), jobID)
+	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	if job.Type != models.JobTypeVideoRender {
+		s.writeError(response, http.StatusConflict, "invalid_job_type", "job does not accept render input")
+		return
+	}
+	if job.Status == models.JobStatusFailed || job.Status == models.JobStatusCancelled {
+		s.writeError(response, http.StatusConflict, "job_not_renderable", "failed or cancelled render jobs cannot be rendered")
+		return
+	}
+	project, err := s.Store.GetProject(request.Context(), job.UserID, job.ProjectID)
+	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	plan, err := s.Store.GetStoryPlan(request.Context(), job.UserID, job.ProjectID)
+	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	if expectedVersion, ok := configuredStoryPlanVersion(job.Configuration); ok && expectedVersion != plan.Version {
+		s.writeError(response, http.StatusConflict, "story_plan_version_mismatch", "render job targets a different story plan version")
+		return
+	}
+	assets := make([]renderInputMediaAsset, 0, len(project.MediaIDs))
+	for _, mediaID := range project.MediaIDs {
+		media, err := s.Store.GetMedia(request.Context(), job.UserID, mediaID)
+		if err != nil {
+			s.mapStoreError(response, err)
+			return
+		}
+		assets = append(assets, renderInputMediaAsset{
+			ID:              media.ID,
+			MediaType:       media.Type,
+			S3Key:           media.S3Key,
+			ContentType:     media.ContentType,
+			DurationSeconds: media.DurationSeconds,
+			Width:           media.PixelWidth,
+			Height:          media.PixelHeight,
+			FileName:        media.FileName,
+			ETag:            media.ETag,
+		})
+	}
+	outputKey := job.Configuration["output_s3_key"]
+	if strings.TrimSpace(outputKey) == "" {
+		outputKey = renderOutputKey(job.UserID, job.ProjectID, plan.Version, job.Configuration["output_preset"])
+	}
+	s.writeJSON(response, http.StatusOK, renderInputResponse{
+		JobID:       job.ID,
+		ProjectID:   job.ProjectID,
+		StoryPlan:   plan,
+		MediaAssets: assets,
+		OutputS3Key: outputKey,
+	})
+}
+
+func renderOutputKey(userID, projectID string, storyPlanVersion int, outputPreset string) string {
+	preset := strings.TrimSpace(outputPreset)
+	if preset == "" {
+		preset = "social"
+	}
+	return "users/" + userID + "/projects/" + projectID + "/renders/story-plan-v" + strconv.Itoa(storyPlanVersion) + "-" + preset + ".mp4"
+}
+
+func configuredStoryPlanVersion(configuration map[string]string) (int, bool) {
+	if configuration == nil || strings.TrimSpace(configuration["story_plan_version"]) == "" {
+		return 0, false
+	}
+	version, err := strconv.Atoi(configuration["story_plan_version"])
+	if err != nil || version <= 0 {
+		return 0, false
+	}
+	return version, true
 }
 
 type updateJobStatusRequest struct {
