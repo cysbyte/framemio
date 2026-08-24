@@ -286,7 +286,7 @@ func (s *Server) refreshIOSUploadSessionIfExpired(request *http.Request, userID 
 		s.Logger.Info("skip refresh for completed iOS upload session", "user_id", userID, "upload_id", session.ID, "media_id", session.MediaID, "strategy", string(session.Strategy), "completed_at", session.CompletedAt)
 		return session, false, nil
 	}
-	if session.ExpiresAt.After(s.Now().UTC().Add(60 * time.Second)) {
+	if session.ExpiresAt.After(s.Now().UTC().Add(15 * time.Minute)) {
 		return session, false, nil
 	}
 	media, err := s.Store.GetMedia(request.Context(), userID, session.MediaID)

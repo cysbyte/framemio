@@ -86,7 +86,7 @@ func NewECSRunTaskActivator(ctx context.Context, config ECSRunTaskConfig) (*ECSR
 }
 
 func NewECSRunTaskActivatorFromEnv(ctx context.Context, logger *slog.Logger) (*ECSRunTaskActivator, bool, error) {
-	if !readBool("ECS_WORKER_RUN_TASK_ENABLED", false) {
+	if !readBool(os.Getenv("ECS_WORKER_RUN_TASK_ENABLED"), false) {
 		return nil, false, nil
 	}
 	activator, err := NewECSRunTaskActivator(ctx, ECSRunTaskConfig{

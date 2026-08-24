@@ -63,7 +63,7 @@ struct StoryCreationView: View {
                     VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
                         LoadingState(title: viewModel.phaseTitle, message: "You can leave this screen; FrameMio will keep the work focused and quiet.")
                             .frame(maxWidth: .infinity)
-                        FrameMioProgressView(value: viewModel.progress, title: "Creating your story")
+                        FrameMioProgressView(value: viewModel.progress, title: viewModel.phaseTitle)
                     }
                 } else if let story = viewModel.story {
                     processingStartedCard(story)

@@ -9,6 +9,10 @@ private func storyCreationDebugLog(_ message: @autoclosure () -> String) {
 #endif
 }
 
+private enum StoryCreationAnalysisTimeoutError: Error {
+    case timedOut
+}
+
 @MainActor
 final class StoryCreationViewModel: ObservableObject {
     @Published private(set) var progress: Double = 0
@@ -88,7 +92,7 @@ final class StoryCreationViewModel: ObservableObject {
 
             do {
                 storyCreationDebugLog("phase=upload_start progress=\(progress)")
-                phaseTitle = "Looking through your videos..."
+                phaseTitle = "Uploading your photos and videos..."
                 let selection = MediaSelection(explicitlySelectedAssetIDs: assets.map(\.id))
                 _ = try await mediaUploadService.upload(
                     selection: selection,
@@ -153,7 +157,11 @@ final class StoryCreationViewModel: ObservableObject {
                 storyCreationDebugLog("phase=analysis_enqueue asset=\(asset.id) kind=\(asset.kind.rawValue)")
                 group.addTask { [analysisService] in
                     try Task.checkCancellation()
-                    return try await analysisService.analyze(asset: asset)
+                    return try await Self.analyzeWithFallback(
+                        asset: asset,
+                        analysisService: analysisService,
+                        timeout: .seconds(8)
+                    )
                 }
             }
 
@@ -164,6 +172,54 @@ final class StoryCreationViewModel: ObservableObject {
             }
         }
         return analyses.sorted { $0.assetID < $1.assetID }
+    }
+
+    private static func analyzeWithFallback(
+        asset: MediaAsset,
+        analysisService: MediaAnalysisService,
+        timeout: Duration
+    ) async throws -> MediaAnalysis {
+        do {
+            return try await withThrowingTaskGroup(of: MediaAnalysis.self) { group in
+                group.addTask {
+                    try await analysisService.analyze(asset: asset)
+                }
+                group.addTask {
+                    try await Task.sleep(for: timeout)
+                    throw StoryCreationAnalysisTimeoutError.timedOut
+                }
+
+                do {
+                    guard let analysis = try await group.next() else {
+                        group.cancelAll()
+                        return fallbackAnalysis(for: asset)
+                    }
+                    group.cancelAll()
+                    return analysis
+                } catch is CancellationError {
+                    group.cancelAll()
+                    throw CancellationError()
+                } catch {
+                    group.cancelAll()
+                    storyCreationDebugLog("phase=analysis_fallback asset=\(asset.id) kind=\(asset.kind.rawValue) error=\(error.localizedDescription)")
+                    return fallbackAnalysis(for: asset)
+                }
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            storyCreationDebugLog("phase=analysis_fallback asset=\(asset.id) kind=\(asset.kind.rawValue) error=\(error.localizedDescription)")
+            return fallbackAnalysis(for: asset)
+        }
+    }
+
+    private static func fallbackAnalysis(for asset: MediaAsset) -> MediaAnalysis {
+        MediaAnalysis(
+            assetID: asset.id,
+            labels: asset.isVideo ? ["video", "memory"] : ["photo", "memory"],
+            peopleCount: 0,
+            confidence: 0.35
+        )
     }
 
     deinit {

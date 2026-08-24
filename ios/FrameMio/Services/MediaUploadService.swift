@@ -251,23 +251,9 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
 
             var session = record.session
             if session == nil || session?.isUsable() == false {
-                let metadata = MediaUploadMetadata(
-                    assetID: record.assetID,
-                    mediaType: record.mediaType,
-                    contentType: record.contentType,
-                    fileName: record.fileName,
-                    fileSizeBytes: record.fileSizeBytes,
-                    duration: record.duration,
-                    creationDate: record.creationDate,
-                    pixelWidth: record.pixelWidth,
-                    pixelHeight: record.pixelHeight,
-                    orientation: record.orientation,
-                    optimization: record.optimization,
-                    preferredPartSizeBytes: options.partSizeBytes
-                )
                 mediaUploadDebugLog("authorizing session upload=\(record.id) asset=\(record.assetID) bytes=\(record.fileSizeBytes)")
                 session = try await authorizer.createUploadSession(
-                    metadata: metadata,
+                    metadata: uploadMetadata(from: record, options: options),
                     idempotencyKey: record.id
                 )
                 mediaUploadDebugLog("authorized session upload=\(record.id) session=\(session?.uploadID ?? "nil") media=\(session?.mediaID ?? "nil") strategy=\(session?.strategy.rawValue ?? "nil") parts=\(session?.parts.count ?? 0) completed_parts=\(session?.parts.filter(\.isCompleted).count ?? 0) usable=\(session?.isUsable() ?? false)")
@@ -373,6 +359,10 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
                 continue
             }
 
+            session = try await refreshSessionIfNeeded(session, record: record, options: options)
+            record.session = session
+            try await store.save(record)
+
             let uploadFileURL = try makePartFileIfNeeded(
                 sourceURL: fileURL,
                 part: session.parts[index],
@@ -457,6 +447,65 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
                 }
             }
         }
+    }
+
+    private func uploadMetadata(from record: MediaUpload, options: MediaUploadOptions) -> MediaUploadMetadata {
+        MediaUploadMetadata(
+            assetID: record.assetID,
+            mediaType: record.mediaType,
+            contentType: record.contentType,
+            fileName: record.fileName,
+            fileSizeBytes: record.fileSizeBytes,
+            duration: record.duration,
+            creationDate: record.creationDate,
+            pixelWidth: record.pixelWidth,
+            pixelHeight: record.pixelHeight,
+            orientation: record.orientation,
+            optimization: record.optimization,
+            preferredPartSizeBytes: options.partSizeBytes
+        )
+    }
+
+    private func refreshSessionIfNeeded(
+        _ session: UploadSession,
+        record: MediaUpload,
+        options: MediaUploadOptions
+    ) async throws -> UploadSession {
+        guard let expiresAt = session.expiresAt else {
+            return session
+        }
+        guard expiresAt <= Date().addingTimeInterval(15 * 60) else {
+            return session
+        }
+
+        mediaUploadDebugLog("refreshing upload session upload=\(record.id) session=\(session.uploadID) expires_at=\(expiresAt)")
+        let refreshed = try await authorizer.createUploadSession(
+            metadata: uploadMetadata(from: record, options: options),
+            idempotencyKey: record.id
+        )
+        return mergeCompletedParts(from: session, into: refreshed)
+    }
+
+    private func mergeCompletedParts(from current: UploadSession, into refreshed: UploadSession) -> UploadSession {
+        let completedParts = Dictionary(
+            uniqueKeysWithValues: current.parts.compactMap { part -> (Int, UploadPart)? in
+                guard part.isCompleted else { return nil }
+                return (part.partNumber, part)
+            }
+        )
+        guard !completedParts.isEmpty else {
+            return refreshed
+        }
+
+        var merged = refreshed
+        for index in merged.parts.indices {
+            guard let completed = completedParts[merged.parts[index].partNumber] else { continue }
+            merged.parts[index].status = .completed
+            merged.parts[index].attempts = completed.attempts
+            merged.parts[index].eTag = completed.eTag
+            merged.parts[index].lastError = completed.lastError
+        }
+        return merged
     }
 
     private func materializeFile(

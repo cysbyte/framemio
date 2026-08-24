@@ -58,7 +58,7 @@ func NewS3ObjectStorage(ctx context.Context, bucket string, partSizeBytes int64,
 		multipartThreshold = partSizeBytes
 	}
 	if expiry <= 0 {
-		expiry = 15 * time.Minute
+		expiry = 2 * time.Hour
 	}
 	client := s3.NewFromConfig(cfg)
 	return &S3ObjectStorage{
@@ -306,7 +306,7 @@ func (s StaticObjectStorage) AuthorizeUpload(_ context.Context, request UploadAu
 		threshold = partSize
 	}
 	now := time.Now().UTC()
-	expiresAt := now.Add(15 * time.Minute)
+	expiresAt := now.Add(2 * time.Hour)
 	key := fmt.Sprintf("users/%s/media/%s", request.UserID, request.MediaID)
 	strategy := models.UploadStrategySingle
 	if request.FileSizeBytes >= threshold {
@@ -330,7 +330,7 @@ func (s StaticObjectStorage) AuthorizeUpload(_ context.Context, request UploadAu
 }
 
 func (s StaticObjectStorage) RefreshUpload(_ context.Context, session models.UploadSession, request UploadRefreshRequest) (models.UploadSession, error) {
-	expiresAt := time.Now().UTC().Add(15 * time.Minute)
+	expiresAt := time.Now().UTC().Add(2 * time.Hour)
 	refreshed := session
 	refreshed.ExpiresAt = expiresAt
 	if len(refreshed.Parts) == 0 && refreshed.Strategy == models.UploadStrategySingle {

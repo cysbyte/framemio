@@ -40,7 +40,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	objects, err := storage.NewS3ObjectStorage(ctx, configuration.S3Bucket, configuration.PartSizeBytes, configuration.MultipartThresholdBytes, 15*time.Minute)
+	objects, err := storage.NewS3ObjectStorage(ctx, configuration.S3Bucket, configuration.PartSizeBytes, configuration.MultipartThresholdBytes, 2*time.Hour)
 	if err != nil {
 		logger.Error("configure object storage", slog.Any("error", err))
 		os.Exit(1)

@@ -14,3 +14,11 @@ func TestNilECSRunTaskActivatorIsNoop(t *testing.T) {
 		t.Fatalf("nil activator returned error: %v", err)
 	}
 }
+
+func TestReadBoolAcceptsEnabledValues(t *testing.T) {
+	for _, value := range []string{"1", "true", "yes", "enabled"} {
+		if !readBool(value, false) {
+			t.Fatalf("readBool(%q) = false, want true", value)
+		}
+	}
+}
