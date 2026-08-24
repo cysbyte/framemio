@@ -422,6 +422,62 @@ func TestIOSStoriesCompatibilityCreatesProjectAndFetchesStories(t *testing.T) {
 	}
 }
 
+func TestGetIOSStoryReconcilesCompletedVideoPreprocess(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	handler := newTestServer(memoryStore, publisher).Handler()
+	createReadyIOSMediaInStore(t, memoryStore, "asset-video-1", models.MediaTypeVideo, 1_024)
+	now := time.Date(2026, time.August, 19, 10, 0, 0, 0, time.UTC)
+	project := models.StoryProject{
+		ID:        "project-stalled-ios",
+		UserID:    "user-1",
+		Title:     "Special moments story",
+		Context:   "Special moments",
+		MediaIDs:  []string{"media-asset-video-1"},
+		Status:    models.ProjectStatusAnalyzing,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if _, _, err := memoryStore.CreateProject(ctx, project, "stalled-ios-project"); err != nil {
+		t.Fatal(err)
+	}
+	completed := models.ProcessingJob{
+		ID:            "job-completed-preprocess",
+		UserID:        project.UserID,
+		ProjectID:     project.ID,
+		MediaID:       "media-asset-video-1",
+		Type:          models.JobTypeMediaPreprocess,
+		Status:        models.JobStatusCompleted,
+		Progress:      1,
+		MaxAttempts:   3,
+		Configuration: map[string]string{"pipeline_version": "async-pipeline-v1", "job_type": string(models.JobTypeMediaPreprocess)},
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		CompletedAt:   &now,
+	}
+	if _, _, err := memoryStore.CreateJob(ctx, completed, "completed-preprocess"); err != nil {
+		t.Fatal(err)
+	}
+
+	response := performJSON(t, handler, http.MethodGet, "/v1/stories/"+project.ID, nil, "", true, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("get iOS story status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if countMessageType(publisher.Messages(), models.JobTypeTranscribe) != 1 {
+		t.Fatalf("expected stalled completed preprocess to enqueue transcribe, got %+v", publisher.Messages())
+	}
+	jobs, err := memoryStore.ListProjectJobs(ctx, project.UserID, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countType(jobs, models.JobTypeTranscribe) != 1 {
+		t.Fatalf("expected exactly one transcribe job after reconciliation, got %+v", jobs)
+	}
+}
+
 func TestIOSStoriesCompatibilityRejectsStoriesOverTotalUploadLimit(t *testing.T) {
 	t.Parallel()
 

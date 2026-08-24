@@ -62,6 +62,7 @@ func (s *Server) listIOSStories(response http.ResponseWriter, request *http.Requ
 	}
 	stories := make([]iosStory, 0, len(projects))
 	for _, project := range projects {
+		project = s.reconcileIOSStoryProgress(request, user.ID, project)
 		stories = append(stories, s.makeIOSStory(request, user.ID, project))
 	}
 	s.writeJSON(response, http.StatusOK, stories)
@@ -77,7 +78,45 @@ func (s *Server) getIOSStory(response http.ResponseWriter, request *http.Request
 		s.mapStoreError(response, err)
 		return
 	}
+	project = s.reconcileIOSStoryProgress(request, user.ID, project)
 	s.writeJSON(response, http.StatusOK, s.makeIOSStory(request, user.ID, project))
+}
+
+func (s *Server) reconcileIOSStoryProgress(request *http.Request, userID string, project models.StoryProject) models.StoryProject {
+	if project.Status != models.ProjectStatusAnalyzing || s.Orchestrator == nil {
+		return project
+	}
+	jobs, err := s.Store.ListProjectJobs(request.Context(), userID, project.ID)
+	if err != nil {
+		s.Logger.Warn("reconcile iOS story jobs failed", "user_id", userID, "project_id", project.ID, "error", err)
+		return project
+	}
+	for _, job := range jobs {
+		if !models.IsTerminalJobStatus(job.Status) {
+			return project
+		}
+	}
+	advanced := false
+	for _, job := range jobs {
+		if job.Status != models.JobStatusCompleted {
+			continue
+		}
+		if err := s.Orchestrator.AdvanceAfterJob(request.Context(), job); err != nil {
+			s.Logger.Warn("reconcile iOS story advancement failed", "user_id", userID, "project_id", project.ID, "job_id", job.ID, "job_type", string(job.Type), "error", err)
+			return project
+		}
+		advanced = true
+	}
+	if !advanced {
+		return project
+	}
+	updated, err := s.Store.GetProject(request.Context(), userID, project.ID)
+	if err != nil {
+		s.Logger.Warn("reload reconciled iOS story failed", "user_id", userID, "project_id", project.ID, "error", err)
+		return project
+	}
+	s.Logger.Info("reconciled stalled iOS story", "user_id", userID, "project_id", project.ID, "status", string(updated.Status))
+	return updated
 }
 
 func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Request) {
