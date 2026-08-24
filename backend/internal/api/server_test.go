@@ -359,12 +359,44 @@ func TestIOSUploadContractCompatibility(t *testing.T) {
 	if session.UploadID == "" || session.MediaID == "" || len(session.Parts) != 1 || session.Parts[0].PresignedURL == "" || session.Parts[0].Status != "pending" {
 		t.Fatalf("invalid iOS upload session: %+v", session)
 	}
+	if session.Completed {
+		t.Fatalf("a fresh session must not be reported completed: %+v", session)
+	}
 
 	notify := performJSON(t, handler, http.MethodPost, "/v1/media/uploads/complete", map[string]any{
 		"mediaId": session.MediaID, "uploadId": session.UploadID, "s3Key": session.S3Key, "mediaType": "photo",
 	}, "", true, nil)
 	if notify.Code != http.StatusOK {
 		t.Fatalf("iOS completion status = %d, body = %s", notify.Code, notify.Body.String())
+	}
+
+	// Re-requesting a session for bytes already in S3 must report completion.
+	// Presigned URLs are never refreshed for a completed session, so describing
+	// its parts as pending work sends the client into an unbreakable retry loop
+	// against dead URLs.
+	replay := performJSON(t, handler, http.MethodPost, "/v1/media/upload-sessions", map[string]any{
+		"idempotencyKey": "media-upload-original-asset-1",
+		"metadata": map[string]any{
+			"assetID": "asset-1", "mediaType": "photo", "contentType": "image/jpeg", "fileName": "IMG_0001.JPG",
+			"fileSizeBytes": 100, "pixelWidth": 4032, "pixelHeight": 3024, "orientation": "landscape",
+			"optimization": "original", "preferredPartSizeBytes": 8 * 1024 * 1024,
+		},
+	}, "", true, nil)
+	if replay.Code != http.StatusOK {
+		t.Fatalf("replay status = %d, body = %s", replay.Code, replay.Body.String())
+	}
+	var replayed iosUploadSessionResponse
+	decodeResponse(t, replay, &replayed)
+	if replayed.UploadID != session.UploadID {
+		t.Fatalf("replay returned a different session: %s want %s", replayed.UploadID, session.UploadID)
+	}
+	if !replayed.Completed {
+		t.Fatalf("completed session must report completed: %+v", replayed)
+	}
+	for _, part := range replayed.Parts {
+		if part.Status != "completed" {
+			t.Fatalf("completed session part %d status = %s, want completed", part.PartNumber, part.Status)
+		}
 	}
 }
 

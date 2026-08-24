@@ -37,7 +37,12 @@ type iosUploadSessionResponse struct {
 	PartSizeBytes       int64                   `json:"partSizeBytes"`
 	S3MultipartUploadID *string                 `json:"s3MultipartUploadID,omitempty"`
 	ExpiresAt           *string                 `json:"expiresAt,omitempty"`
-	Parts               []iosUploadPartResponse `json:"parts"`
+	// Completed reports that the bytes for this session are already in S3.
+	// Presigned part URLs are not refreshed for a completed session, so without
+	// this the client is handed expired URLs described as pending work and
+	// retries an upload that can never succeed.
+	Completed bool                    `json:"completed"`
+	Parts     []iosUploadPartResponse `json:"parts"`
 }
 
 type iosUploadPartResponse struct {
@@ -263,11 +268,20 @@ func (s *Server) notifyIOSUploadComplete(response http.ResponseWriter, request *
 }
 
 func makeIOSUploadSession(session models.UploadSession) iosUploadSessionResponse {
+	// A completed session's parts are already durable in S3. Reporting them as
+	// pending sends the client back to presigned URLs that refreshIOSUpload-
+	// SessionIfExpired deliberately will not renew, which it can only answer by
+	// retrying forever.
+	completed := session.CompletedAt != nil
+	partStatus := "pending"
+	if completed {
+		partStatus = "completed"
+	}
 	parts := make([]iosUploadPartResponse, 0, len(session.Parts))
 	for _, part := range session.Parts {
 		parts = append(parts, iosUploadPartResponse{
 			PartNumber: part.PartNumber, OffsetBytes: part.OffsetBytes, LengthBytes: part.LengthBytes,
-			PresignedURL: part.UploadURL, Status: "pending", Attempts: 0,
+			PresignedURL: part.UploadURL, Status: partStatus, Attempts: 0,
 		})
 	}
 	var multipartUploadID *string
@@ -277,7 +291,8 @@ func makeIOSUploadSession(session models.UploadSession) iosUploadSessionResponse
 	expiresAt := iosTimeString(session.ExpiresAt)
 	return iosUploadSessionResponse{
 		UploadID: session.ID, MediaID: session.MediaID, S3Key: session.S3Key, Strategy: session.Strategy,
-		PartSizeBytes: session.PartSizeBytes, S3MultipartUploadID: multipartUploadID, ExpiresAt: stringPointer(expiresAt), Parts: parts,
+		PartSizeBytes: session.PartSizeBytes, S3MultipartUploadID: multipartUploadID, ExpiresAt: stringPointer(expiresAt),
+		Completed: completed, Parts: parts,
 	}
 }
 

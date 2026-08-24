@@ -283,21 +283,31 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
             }
             mediaUploadDebugLog("using session upload=\(record.id) session=\(session.uploadID) media=\(session.mediaID) strategy=\(session.strategy.rawValue) parts=\(session.parts.count) completed_parts=\(session.parts.filter(\.isCompleted).count) usable=\(session.isUsable())")
 
+            // The server already holds these bytes. Re-uploading is impossible
+            // anyway: it refuses to refresh a completed session's presigned URLs,
+            // and the S3 multipart upload was finalized, so its uploadID is gone.
+            let alreadyUploaded = session.isAlreadyUploaded
+            if alreadyUploaded {
+                mediaUploadDebugLog("session already uploaded upload=\(record.id) session=\(session.uploadID) media=\(session.mediaID) bytes=\(record.fileSizeBytes)")
+            }
+
             record.status = .uploading
             try await store.save(record)
-            try await uploadParts(
-                session: &session,
-                record: &record,
-                options: options,
-                totalUploads: totalUploads,
-                progress: progress
-            )
+            if !alreadyUploaded {
+                try await uploadParts(
+                    session: &session,
+                    record: &record,
+                    options: options,
+                    totalUploads: totalUploads,
+                    progress: progress
+                )
+            }
 
             record.status = .completing
             record.session = session
             try await store.save(record)
             mediaUploadDebugLog("all parts uploaded upload=\(record.id) session=\(session.uploadID) strategy=\(session.strategy.rawValue) completed_parts=\(session.parts.filter(\.isCompleted).count)/\(session.parts.count)")
-            if session.strategy == .multipart {
+            if session.strategy == .multipart && !alreadyUploaded {
                 let completedParts = session.parts.compactMap { part -> MultipartPartCompletion? in
                     guard let eTag = part.eTag else { return nil }
                     return MultipartPartCompletion(partNumber: part.partNumber, eTag: eTag)
@@ -485,6 +495,11 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         record: MediaUpload,
         options: MediaUploadOptions
     ) async throws -> UploadSession {
+        // Refreshing a completed session returns the same expired URLs, so this
+        // would spin without ever making progress.
+        if session.isAlreadyUploaded {
+            return session
+        }
         guard let expiresAt = session.expiresAt else {
             return session
         }

@@ -61,9 +61,22 @@ struct UploadSession: Codable, Hashable, Sendable {
     let partSizeBytes: Int64
     let s3MultipartUploadID: String?
     let expiresAt: Date?
+    /// The server reports the bytes are already durable in S3. Older responses
+    /// omit the field, so absence means "not known to be complete" and the
+    /// upload proceeds as usual.
+    var completed: Bool?
     var parts: [UploadPart]
 
+    var isAlreadyUploaded: Bool {
+        completed == true
+    }
+
+    /// A completed session is usable regardless of expiry: its presigned URLs
+    /// are never refreshed by the server, and nothing remains to upload.
     func isUsable(at date: Date = Date()) -> Bool {
+        if isAlreadyUploaded {
+            return true
+        }
         guard let expiresAt else {
             return true
         }
