@@ -1,6 +1,10 @@
 import Foundation
 import Security
 
+private func apiClientDebugLog(_ message: @autoclosure () -> String) {
+    print("[FrameMio][APIClient] \(message())")
+}
+
 enum APIClientError: Error, Sendable {
     case invalidURL
     case invalidResponse
@@ -11,15 +15,18 @@ final class URLSessionAPIClient: APIClient, @unchecked Sendable {
     private let baseURL: URL
     private let session: URLSession
     private let tokenProvider: AuthTokenProvider
+    private let maxNetworkRetries: Int
 
     init(
         baseURL: URL,
         session: URLSession = .shared,
-        tokenProvider: AuthTokenProvider
+        tokenProvider: AuthTokenProvider,
+        maxNetworkRetries: Int = 1
     ) {
         self.baseURL = baseURL
         self.session = session
         self.tokenProvider = tokenProvider
+        self.maxNetworkRetries = max(0, maxNetworkRetries)
     }
 
     func data(for request: APIRequest) async throws -> Data {
@@ -45,12 +52,9 @@ final class URLSessionAPIClient: APIClient, @unchecked Sendable {
             urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
-        let (data, response) = try await session.data(for: urlRequest)
-        try Task.checkCancellation()
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw APIClientError.invalidResponse
-        }
+        apiClientDebugLog("request start method=\(request.method.rawValue) path=\(request.path) host=\(url.host ?? "nil")")
+        let (data, httpResponse) = try await dataWithTransientRetry(for: urlRequest)
+        apiClientDebugLog("request response method=\(request.method.rawValue) path=\(request.path) status=\(httpResponse.statusCode)")
 
         if httpResponse.statusCode == 401,
            urlRequest.value(forHTTPHeaderField: "Authorization") != nil,
@@ -65,6 +69,40 @@ final class URLSessionAPIClient: APIClient, @unchecked Sendable {
         return data
     }
 
+    private func dataWithTransientRetry(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        var attempts = 0
+        while true {
+            do {
+                let (data, response) = try await session.data(for: request)
+                try Task.checkCancellation()
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    throw APIClientError.invalidResponse
+                }
+                return (data, httpResponse)
+            } catch {
+                try Task.checkCancellation()
+                guard attempts < maxNetworkRetries, isTransientNetworkFailure(error) else {
+                    apiClientDebugLog("request failed url=\(request.url?.absoluteString ?? "nil") attempts=\(attempts + 1) error=\(error.localizedDescription)")
+                    throw error
+                }
+                attempts += 1
+                apiClientDebugLog("request retry url=\(request.url?.absoluteString ?? "nil") attempt=\(attempts) error=\(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func isTransientNetworkFailure(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else {
+            return false
+        }
+        switch urlError.code {
+        case .networkConnectionLost, .timedOut, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .notConnectedToInternet:
+            return true
+        default:
+            return false
+        }
+    }
+
     private func retryWithFreshToken(_ originalRequest: URLRequest) async throws -> Data? {
         await tokenProvider.invalidateAccessToken()
         guard let token = await tokenProvider.accessToken() else {
@@ -72,11 +110,7 @@ final class URLSessionAPIClient: APIClient, @unchecked Sendable {
         }
         var request = originalRequest
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await session.data(for: request)
-        try Task.checkCancellation()
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw APIClientError.invalidResponse
-        }
+        let (data, httpResponse) = try await dataWithTransientRetry(for: request)
         guard (200..<300).contains(httpResponse.statusCode) else {
             throw APIClientError.server(statusCode: httpResponse.statusCode)
         }

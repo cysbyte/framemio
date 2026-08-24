@@ -66,6 +66,7 @@
 		B60000000000000000000102 /* MediaClusterer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000002 /* MediaClusterer.swift */; };
 		B60000000000000000000103 /* MediaIntelligenceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000003 /* MediaIntelligenceStore.swift */; };
 		B60000000000000000000110 /* MediaIntelligenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000010 /* MediaIntelligenceTests.swift */; };
+		B60000000000000000000111 /* APIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000012 /* APIClientTests.swift */; };
 		C70000000000000000000101 /* MediaUploadModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70000000000000000000001 /* MediaUploadModels.swift */; };
 		C70000000000000000000102 /* MediaUploadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70000000000000000000002 /* MediaUploadService.swift */; };
 		C70000000000000000000103 /* MediaUploadMocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70000000000000000000003 /* MediaUploadMocks.swift */; };
@@ -147,6 +148,7 @@
 		B60000000000000000000003 /* MediaIntelligenceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaIntelligenceStore.swift; sourceTree = "<group>"; };
 		B60000000000000000000010 /* MediaIntelligenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaIntelligenceTests.swift; sourceTree = "<group>"; };
 		B60000000000000000000011 /* FrameMioTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FrameMioTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B60000000000000000000012 /* APIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClientTests.swift; sourceTree = "<group>"; };
 		C70000000000000000000001 /* MediaUploadModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaUploadModels.swift; sourceTree = "<group>"; };
 		C70000000000000000000002 /* MediaUploadService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaUploadService.swift; sourceTree = "<group>"; };
 		C70000000000000000000003 /* MediaUploadMocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaUploadMocks.swift; sourceTree = "<group>"; };
@@ -458,6 +460,7 @@
 		B60000000000000000000020 /* FrameMioTests */ = {
 			isa = PBXGroup;
 			children = (
+				B60000000000000000000012 /* APIClientTests.swift */,
 				B60000000000000000000010 /* MediaIntelligenceTests.swift */,
 				C70000000000000000000007 /* MediaUploadTests.swift */,
 			);
@@ -623,6 +626,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B60000000000000000000111 /* APIClientTests.swift in Sources */,
 				B60000000000000000000110 /* MediaIntelligenceTests.swift in Sources */,
 				C70000000000000000000107 /* MediaUploadTests.swift in Sources */,
 			);

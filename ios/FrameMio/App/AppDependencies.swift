@@ -19,11 +19,13 @@ struct AppDependencies {
 
     static func live() -> AppDependencies {
         let persistence = UserDefaultsStoryPersistence()
-        let tokenProvider = KeychainAuthTokenProvider(baseURL: AppConfiguration.apiBaseURL)
+        let apiSession = URLSession(configuration: AppConfiguration.apiSessionConfiguration)
+        let tokenProvider = KeychainAuthTokenProvider(baseURL: AppConfiguration.apiBaseURL, session: apiSession)
         let photoLibrary = PhotoKitPhotoLibraryService()
         let mediaIntelligenceStore = FileMediaIntelligenceStore()
         let apiClient = URLSessionAPIClient(
             baseURL: AppConfiguration.apiBaseURL,
+            session: apiSession,
             tokenProvider: tokenProvider
         )
         let uploadStore = FileMediaUploadStore()
@@ -94,5 +96,15 @@ enum AppConfiguration {
     static var apiBaseURL: URL {
         let configuredValue = Bundle.main.object(forInfoDictionaryKey: "APIBaseURL") as? String
         return URL(string: configuredValue ?? "https://api.framemio.com")!
+    }
+
+    static var apiSessionConfiguration: URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.urlCache = nil
+        configuration.waitsForConnectivity = true
+        configuration.timeoutIntervalForRequest = 60
+        configuration.timeoutIntervalForResource = 120
+        return configuration
     }
 }
