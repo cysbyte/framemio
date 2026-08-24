@@ -53,13 +53,19 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 				continue
 			}
 			if received.ApproximateReceiveCount > maxReceiveCount {
-				if _, err := w.Store.UpdateJob(ctx, received.Message.JobID, models.JobStatusFailed, 0, "max_receive_count_exceeded", "job exceeded queue receive limit", "", ""); err != nil {
+				job, err := w.Store.GetJobByID(ctx, received.Message.JobID)
+				if err != nil {
 					return err
 				}
-				if err := w.Consumer.MoveToDeadLetter(ctx, received, "max_receive_count_exceeded"); err != nil {
-					return err
+				if w.TargetJobID == "" || shouldDeadLetterForReceiveLimit(job) {
+					if _, err := w.Store.UpdateJob(ctx, received.Message.JobID, models.JobStatusFailed, 0, "max_receive_count_exceeded", "job exceeded queue receive limit", "", ""); err != nil {
+						return err
+					}
+					if err := w.Consumer.MoveToDeadLetter(ctx, received, "max_receive_count_exceeded"); err != nil {
+						return err
+					}
+					return nil
 				}
-				return nil
 			}
 			if err := w.handleReceived(ctx, received, visibilityTimeout); err != nil {
 				return err
@@ -110,6 +116,10 @@ func (w *Worker) handleReceived(ctx context.Context, received queue.ReceivedJobM
 		return err
 	}
 	return w.Consumer.Delete(ctx, received.ReceiptHandle)
+}
+
+func shouldDeadLetterForReceiveLimit(job models.ProcessingJob) bool {
+	return job.Attempt > 0 || job.Status == models.JobStatusRunning || job.Status == models.JobStatusFailed
 }
 
 func now(w *Worker) time.Time {

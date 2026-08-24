@@ -59,15 +59,30 @@ final class StoryPreviewViewModel: ObservableObject {
     func load() {
         loadTask?.cancel()
         loadTask = Task { [weak self] in
-            guard let self else { return }
+            await self?.pollStory()
+        }
+    }
+
+    private func pollStory() async {
+        if story == nil {
             isLoading = true
-            defer { isLoading = false }
+        }
+        defer { isLoading = false }
+
+        while !Task.isCancelled {
             do {
-                story = try await storyService.story(id: storyID)
+                let latest = try await storyService.story(id: storyID)
+                story = latest
                 errorMessage = nil
+                isLoading = false
+
+                guard latest.status.shouldPoll else { return }
+                try await Task.sleep(nanoseconds: 5_000_000_000)
             } catch is CancellationError {
+                return
             } catch {
                 errorMessage = AppError.from(error).localizedDescription
+                return
             }
         }
     }
@@ -145,6 +160,17 @@ enum StoryPreviewAction: Hashable, Sendable {
             "Replacing moment"
         case .removeMoment:
             "Removing moment"
+        }
+    }
+}
+
+private extension StoryStatus {
+    var shouldPoll: Bool {
+        switch self {
+        case .queued, .analyzing, .rendering:
+            true
+        case .ready, .failed:
+            false
         }
     }
 }

@@ -57,6 +57,43 @@ func TestWorkerRunOnceReleasesNonTargetMessage(t *testing.T) {
 	}
 }
 
+func TestWorkerRunOnceProcessesQueuedTargetWithInflatedReceiveCount(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore, _, coordinator, project, _ := setupProject(t, models.MediaTypePhoto)
+	targetJob, _, err := memoryStore.CreateJob(ctx, models.ProcessingJob{ID: "job-target-inflated", UserID: project.UserID, ProjectID: project.ID, Type: models.JobTypeStoryPlan, Status: models.JobStatusQueued, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}, "target-job-inflated")
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer := &memoryConsumer{received: []queue.ReceivedJobMessage{
+		{Message: queue.JobMessage{JobID: targetJob.ID, ProjectID: project.ID, JobType: targetJob.Type}, ReceiptHandle: "receipt-target", ApproximateReceiveCount: 10},
+	}}
+	worker := Worker{
+		Store:           memoryStore,
+		Consumer:        consumer,
+		Coordinator:     coordinator,
+		Handlers:        map[models.JobType]JobHandler{models.JobTypeStoryPlan: noopHandler{}},
+		TargetJobID:     targetJob.ID,
+		MaxReceiveCount: 5,
+	}
+	if err := worker.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(consumer.deadLetters) != 0 {
+		t.Fatalf("queued target should not be dead-lettered for pre-handler receives: %+v", consumer.deadLetters)
+	}
+	if len(consumer.deleted) != 1 || consumer.deleted[0] != "receipt-target" {
+		t.Fatalf("target message was not deleted after processing: %+v", consumer.deleted)
+	}
+	targetAfter, err := memoryStore.GetJob(ctx, project.UserID, targetJob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targetAfter.Status != models.JobStatusCompleted {
+		t.Fatalf("target job should complete: %+v", targetAfter)
+	}
+}
+
 type noopHandler struct{}
 
 func (noopHandler) HandleJob(context.Context, models.ProcessingJob) error { return nil }

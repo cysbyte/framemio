@@ -99,6 +99,11 @@ func (c *Consumer) RunOnce(ctx context.Context, handler Handler, targetJobID str
 			if !ok {
 				continue
 			}
+			if !isVideoAnalysisJobType(jobMessage.JobType) {
+				c.logger.Info("release non-video-analysis message", slog.String("job_id", jobMessage.JobID), slog.String("job_type", jobMessage.JobType))
+				c.release(runContext, message)
+				continue
+			}
 			if targetJobID != "" && jobMessage.JobID != targetJobID {
 				c.logger.Info("release non-target video analysis message", slog.String("target_job_id", targetJobID), slog.String("job_id", jobMessage.JobID))
 				c.release(runContext, message)
@@ -124,6 +129,11 @@ func (c *Consumer) handleMessage(ctx context.Context, handler Handler, received 
 	}
 	message, ok := c.decodeMessage(ctx, received)
 	if !ok {
+		return
+	}
+	if !isVideoAnalysisJobType(message.JobType) {
+		c.logger.Info("release non-video-analysis message", slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID), slog.String("job_type", message.JobType))
+		c.release(ctx, received)
 		return
 	}
 	receiveCount := 1
@@ -224,6 +234,15 @@ func (c *Consumer) release(ctx context.Context, received types.Message) {
 func (c *Consumer) delete(ctx context.Context, receiptHandle string) {
 	if _, err := c.client.DeleteMessage(ctx, &sqs.DeleteMessageInput{QueueUrl: aws.String(c.queueURL), ReceiptHandle: aws.String(receiptHandle)}); err != nil {
 		c.logger.Error("delete video analysis message", slog.Any("error", err))
+	}
+}
+
+func isVideoAnalysisJobType(jobType string) bool {
+	switch jobType {
+	case "analysis", "MEDIA_PREPROCESS", "TRANSCRIBE", "VIDEO_UNDERSTAND":
+		return true
+	default:
+		return false
 	}
 }
 
