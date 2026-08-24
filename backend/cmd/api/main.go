@@ -18,6 +18,7 @@ import (
 	"github.com/framemio/backend/internal/queue"
 	"github.com/framemio/backend/internal/storage"
 	"github.com/framemio/backend/internal/store"
+	"github.com/framemio/backend/internal/storyvalidation"
 	"github.com/framemio/backend/internal/workeractivation"
 )
 
@@ -64,7 +65,8 @@ func main() {
 		logger.Info("ECS worker RunTask activation enabled")
 	}
 
-	coordinator := orchestration.New(orchestration.Coordinator{Store: database, Publisher: publisher, Activator: activator, Logger: logger})
+	storyPlanValidator := storyvalidation.New(database, objects, storyvalidation.DefaultConfig())
+	coordinator := orchestration.New(orchestration.Coordinator{Store: database, Publisher: publisher, Activator: activator, Validator: storyPlanValidator, Logger: logger})
 	if configuration.WorkerRunOnce {
 		if err := runWorkerOnce(ctx, database, coordinator, configuration, logger); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.Error("backend worker run-once failed", slog.Any("error", err))
@@ -74,14 +76,15 @@ func main() {
 	}
 
 	application := api.NewServer(api.Server{
-		Store:         database,
-		ObjectStorage: objects,
-		Publisher:     publisher,
-		Activator:     activator,
-		Orchestrator:  coordinator,
-		Authenticator: api.HMACTokenAuthenticator{Secret: []byte(configuration.AuthHMACSecret)},
-		InternalToken: configuration.InternalAPIToken,
-		Logger:        logger,
+		Store:              database,
+		ObjectStorage:      objects,
+		Publisher:          publisher,
+		Activator:          activator,
+		Orchestrator:       coordinator,
+		StoryPlanValidator: storyPlanValidator,
+		Authenticator:      api.HMACTokenAuthenticator{Secret: []byte(configuration.AuthHMACSecret)},
+		InternalToken:      configuration.InternalAPIToken,
+		Logger:             logger,
 	})
 	httpServer := &http.Server{
 		Addr:              ":" + configuration.Port,

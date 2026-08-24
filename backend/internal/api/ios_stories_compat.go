@@ -83,7 +83,10 @@ func (s *Server) getIOSStory(response http.ResponseWriter, request *http.Request
 }
 
 func (s *Server) reconcileIOSStoryProgress(request *http.Request, userID string, project models.StoryProject) models.StoryProject {
-	if project.Status != models.ProjectStatusAnalyzing || s.Orchestrator == nil {
+	// story_ready is included because a StoryPlan that completed before the
+	// pipeline queued its render leaves the project parked there forever, which
+	// iOS reports as an endless "Finding meaningful moments".
+	if s.Orchestrator == nil || (project.Status != models.ProjectStatusAnalyzing && project.Status != models.ProjectStatusStoryReady) {
 		return project
 	}
 	jobs, err := s.Store.ListProjectJobs(request.Context(), userID, project.ID)

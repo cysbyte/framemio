@@ -159,22 +159,37 @@ func TestEndToEndMemoryVideoPipelineReusesCompletedStages(t *testing.T) {
 		t.Fatalf("story plan callback = %d, body = %s", storyPlanResponse.Code, storyPlanResponse.Body.String())
 	}
 
+	// A completed story plan advances itself through deterministic validation into
+	// rendering; the pipeline must not park on story_ready waiting for a client to
+	// ask for a render, because the iOS "Make My Day" flow never does.
 	validatedStatus := performJSON(t, handler, http.MethodGet, "/projects/"+createdProject.ID+"/status", nil, "", true, nil)
 	decodeResponse(t, validatedStatus, &statusBody)
-	if statusBody.Project.Status != models.ProjectStatusStoryReady {
-		t.Fatalf("project status = %s, want story_ready", statusBody.Project.Status)
+	if statusBody.Project.Status != models.ProjectStatusRendering {
+		t.Fatalf("project status = %s, want rendering after story plan callback", statusBody.Project.Status)
 	}
-	if countType(statusBody.Jobs, models.JobTypeStoryValidate) != 0 {
-		t.Fatalf("validation job should not be queued until rendering, got %+v", statusBody.Jobs)
+	if countType(statusBody.Jobs, models.JobTypeStoryValidate) != 1 || countType(statusBody.Jobs, models.JobTypeVideoRender) != 1 {
+		t.Fatalf("story plan completion should queue validation and render, got %+v", statusBody.Jobs)
 	}
 
-	renderResponse := performJSON(t, handler, http.MethodPost, "/projects/"+createdProject.ID+"/render", map[string]any{"output_preset": "social"}, "render-key", true, nil)
+	// The render identity is (project, story plan version, output preset), so an
+	// explicit request for the preset the plan already rendered under must reuse
+	// that job rather than render the same film a second time.
+	renderResponse := performJSON(t, handler, http.MethodPost, "/projects/"+createdProject.ID+"/render", map[string]any{"output_preset": plan.Output.Preset}, "render-key", true, nil)
 	if renderResponse.Code != http.StatusAccepted {
 		t.Fatalf("render status = %d, body = %s", renderResponse.Code, renderResponse.Body.String())
 	}
 	var renderJobs jobsResponse
 	decodeResponse(t, renderResponse, &renderJobs)
-	duplicateRender := performJSON(t, handler, http.MethodPost, "/projects/"+createdProject.ID+"/render", map[string]any{"output_preset": "social"}, "render-key", true, nil)
+	autoQueuedRenderID := ""
+	for _, queued := range statusBody.Jobs {
+		if queued.Type == models.JobTypeVideoRender {
+			autoQueuedRenderID = queued.ID
+		}
+	}
+	if renderJobs.JobID != autoQueuedRenderID {
+		t.Fatalf("explicit render job = %s, want the already-queued render %s", renderJobs.JobID, autoQueuedRenderID)
+	}
+	duplicateRender := performJSON(t, handler, http.MethodPost, "/projects/"+createdProject.ID+"/render", map[string]any{"output_preset": plan.Output.Preset}, "render-key", true, nil)
 	var duplicateRenderJobs jobsResponse
 	decodeResponse(t, duplicateRender, &duplicateRenderJobs)
 	if renderJobs.JobID != duplicateRenderJobs.JobID {

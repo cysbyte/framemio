@@ -1,1 +1,14 @@
 landing-page/
+
+# Node dependencies — restored with `npm ci`, never committed.
+node_modules/
+
+# Xcode build output and per-user state.
+ios/build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+
+# macOS
+.DS_Store

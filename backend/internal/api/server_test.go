@@ -330,8 +330,13 @@ func TestWorkerCallbacksPersistResultsIdempotently(t *testing.T) {
 	}
 	status = performJSON(t, handler, http.MethodGet, "/projects/"+project.ID+"/status", nil, "", true, nil)
 	decodeResponse(t, status, &statusBody)
-	if statusBody.Project.Status != models.ProjectStatusStoryReady || len(statusBody.Jobs) != 2 {
+	// The repeated story-plan callback above must still leave exactly one
+	// validation and one render job: advancing is idempotent.
+	if statusBody.Project.Status != models.ProjectStatusRendering || len(statusBody.Jobs) != 4 {
 		t.Fatalf("worker results did not update status: %+v", statusBody)
+	}
+	if countType(statusBody.Jobs, models.JobTypeStoryValidate) != 1 || countType(statusBody.Jobs, models.JobTypeVideoRender) != 1 {
+		t.Fatalf("story plan completion should queue one validation and one render, got %+v", statusBody.Jobs)
 	}
 }
 

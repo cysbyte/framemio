@@ -14,21 +14,24 @@ import (
 	"github.com/framemio/backend/internal/models"
 	"github.com/framemio/backend/internal/queue"
 	"github.com/framemio/backend/internal/store"
+	"github.com/framemio/backend/internal/storyvalidation"
 	"github.com/framemio/backend/internal/workeractivation"
 )
 
 const PipelineVersion = "async-pipeline-v1"
 
 const (
-	defaultMaxAttempts = 3
-	defaultBaseBackoff = 2 * time.Second
-	defaultMaxBackoff  = 5 * time.Minute
+	defaultMaxAttempts  = 3
+	defaultBaseBackoff  = 2 * time.Second
+	defaultMaxBackoff   = 5 * time.Minute
+	defaultOutputPreset = "social"
 )
 
 type Coordinator struct {
 	Store       store.Store
 	Publisher   queue.Publisher
 	Activator   workeractivation.Activator
+	Validator   storyvalidation.Service
 	Logger      *slog.Logger
 	Now         func() time.Time
 	MaxAttempts int
@@ -131,9 +134,18 @@ func (c *Coordinator) StartIOSAnalysis(ctx context.Context, userID, projectID, i
 	return jobs, nil
 }
 
+// RecordValidationAndQueueRender records the deterministic validation stage and
+// queues the render.
+//
+// A render is identified by (project, story plan version, output preset) rather
+// than by the caller's idempotency key, because that triple already determines
+// the output S3 object. Keying on it means the automatic post-story-plan advance
+// and an explicit /render request for the same plan converge on one job instead
+// of rendering the same film twice.
 func (c *Coordinator) RecordValidationAndQueueRender(ctx context.Context, userID, projectID, idempotencyKey string, storyPlanVersion int, outputPreset string) (models.ProcessingJob, error) {
-	configuration := map[string]string{"pipeline_version": PipelineVersion, "story_plan_version": strconv.Itoa(storyPlanVersion), "output_preset": outputPreset, "output_s3_key": renderOutputKey(userID, projectID, storyPlanVersion, outputPreset)}
-	validationJob, err := c.createStageJob(ctx, userID, projectID, "", models.JobTypeStoryValidate, configuration, idempotencyKey+":"+string(models.JobTypeStoryValidate), false)
+	preset := valueOrDefault(strings.TrimSpace(outputPreset), defaultOutputPreset)
+	configuration := map[string]string{"pipeline_version": PipelineVersion, "story_plan_version": strconv.Itoa(storyPlanVersion), "output_preset": preset, "output_s3_key": renderOutputKey(userID, projectID, storyPlanVersion, preset)}
+	validationJob, err := c.createStageJob(ctx, userID, projectID, "", models.JobTypeStoryValidate, configuration, stableValidateKey(projectID, storyPlanVersion, preset), false)
 	if err != nil {
 		return models.ProcessingJob{}, err
 	}
@@ -142,7 +154,7 @@ func (c *Coordinator) RecordValidationAndQueueRender(ctx context.Context, userID
 			return models.ProcessingJob{}, err
 		}
 	}
-	return c.createStageJob(ctx, userID, projectID, "", models.JobTypeVideoRender, configuration, idempotencyKey+":"+string(models.JobTypeVideoRender), true)
+	return c.createStageJob(ctx, userID, projectID, "", models.JobTypeVideoRender, configuration, stableRenderKey(projectID, storyPlanVersion, preset), true)
 }
 
 func (c *Coordinator) UpdateJobStatus(ctx context.Context, jobID string, status models.JobStatus, progress float64, errorCode, errorMessage, artifactS3Key, artifactType string) (models.ProcessingJob, error) {
@@ -196,7 +208,10 @@ func (c *Coordinator) AdvanceAfterJob(ctx context.Context, job models.Processing
 	case models.JobTypeVideoUnderstand:
 		return c.enqueueStoryPlanIfReady(ctx, job.UserID, job.ProjectID)
 	case models.JobTypeStoryPlan:
-		return c.Store.SetProjectStatus(ctx, job.UserID, job.ProjectID, models.ProjectStatusStoryReady)
+		if err := c.Store.SetProjectStatus(ctx, job.UserID, job.ProjectID, models.ProjectStatusStoryReady); err != nil {
+			return err
+		}
+		return c.AdvanceStoryPlanToRender(ctx, job.UserID, job.ProjectID)
 	case models.JobTypeStoryValidate:
 		version, _ := strconv.Atoi(job.Configuration["story_plan_version"])
 		_, err := c.createStageJob(ctx, job.UserID, job.ProjectID, "", models.JobTypeVideoRender, inheritConfiguration(job.Configuration), stableRenderKey(job.ProjectID, version, job.Configuration["output_preset"]), true)
@@ -206,6 +221,38 @@ func (c *Coordinator) AdvanceAfterJob(ctx context.Context, job models.Processing
 	default:
 		return nil
 	}
+}
+
+// AdvanceStoryPlanToRender carries a completed StoryPlan through deterministic
+// validation and into the render stage. The end-to-end pipeline owns this
+// transition: without it a project settles on ProjectStatusStoryReady and never
+// produces an MP4, which iOS renders forever as "Finding meaningful moments".
+func (c *Coordinator) AdvanceStoryPlanToRender(ctx context.Context, userID, projectID string) error {
+	plan, err := c.Store.GetStoryPlan(ctx, userID, projectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			c.Logger.Warn("story plan is not stored; cannot queue render", slog.String("project_id", projectID))
+			return nil
+		}
+		return err
+	}
+	preset := valueOrDefault(strings.TrimSpace(plan.Output.Preset), defaultOutputPreset)
+	// Section 17: validation is deterministic and invalid plans never reach rendering.
+	if c.Validator != nil {
+		if validationErr := c.Validator.Validate(ctx, userID, plan); validationErr != nil {
+			c.Logger.Error("story plan failed validation; render not queued", slog.String("project_id", projectID), slog.Int("story_plan_version", plan.Version), slog.Any("error", validationErr))
+			return c.Store.SetProjectStatus(ctx, userID, projectID, models.ProjectStatusFailed)
+		}
+	}
+	renderJob, err := c.RecordValidationAndQueueRender(ctx, userID, projectID, "", plan.Version, preset)
+	if err != nil {
+		return err
+	}
+	c.Logger.Info("queued render for completed story plan", slog.String("project_id", projectID), slog.String("job_id", renderJob.ID), slog.Int("story_plan_version", plan.Version), slog.String("output_preset", preset), slog.String("status", string(renderJob.Status)))
+	if models.IsTerminalJobStatus(renderJob.Status) {
+		return nil
+	}
+	return c.Store.SetProjectStatus(ctx, userID, projectID, models.ProjectStatusRendering)
 }
 
 func (c *Coordinator) enqueueStoryPlanIfReady(ctx context.Context, userID, projectID string) error {
@@ -333,6 +380,10 @@ func smallConfiguration(configuration map[string]string) map[string]string {
 
 func stableStageKey(projectID, mediaID string, jobType models.JobType) string {
 	return projectID + ":" + mediaID + ":" + string(jobType) + ":" + PipelineVersion
+}
+
+func stableValidateKey(projectID string, storyPlanVersion int, outputPreset string) string {
+	return projectID + ":" + strconv.Itoa(storyPlanVersion) + ":" + outputPreset + ":" + string(models.JobTypeStoryValidate) + ":" + PipelineVersion
 }
 
 func stableRenderKey(projectID string, storyPlanVersion int, outputPreset string) string {

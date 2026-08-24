@@ -1,4 +1,0 @@
-Target dependency graph (2 targets)
-Target 'FrameMioTests' in project 'FrameMio'
-➜ Explicit dependency on target 'FrameMio' in project 'FrameMio'
-Target 'FrameMio' in project 'FrameMio' (no dependencies)

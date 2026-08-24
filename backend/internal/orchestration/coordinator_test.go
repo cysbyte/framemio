@@ -186,6 +186,112 @@ func TestWorkerUsesVisibilityAndDeadLetterQueue(t *testing.T) {
 	}
 }
 
+// A completed story plan must carry itself into rendering. Parking on
+// story_ready waits for a render request that the iOS flow never sends, which
+// the app shows as an endless "Finding meaningful moments".
+func TestCompletedStoryPlanAdvancesItselfIntoRendering(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore, publisher, coordinator, project, _ := setupProject(t, models.MediaTypePhoto)
+	storyPlan := completeThroughStoryPlan(t, memoryStore, publisher, coordinator, project, "advance-key")
+
+	rendering, err := memoryStore.GetProject(ctx, project.UserID, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rendering.Status != models.ProjectStatusRendering {
+		t.Fatalf("project status = %s, want rendering", rendering.Status)
+	}
+	render := latestMessageOfType(t, publisher, models.JobTypeVideoRender)
+	if render.ProjectID != project.ID {
+		t.Fatalf("render message is not project scoped: %+v", render)
+	}
+	jobs, err := memoryStore.ListProjectJobs(ctx, project.UserID, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countType(jobs, models.JobTypeStoryValidate) != 1 || countType(jobs, models.JobTypeVideoRender) != 1 {
+		t.Fatalf("want exactly one validate and one render job: %+v", jobs)
+	}
+
+	// Replaying the same story-plan completion must converge on the one render.
+	if err := coordinator.AdvanceStoryPlanToRender(ctx, project.UserID, project.ID); err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := memoryStore.ListProjectJobs(ctx, project.UserID, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countType(replayed, models.JobTypeVideoRender) != 1 || countType(replayed, models.JobTypeStoryValidate) != 1 {
+		t.Fatalf("advancing twice duplicated jobs: %+v", replayed)
+	}
+	if storyPlan.Version != 1 {
+		t.Fatalf("story plan version = %d, want 1", storyPlan.Version)
+	}
+}
+
+// Section 17: validation is deterministic and an invalid plan never reaches the
+// render stage.
+func TestInvalidStoryPlanFailsProjectInsteadOfRendering(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore, publisher, coordinator, project, _ := setupProject(t, models.MediaTypePhoto)
+	coordinator.Validator = rejectingValidator{}
+	completeThroughStoryPlan(t, memoryStore, publisher, coordinator, project, "invalid-key")
+
+	failed, err := memoryStore.GetProject(ctx, project.UserID, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Status != models.ProjectStatusFailed {
+		t.Fatalf("project status = %s, want failed", failed.Status)
+	}
+	jobs, err := memoryStore.ListProjectJobs(ctx, project.UserID, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countType(jobs, models.JobTypeVideoRender) != 0 {
+		t.Fatalf("invalid plan reached the render stage: %+v", jobs)
+	}
+}
+
+// completeThroughStoryPlan drives the analysis chain to a completed STORY_PLAN
+// job with a stored plan, which is the state the auto-advance reacts to.
+func completeThroughStoryPlan(t *testing.T, memoryStore *store.MemoryStore, publisher *queue.MemoryPublisher, coordinator *Coordinator, project models.StoryProject, idempotencyKey string) models.StoryPlan {
+	t.Helper()
+	ctx := context.Background()
+	jobs, err := coordinator.StartAnalysis(ctx, project.UserID, project.ID, idempotencyKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stage := range jobs {
+		if _, err := coordinator.UpdateJobStatus(ctx, stage.ID, models.JobStatusCompleted, 1, "", "", "", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	planMessage := latestMessageOfType(t, publisher, models.JobTypeStoryPlan)
+	plan := models.StoryPlan{
+		ID:        "story-plan-1",
+		ProjectID: project.ID,
+		Version:   1,
+		Moments:   []models.StoryMoment{{MediaID: "media-1", DurationMS: 2000}},
+		Output:    models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 30, Preset: "premium-memory"},
+	}
+	if err := memoryStore.SaveStoryPlan(ctx, project.UserID, plan); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordinator.UpdateJobStatus(ctx, planMessage.JobID, models.JobStatusCompleted, 1, "", "", "plans/story-plan-1.json", "application/json"); err != nil {
+		t.Fatal(err)
+	}
+	return plan
+}
+
+type rejectingValidator struct{}
+
+func (rejectingValidator) Validate(context.Context, string, models.StoryPlan) error {
+	return errors.New("moment references missing media")
+}
+
 func setupProject(t *testing.T, mediaType models.MediaType) (*store.MemoryStore, *queue.MemoryPublisher, *Coordinator, models.StoryProject, models.MediaAsset) {
 	t.Helper()
 	ctx := context.Background()
