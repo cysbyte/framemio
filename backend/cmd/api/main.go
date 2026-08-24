@@ -8,10 +8,13 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/framemio/backend/internal/api"
+	"github.com/framemio/backend/internal/models"
+	"github.com/framemio/backend/internal/orchestration"
 	"github.com/framemio/backend/internal/queue"
 	"github.com/framemio/backend/internal/storage"
 	"github.com/framemio/backend/internal/store"
@@ -61,11 +64,21 @@ func main() {
 		logger.Info("ECS worker RunTask activation enabled")
 	}
 
+	coordinator := orchestration.New(orchestration.Coordinator{Store: database, Publisher: publisher, Activator: activator, Logger: logger})
+	if configuration.WorkerRunOnce {
+		if err := runWorkerOnce(ctx, database, coordinator, configuration, logger); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			logger.Error("backend worker run-once failed", slog.Any("error", err))
+			os.Exit(1)
+		}
+		return
+	}
+
 	application := api.NewServer(api.Server{
 		Store:         database,
 		ObjectStorage: objects,
 		Publisher:     publisher,
 		Activator:     activator,
+		Orchestrator:  coordinator,
 		Authenticator: api.HMACTokenAuthenticator{Secret: []byte(configuration.AuthHMACSecret)},
 		InternalToken: configuration.InternalAPIToken,
 		Logger:        logger,
@@ -105,6 +118,10 @@ type configuration struct {
 	InternalAPIToken        string
 	PartSizeBytes           int64
 	MultipartThresholdBytes int64
+	DeadLetterQueueURL      string
+	WorkerRunOnce           bool
+	WorkerJobID             string
+	WorkerWaitTimeout       time.Duration
 }
 
 func loadConfiguration() (configuration, error) {
@@ -117,6 +134,10 @@ func loadConfiguration() (configuration, error) {
 		InternalAPIToken:        os.Getenv("INTERNAL_API_TOKEN"),
 		PartSizeBytes:           environmentInt64("UPLOAD_PART_SIZE_BYTES", 8*1024*1024),
 		MultipartThresholdBytes: environmentInt64("UPLOAD_MULTIPART_THRESHOLD_BYTES", 16*1024*1024),
+		DeadLetterQueueURL:      os.Getenv("SQS_DEAD_LETTER_QUEUE_URL"),
+		WorkerRunOnce:           environmentBool("WORKER_RUN_ONCE", false),
+		WorkerJobID:             os.Getenv("JOB_ID"),
+		WorkerWaitTimeout:       environmentDuration("WORKER_RUN_ONCE_WAIT_TIMEOUT", 2*time.Minute),
 	}
 	if result.DatabaseURL == "" || result.S3Bucket == "" || result.SQSQueueURL == "" {
 		return configuration{}, errors.New("DATABASE_URL, S3_MEDIA_BUCKET, and SQS_PROCESSING_QUEUE_URL are required")
@@ -143,6 +164,55 @@ func environmentInt64(name string, fallback int64) int64 {
 		return fallback
 	}
 	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
+}
+
+func runWorkerOnce(ctx context.Context, database store.Store, coordinator *orchestration.Coordinator, configuration configuration, logger *slog.Logger) error {
+	consumer, err := queue.NewSQSConsumer(ctx, configuration.SQSQueueURL, configuration.DeadLetterQueueURL)
+	if err != nil {
+		return err
+	}
+	workerContext := ctx
+	if configuration.WorkerJobID != "" {
+		var cancel context.CancelFunc
+		workerContext, cancel = context.WithTimeout(ctx, configuration.WorkerWaitTimeout)
+		defer cancel()
+	}
+	worker := orchestration.Worker{
+		Store:             database,
+		Consumer:          consumer,
+		Coordinator:       coordinator,
+		Handlers:          map[models.JobType]orchestration.JobHandler{models.JobTypeStoryPlan: orchestration.StoryPlanHandler{Store: database}},
+		Logger:            logger,
+		TargetJobID:       configuration.WorkerJobID,
+		VisibilityTimeout: 2 * time.Minute,
+		WaitTime:          20 * time.Second,
+	}
+	logger.Info("backend worker run-once started", slog.String("job_id", configuration.WorkerJobID))
+	return worker.RunOnce(workerContext)
+}
+
+func environmentBool(name string, fallback bool) bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
+	switch value {
+	case "1", "true", "yes", "enabled":
+		return true
+	case "0", "false", "no", "disabled":
+		return false
+	default:
+		return fallback
+	}
+}
+
+func environmentDuration(name string, fallback time.Duration) time.Duration {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := time.ParseDuration(value)
 	if err != nil || parsed <= 0 {
 		return fallback
 	}

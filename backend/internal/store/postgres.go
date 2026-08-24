@@ -575,6 +575,55 @@ func (s *PostgresStore) GetVideoAnalysis(ctx context.Context, userID, videoID, a
 	}
 	return analysis, nil
 }
+
+func (s *PostgresStore) ListProjectAnalyses(ctx context.Context, userID, projectID string) ([]models.MediaAnalysis, []models.VideoAnalysis, error) {
+	if _, err := s.GetProject(ctx, userID, projectID); err != nil {
+		return nil, nil, err
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT kind, data
+		FROM framemio_domain_records
+		WHERE user_id=$1 AND project_id=$2 AND kind IN ('analysis','video_analysis')
+		ORDER BY kind, media_id, created_at DESC`, userID, projectID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	photoAnalyses := make([]models.MediaAnalysis, 0)
+	latestVideoByMedia := make(map[string]models.VideoAnalysis)
+	for rows.Next() {
+		var kind string
+		var data []byte
+		if err := rows.Scan(&kind, &data); err != nil {
+			return nil, nil, err
+		}
+		switch kind {
+		case "analysis":
+			var analysis models.MediaAnalysis
+			if err := json.Unmarshal(data, &analysis); err != nil {
+				return nil, nil, fmt.Errorf("decode media analysis: %w", err)
+			}
+			photoAnalyses = append(photoAnalyses, analysis)
+		case "video_analysis":
+			var analysis models.VideoAnalysis
+			if err := json.Unmarshal(data, &analysis); err != nil {
+				return nil, nil, fmt.Errorf("decode video analysis: %w", err)
+			}
+			if _, exists := latestVideoByMedia[analysis.VideoID]; !exists {
+				latestVideoByMedia[analysis.VideoID] = analysis
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	videoAnalyses := make([]models.VideoAnalysis, 0, len(latestVideoByMedia))
+	for _, analysis := range latestVideoByMedia {
+		videoAnalyses = append(videoAnalyses, analysis)
+	}
+	return photoAnalyses, videoAnalyses, nil
+}
+
 func (s *PostgresStore) SaveStoryPlan(ctx context.Context, userID string, plan models.StoryPlan) error {
 	if _, err := s.GetProject(ctx, userID, plan.ProjectID); err != nil {
 		return err

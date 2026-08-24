@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/framemio/video-intelligence-worker/internal/callback"
 	"github.com/framemio/video-intelligence-worker/internal/config"
 	"github.com/framemio/video-intelligence-worker/internal/ffmpeg"
 	"github.com/framemio/video-intelligence-worker/internal/pipeline"
@@ -85,6 +86,11 @@ func main() {
 		Provider: understandingProvider, Repository: repository, Artifacts: objects,
 		RetryAttempts: configuration.UnderstandingRetries, FrameURLExpiry: configuration.PresignedEvidenceExpiry,
 	}
+	var completionReporter pipeline.CompletionReporter
+	if configuration.BackendURL != "" && configuration.InternalToken != "" {
+		completionReporter = callback.BackendReporter{BaseURL: configuration.BackendURL, InternalToken: configuration.InternalToken}
+		logger.Info("backend job completion callback enabled")
+	}
 	processor := &pipeline.Processor{
 		Config: pipeline.Config{
 			WorkRoot: configuration.WorkRoot, AnalysisVersion: configuration.AnalysisVersion,
@@ -98,7 +104,7 @@ func main() {
 			EnableTranscription: configuration.EnableTranscription, TranscriptionVersion: configuration.TranscriptionVersion,
 			UnderstandingVersion: configuration.UnderstandingVersion, EvidenceURLExpiry: configuration.PresignedEvidenceExpiry,
 		},
-		Repository: repository, Objects: objects, Tools: tools, Logger: logger,
+		Repository: repository, Objects: objects, Tools: tools, Logger: logger, Completion: completionReporter,
 		Transcription: transcriptionService, Understanding: understandingService,
 	}
 	consumer, err := queue.NewConsumer(ctx, configuration.QueueURL, configuration.AWSRegion, configuration.VisibilityTimeout, configuration.MaxJobAttempts, logger)

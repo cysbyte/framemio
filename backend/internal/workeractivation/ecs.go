@@ -29,6 +29,8 @@ type ECSRunTaskActivator struct {
 	videoContainerName   string
 	renderTaskDefinition string
 	renderContainerName  string
+	storyTaskDefinition  string
+	storyContainerName   string
 	logger               *slog.Logger
 }
 
@@ -42,6 +44,8 @@ type ECSRunTaskConfig struct {
 	VideoContainerName   string
 	RenderTaskDefinition string
 	RenderContainerName  string
+	StoryTaskDefinition  string
+	StoryContainerName   string
 	Logger               *slog.Logger
 }
 
@@ -81,6 +85,8 @@ func NewECSRunTaskActivator(ctx context.Context, config ECSRunTaskConfig) (*ECSR
 		videoContainerName:   valueOrDefault(config.VideoContainerName, "Main"),
 		renderTaskDefinition: strings.TrimSpace(config.RenderTaskDefinition),
 		renderContainerName:  valueOrDefault(config.RenderContainerName, "Main"),
+		storyTaskDefinition:  strings.TrimSpace(config.StoryTaskDefinition),
+		storyContainerName:   valueOrDefault(config.StoryContainerName, "Main"),
 		logger:               logger,
 	}, nil
 }
@@ -99,6 +105,8 @@ func NewECSRunTaskActivatorFromEnv(ctx context.Context, logger *slog.Logger) (*E
 		VideoContainerName:   os.Getenv("VIDEO_WORKER_CONTAINER_NAME"),
 		RenderTaskDefinition: os.Getenv("RENDER_WORKER_TASK_DEFINITION"),
 		RenderContainerName:  os.Getenv("RENDER_WORKER_CONTAINER_NAME"),
+		StoryTaskDefinition:  firstEnv("STORY_WORKER_TASK_DEFINITION", "BACKEND_WORKER_TASK_DEFINITION"),
+		StoryContainerName:   firstEnv("STORY_WORKER_CONTAINER_NAME", "BACKEND_WORKER_CONTAINER_NAME"),
 		Logger:               logger,
 	})
 	if err != nil {
@@ -166,6 +174,8 @@ func (a *ECSRunTaskActivator) workerFor(jobType models.JobType) (string, string,
 	switch jobType {
 	case models.JobTypeMediaPreprocess, models.JobTypeTranscribe, models.JobTypeVideoUnderstand:
 		return a.videoTaskDefinition, a.videoContainerName, "video-worker", true
+	case models.JobTypeStoryPlan:
+		return a.storyTaskDefinition, a.storyContainerName, "story-worker", true
 	case models.JobTypeVideoRender:
 		return a.renderTaskDefinition, a.renderContainerName, "render-worker", true
 	default:

@@ -393,6 +393,36 @@ func (s *MemoryStore) GetVideoAnalysis(_ context.Context, userID, videoID, analy
 	return analysis, nil
 }
 
+func (s *MemoryStore) ListProjectAnalyses(_ context.Context, userID, projectID string) ([]models.MediaAnalysis, []models.VideoAnalysis, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	project, ok := s.projects[projectID]
+	if !ok || project.UserID != userID {
+		return nil, nil, ErrNotFound
+	}
+	photoAnalyses := make([]models.MediaAnalysis, 0)
+	for _, analysis := range s.analyses {
+		if analysis.ProjectID == projectID {
+			photoAnalyses = append(photoAnalyses, analysis)
+		}
+	}
+	latestVideoByMedia := make(map[string]models.VideoAnalysis)
+	for _, analysis := range s.videoAnalyses {
+		if analysis.ProjectID != projectID {
+			continue
+		}
+		current, ok := latestVideoByMedia[analysis.VideoID]
+		if !ok || analysis.CreatedAt.After(current.CreatedAt) {
+			latestVideoByMedia[analysis.VideoID] = analysis
+		}
+	}
+	videoAnalyses := make([]models.VideoAnalysis, 0, len(latestVideoByMedia))
+	for _, analysis := range latestVideoByMedia {
+		videoAnalyses = append(videoAnalyses, analysis)
+	}
+	return photoAnalyses, videoAnalyses, nil
+}
+
 func (s *MemoryStore) SaveStoryPlan(_ context.Context, userID string, plan models.StoryPlan) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

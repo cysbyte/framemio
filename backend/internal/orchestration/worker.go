@@ -25,6 +25,7 @@ type Worker struct {
 	VisibilityTimeout time.Duration
 	WaitTime          time.Duration
 	Now               func() time.Time
+	TargetJobID       string
 }
 
 func (w *Worker) RunOnce(ctx context.Context) error {
@@ -39,25 +40,41 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 	if visibilityTimeout <= 0 {
 		visibilityTimeout = 2 * time.Minute
 	}
-	receivedMessages, err := w.Consumer.Receive(ctx, 10, w.WaitTime, visibilityTimeout)
-	if err != nil {
-		return err
-	}
-	for _, received := range receivedMessages {
-		if received.ApproximateReceiveCount > maxReceiveCount {
-			if _, err := w.Store.UpdateJob(ctx, received.Message.JobID, models.JobStatusFailed, 0, "max_receive_count_exceeded", "job exceeded queue receive limit", "", ""); err != nil {
-				return err
-			}
-			if err := w.Consumer.MoveToDeadLetter(ctx, received, "max_receive_count_exceeded"); err != nil {
-				return err
-			}
-			continue
+	for {
+		receivedMessages, err := w.Consumer.Receive(ctx, 10, w.WaitTime, visibilityTimeout)
+		if err != nil {
+			return err
 		}
-		if err := w.handleReceived(ctx, received, visibilityTimeout); err != nil {
+		for _, received := range receivedMessages {
+			if w.TargetJobID != "" && received.Message.JobID != w.TargetJobID {
+				if err := w.Consumer.ExtendVisibility(ctx, received.ReceiptHandle, 0); err != nil {
+					return err
+				}
+				continue
+			}
+			if received.ApproximateReceiveCount > maxReceiveCount {
+				if _, err := w.Store.UpdateJob(ctx, received.Message.JobID, models.JobStatusFailed, 0, "max_receive_count_exceeded", "job exceeded queue receive limit", "", ""); err != nil {
+					return err
+				}
+				if err := w.Consumer.MoveToDeadLetter(ctx, received, "max_receive_count_exceeded"); err != nil {
+					return err
+				}
+				return nil
+			}
+			if err := w.handleReceived(ctx, received, visibilityTimeout); err != nil {
+				return err
+			}
+			if w.TargetJobID != "" {
+				return nil
+			}
+		}
+		if w.TargetJobID == "" {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 	}
-	return nil
 }
 
 func (w *Worker) handleReceived(ctx context.Context, received queue.ReceivedJobMessage, visibilityTimeout time.Duration) error {

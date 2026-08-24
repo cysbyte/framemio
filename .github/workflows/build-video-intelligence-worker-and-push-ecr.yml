@@ -34,8 +34,10 @@ env:
   ENABLE_TRANSCRIPTION: "false"
   VIDEO_UNDERSTANDING_PROVIDER: local
   VIDEO_UNDERSTANDING_MODEL: heuristic-v1
+  BACKEND_INTERNAL_API_URL: ${{ vars.BACKEND_INTERNAL_API_URL }}
+  INTERNAL_API_TOKEN: ${{ secrets.INTERNAL_API_TOKEN }}
   SQS_VIDEO_ANALYSIS_QUEUE_URL: ${{ vars.SQS_PROCESSING_QUEUE_URL || 'https://sqs.us-east-1.amazonaws.com/450876624497/framemio-processing' }}
-  ECS_SET_ENV_VARS: DATABASE_URL,DATABASE_AUTH_MODE,AWS_REGION,SQS_VIDEO_ANALYSIS_QUEUE_URL,ENABLE_TRANSCRIPTION,VIDEO_UNDERSTANDING_PROVIDER,VIDEO_UNDERSTANDING_MODEL
+  ECS_SET_ENV_VARS: DATABASE_URL,DATABASE_AUTH_MODE,AWS_REGION,SQS_VIDEO_ANALYSIS_QUEUE_URL,ENABLE_TRANSCRIPTION,VIDEO_UNDERSTANDING_PROVIDER,VIDEO_UNDERSTANDING_MODEL,BACKEND_INTERNAL_API_URL,INTERNAL_API_TOKEN
 
 jobs:
   build-and-push:
@@ -56,6 +58,8 @@ jobs:
           test -n "$ROLE_ARN" || { echo "Missing repository secret AWS_GITHUB_ACTIONS_ROLE_ARN"; exit 1; }
           test -n "$DATABASE_URL" || { echo "Missing repository variable DATABASE_URL"; exit 1; }
           test -n "$SQS_VIDEO_ANALYSIS_QUEUE_URL" || { echo "Missing repository variable SQS_PROCESSING_QUEUE_URL"; exit 1; }
+          test -n "$BACKEND_INTERNAL_API_URL" || { echo "Missing repository variable BACKEND_INTERNAL_API_URL"; exit 1; }
+          test -n "$INTERNAL_API_TOKEN" || { echo "Missing repository secret INTERNAL_API_TOKEN"; exit 1; }
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6

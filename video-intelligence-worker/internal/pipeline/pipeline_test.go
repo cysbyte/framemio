@@ -48,7 +48,8 @@ func TestProcessorCachesPreprocessingAndAnalysis(t *testing.T) {
 			EvidenceURLExpiry: time.Hour,
 		},
 		Repository: repository, Objects: objects, Tools: tools, Transcription: transcriber, Understanding: understandingService,
-		Now: func() time.Time { return now },
+		Completion: &fakeCompletionReporter{},
+		Now:        func() time.Time { return now },
 	}
 
 	first := repository.addJob("job-1", false)
@@ -91,6 +92,15 @@ func TestProcessorCachesPreprocessingAndAnalysis(t *testing.T) {
 	}
 	if provider.calls != 3 {
 		t.Fatalf("understanding calls = %d, want 3", provider.calls)
+	}
+}
+
+func TestProcessorRequiresBackendCompletionCallback(t *testing.T) {
+	t.Parallel()
+	processor := &Processor{}
+	err := processor.completeJob(context.Background(), domain.ProcessingJob{ID: "job-1", ProjectID: "project-1", MediaID: "media-1"}, "analysis/evidence.json")
+	if err == nil || err.Error() != "backend completion callback is required" {
+		t.Fatalf("expected missing callback error, got %v", err)
 	}
 }
 
@@ -437,3 +447,12 @@ func (m *fakeUnderstandingProvider) Name() string  { return "fake-provider" }
 func (m *fakeUnderstandingProvider) Model() string { return "fake-model" }
 
 func cacheKey(values ...string) string { return filepath.Join(values...) }
+
+type fakeCompletionReporter struct {
+	calls int
+}
+
+func (r *fakeCompletionReporter) CompleteJob(_ context.Context, _ domain.ProcessingJob, _ string) error {
+	r.calls++
+	return nil
+}

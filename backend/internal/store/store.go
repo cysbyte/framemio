@@ -36,6 +36,7 @@ type Store interface {
 	SaveAnalysis(ctx context.Context, userID string, analysis models.MediaAnalysis) error
 	SaveVideoAnalysis(ctx context.Context, userID string, analysis models.VideoAnalysis) error
 	GetVideoAnalysis(ctx context.Context, userID, videoID, analysisVersion string) (models.VideoAnalysis, error)
+	ListProjectAnalyses(ctx context.Context, userID, projectID string) ([]models.MediaAnalysis, []models.VideoAnalysis, error)
 	SaveStoryPlan(ctx context.Context, userID string, plan models.StoryPlan) error
 	GetStoryPlan(ctx context.Context, userID, projectID string) (models.StoryPlan, error)
 }

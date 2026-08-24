@@ -49,6 +49,8 @@ type Config struct {
 	JobID                             string
 	RunOnceWaitTimeout                time.Duration
 	PresignedEvidenceExpiry           time.Duration
+	BackendURL                        string
+	InternalToken                     string
 }
 
 func Load() (Config, error) {
@@ -94,11 +96,13 @@ func Load() (Config, error) {
 		JobID:                             os.Getenv("JOB_ID"),
 		RunOnceWaitTimeout:                environmentDuration("WORKER_RUN_ONCE_WAIT_TIMEOUT", 2*time.Minute),
 		PresignedEvidenceExpiry:           environmentDuration("EVIDENCE_URL_EXPIRY", 30*time.Minute),
+		BackendURL:                        environmentFirst([]string{"BACKEND_INTERNAL_API_URL", "BACKEND_URL", "API_BASE_URL"}, ""),
+		InternalToken:                     os.Getenv("INTERNAL_API_TOKEN"),
 	}
 	if configuration.DatabaseURL == "" || configuration.S3Bucket == "" || configuration.QueueURL == "" {
 		return Config{}, errors.New("DATABASE_URL, S3_MEDIA_BUCKET, and SQS_VIDEO_ANALYSIS_QUEUE_URL are required")
 	}
-	if configuration.UnderstandingURL == "" {
+	if configuration.UnderstandingURL == "" && configuration.UnderstandingProvider != "local" && configuration.UnderstandingProvider != "heuristic" {
 		return Config{}, errors.New("VIDEO_UNDERSTANDING_API_URL is required")
 	}
 	if configuration.EnableTranscription && configuration.TranscriptionURL == "" {

@@ -46,6 +46,10 @@ type Result struct {
 	Reused   bool
 }
 
+type CompletionReporter interface {
+	CompleteJob(ctx context.Context, job domain.ProcessingJob, artifactS3Key string) error
+}
+
 type Processor struct {
 	Config        Config
 	Repository    store.Repository
@@ -53,6 +57,7 @@ type Processor struct {
 	Tools         MediaToolchain
 	Transcription transcription.Transcriber
 	Understanding understanding.Analyzer
+	Completion    CompletionReporter
 	Logger        *slog.Logger
 	Now           func() time.Time
 }
@@ -95,7 +100,9 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 			InputVersion: inputVersion, UnderstandingVersion: analysisVersion,
 		})
 		if lookupErr == nil {
-			_, _ = p.Repository.UpdateJob(ctx, jobContext.Job.ID, "COMPLETED", 1, "", "", cached.Analysis.EvidenceS3Key)
+			if err := p.completeJob(ctx, jobContext.Job, cached.Analysis.EvidenceS3Key); err != nil {
+				return Result{}, err
+			}
 			return Result{Analysis: cached.Analysis, Reused: true}, nil
 		}
 		if !errors.Is(lookupErr, domain.ErrNotFound) {
@@ -133,10 +140,22 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 		return Result{}, err
 	}
 	analysis := understandingResult.Analysis
-	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "COMPLETED", 1, "", "", analysis.EvidenceS3Key); err != nil {
+	if err := p.completeJob(ctx, jobContext.Job, analysis.EvidenceS3Key); err != nil {
 		return Result{}, err
 	}
 	return Result{Analysis: analysis, Reused: understandingResult.Reused}, nil
+}
+
+func (p *Processor) completeJob(ctx context.Context, job domain.ProcessingJob, artifactS3Key string) error {
+	if p.Completion == nil {
+		return fmt.Errorf("backend completion callback is required")
+	}
+	if err := p.Completion.CompleteJob(ctx, job, artifactS3Key); err != nil {
+		p.logger().Error("complete video job callback failed", slog.String("job_id", job.ID), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID), slog.Any("error", err))
+		return err
+	}
+	p.logger().Info("completed video job through backend callback", slog.String("job_id", job.ID), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID))
+	return nil
 }
 
 func (p *Processor) MarkFailed(ctx context.Context, message domain.JobMessage, err error) error {
