@@ -70,14 +70,20 @@ func main() {
 		ReferenceExpiry:           configuration.PresignedEvidenceExpiry,
 		RawArtifactThresholdBytes: configuration.TranscriptionRawArtifactThreshold,
 	}
+	understandingProvider := understanding.VideoUnderstandingProvider(providers.HTTPVideoUnderstandingProvider{
+		URL: configuration.UnderstandingURL, APIKey: configuration.UnderstandingAPIKey,
+		ProviderName: configuration.UnderstandingProvider, ModelName: configuration.UnderstandingModel,
+		Client: understandingClient,
+	})
+	if configuration.UnderstandingProvider == "local" || configuration.UnderstandingProvider == "heuristic" {
+		understandingProvider = providers.HeuristicVideoUnderstandingProvider{
+			ProviderName: configuration.UnderstandingProvider,
+			ModelName:    configuration.UnderstandingModel,
+		}
+	}
 	understandingService := &understanding.Service{
-		Provider: providers.HTTPVideoUnderstandingProvider{
-			URL: configuration.UnderstandingURL, APIKey: configuration.UnderstandingAPIKey,
-			ProviderName: configuration.UnderstandingProvider, ModelName: configuration.UnderstandingModel,
-			Client: understandingClient,
-		},
-		Repository: repository, Artifacts: objects, RetryAttempts: configuration.UnderstandingRetries,
-		FrameURLExpiry: configuration.PresignedEvidenceExpiry,
+		Provider: understandingProvider, Repository: repository, Artifacts: objects,
+		RetryAttempts: configuration.UnderstandingRetries, FrameURLExpiry: configuration.PresignedEvidenceExpiry,
 	}
 	processor := &pipeline.Processor{
 		Config: pipeline.Config{
