@@ -219,4 +219,8 @@ protocol MediaUploadService: Sendable {
         options: MediaUploadOptions,
         progress: @escaping @Sendable (MediaUploadProgress) -> Void
     ) async throws -> [MediaUpload]
+    func invalidateCompletedUploads(
+        for assets: [MediaAsset],
+        optimization: MediaUploadOptimization
+    ) async throws
 }

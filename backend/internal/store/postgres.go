@@ -115,7 +115,7 @@ func (s *PostgresStore) EnsureUser(ctx context.Context, user models.User) (model
 		INSERT INTO framemio_domain_records
 		(kind,id,user_id,logical_key,data,created_at,updated_at)
 		VALUES ('user',$1,$1,$1,$2,$3,$3)
-		ON CONFLICT (kind,id) DO NOTHING`, user.ID, data, now)
+		ON CONFLICT DO NOTHING`, user.ID, data, now)
 	if err != nil {
 		return models.User{}, fmt.Errorf("ensure user: %w", err)
 	}

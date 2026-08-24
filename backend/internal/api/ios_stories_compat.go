@@ -128,7 +128,7 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 	if !s.decodeJSON(response, request, &input) {
 		return
 	}
-	input.Context = strings.TrimSpace(input.Context)
+	input.Context = strings.TrimSpace(sanitizeIOSStoryText(input.Context))
 	if input.Context == "" || len(input.Assets) == 0 {
 		s.writeError(response, http.StatusBadRequest, "invalid_story", "context and at least one asset are required")
 		return
@@ -263,6 +263,7 @@ func (s *Server) saveIOSAnalyses(request *http.Request, userID, projectID string
 	analysisByAssetID := make(map[string]iosStoryAnalysis, len(analyses))
 	for _, analysis := range analyses {
 		analysis.AssetID = strings.TrimSpace(analysis.AssetID)
+		analysis.Labels = sanitizeIOSStoryLabels(analysis.Labels)
 		if analysis.AssetID != "" {
 			analysisByAssetID[analysis.AssetID] = analysis
 		}
@@ -290,7 +291,7 @@ func (s *Server) saveIOSAnalyses(request *http.Request, userID, projectID string
 			QualityScore: quality,
 			Signals: map[string]interface{}{
 				"source":   "ios_local_analysis",
-				"asset_id": assetID,
+				"asset_id": sanitizeIOSStoryText(assetID),
 			},
 			CreatedAt: now,
 			UpdatedAt: now,
@@ -299,6 +300,21 @@ func (s *Server) saveIOSAnalyses(request *http.Request, userID, projectID string
 		}
 	}
 	return nil
+}
+
+func sanitizeIOSStoryLabels(labels []string) []string {
+	cleaned := make([]string, 0, len(labels))
+	for _, label := range labels {
+		label = strings.TrimSpace(sanitizeIOSStoryText(label))
+		if label != "" {
+			cleaned = append(cleaned, label)
+		}
+	}
+	return cleaned
+}
+
+func sanitizeIOSStoryText(value string) string {
+	return strings.ReplaceAll(value, "\x00", "")
 }
 
 func (s *Server) makeIOSStory(request *http.Request, userID string, project models.StoryProject) iosStory {

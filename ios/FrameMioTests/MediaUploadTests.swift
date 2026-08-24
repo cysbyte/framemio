@@ -97,6 +97,34 @@ final class MediaUploadTests: XCTestCase {
         XCTAssertEqual(notificationCount, 1)
     }
 
+
+    func testInvalidateCompletedUploadsForcesFreshUploadSession() async throws {
+        let asset = makeAsset(id: "stale-photo", kind: .image)
+        let source = makeSource(asset: asset, byteCount: 128 * 1_024)
+        let authorizer = MockMediaUploadAuthorizer()
+        let storage = MockDirectObjectStorageClient()
+        let store = MockMediaUploadStore()
+        let service = makeService(source: source, authorizer: authorizer, storage: storage, store: store)
+        let selection = selection(for: [asset])
+        let options = makeOptions()
+
+        _ = try await service.upload(selection: selection, assets: [asset], options: options, progress: { _ in })
+        try await service.invalidateCompletedUploads(for: [asset], optimization: .original)
+        _ = try await service.upload(selection: selection, assets: [asset], options: options, progress: { _ in })
+
+        let uploadID = MediaUpload.makeID(for: asset.id, optimization: .original)
+        let refreshed = try await store.upload(for: uploadID)
+        let materializationCount = await source.materializationCount
+        let requestCount = await storage.requests.count
+        let createSessionCallCount = await authorizer.createSessionCallCount
+        let notificationCount = await authorizer.completedNotifications.count
+        XCTAssertEqual(refreshed?.status, .completed)
+        XCTAssertEqual(materializationCount, 2)
+        XCTAssertEqual(requestCount, 2)
+        XCTAssertEqual(createSessionCallCount, 2)
+        XCTAssertEqual(notificationCount, 2)
+    }
+
     func testLargeVideoUsesMultipartPartSizedFiles() async throws {
         let asset = makeAsset(id: "multipart-video", kind: .video, duration: 42.3)
         let source = makeSource(asset: asset, byteCount: 11 * mebibyte)

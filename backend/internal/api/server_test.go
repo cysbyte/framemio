@@ -422,6 +422,50 @@ func TestIOSStoriesCompatibilityCreatesProjectAndFetchesStories(t *testing.T) {
 	}
 }
 
+func TestIOSStoryCreationSanitizesAnalysisTextForJSONB(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	handler := newTestServer(memoryStore, publisher).Handler()
+
+	uploadResponse := createReadyIOSMedia(t, handler, "asset-photo-nul", models.MediaTypePhoto)
+	storyResponse := performJSON(t, handler, http.MethodPost, "/v1/stories", map[string]any{
+		"context": "Special\x00 moments",
+		"assets": []map[string]any{
+			{
+				"id":           "asset-photo-nul",
+				"kind":         "image",
+				"duration":     0,
+				"pixelWidth":   3024,
+				"pixelHeight":  4032,
+				"creationDate": "2026-08-19T10:00:00Z",
+			},
+		},
+		"analyses": []map[string]any{
+			{"assetID": "asset-photo-nul", "labels": []string{"be\x00ach", "\x00"}, "peopleCount": 2, "confidence": 0.91},
+		},
+	}, "", true, nil)
+	if storyResponse.Code != http.StatusCreated {
+		t.Fatalf("create iOS story status = %d, body = %s", storyResponse.Code, storyResponse.Body.String())
+	}
+	var story iosStory
+	decodeResponse(t, storyResponse, &story)
+	if strings.Contains(story.Context, "\x00") {
+		t.Fatalf("story context contains NUL: %q", story.Context)
+	}
+	analyses, _, err := memoryStore.ListProjectAnalyses(context.Background(), "user-1", story.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(analyses) != 1 || analyses[0].MediaID != uploadResponse.MediaID {
+		t.Fatalf("unexpected stored analyses: %+v", analyses)
+	}
+	if len(analyses[0].Labels) != 1 || analyses[0].Labels[0] != "beach" || strings.Contains(analyses[0].Labels[0], "\x00") {
+		t.Fatalf("analysis labels were not sanitized: %+v", analyses[0].Labels)
+	}
+}
+
 func TestGetIOSStoryReconcilesCompletedVideoPreprocess(t *testing.T) {
 	t.Parallel()
 

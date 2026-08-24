@@ -124,8 +124,9 @@ final class StoryCreationViewModel: ObservableObject {
                 phaseTitle = "Building your story..."
                 progress = max(progress, 0.86)
                 storyCreationDebugLog("phase=story_create_start app_percent=\(Int(progress * 100)) analyses=\(analyses.count)")
-                story = try await storyService.createStory(
-                    request: CreateStoryRequest(context: context, assets: assets, analyses: analyses)
+                story = try await createStoryWithUploadRefreshRetry(
+                    selection: selection,
+                    analyses: analyses
                 )
                 progress = 1
                 storyCreationDebugLog("phase=story_create_complete story=\(story?.id ?? "nil") status=\(story?.status.rawValue ?? "nil")")
@@ -145,6 +146,51 @@ final class StoryCreationViewModel: ObservableObject {
 
     func cancel() {
         creationTask?.cancel()
+    }
+
+    private func createStoryWithUploadRefreshRetry(
+        selection: MediaSelection,
+        analyses: [MediaAnalysis]
+    ) async throws -> Story {
+        do {
+            return try await storyService.createStory(
+                request: CreateStoryRequest(context: context, assets: assets, analyses: analyses)
+            )
+        } catch {
+            guard shouldRetryAfterStaleUploadCache(error) else {
+                throw error
+            }
+            storyCreationDebugLog("phase=story_create_conflict action=refresh_upload_cache_and_retry")
+            phaseTitle = "Refreshing uploaded media..."
+            try await mediaUploadService.invalidateCompletedUploads(for: assets, optimization: .original)
+            _ = try await mediaUploadService.upload(
+                selection: selection,
+                assets: assets,
+                options: MediaUploadOptions(),
+                progress: { [weak self] uploadProgress in
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        progress = min(0.28, uploadProgress.fractionCompleted * 0.28)
+                    }
+                }
+            )
+            try Task.checkCancellation()
+            phaseTitle = "Building your story..."
+            progress = max(progress, 0.86)
+            return try await storyService.createStory(
+                request: CreateStoryRequest(context: context, assets: assets, analyses: analyses)
+            )
+        }
+    }
+
+    private func shouldRetryAfterStaleUploadCache(_ error: Error) -> Bool {
+        if case let AppError.server(statusCode) = AppError.from(error), statusCode == 409 {
+            return true
+        }
+        if case let APIClientError.server(statusCode) = error, statusCode == 409 {
+            return true
+        }
+        return false
     }
 
     private func analyzeAssets() async throws -> [MediaAnalysis] {
