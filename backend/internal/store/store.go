@@ -21,6 +21,7 @@ type Store interface {
 	CreateMediaUpload(ctx context.Context, media models.MediaAsset, session models.UploadSession) error
 	UpdateUploadSession(ctx context.Context, session models.UploadSession) error
 	GetUploadSessionByIdempotency(ctx context.Context, userID, key string) (models.UploadSession, error)
+	GetReadyMediaByUploadIdempotencyPrefix(ctx context.Context, userID, prefix string) (models.MediaAsset, error)
 	GetUploadSession(ctx context.Context, userID, uploadID string) (models.UploadSession, error)
 	MarkMediaReady(ctx context.Context, userID, mediaID, uploadID, s3Key, etag string) (models.MediaAsset, error)
 	CreateProject(ctx context.Context, project models.StoryProject, idempotencyKey string) (models.StoryProject, bool, error)

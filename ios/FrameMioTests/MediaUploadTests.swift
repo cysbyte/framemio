@@ -197,6 +197,56 @@ final class MediaUploadTests: XCTestCase {
         XCTAssertEqual(notificationCount, 2)
     }
 
+    func testInvalidateCompletedUploadsClearsFailedAndPausedRecords() async throws {
+        let failedAsset = makeAsset(id: "failed-photo", kind: .image)
+        let pausedAsset = makeAsset(id: "paused-video", kind: .video)
+        let failedUpload = makeUploadRecord(asset: failedAsset, status: .failed)
+        let pausedUpload = makeUploadRecord(asset: pausedAsset, status: .paused)
+        let fixtures = [
+            failedAsset.id: MockOriginalMediaSource.Fixture(
+                data: Data(repeating: 3, count: 128 * 1_024),
+                fileName: "failed-photo.jpg",
+                contentType: "image/jpeg"
+            ),
+            pausedAsset.id: MockOriginalMediaSource.Fixture(
+                data: Data(repeating: 4, count: 192 * 1_024),
+                fileName: "paused-video.mov",
+                contentType: "video/quicktime"
+            )
+        ]
+        let source = MockOriginalMediaSource(fixtures: fixtures)
+        let authorizer = MockMediaUploadAuthorizer()
+        let storage = MockDirectObjectStorageClient()
+        let store = MockMediaUploadStore(uploads: [failedUpload, pausedUpload])
+        let service = makeService(source: source, authorizer: authorizer, storage: storage, store: store)
+        let assets = [failedAsset, pausedAsset]
+
+        try await service.invalidateCompletedUploads(for: assets, optimization: .original)
+        _ = try await service.upload(
+            selection: selection(for: assets),
+            assets: assets,
+            options: makeOptions(),
+            progress: { _ in }
+        )
+
+        let failedID = MediaUpload.makeID(for: failedAsset.id, optimization: .original)
+        let pausedID = MediaUpload.makeID(for: pausedAsset.id, optimization: .original)
+        let refreshedFailedRecord = try await store.upload(for: failedID)
+        let refreshedPausedRecord = try await store.upload(for: pausedID)
+        let refreshedFailed = try XCTUnwrap(refreshedFailedRecord)
+        let refreshedPaused = try XCTUnwrap(refreshedPausedRecord)
+        let materializationCount = await source.materializationCount
+        let requestCount = await storage.requests.count
+        let createSessionCallCount = await authorizer.createSessionCallCount
+        XCTAssertEqual(refreshedFailed.status, .completed)
+        XCTAssertEqual(refreshedPaused.status, .completed)
+        XCTAssertNotEqual(refreshedFailed.session?.uploadID, failedUpload.session?.uploadID)
+        XCTAssertNotEqual(refreshedPaused.session?.uploadID, pausedUpload.session?.uploadID)
+        XCTAssertEqual(materializationCount, 2)
+        XCTAssertEqual(requestCount, 2)
+        XCTAssertEqual(createSessionCallCount, 2)
+    }
+
     func testLargeVideoUsesMultipartPartSizedFiles() async throws {
         let asset = makeAsset(id: "multipart-video", kind: .video, duration: 42.3)
         let source = makeSource(asset: asset, byteCount: 11 * mebibyte)
@@ -325,6 +375,57 @@ final class MediaUploadTests: XCTestCase {
                     contentType: asset.isVideo ? "video/quicktime" : "image/jpeg"
                 )
             ]
+        )
+    }
+
+    private func makeUploadRecord(
+        asset: MediaAsset,
+        status: UploadStatus
+    ) -> MediaUpload {
+        let uploadID = MediaUpload.makeID(for: asset.id, optimization: .original)
+        let session = UploadSession(
+            uploadID: "stale-upload-\(asset.id)",
+            mediaID: "stale-media-\(asset.id)",
+            s3Key: "media/stale/\(asset.id)",
+            strategy: .single,
+            partSizeBytes: 128,
+            s3MultipartUploadID: nil,
+            expiresAt: Date().addingTimeInterval(3_600),
+            parts: [
+                UploadPart(
+                    partNumber: 1,
+                    offsetBytes: 0,
+                    lengthBytes: 128,
+                    presignedURL: URL(string: "https://s3.example.test/stale/\(asset.id)?X-Amz-SignedHeaders=host")!,
+                    status: status == .paused ? .pending : .failed,
+                    attempts: 1,
+                    eTag: nil,
+                    lastError: "stale upload"
+                )
+            ]
+        )
+        return MediaUpload(
+            id: uploadID,
+            assetID: asset.id,
+            localIdentifier: asset.localIdentifier,
+            mediaID: session.mediaID,
+            mediaType: asset.isVideo ? .video : .photo,
+            fileName: asset.isVideo ? "\(asset.id).mov" : "\(asset.id).jpg",
+            contentType: asset.isVideo ? "video/quicktime" : "image/jpeg",
+            fileSizeBytes: 128,
+            duration: asset.isVideo ? asset.duration : nil,
+            creationDate: asset.creationDate,
+            pixelWidth: asset.pixelWidth,
+            pixelHeight: asset.pixelHeight,
+            orientation: .from(pixelWidth: asset.pixelWidth, pixelHeight: asset.pixelHeight),
+            optimization: .original,
+            status: status,
+            uploadedBytes: 0,
+            authorizationIdempotencyKey: MediaUpload.makeAuthorizationID(for: uploadID, fileSizeBytes: 128),
+            session: session,
+            stagedFileURL: nil,
+            lastError: "stale upload",
+            updatedAt: Date()
         )
     }
 

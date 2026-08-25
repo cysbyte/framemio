@@ -505,6 +505,38 @@ func TestIOSStoriesCompatibilityCreatesProjectAndFetchesStories(t *testing.T) {
 	}
 }
 
+func TestIOSStoriesCompatibilityResolvesByteScopedUploadKeys(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	handler := newTestServer(memoryStore, publisher).Handler()
+
+	assetID := "asset-byte-scoped"
+	uploadResponse := createReadyIOSMediaWithIdempotency(t, handler, assetID, models.MediaTypePhoto, 2_048, "media-upload-original-"+assetID+"-bytes-2048")
+	storyResponse := performJSON(t, handler, http.MethodPost, "/v1/stories", map[string]any{
+		"context": "Physical iPhone upload",
+		"assets": []map[string]any{
+			{
+				"id":           assetID,
+				"kind":         "image",
+				"duration":     0,
+				"pixelWidth":   3024,
+				"pixelHeight":  4032,
+				"creationDate": "2026-08-19T10:00:00Z",
+			},
+		},
+	}, "", true, nil)
+	if storyResponse.Code != http.StatusCreated {
+		t.Fatalf("create iOS story with byte-scoped upload status = %d, body = %s", storyResponse.Code, storyResponse.Body.String())
+	}
+	var story iosStory
+	decodeResponse(t, storyResponse, &story)
+	if len(story.AssetIDs) != 1 || story.AssetIDs[0] != uploadResponse.MediaID {
+		t.Fatalf("unexpected byte-scoped iOS story response: %+v", story)
+	}
+}
+
 func TestIOSStoryCreationSanitizesAnalysisTextForJSONB(t *testing.T) {
 	t.Parallel()
 
@@ -903,6 +935,11 @@ func createReadyIOSMedia(t *testing.T, handler http.Handler, assetID string, med
 
 func createReadyIOSMediaWithSize(t *testing.T, handler http.Handler, assetID string, mediaType models.MediaType, fileSizeBytes int64) iosUploadSessionResponse {
 	t.Helper()
+	return createReadyIOSMediaWithIdempotency(t, handler, assetID, mediaType, fileSizeBytes, "media-upload-original-"+assetID)
+}
+
+func createReadyIOSMediaWithIdempotency(t *testing.T, handler http.Handler, assetID string, mediaType models.MediaType, fileSizeBytes int64, idempotencyKey string) iosUploadSessionResponse {
+	t.Helper()
 	contentType := "image/jpeg"
 	fileExtension := ".jpg"
 	if mediaType == models.MediaTypeVideo {
@@ -910,7 +947,7 @@ func createReadyIOSMediaWithSize(t *testing.T, handler http.Handler, assetID str
 		fileExtension = ".mov"
 	}
 	upload := performJSON(t, handler, http.MethodPost, "/v1/media/upload-sessions", map[string]any{
-		"idempotencyKey": "media-upload-original-" + assetID,
+		"idempotencyKey": idempotencyKey,
 		"metadata": map[string]any{
 			"assetID":                assetID,
 			"mediaType":              mediaType,

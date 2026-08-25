@@ -66,10 +66,10 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
     ) async throws {
         for asset in assets {
             let uploadID = MediaUpload.makeID(for: asset.id, optimization: optimization)
-            guard let existing = try await store.upload(for: uploadID), existing.status == .completed else {
+            guard let existing = try await store.upload(for: uploadID) else {
                 continue
             }
-            mediaUploadDebugLog("invalidate completed upload=\(uploadID) asset=\(asset.id) media=\(existing.mediaID ?? "nil")")
+            mediaUploadDebugLog("invalidate upload=\(uploadID) asset=\(asset.id) status=\(existing.status.rawValue) media=\(existing.mediaID ?? "nil")")
             try await store.remove(uploadID: uploadID)
         }
     }

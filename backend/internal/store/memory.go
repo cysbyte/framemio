@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -112,6 +113,35 @@ func (s *MemoryStore) GetUploadSessionByIdempotency(_ context.Context, userID, k
 		return models.UploadSession{}, ErrNotFound
 	}
 	return session, nil
+}
+
+func (s *MemoryStore) GetReadyMediaByUploadIdempotencyPrefix(_ context.Context, userID, prefix string) (models.MediaAsset, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	lookupPrefix := userID + "\x00" + prefix
+	var best models.MediaAsset
+	found := false
+	for key, uploadID := range s.uploadByIdem {
+		if !strings.HasPrefix(key, lookupPrefix) {
+			continue
+		}
+		session, ok := s.uploads[uploadID]
+		if !ok || session.UserID != userID {
+			continue
+		}
+		media, ok := s.media[session.MediaID]
+		if !ok || media.UserID != userID || media.Status != models.MediaStatusReady {
+			continue
+		}
+		if !found || media.UpdatedAt.After(best.UpdatedAt) {
+			best = media
+			found = true
+		}
+	}
+	if !found {
+		return models.MediaAsset{}, ErrNotFound
+	}
+	return best, nil
 }
 
 func (s *MemoryStore) GetUploadSession(_ context.Context, userID, uploadID string) (models.UploadSession, error) {

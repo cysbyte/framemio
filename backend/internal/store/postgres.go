@@ -217,6 +217,41 @@ func (s *PostgresStore) GetUploadSessionByIdempotency(ctx context.Context, userI
 	return session, nil
 }
 
+func (s *PostgresStore) GetReadyMediaByUploadIdempotencyPrefix(ctx context.Context, userID, prefix string) (models.MediaAsset, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT media.data
+		FROM framemio_domain_records upload
+		JOIN framemio_domain_records media
+			ON media.kind = 'media'
+			AND media.user_id = upload.user_id
+			AND media.id = upload.media_id
+		WHERE upload.kind = 'upload'
+			AND upload.user_id = $1
+			AND left(upload.logical_key, length($2)) = $2
+		ORDER BY media.updated_at DESC`, userID, prefix)
+	if err != nil {
+		return models.MediaAsset{}, fmt.Errorf("get media by upload idempotency prefix: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var data []byte
+		if err := rows.Scan(&data); err != nil {
+			return models.MediaAsset{}, fmt.Errorf("scan media by upload idempotency prefix: %w", err)
+		}
+		var media models.MediaAsset
+		if err := json.Unmarshal(data, &media); err != nil {
+			return models.MediaAsset{}, fmt.Errorf("decode media by upload idempotency prefix: %w", err)
+		}
+		if media.UserID == userID && media.Status == models.MediaStatusReady {
+			return media, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return models.MediaAsset{}, fmt.Errorf("iterate media by upload idempotency prefix: %w", err)
+	}
+	return models.MediaAsset{}, ErrNotFound
+}
+
 func (s *PostgresStore) GetUploadSession(ctx context.Context, userID, uploadID string) (models.UploadSession, error) {
 	var session models.UploadSession
 	if err := s.get(ctx, "upload", userID, uploadID, &session); err != nil {

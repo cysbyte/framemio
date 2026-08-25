@@ -257,11 +257,16 @@ func (s *Server) mediaForIOSAsset(request *http.Request, userID, assetID string)
 		return media, nil
 	}
 	for _, key := range []string{"media-upload-original-" + assetID, "media-upload-optimized-" + assetID} {
-		session, err := s.Store.GetUploadSessionByIdempotency(request.Context(), userID, key)
-		if err != nil {
-			continue
+		if session, err := s.Store.GetUploadSessionByIdempotency(request.Context(), userID, key); err == nil {
+			media, mediaErr := s.Store.GetMedia(request.Context(), userID, session.MediaID)
+			if mediaErr == nil && media.Status == models.MediaStatusReady {
+				return media, nil
+			}
 		}
-		return s.Store.GetMedia(request.Context(), userID, session.MediaID)
+		media, err := s.Store.GetReadyMediaByUploadIdempotencyPrefix(request.Context(), userID, key+"-bytes-")
+		if err == nil {
+			return media, nil
+		}
 	}
 	return models.MediaAsset{}, store.ErrNotFound
 }
