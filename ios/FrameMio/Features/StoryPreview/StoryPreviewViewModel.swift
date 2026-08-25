@@ -9,18 +9,51 @@ final class StoryPreviewViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var isPlayingVideo = false
 
-    private let storyID: String
+    private var storyID: String?
+    private let launchContext: MomentContext?
+    private let launchAssets: [MediaAsset]
+    private let launchID: UUID?
+    private let storyLaunchCoordinator: StoryLaunchCoordinator?
     private let storyService: StoryService
     private var loadTask: Task<Void, Never>?
     private var actionTask: Task<Void, Never>?
+    private var launchCancellable: AnyCancellable?
 
     init(storyID: String, storyService: StoryService) {
         self.storyID = storyID
+        launchContext = nil
+        launchAssets = []
+        launchID = nil
+        storyLaunchCoordinator = nil
         self.storyService = storyService
+    }
+
+    init(
+        context: MomentContext,
+        assets: [MediaAsset],
+        launchID: UUID,
+        storyLaunchCoordinator: StoryLaunchCoordinator,
+        storyService: StoryService
+    ) {
+        storyID = nil
+        launchContext = context
+        launchAssets = assets
+        self.launchID = launchID
+        self.storyLaunchCoordinator = storyLaunchCoordinator
+        self.storyService = storyService
+        launchCancellable = storyLaunchCoordinator.objectWillChange.sink { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.objectWillChange.send()
+            }
+        }
     }
 
     var isPerformingAction: Bool {
         activeAction != nil
+    }
+
+    var shouldShowInitialProgress: Bool {
+        story == nil && errorMessage == nil && (isLoading || storyLaunchCoordinator != nil)
     }
 
     /// The film can be watched: the render finished and the server handed back a
@@ -41,7 +74,11 @@ final class StoryPreviewViewModel: ObservableObject {
     }
 
     var progressTitle: String {
-        switch story?.status {
+        if let storyLaunchCoordinator, story == nil {
+            return storyLaunchCoordinator.phaseTitle
+        }
+
+        return switch story?.status {
         case .queued:
             "Preparing your memories..."
         case .analyzing:
@@ -58,7 +95,11 @@ final class StoryPreviewViewModel: ObservableObject {
     }
 
     var progressValue: Double {
-        switch story?.status {
+        if let storyLaunchCoordinator, story == nil {
+            return storyLaunchCoordinator.progress
+        }
+
+        return switch story?.status {
         case .queued:
             0.18
         case .analyzing:
@@ -77,11 +118,46 @@ final class StoryPreviewViewModel: ObservableObject {
     func load() {
         loadTask?.cancel()
         loadTask = Task { [weak self] in
-            await self?.pollStory()
+            await self?.loadStoryOrLaunch()
+        }
+    }
+
+    private func loadStoryOrLaunch() async {
+        if let launchContext, let launchID, let storyLaunchCoordinator {
+            storyLaunchCoordinator.start(context: launchContext, assets: launchAssets, launchID: launchID)
+            await waitForLaunchedStoryID(from: storyLaunchCoordinator)
+        }
+
+        guard storyID != nil else { return }
+        await pollStory()
+    }
+
+    private func waitForLaunchedStoryID(from storyLaunchCoordinator: StoryLaunchCoordinator) async {
+        isLoading = true
+        defer { if storyID == nil { isLoading = false } }
+
+        while !Task.isCancelled {
+            if let launchedStoryID = storyLaunchCoordinator.storyID {
+                storyID = launchedStoryID
+                return
+            }
+
+            if let launchErrorMessage = storyLaunchCoordinator.errorMessage {
+                errorMessage = launchErrorMessage
+                return
+            }
+
+            do {
+                try await Task.sleep(nanoseconds: 300_000_000)
+            } catch {
+                return
+            }
         }
     }
 
     private func pollStory() async {
+        guard let storyID else { return }
+
         if story == nil {
             isLoading = true
         }
@@ -106,31 +182,36 @@ final class StoryPreviewViewModel: ObservableObject {
     }
 
     func retryProcessing() {
-        perform(.retry) { [storyService, storyID] in
+        guard let storyID else { return }
+        perform(.retry) { [storyService] in
             try await storyService.retryProcessing(id: storyID)
         }
     }
 
     func regenerateStory() {
-        perform(.regenerate) { [storyService, storyID] in
+        guard let storyID else { return }
+        perform(.regenerate) { [storyService] in
             try await storyService.regenerateStory(id: storyID)
         }
     }
 
     func renderAgain() {
-        perform(.renderAgain) { [storyService, storyID] in
+        guard let storyID else { return }
+        perform(.renderAgain) { [storyService] in
             try await storyService.renderAgain(id: storyID)
         }
     }
 
     func replaceMoment(assetID: String) {
-        perform(.replaceMoment) { [storyService, storyID] in
+        guard let storyID else { return }
+        perform(.replaceMoment) { [storyService] in
             try await storyService.replaceMoment(storyID: storyID, assetID: assetID)
         }
     }
 
     func removeMoment(assetID: String) {
-        perform(.removeMoment) { [storyService, storyID] in
+        guard let storyID else { return }
+        perform(.removeMoment) { [storyService] in
             try await storyService.removeMoment(storyID: storyID, assetID: assetID)
         }
     }

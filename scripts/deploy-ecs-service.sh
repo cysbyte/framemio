@@ -19,6 +19,7 @@ require_var IMAGE
 : "${ECS_SERVICE_DESIRED_COUNT:=1}"
 : "${ECS_LAUNCH_TYPE:=FARGATE}"
 : "${ECS_REGISTER_SCALABLE_TARGET:=false}"
+: "${ECS_PRESERVE_DESIRED_COUNT:=false}"
 : "${ECS_MIN_CAPACITY:=$ECS_SERVICE_DESIRED_COUNT}"
 : "${ECS_MAX_CAPACITY:=$ECS_SERVICE_DESIRED_COUNT}"
 
@@ -121,13 +122,19 @@ SERVICE_STATUS="$(aws ecs describe-services \
 
 if [[ "$SERVICE_STATUS" == "ACTIVE" ]]; then
   echo "Updating ECS service $ECS_SERVICE"
-  aws ecs update-service \
-    --region "$AWS_REGION" \
-    --cluster "$ECS_CLUSTER" \
-    --service "$ECS_SERVICE" \
-    --task-definition "$TASK_DEFINITION_ARN" \
-    --desired-count "$ECS_SERVICE_DESIRED_COUNT" \
-    --force-new-deployment >/dev/null
+  UPDATE_SERVICE_ARGS=(
+    --region "$AWS_REGION"
+    --cluster "$ECS_CLUSTER"
+    --service "$ECS_SERVICE"
+    --task-definition "$TASK_DEFINITION_ARN"
+    --force-new-deployment
+  )
+  if [[ "$ECS_PRESERVE_DESIRED_COUNT" == "true" ]]; then
+    echo "Preserving current desired count for $ECS_SERVICE"
+  else
+    UPDATE_SERVICE_ARGS+=(--desired-count "$ECS_SERVICE_DESIRED_COUNT")
+  fi
+  aws ecs update-service "${UPDATE_SERVICE_ARGS[@]}" >/dev/null
 else
   echo "Creating ECS service $ECS_SERVICE"
   require_var ECS_SUBNETS

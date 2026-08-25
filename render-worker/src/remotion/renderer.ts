@@ -49,6 +49,21 @@ export class RemotionCliRenderer implements RemotionRenderer {
   }
 }
 
+function concatVideoFilter(composition: CompositionSpec): string {
+  const filters = composition.clips.map((clip, index) => {
+    const scaleAndCrop = clip.transform.kind === 'video' && clip.transform.crop === 'fit'
+      ? `scale=${composition.resolution.width}:${composition.resolution.height}:force_original_aspect_ratio=decrease,pad=${composition.resolution.width}:${composition.resolution.height}:(ow-iw)/2:(oh-ih)/2`
+      : `scale=${composition.resolution.width}:${composition.resolution.height}:force_original_aspect_ratio=increase,crop=${composition.resolution.width}:${composition.resolution.height}`;
+    return `[${index}:v]${scaleAndCrop},setsar=1,fps=${composition.fps},trim=duration=${clipDurationSeconds(clip)},setpts=PTS-STARTPTS[v${index}]`;
+  });
+  const inputs = composition.clips.map((_, index) => `[v${index}]`).join('');
+  return [...filters, `${inputs}concat=n=${composition.clips.length}:v=1:a=0,format=yuv420p[outv]`].join(';');
+}
+
+function clipDurationSeconds(clip: {duration_ms: number}): string {
+  return Math.max(0.001, clip.duration_ms / 1000).toFixed(3);
+}
+
 async function run(command: string, args: string[], timeoutMs: number): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const child = spawn(command, args, {stdio: ['ignore', 'pipe', 'pipe']});
@@ -99,13 +114,32 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
       ], 15 * 60 * 1000);
       return;
     }
-    const inputPath = clip.media_type === 'photo' ? clip.source_path : clip.prepared_path;
-    const videoFilter = `scale=${composition.resolution.width}:${composition.resolution.height}:force_original_aspect_ratio=increase,crop=${composition.resolution.width}:${composition.resolution.height},format=yuv420p`;
     const args = ['-hide_banner', '-loglevel', 'error', '-y'];
-    if (clip.media_type === 'photo') {
-      args.push('-loop', '1');
+    for (const timelineClip of composition.clips) {
+      const inputPath = timelineClip.media_type === 'video' ? timelineClip.prepared_path : timelineClip.source_path;
+      if (timelineClip.media_type !== 'video') {
+        args.push('-loop', '1', '-t', clipDurationSeconds(timelineClip));
+      }
+      args.push('-i', inputPath);
     }
-    args.push('-i', inputPath, '-t', durationSeconds.toFixed(3), '-vf', videoFilter, '-r', String(composition.fps), '-an', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', outputPath);
+    args.push(
+      '-filter_complex',
+      concatVideoFilter(composition),
+      '-map',
+      '[outv]',
+      '-t',
+      durationSeconds.toFixed(3),
+      '-r',
+      String(composition.fps),
+      '-an',
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      '-movflags',
+      '+faststart',
+      outputPath,
+    );
     await run(this.ffmpegBinary, args, 15 * 60 * 1000);
   }
 }

@@ -1,16 +1,16 @@
 import SwiftUI
 
 struct StoryPreviewView: View {
-    @ObservedObject private var viewModel: StoryPreviewViewModel
+    @StateObject private var viewModel: StoryPreviewViewModel
 
     init(viewModel: StoryPreviewViewModel) {
-        _viewModel = ObservedObject(wrappedValue: viewModel)
+        _viewModel = StateObject(wrappedValue: viewModel)
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: FrameMioSpacing.section) {
-                if viewModel.isLoading && viewModel.story == nil {
+                if viewModel.shouldShowInitialProgress {
                     initialLoadingProgress
                         .frame(maxWidth: .infinity)
                 } else if let story = viewModel.story {

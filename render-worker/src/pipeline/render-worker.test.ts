@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, readFile} from 'node:fs/promises';
+import {chmod, mkdtemp, readFile, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {DeterministicFixtureFfmpegClient} from '../ffmpeg/client.js';
-import {FixtureRemotionRenderer} from '../remotion/renderer.js';
+import {FfmpegCompositionRenderer, FixtureRemotionRenderer} from '../remotion/renderer.js';
 import {LocalFixtureObjectStore} from '../storage/object-store.js';
 import {canonicalJson, resolutionForAspectRatio} from '../determinism.js';
 import {RenderAssetError, RenderInputError} from './errors.js';
@@ -83,6 +83,52 @@ test('normalizes transitions and resolves audio deterministically', () => {
   assert.equal(composition.audio.background_path, '/work/assets/background-audio');
   assert.equal(composition.audio.fade_in_frames, 18);
   assert.equal(composition.audio.fade_out_frames, 27);
+});
+
+
+test('ffmpeg fallback renderer concatenates every story clip', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'framemio-ffmpeg-render-test-'));
+  const fakeFfmpeg = path.join(root, 'fake-ffmpeg.cjs');
+  const argsPath = path.join(root, 'ffmpeg-args.json');
+  const outputPath = path.join(root, 'story.mp4');
+  await writeFile(fakeFfmpeg, `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.writeFileSync(process.env.FRAMEMIO_FFMPEG_ARGS_PATH, JSON.stringify(args));
+fs.writeFileSync(args[args.length - 1], 'fake mp4');
+`, 'utf8');
+  await chmod(fakeFfmpeg, 0o755);
+
+  const previousArgsPath = process.env.FRAMEMIO_FFMPEG_ARGS_PATH;
+  process.env.FRAMEMIO_FFMPEG_ARGS_PATH = argsPath;
+  try {
+    const assets = fixtureMediaAssets();
+    const assetPaths = new Map(assets.map((asset) => [asset.id, `/asset/${asset.file_name}`]));
+    const composition = buildComposition(fixtureStoryPlan(), assets, assetPaths, new Map(), {
+      work_dir: root,
+      assets_dir: path.join(root, 'assets'),
+      clips_dir: path.join(root, 'clips'),
+      output_file: outputPath,
+      composition_file: path.join(root, 'composition.json'),
+    });
+
+    await new FfmpegCompositionRenderer({ffmpegBinary: fakeFfmpeg}).renderComposition(composition, outputPath);
+
+    const args = JSON.parse(await readFile(argsPath, 'utf8')) as string[];
+    const inputs = args.flatMap((arg, index) => arg === '-i' ? [args[index + 1]] : []);
+    assert.deepEqual(inputs, ['/asset/IMG_1001.jpg', '/asset/IMG_1002.MOV']);
+    const filterComplex = args[args.indexOf('-filter_complex') + 1];
+    assert.match(filterComplex, /\[0:v\]/);
+    assert.match(filterComplex, /\[1:v\]/);
+    assert.match(filterComplex, /concat=n=2:v=1:a=0/);
+    assert.equal(args[args.indexOf('-map') + 1], '[outv]');
+  } finally {
+    if (previousArgsPath === undefined) {
+      delete process.env.FRAMEMIO_FFMPEG_ARGS_PATH;
+    } else {
+      process.env.FRAMEMIO_FFMPEG_ARGS_PATH = previousArgsPath;
+    }
+  }
 });
 
 test('supports the required output aspect ratios', () => {

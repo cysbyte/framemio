@@ -2,10 +2,16 @@ import SwiftUI
 
 struct StoryCreationView: View {
     @ObservedObject private var viewModel: StoryCreationViewModel
+    let onCreate: () -> Void
     let onCreated: (Story) -> Void
 
-    init(viewModel: StoryCreationViewModel, onCreated: @escaping (Story) -> Void) {
+    init(
+        viewModel: StoryCreationViewModel,
+        onCreate: @escaping () -> Void,
+        onCreated: @escaping (Story) -> Void
+    ) {
         _viewModel = ObservedObject(wrappedValue: viewModel)
+        self.onCreate = onCreate
         self.onCreated = onCreated
     }
 
@@ -69,7 +75,7 @@ struct StoryCreationView: View {
                     processingStartedCard(story)
                 } else {
                     PrimaryButton(title: "Create Story", systemImage: "sparkles") {
-                        viewModel.createStory()
+                        onCreate()
                     }
                 }
 

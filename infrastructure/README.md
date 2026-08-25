@@ -13,7 +13,7 @@ The API, video intelligence worker, and render worker must remain separate deplo
 - Grant only the PostgreSQL, SQS, S3, logging, and secret permissions required by the worker.
 - Supply video-understanding and transcription API credentials through AWS Secrets Manager or SSM, never task-definition plaintext or queue messages.
 - Size ephemeral storage for the largest supported source video plus extracted evidence, with headroom for retries.
-- Production currently uses zero-idle one-off ECS `RunTask` activation from the backend instead of queue-depth scaling policies; keep service scalable targets at `min=0`, `max=1`.
+- Production workers are controlled manually with the backend scripts; keep them private and set ECS service `desiredCount` to `0` or `1` as needed.
 - Set the SQS visibility timeout above the normal processing duration and keep the worker heartbeat enabled for long videos.
 
 The worker stores deterministic preprocessing artifacts in S3 and versioned records in PostgreSQL. Lifecycle policies may expire superseded derived artifacts, but must not remove evidence still referenced by an active analysis or story project.

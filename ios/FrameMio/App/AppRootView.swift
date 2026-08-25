@@ -4,10 +4,18 @@ struct AppRootView: View {
     let dependencies: AppDependencies
     @State private var path: [AppRoute] = []
     @StateObject private var homeViewModel: HomeViewModel
+    @StateObject private var storyLaunchCoordinator: StoryLaunchCoordinator
 
     init(dependencies: AppDependencies = .preview(), homeMockState: HomeMockState? = nil) {
         self.dependencies = dependencies
         _homeViewModel = StateObject(wrappedValue: HomeViewModel(storyService: dependencies.storyService, mockState: homeMockState))
+        _storyLaunchCoordinator = StateObject(
+            wrappedValue: StoryLaunchCoordinator(
+                analysisService: dependencies.mediaAnalysis,
+                mediaUploadService: dependencies.mediaUploadService,
+                storyService: dependencies.storyService
+            )
+        )
     }
 
     var body: some View {
@@ -55,9 +63,22 @@ struct AppRootView: View {
                     mediaUploadService: dependencies.mediaUploadService,
                     storyService: dependencies.storyService
                 ),
+                onCreate: {
+                    path.append(.storyCreating(context: context, assets: assets, launchID: UUID()))
+                },
                 onCreated: { story in
                     path.append(.storyPreview(storyID: story.id))
                 }
+            )
+        case let .storyCreating(context, assets, launchID):
+            StoryPreviewView(
+                viewModel: StoryPreviewViewModel(
+                    context: context,
+                    assets: assets,
+                    launchID: launchID,
+                    storyLaunchCoordinator: storyLaunchCoordinator,
+                    storyService: dependencies.storyService
+                )
             )
         case let .storyPreview(storyID):
             StoryPreviewView(

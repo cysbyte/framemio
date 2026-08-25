@@ -59,6 +59,7 @@
 		A1000000000000000000020E /* MediaPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000010E /* MediaPickerView.swift */; };
 		A1000000000000000000020F /* StoryCreationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000010F /* StoryCreationViewModel.swift */; };
 		A10000000000000000000210 /* StoryCreationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000110 /* StoryCreationView.swift */; };
+		A10000000000000000000216 /* StoryLaunchCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000116 /* StoryLaunchCoordinator.swift */; };
 		A10000000000000000000211 /* StoryPreviewViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000111 /* StoryPreviewViewModel.swift */; };
 		A10000000000000000000212 /* StoryPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000112 /* StoryPreviewView.swift */; };
 		A10000000000000000000213 /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000113 /* SettingsViewModel.swift */; };
@@ -142,6 +143,7 @@
 		A1000000000000000000010E /* MediaPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPickerView.swift; sourceTree = "<group>"; };
 		A1000000000000000000010F /* StoryCreationViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoryCreationViewModel.swift; sourceTree = "<group>"; };
 		A10000000000000000000110 /* StoryCreationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoryCreationView.swift; sourceTree = "<group>"; };
+		A10000000000000000000116 /* StoryLaunchCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoryLaunchCoordinator.swift; sourceTree = "<group>"; };
 		A10000000000000000000111 /* StoryPreviewViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoryPreviewViewModel.swift; sourceTree = "<group>"; };
 		A10000000000000000000112 /* StoryPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoryPreviewView.swift; sourceTree = "<group>"; };
 		A10000000000000000000113 /* SettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModel.swift; sourceTree = "<group>"; };
@@ -441,6 +443,7 @@
 			children = (
 				A1000000000000000000010F /* StoryCreationViewModel.swift */,
 				A10000000000000000000110 /* StoryCreationView.swift */,
+				A10000000000000000000116 /* StoryLaunchCoordinator.swift */,
 			);
 			path = StoryCreation;
 			sourceTree = "<group>";
@@ -613,6 +616,7 @@
 				A1000000000000000000020E /* MediaPickerView.swift in Sources */,
 				A1000000000000000000020F /* StoryCreationViewModel.swift in Sources */,
 				A10000000000000000000210 /* StoryCreationView.swift in Sources */,
+				A10000000000000000000216 /* StoryLaunchCoordinator.swift in Sources */,
 				A10000000000000000000211 /* StoryPreviewViewModel.swift in Sources */,
 				A10000000000000000000212 /* StoryPreviewView.swift in Sources */,
 				A10000000000000000000213 /* SettingsViewModel.swift in Sources */,
