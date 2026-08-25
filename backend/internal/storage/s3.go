@@ -305,7 +305,16 @@ func (s *S3ObjectStorage) PresignedDownloadURL(ctx context.Context, key string, 
 	presigned, err := s.presigner.PresignGetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
-	}, s3.WithPresignExpires(expiry))
+	}, s3.WithPresignExpires(expiry), func(options *s3.PresignOptions) {
+		// The SDK defaults to validating response checksums, which adds
+		// x-amz-checksum-mode to the request and therefore to SignedHeaders.
+		// A player fetching this URL sends no such header, so S3 rejects the
+		// signature with 403. Only the presigned request opts out; ordinary
+		// downloads through this client keep checksum validation.
+		options.ClientOptions = append(options.ClientOptions, func(clientOptions *s3.Options) {
+			clientOptions.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
+		})
+	})
 	if err != nil {
 		return "", fmt.Errorf("presign s3 download: %w", err)
 	}
