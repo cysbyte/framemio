@@ -1,5 +1,5 @@
 import {spawn} from 'node:child_process';
-import {mkdir, writeFile} from 'node:fs/promises';
+import {mkdir, open, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import type {CompositionSpec, KenBurnsTransform, TimelineClip} from '../types.js';
@@ -99,6 +99,20 @@ function isHeifImagePath(filePath: string): boolean {
   return extension === '.heic' || extension === '.heif';
 }
 
+async function isJpegImage(filePath: string): Promise<boolean> {
+  let file: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    file = await open(filePath, 'r');
+    const header = Buffer.alloc(3);
+    const result = await file.read(header, 0, header.length, 0);
+    return result.bytesRead >= 3 && header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff;
+  } catch {
+    return false;
+  } finally {
+    await file?.close();
+  }
+}
+
 async function run(command: string, args: string[], timeoutMs: number): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const child = spawn(command, args, {stdio: ['ignore', 'pipe', 'pipe']});
@@ -187,8 +201,20 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
     if (!isHeifImagePath(clip.source_path)) {
       return clip.source_path;
     }
+    if (await isJpegImage(clip.source_path)) {
+      console.warn(JSON.stringify({level: 'warn', msg: 'HEIC extension contains JPEG bytes; using source image directly', clip_id: clip.clip_id, source_path: clip.source_path}));
+      return clip.source_path;
+    }
     const convertedPath = path.join(path.dirname(outputPath), `${clip.clip_id}.jpg`);
-    await run(this.heifConvertBinary, [clip.source_path, convertedPath], 60 * 1000);
+    try {
+      await run(this.heifConvertBinary, [clip.source_path, convertedPath], 60 * 1000);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('is a JPEG image')) {
+        console.warn(JSON.stringify({level: 'warn', msg: 'HEIC converter reported JPEG bytes; using source image directly', clip_id: clip.clip_id, source_path: clip.source_path}));
+        return clip.source_path;
+      }
+      throw error;
+    }
     return convertedPath;
   }
 }

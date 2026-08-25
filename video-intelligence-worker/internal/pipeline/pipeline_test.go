@@ -104,6 +104,50 @@ func TestProcessorRequiresBackendCompletionCallback(t *testing.T) {
 	}
 }
 
+func TestProcessorContinuesWhenTranscriptionFails(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.August, 19, 10, 0, 0, 0, time.UTC)
+	repository := newMemoryRepository(now)
+	objects := newMemoryObjects()
+	tools := &fakeTools{metadata: domain.VideoMetadata{
+		DurationMicros: 18_000_000, Width: 1920, Height: 1080, FPS: 30,
+		VideoCodec: "hevc", AudioCodec: "aac", BitRate: 8_000_000, FileSizeBytes: 1000, HasAudio: true,
+	}, boundaries: []domain.SceneBoundary{{TimestampMicros: 4_000_000, Score: 0.6}, {TimestampMicros: 8_000_000, Score: 0.7}, {TimestampMicros: 12_000_000, Score: 0.65}}}
+	transcriber := &fakeTranscriber{err: errors.New("transcription provider timeout")}
+	provider := &fakeUnderstandingProvider{}
+	completion := &fakeCompletionReporter{}
+	processor := &Processor{
+		Config: Config{
+			WorkRoot: t.TempDir(), AnalysisVersion: "video-v1", SceneThreshold: 0.32, MaxSceneBoundaries: 100,
+			Planner: PlannerConfig{
+				MinSceneDuration: 750 * time.Millisecond, MaxSegmentDuration: 12 * time.Second,
+				LongVideoThreshold: 5 * time.Minute, MaxFramesShort: 12, MaxFramesLong: 24,
+			},
+			DuplicateHashDistance: 4, StageRetries: 1, EnableTranscription: true,
+			TranscriptionVersion: "transcription-v1", UnderstandingVersion: "video-understanding-v1",
+			EvidenceURLExpiry: time.Hour,
+		},
+		Repository: repository, Objects: objects, Tools: tools, Transcription: transcriber,
+		Understanding: &understanding.Service{Provider: provider, Repository: repository, Artifacts: objects, RetryAttempts: 1, RetryDelay: time.Nanosecond, FrameURLExpiry: time.Hour, Now: func() time.Time { return now }},
+		Completion:    completion,
+		Now:           func() time.Time { return now },
+	}
+
+	result, err := processor.Process(context.Background(), repository.addJob("job-transcription-fails", false))
+	if err != nil {
+		t.Fatalf("expected visual-only analysis to complete, got %v", err)
+	}
+	if result.Reused || result.Analysis.ID == "" || len(result.Analysis.Segments) == 0 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if tools.audioCalls != 1 || transcriber.calls != 1 || provider.calls != 1 || completion.calls != 1 {
+		t.Fatalf("unexpected calls: audio=%d transcription=%d understanding=%d completion=%d", tools.audioCalls, transcriber.calls, provider.calls, completion.calls)
+	}
+	if result.Analysis.Transcript.HasSpeech || len(result.Analysis.Transcript.Segments) != 0 {
+		t.Fatalf("expected empty transcript after transcription failure: %+v", result.Analysis.Transcript)
+	}
+}
+
 type memoryRepository struct {
 	mu            sync.Mutex
 	now           time.Time
@@ -380,10 +424,16 @@ func (t *fakeTools) ExtractAudio(_ context.Context, _, destinationPath string) e
 	return os.WriteFile(destinationPath, []byte("audio"), 0o600)
 }
 
-type fakeTranscriber struct{ calls int }
+type fakeTranscriber struct {
+	calls int
+	err   error
+}
 
 func (s *fakeTranscriber) Transcribe(_ context.Context, request transcription.Request) (transcription.Result, error) {
 	s.calls++
+	if s.err != nil {
+		return transcription.Result{}, s.err
+	}
 	transcript := domain.Transcript{
 		Language: "en", Text: "Happy birthday", HasSpeech: true,
 		Segments: []domain.TranscriptSegment{{StartMicros: 1_000_000, EndMicros: 2_000_000, Text: "Happy birthday", Confidence: 0.98}},

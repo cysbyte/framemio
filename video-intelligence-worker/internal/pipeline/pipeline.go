@@ -241,6 +241,7 @@ func (p *Processor) loadOrPreprocess(ctx context.Context, jobContext domain.JobC
 		return domain.VideoEvidence{}, domain.PreprocessingArtifact{}, domain.Permanent(fmt.Errorf("no usable representative frames were extracted"))
 	}
 	prefix := artifactPrefix(jobContext.Job.UserID, jobContext.Media.ID, version, sourceETag)
+	p.logger().Info("selected representative frames", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Int("selected_frame_count", len(selectedFrames)))
 	for index := range selectedFrames {
 		key := fmt.Sprintf("%s/frames/%s.jpg", prefix, selectedFrames[index].ID)
 		if err := retry(ctx, p.Config.StageRetries, func() error {
@@ -253,9 +254,12 @@ func (p *Processor) loadOrPreprocess(ctx context.Context, jobContext domain.JobC
 	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "RUNNING", 0.55, "", "", ""); err != nil {
 		return domain.VideoEvidence{}, domain.PreprocessingArtifact{}, err
 	}
+	p.logger().Info("video frame evidence ready", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Int("frame_count", len(selectedFrames)))
 	transcript, audioKey, err := p.extractTranscript(ctx, workspace, sourcePath, prefix, jobContext, sourceETag, metadata)
 	if err != nil {
-		return domain.VideoEvidence{}, domain.PreprocessingArtifact{}, err
+		p.logger().Warn("video transcription unavailable; continuing with visual evidence", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Any("error", err))
+		transcript = domain.Transcript{}
+		audioKey = ""
 	}
 	quality := ComputeQuality(metadata, scenes, selectedFrames)
 	now := p.now().UTC()
@@ -284,6 +288,7 @@ func (p *Processor) extractTranscript(ctx context.Context, workspace, sourcePath
 	if !p.Config.EnableTranscription || !metadata.HasAudio {
 		return domain.Transcript{}, "", nil
 	}
+	p.logger().Info("starting video transcription", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID))
 	if p.Transcription == nil {
 		return domain.Transcript{}, "", domain.Permanent(fmt.Errorf("transcription service is required when transcription is enabled"))
 	}
@@ -303,6 +308,7 @@ func (p *Processor) extractTranscript(ctx context.Context, workspace, sourcePath
 	if err != nil {
 		return domain.Transcript{}, "", fmt.Errorf("transcribe video audio: %w", err)
 	}
+	p.logger().Info("video transcription ready", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Bool("has_speech", result.Record.Transcript.HasSpeech), slog.Int("segment_count", len(result.Record.Transcript.Segments)))
 	return result.Record.Transcript, audioKey, nil
 }
 

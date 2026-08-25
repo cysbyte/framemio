@@ -92,7 +92,7 @@ func (t Toolchain) ExtractFrame(ctx context.Context, sourcePath string, timestam
 	timestamp := strconv.FormatFloat(float64(timestampMicros)/1_000_000, 'f', 6, 64)
 	filter := fmt.Sprintf("scale=min(%d\\,iw):-2", width)
 	_, _, err := t.runner().Run(ctx, t.FFmpegPath,
-		"-hide_banner", "-loglevel", "error", "-nostdin", "-i", sourcePath, "-ss", timestamp,
+		"-hide_banner", "-loglevel", "error", "-nostdin", "-ss", timestamp, "-i", sourcePath,
 		"-map", "0:v:0", "-frames:v", "1", "-vf", filter, "-q:v", "2", "-y", destinationPath,
 	)
 	return err

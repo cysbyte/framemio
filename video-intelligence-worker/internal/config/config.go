@@ -78,7 +78,7 @@ func Load() (Config, error) {
 		TranscriptionVersion:              environment("TRANSCRIPTION_VERSION", "transcription-v1"),
 		EnableTranscription:               environmentBoolFirst([]string{"ENABLE_TRANSCRIPTION", "ENABLE_SPEECH_TO_TEXT"}, true),
 		TranscriptionRetries:              environmentInt("TRANSCRIPTION_RETRIES", 3),
-		TranscriptionTimeout:              environmentDuration("TRANSCRIPTION_PROVIDER_TIMEOUT", 30*time.Minute),
+		TranscriptionTimeout:              environmentDuration("TRANSCRIPTION_PROVIDER_TIMEOUT", 90*time.Second),
 		TranscriptionRawArtifactThreshold: environmentInt("TRANSCRIPTION_RAW_ARTIFACT_THRESHOLD_BYTES", 256<<10),
 		SceneThreshold:                    environmentFloat("SCENE_CHANGE_THRESHOLD", 0.32),
 		MinSceneDuration:                  environmentDuration("MIN_SCENE_DURATION", 750*time.Millisecond),
