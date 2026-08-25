@@ -66,6 +66,41 @@ test('preprocesses video clips with exact source timestamps and audio settings',
   assert.equal(renderedClip.volume, 0.72);
 });
 
+test('preprocesses multiple selected ranges from the same source video', async () => {
+  const harness = await createHarness();
+  const basePlan = fixtureStoryPlan();
+  const firstVideo = {...basePlan.moments[1], moment_id: 'moment-video-1', start_micros: 4_000_000, end_micros: 8_000_000, duration_ms: 4000};
+  const secondVideo = {...basePlan.moments[1], moment_id: 'moment-video-2', start_micros: 12_000_000, end_micros: 16_000_000, duration_ms: 4000};
+  await harness.worker.render(fixtureRenderInput({
+    story_plan: fixtureStoryPlan({moments: [basePlan.moments[0], firstVideo, secondVideo], total_duration_ms: 11_000, requested_duration_ms: 11_000}),
+  }));
+
+  const trimOperations = harness.ffmpeg.operations.filter((operation) => operation.name === 'trimVideo');
+  assert.equal(trimOperations.length, 2);
+  assert.equal(trimOperations[0].request.startMicros, 4_000_000);
+  assert.equal(trimOperations[0].request.endMicros, 8_000_000);
+  assert.equal(trimOperations[1].request.startMicros, 12_000_000);
+  assert.equal(trimOperations[1].request.endMicros, 16_000_000);
+  assert.notEqual(trimOperations[0].request.outputPath, trimOperations[1].request.outputPath);
+});
+
+test('applies deterministic cinematic motion to photo clips', () => {
+  const plan = fixtureStoryPlan({moments: [fixtureStoryPlan().moments[0]]});
+  const [photo] = fixtureMediaAssets();
+  const composition = buildComposition(plan, [photo], new Map([[photo.id, '/asset/photo.jpg']]), new Map(), {
+    work_dir: '/work',
+    assets_dir: '/work/assets',
+    clips_dir: '/work/clips',
+    output_file: '/work/story.mp4',
+    composition_file: '/work/composition.json',
+  });
+
+  const transform = composition.clips[0].transform;
+  assert.equal(transform.kind, 'photo');
+  assert.notEqual(transform.from_scale, transform.to_scale);
+  assert.equal(composition.clips[0].media_type, 'photo');
+});
+
 test('normalizes transitions and resolves audio deterministically', () => {
   const plan = fixtureStoryPlan();
   const assets = fixtureMediaAssets();
@@ -120,6 +155,7 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
     const filterComplex = args[args.indexOf('-filter_complex') + 1];
     assert.match(filterComplex, /\[0:v\]/);
     assert.match(filterComplex, /\[1:v\]/);
+    assert.match(filterComplex, /zoompan=z=/);
     assert.match(filterComplex, /concat=n=2:v=1:a=0/);
     assert.equal(args[args.indexOf('-map') + 1], '[outv]');
   } finally {

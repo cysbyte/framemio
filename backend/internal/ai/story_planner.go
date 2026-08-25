@@ -33,6 +33,8 @@ type Planner struct {
 	Now func() time.Time
 }
 
+const maxVideoMomentDuration = 5 * time.Second
+
 type candidate struct {
 	moment     models.StoryMoment
 	sourceTime int64
@@ -264,15 +266,19 @@ func buildCandidates(request Request, selected map[string]struct{}, clusters map
 			if strings.TrimSpace(segment.SegmentID) == "" || strings.TrimSpace(segment.SceneID) == "" {
 				continue
 			}
+			if excludedVideoUsage(segment.RecommendedUsage) {
+				continue
+			}
 			if segment.EndMicros <= segment.StartMicros || segment.StartMicros < 0 || segment.EndMicros > analysis.DurationMicros {
 				continue
 			}
 			clusterID := clusterForMedia(clusters, mediaID)
 			score := videoScore(analysis, segment, selected, clusterID)
+			endMicros := selectedVideoEndMicros(segment)
 			moment := models.StoryMoment{
 				AssetID: mediaID, MediaID: mediaID, MediaType: models.MediaTypeVideo,
 				VideoAnalysisVersion: analysis.AnalysisVersion,
-				StartMicros:          segment.StartMicros, EndMicros: segment.EndMicros,
+				StartMicros:          segment.StartMicros, EndMicros: endMicros,
 				Narrative: segment.Description, Caption: captionFromSegment(segment),
 				DurationMS: videoDuration(segment), Reason: reasonFromSegment(segment), Score: score,
 				CropIntent: cropIntentFor(analysis, segment), Transition: "cut",
@@ -308,20 +314,30 @@ func selectCandidates(candidates []candidate, desired time.Duration) []candidate
 		targetMS = 15000
 	}
 	totalMS := 0
+	addCandidate := func(entry candidate, force bool) bool {
+		if _, exists := seenKeys[entry.repetition]; exists {
+			return false
+		}
+		if selectedPerMedia[entry.mediaID] >= 2 && !force {
+			return false
+		}
+		if totalMS+entry.moment.DurationMS > targetMS && len(selected) > 0 {
+			return false
+		}
+		selected = append(selected, entry)
+		seenKeys[entry.repetition] = struct{}{}
+		selectedPerMedia[entry.mediaID]++
+		totalMS += entry.moment.DurationMS
+		return true
+	}
+	for _, candidate := range bestCandidatePerMedia(candidates) {
+		addCandidate(candidate, true)
+	}
 	for _, candidate := range candidates {
 		if totalMS >= targetMS && len(selected) > 0 {
 			break
 		}
-		if _, exists := seenKeys[candidate.repetition]; exists && !candidate.isSelected {
-			continue
-		}
-		if selectedPerMedia[candidate.mediaID] >= 2 && !candidate.isSelected {
-			continue
-		}
-		selected = append(selected, candidate)
-		seenKeys[candidate.repetition] = struct{}{}
-		selectedPerMedia[candidate.mediaID]++
-		totalMS += candidate.moment.DurationMS
+		addCandidate(candidate, false)
 	}
 	if len(selected) == 0 {
 		selected = append(selected, candidates[0])
@@ -330,6 +346,36 @@ func selectCandidates(candidates []candidate, desired time.Duration) []candidate
 		selected = trimToDuration(selected, targetMS)
 	}
 	return selected
+}
+
+func bestCandidatePerMedia(candidates []candidate) []candidate {
+	bestByMedia := make(map[string]candidate, len(candidates))
+	for _, entry := range candidates {
+		current, exists := bestByMedia[entry.mediaID]
+		if !exists || entry.score > current.score || (entry.score == current.score && entry.sourceTime < current.sourceTime) {
+			bestByMedia[entry.mediaID] = entry
+		}
+	}
+	best := make([]candidate, 0, len(bestByMedia))
+	for _, entry := range bestByMedia {
+		best = append(best, entry)
+	}
+	sort.Slice(best, func(left, right int) bool {
+		if best[left].isSelected != best[right].isSelected {
+			return best[left].isSelected
+		}
+		if best[left].isVideo != best[right].isVideo {
+			return !best[left].isVideo
+		}
+		if best[left].moment.DurationMS == best[right].moment.DurationMS {
+			if best[left].score == best[right].score {
+				return best[left].sourceTime < best[right].sourceTime
+			}
+			return best[left].score > best[right].score
+		}
+		return best[left].moment.DurationMS < best[right].moment.DurationMS
+	})
+	return best
 }
 
 func trimToDuration(candidates []candidate, targetMS int) []candidate {
@@ -345,8 +391,12 @@ func trimToDuration(candidates []candidate, targetMS int) []candidate {
 		total += candidate.moment.DurationMS
 	}
 	for total > targetMS && len(sorted) > 1 {
-		removed := sorted[0]
-		sorted = sorted[1:]
+		removeIndex := firstRemovableCandidate(sorted)
+		if removeIndex < 0 {
+			break
+		}
+		removed := sorted[removeIndex]
+		sorted = append(sorted[:removeIndex], sorted[removeIndex+1:]...)
 		total -= removed.moment.DurationMS
 	}
 	sort.Slice(sorted, func(left, right int) bool {
@@ -356,6 +406,28 @@ func trimToDuration(candidates []candidate, targetMS int) []candidate {
 		return sorted[left].sourceTime < sorted[right].sourceTime
 	})
 	return sorted
+}
+
+func firstRemovableCandidate(candidates []candidate) int {
+	videoCount := 0
+	photoCount := 0
+	for _, entry := range candidates {
+		if entry.isVideo {
+			videoCount++
+		} else {
+			photoCount++
+		}
+	}
+	for index, entry := range candidates {
+		if entry.isVideo && videoCount == 1 && photoCount > 0 {
+			continue
+		}
+		if !entry.isVideo && photoCount == 1 && videoCount > 0 {
+			continue
+		}
+		return index
+	}
+	return -1
 }
 
 func validateRequest(request Request) error {
@@ -509,6 +581,15 @@ func photoScore(photo models.PhotoAnalysis, selected map[string]struct{}, cluste
 	return math.Min(1, score)
 }
 
+func excludedVideoUsage(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "exclude", "audio_only":
+		return true
+	default:
+		return false
+	}
+}
+
 func videoScore(analysis models.VideoAnalysis, segment models.VideoSegment, selected map[string]struct{}, clusterID string) float64 {
 	score := 0.3*clamp(segment.Importance) + 0.2*clamp(segment.MemoryValue) + 0.2*clamp(segment.EmotionalValue) + 0.15*clamp(segment.StoryRelevance) + 0.1*clamp(segment.VisualQuality) + 0.05*clamp(analysis.QualitySignals.OverallScore)
 	if segment.Recommended {
@@ -541,14 +622,15 @@ func photoDuration(storyType models.StoryType, photo models.PhotoAnalysis) int {
 }
 
 func videoDuration(segment models.VideoSegment) int {
-	duration := int((segment.EndMicros - segment.StartMicros) / 1000)
-	if duration < 2500 {
-		duration = 2500
-	}
-	if duration > 7000 {
-		duration = 7000
+	duration := int((selectedVideoEndMicros(segment) - segment.StartMicros) / 1000)
+	if duration < 1 {
+		duration = 1
 	}
 	return duration
+}
+
+func selectedVideoEndMicros(segment models.VideoSegment) int64 {
+	return min(segment.EndMicros, segment.StartMicros+maxVideoMomentDuration.Microseconds())
 }
 
 func captionFromSegment(segment models.VideoSegment) string {
@@ -623,10 +705,10 @@ func momentKey(moment models.StoryMoment) string {
 }
 
 func repetitionKey(mediaID, clusterID string, timestampMicros int64, suffix string) string {
-	if clusterID != "" {
-		return clusterID
-	}
 	bucket := timestampMicros / (15 * int64(time.Minute/time.Microsecond))
+	if clusterID != "" {
+		return fmt.Sprintf("%s:%s:%s:%d", clusterID, mediaID, suffix, bucket)
+	}
 	return fmt.Sprintf("%s:%s:%d", mediaID, suffix, bucket)
 }
 

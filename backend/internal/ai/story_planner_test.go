@@ -59,6 +59,134 @@ func TestPlannerBuildsChronologicalCoherentStoryPlan(t *testing.T) {
 	}
 }
 
+func TestPlannerKeepsPhotoWhenSelectedVideoSegmentsOutscorePhotos(t *testing.T) {
+	t.Parallel()
+	planner := &Planner{Now: func() time.Time { return time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC) }}
+	request := Request{
+		ProjectID:        "project-1",
+		DesiredDuration:  12 * time.Second,
+		StoryType:        models.StoryTypeCustom,
+		VisualStyle:      models.VisualStyleCinematic,
+		SelectedMediaIDs: []string{"video-1", "photo-1", "photo-2"},
+		PhotoAnalyses: []models.PhotoAnalysis{
+			{ID: "photo-analysis-1", PhotoID: "photo-1", ProjectID: "project-1", AnalysisVersion: "photo-v1", TimestampMicros: 1_000_000, Caption: "First uploaded image", MemoryValue: 0.45, EmotionalValue: 0.45, VisualQuality: 0.5, StoryRelevance: 0.45, Selected: true},
+			{ID: "photo-analysis-2", PhotoID: "photo-2", ProjectID: "project-1", AnalysisVersion: "photo-v1", TimestampMicros: 6_000_000, Caption: "Updated image", MemoryValue: 0.5, EmotionalValue: 0.5, VisualQuality: 0.5, StoryRelevance: 0.5, Selected: true},
+		},
+		VideoAnalyses: []models.VideoAnalysis{{
+			ID:              "video-analysis-1",
+			VideoID:         "video-1",
+			ProjectID:       "project-1",
+			AnalysisVersion: "video-analysis-v1",
+			DurationMicros:  15_000_000,
+			QualitySignals:  models.VideoQualitySignals{OverallScore: 0.95},
+			Segments: []models.VideoSegment{
+				{SegmentID: "segment-1", SceneID: "scene-1", StartMicros: 0, EndMicros: 5_000_000, Description: "Strong opening video moment", Importance: 0.95, VisualQuality: 0.95, MemoryValue: 0.95, EmotionalValue: 0.95, StoryRelevance: 0.95, Recommended: true},
+				{SegmentID: "segment-2", SceneID: "scene-2", StartMicros: 5_000_000, EndMicros: 10_000_000, Description: "Strong middle video moment", Importance: 0.94, VisualQuality: 0.94, MemoryValue: 0.94, EmotionalValue: 0.94, StoryRelevance: 0.94, Recommended: true},
+				{SegmentID: "segment-3", SceneID: "scene-3", StartMicros: 10_000_000, EndMicros: 15_000_000, Description: "Strong ending video moment", Importance: 0.93, VisualQuality: 0.93, MemoryValue: 0.93, EmotionalValue: 0.93, StoryRelevance: 0.93, Recommended: true},
+			},
+		}},
+	}
+
+	plan, err := planner.Plan(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateStoryPlan(plan); err != nil {
+		t.Fatal(err)
+	}
+	photoCount := 0
+	videoCount := 0
+	for _, moment := range plan.Moments {
+		if moment.MediaType == models.MediaTypeVideo {
+			videoCount++
+		}
+		if moment.MediaType == models.MediaTypePhoto {
+			photoCount++
+		}
+	}
+	if videoCount == 0 || photoCount == 0 {
+		t.Fatalf("expected mixed photo/video story moments, got %+v", plan.Moments)
+	}
+}
+
+func TestPlannerSelectsMeaningfulVideoRanges(t *testing.T) {
+	t.Parallel()
+	planner := &Planner{Now: func() time.Time { return time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC) }}
+	plan, err := planner.Plan(context.Background(), Request{
+		ProjectID:        "project-1",
+		DesiredDuration:  12 * time.Second,
+		StoryType:        models.StoryTypeCustom,
+		VisualStyle:      models.VisualStyleCinematic,
+		SelectedMediaIDs: []string{"video-1"},
+		VideoAnalyses: []models.VideoAnalysis{{
+			ID: "analysis-1", VideoID: "video-1", ProjectID: "project-1", AnalysisVersion: "video-analysis-v1", DurationMicros: 18_000_000,
+			QualitySignals: models.VideoQualitySignals{OverallScore: 0.8},
+			Segments: []models.VideoSegment{
+				{SegmentID: "segment-1", SceneID: "scene-1", StartMicros: 0, EndMicros: 4_000_000, Description: "Walking toward lake", Importance: 0.2, VisualQuality: 0.7, MemoryValue: 0.2, EmotionalValue: 0.2, StoryRelevance: 0.2, RecommendedUsage: "exclude"},
+				{SegmentID: "segment-2", SceneID: "scene-2", StartMicros: 4_000_000, EndMicros: 8_000_000, Description: "Family playing near lake", Importance: 0.95, VisualQuality: 0.8, MemoryValue: 0.95, EmotionalValue: 0.92, StoryRelevance: 0.95, Recommended: true, RecommendedUsage: "hero"},
+				{SegmentID: "segment-3", SceneID: "scene-3", StartMicros: 8_000_000, EndMicros: 12_000_000, Description: "Static footage", Importance: 0.1, VisualQuality: 0.5, MemoryValue: 0.1, EmotionalValue: 0.1, StoryRelevance: 0.1, RecommendedUsage: "exclude"},
+				{SegmentID: "segment-4", SceneID: "scene-4", StartMicros: 12_000_000, EndMicros: 16_000_000, Description: "Family laughing", Importance: 0.94, VisualQuality: 0.78, MemoryValue: 0.94, EmotionalValue: 0.96, StoryRelevance: 0.93, Recommended: true, RecommendedUsage: "supporting"},
+				{SegmentID: "segment-5", SceneID: "scene-5", StartMicros: 16_000_000, EndMicros: 18_000_000, Description: "Camera pointed at ground", Importance: 0.05, VisualQuality: 0.2, MemoryValue: 0.05, EmotionalValue: 0.05, StoryRelevance: 0.05, RecommendedUsage: "exclude"},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Moments) != 2 {
+		t.Fatalf("expected two meaningful video ranges, got %+v", plan.Moments)
+	}
+	wantStarts := map[int64]struct{}{4_000_000: {}, 12_000_000: {}}
+	for _, moment := range plan.Moments {
+		if _, ok := wantStarts[moment.StartMicros]; !ok || moment.EndMicros-moment.StartMicros > maxVideoMomentDuration.Microseconds() {
+			t.Fatalf("selected wrong video range: %+v", plan.Moments)
+		}
+	}
+}
+
+func TestPlannerBuildsPhotoOnlyStory(t *testing.T) {
+	t.Parallel()
+	request := storyPlannerRequest()
+	request.VideoAnalyses = nil
+	request.SelectedMediaIDs = []string{"photo-1", "photo-2", "photo-3"}
+	plan, err := (&Planner{}).Plan(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Moments) == 0 {
+		t.Fatal("expected photo-only moments")
+	}
+	for _, moment := range plan.Moments {
+		if moment.MediaType != models.MediaTypePhoto {
+			t.Fatalf("photo-only story included non-photo moment: %+v", plan.Moments)
+		}
+	}
+}
+
+func TestPlannerBuildsVideoOnlyStoryAcrossVideos(t *testing.T) {
+	t.Parallel()
+	request := Request{ProjectID: "project-1", DesiredDuration: 12 * time.Second, StoryType: models.StoryTypeCustom, VisualStyle: models.VisualStyleCinematic, SelectedMediaIDs: []string{"video-1", "video-2", "video-3"}}
+	for index, mediaID := range request.SelectedMediaIDs {
+		start := int64(index) * 5_000_000
+		request.VideoAnalyses = append(request.VideoAnalyses, models.VideoAnalysis{
+			ID: "analysis-" + mediaID, VideoID: mediaID, ProjectID: "project-1", AnalysisVersion: "video-analysis-v1", DurationMicros: 20_000_000,
+			QualitySignals: models.VideoQualitySignals{OverallScore: 0.8},
+			Segments:       []models.VideoSegment{{SegmentID: "segment-1", SceneID: "scene-1", StartMicros: start, EndMicros: start + 4_000_000, Description: "Meaningful clip", Importance: 0.85, VisualQuality: 0.8, MemoryValue: 0.86, EmotionalValue: 0.84, StoryRelevance: 0.87, Recommended: true, RecommendedUsage: "hero"}},
+		})
+	}
+	plan, err := (&Planner{}).Plan(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[string]struct{})
+	for _, moment := range plan.Moments {
+		seen[moment.AssetID] = struct{}{}
+	}
+	if len(seen) != 3 {
+		t.Fatalf("expected each selected video to contribute, got %+v", plan.Moments)
+	}
+}
+
 func TestValidateStoryPlanRejectsBrokenReferences(t *testing.T) {
 	t.Parallel()
 	plan := models.StoryPlan{

@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"sort"
 
 	"github.com/framemio/video-intelligence-worker/internal/domain"
 )
@@ -12,35 +13,38 @@ type HeuristicVideoUnderstandingProvider struct {
 }
 
 func (p HeuristicVideoUnderstandingProvider) Understand(_ context.Context, input domain.VideoUnderstandingInputV1) (domain.VideoUnderstandingResponseV1, error) {
+	ranks := rankedSegments(input)
 	candidates := make([]domain.VideoSegmentAnalysisV1, 0, len(input.Segments))
-	for index, segment := range input.Segments {
-		frameIDs := frameIDsForSegment(input.Frames, segment.ID)
+	for _, segment := range input.Segments {
+		frames := framesForSegment(input.Frames, segment.ID)
+		frameIDs := frameIDs(frames)
+		rank := ranks[segment.ID]
 		usage := domain.RecommendedUsageExclude
 		if len(frameIDs) > 0 {
-			switch index {
+			switch rank {
 			case 0:
 				usage = domain.RecommendedUsageHero
 			case 1:
 				usage = domain.RecommendedUsageSupporting
 			default:
-				usage = domain.RecommendedUsageContext
+				if segmentEvidenceScore(frames, input.Quality) >= 0.45 {
+					usage = domain.RecommendedUsageContext
+				}
 			}
 		}
-		quality := clamp01(input.Quality.OverallScore)
-		if quality == 0 {
-			quality = 0.6
-		}
+		quality := segmentQuality(frames, input.Quality)
+		importance := clamp01(segmentEvidenceScore(frames, input.Quality) - float64(rank)*0.03)
 		candidates = append(candidates, domain.VideoSegmentAnalysisV1{
 			SegmentID:           segment.ID,
 			SceneID:             segment.SceneID,
 			StartMicros:         segment.StartMicros,
 			EndMicros:           segment.EndMicros,
 			Description:         "Video moment selected from visual evidence.",
-			ImportanceScore:     scoreByRank(index, 0.78),
+			ImportanceScore:     importance,
 			VisualQualityScore:  quality,
-			MemoryValueScore:    scoreByRank(index, 0.74),
-			EmotionalValueScore: scoreByRank(index, 0.68),
-			StoryRelevanceScore: scoreByRank(index, 0.72),
+			MemoryValueScore:    clamp01(importance * 0.95),
+			EmotionalValueScore: clamp01(importance * 0.9),
+			StoryRelevanceScore: clamp01(importance * 0.92),
 			EmotionalTone:       "warm",
 			RecommendedUsage:    usage,
 			Reason:              "Selected from available frame evidence while external AI understanding is disabled.",
@@ -64,18 +68,79 @@ func (p HeuristicVideoUnderstandingProvider) Model() string {
 	return "heuristic-v1"
 }
 
-func frameIDsForSegment(frames []domain.VideoUnderstandingFrameV1, segmentID string) []string {
-	ids := make([]string, 0, len(frames))
+type segmentRank struct {
+	segmentID string
+	score     float64
+	start     int64
+}
+
+func rankedSegments(input domain.VideoUnderstandingInputV1) map[string]int {
+	ranked := make([]segmentRank, 0, len(input.Segments))
+	for _, segment := range input.Segments {
+		ranked = append(ranked, segmentRank{segmentID: segment.ID, score: segmentEvidenceScore(framesForSegment(input.Frames, segment.ID), input.Quality), start: segment.StartMicros})
+	}
+	sort.SliceStable(ranked, func(left, right int) bool {
+		if ranked[left].score == ranked[right].score {
+			return ranked[left].start < ranked[right].start
+		}
+		return ranked[left].score > ranked[right].score
+	})
+	ranks := make(map[string]int, len(ranked))
+	for index, segment := range ranked {
+		ranks[segment.segmentID] = index
+	}
+	return ranks
+}
+
+func framesForSegment(frames []domain.VideoUnderstandingFrameV1, segmentID string) []domain.VideoUnderstandingFrameV1 {
+	result := make([]domain.VideoUnderstandingFrameV1, 0, len(frames))
 	for _, frame := range frames {
 		if frame.SegmentID == segmentID {
-			ids = append(ids, frame.ID)
+			result = append(result, frame)
 		}
+	}
+	return result
+}
+
+func frameIDs(frames []domain.VideoUnderstandingFrameV1) []string {
+	ids := make([]string, 0, len(frames))
+	for _, frame := range frames {
+		ids = append(ids, frame.ID)
 	}
 	return ids
 }
 
-func scoreByRank(index int, base float64) float64 {
-	return clamp01(base - float64(index)*0.04)
+func segmentQuality(frames []domain.VideoUnderstandingFrameV1, quality domain.QualitySignals) float64 {
+	if len(frames) == 0 {
+		fallback := clamp01(quality.OverallScore)
+		if fallback == 0 {
+			return 0.6
+		}
+		return fallback
+	}
+	var total float64
+	for _, frame := range frames {
+		total += clamp01(frame.QualityScore)
+	}
+	return clamp01(total / float64(len(frames)))
+}
+
+func segmentEvidenceScore(frames []domain.VideoUnderstandingFrameV1, quality domain.QualitySignals) float64 {
+	if len(frames) == 0 {
+		return 0
+	}
+	visual := segmentQuality(frames, quality)
+	motionBonus := 0.0
+	for _, frame := range frames {
+		switch frame.SelectionReason {
+		case "motion-quarter", "motion-three-quarter":
+			motionBonus += 0.05
+		}
+	}
+	if quality.FastMoving {
+		motionBonus += 0.05
+	}
+	return clamp01(0.55 + visual*0.35 + motionBonus)
 }
 
 func clamp01(value float64) float64 {

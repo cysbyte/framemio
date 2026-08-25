@@ -55,10 +55,15 @@ func BuildScenes(metadata domain.VideoMetadata, boundaries []domain.SceneBoundar
 	return scenes
 }
 
+const defaultStorySegmentDuration = 4 * time.Second
+
 func BuildSegments(scenes []domain.VideoScene, maximumDuration time.Duration) []domain.CandidateSegment {
 	maximum := maximumDuration.Microseconds()
 	if maximum <= 0 {
 		maximum = 12_000_000
+	}
+	if storyMaximum := defaultStorySegmentDuration.Microseconds(); maximum > storyMaximum {
+		maximum = storyMaximum
 	}
 	segments := make([]domain.CandidateSegment, 0, len(scenes))
 	segmentNumber := 1

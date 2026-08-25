@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/framemio/video-intelligence-worker/internal/domain"
 	"github.com/framemio/video-intelligence-worker/internal/ffmpeg"
 )
 
@@ -69,5 +70,19 @@ func TestPlannerAdaptsToRepresentativeIPhoneProfiles(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBuildSegmentsCreatesStorySizedCandidates(t *testing.T) {
+	t.Parallel()
+	segments := BuildSegments([]domain.VideoScene{{ID: "scene-0001", StartMicros: 0, EndMicros: 18_000_000}}, 12*time.Second)
+	if len(segments) != 5 {
+		t.Fatalf("18-second video segments = %d, want 5: %+v", len(segments), segments)
+	}
+	if segments[1].StartMicros != 4_000_000 || segments[1].EndMicros != 8_000_000 {
+		t.Fatalf("second segment = %+v, want 4s-8s", segments[1])
+	}
+	if segments[3].StartMicros != 12_000_000 || segments[3].EndMicros != 16_000_000 {
+		t.Fatalf("fourth segment = %+v, want 12s-16s", segments[3])
 	}
 }

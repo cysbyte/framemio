@@ -168,7 +168,7 @@ Optional tuning:
 
 - `AWS_REGION`
 - `VIDEO_WORK_ROOT`
-- `VIDEO_ANALYSIS_VERSION` (deterministic input version; default `video-v1`)
+- `VIDEO_ANALYSIS_VERSION` (deterministic input version; default `video-v2`)
 - `VIDEO_UNDERSTANDING_VERSION` (default `video-understanding-v1`)
 - `FFMPEG_PATH`, `FFPROBE_PATH`
 - `VIDEO_UNDERSTANDING_API_KEY`, `VIDEO_UNDERSTANDING_PROVIDER`, `VIDEO_UNDERSTANDING_MODEL`

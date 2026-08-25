@@ -47,6 +47,22 @@ func TestValidateStoryPlanAcceptsValidPlan(t *testing.T) {
 	}
 }
 
+func TestValidateStoryPlanAcceptsMultipleSegmentsFromSameVideo(t *testing.T) {
+	t.Parallel()
+	validator, plan := validStoryPlanFixture(t)
+	second := plan.Moments[0]
+	second.MomentID = "moment-2"
+	second.StartMicros = 4_000_000
+	second.EndMicros = 7_000_000
+	plan.Moments = append(plan.Moments, second)
+	plan.TotalDurationMS += second.DurationMS
+	plan.RequestedDurationMS = plan.TotalDurationMS
+
+	if err := validator.Validate(context.Background(), "user-1", plan); err != nil {
+		t.Fatalf("validate multiple segments from same video: %v", err)
+	}
+}
+
 func TestValidateStoryPlanRejectsInvalidInputs(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -81,13 +97,35 @@ func TestValidateStoryPlanRejectsInvalidInputs(t *testing.T) {
 			code:  "out_of_range",
 		},
 		{
-			name: "duplicate asset reference",
+			name: "video duration does not match selected range",
+			mutate: func(plan *models.StoryPlan) {
+				plan.Moments[0].DurationMS = 4500
+				plan.TotalDurationMS = 4500
+				plan.RequestedDurationMS = 4500
+			},
+			field: "moments[0].duration_ms",
+			code:  "range_mismatch",
+		},
+		{
+			name: "duplicate exact moment reference",
 			mutate: func(plan *models.StoryPlan) {
 				plan.Moments = append(plan.Moments, plan.Moments[0])
 				plan.TotalDurationMS += plan.Moments[0].DurationMS
 			},
 			field: "moments[1].asset_id",
 			code:  "duplicate_reference",
+		},
+		{
+			name: "media outside project",
+			mutate: func(plan *models.StoryPlan) {
+				plan.Moments[0].AssetID = "photo-outside"
+				plan.Moments[0].MediaType = models.MediaTypePhoto
+				plan.Moments[0].VideoAnalysisVersion = ""
+				plan.Moments[0].StartMicros = 0
+				plan.Moments[0].EndMicros = 0
+			},
+			field: "moments[0].asset_id",
+			code:  "not_in_project",
 		},
 		{
 			name: "missing s3 object",
@@ -184,8 +222,24 @@ func validStoryPlanFixture(t *testing.T) (*Validator, models.StoryPlan) {
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
-	if err := memoryStore.CreateMediaUpload(context.Background(), video, models.UploadSession{ID: "upload-1", UserID: userID, MediaID: video.ID, S3Key: video.S3Key, Strategy: models.UploadStrategySingle, CreatedAt: now}); err != nil {
-		t.Fatal(err)
+	outsidePhoto := models.MediaAsset{
+		ID:            "photo-outside",
+		UserID:        userID,
+		Type:          models.MediaTypePhoto,
+		Status:        models.MediaStatusReady,
+		FileName:      "outside.jpg",
+		ContentType:   "image/jpeg",
+		FileSizeBytes: 4_000,
+		PixelWidth:    1200,
+		PixelHeight:   1600,
+		S3Key:         "users/user-1/media/photo-outside/outside.jpg",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	for _, media := range []models.MediaAsset{video, outsidePhoto} {
+		if err := memoryStore.CreateMediaUpload(context.Background(), media, models.UploadSession{ID: "upload-" + media.ID, UserID: userID, MediaID: media.ID, S3Key: media.S3Key, Strategy: models.UploadStrategySingle, CreatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	project := models.StoryProject{ID: "project-1", UserID: userID, MediaIDs: []string{video.ID}, Status: models.ProjectStatusStoryReady, CreatedAt: now, UpdatedAt: now}
 	if _, _, err := memoryStore.CreateProject(context.Background(), project, "project-key"); err != nil {
@@ -204,7 +258,7 @@ func validStoryPlanFixture(t *testing.T) (*Validator, models.StoryPlan) {
 	if err := memoryStore.SaveVideoAnalysis(context.Background(), userID, analysis); err != nil {
 		t.Fatal(err)
 	}
-	validator := New(memoryStore, testObjectStorage{existing: map[string]struct{}{video.S3Key: {}}}, DefaultConfig())
+	validator := New(memoryStore, testObjectStorage{existing: map[string]struct{}{video.S3Key: {}, outsidePhoto.S3Key: {}}}, DefaultConfig())
 	plan := models.StoryPlan{
 		SchemaVersion:       models.StoryPlanSchemaVersionV1,
 		ID:                  "plan-1",

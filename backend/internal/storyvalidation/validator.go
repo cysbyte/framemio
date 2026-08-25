@@ -132,8 +132,21 @@ func (v *Validator) Validate(ctx context.Context, userID string, plan models.Sto
 		problems.Add("moments", "required", "story plan requires at least one moment")
 	}
 
+	projectMedia := make(map[string]struct{})
+	if strings.TrimSpace(plan.ProjectID) != "" {
+		project, err := v.Store.GetProject(ctx, userID, plan.ProjectID)
+		if err != nil {
+			problems.Add("project_id", "missing_project", "story plan project does not exist")
+		} else {
+			projectMedia = make(map[string]struct{}, len(project.MediaIDs))
+			for _, mediaID := range project.MediaIDs {
+				projectMedia[mediaID] = struct{}{}
+			}
+		}
+	}
+
 	momentIDs := make(map[string]struct{}, len(plan.Moments))
-	assetIDs := make(map[string]struct{}, len(plan.Moments))
+	momentRefs := make(map[string]struct{}, len(plan.Moments))
 	sumDurationMS := 0
 	for index, moment := range plan.Moments {
 		field := fmt.Sprintf("moments[%d]", index)
@@ -142,10 +155,16 @@ func (v *Validator) Validate(ctx context.Context, userID string, plan models.Sto
 			problems.Add(field+".asset_id", "required", "moment asset id is required")
 			continue
 		}
-		if _, exists := assetIDs[assetID]; exists {
-			problems.Add(field+".asset_id", "duplicate_reference", "asset may only appear once in a story plan")
+		if len(projectMedia) > 0 {
+			if _, belongs := projectMedia[assetID]; !belongs {
+				problems.Add(field+".asset_id", "not_in_project", "story plan references media outside the project")
+			}
+		}
+		referenceKey := momentReferenceKey(assetID, moment)
+		if _, exists := momentRefs[referenceKey]; exists {
+			problems.Add(field+".asset_id", "duplicate_reference", "story plan contains a duplicate moment reference")
 		} else {
-			assetIDs[assetID] = struct{}{}
+			momentRefs[referenceKey] = struct{}{}
 		}
 		if strings.TrimSpace(moment.MomentID) != "" {
 			if _, exists := momentIDs[moment.MomentID]; exists {
@@ -186,8 +205,11 @@ func (v *Validator) Validate(ctx context.Context, userID string, plan models.Sto
 				problems.Add(field+".duration_ms", "invalid_source_duration", "video asset is missing a valid source duration")
 			} else {
 				sourceDurationMicros := int64(math.Round(*media.DurationSeconds * 1_000_000))
-				if moment.StartMicros < 0 || moment.EndMicros <= moment.StartMicros || moment.EndMicros > sourceDurationMicros {
+				validRange := moment.StartMicros >= 0 && moment.EndMicros > moment.StartMicros && moment.EndMicros <= sourceDurationMicros
+				if !validRange {
 					problems.Add(field+".timestamps", "out_of_range", "video moment timestamps must be within the source duration")
+				} else if !durationMatchesVideoRange(moment.DurationMS, moment.StartMicros, moment.EndMicros) {
+					problems.Add(field+".duration_ms", "range_mismatch", "video moment duration must match the selected source range")
 				}
 			}
 			if strings.TrimSpace(moment.VideoAnalysisVersion) == "" {
@@ -327,6 +349,25 @@ func (v *Validator) supportedAspectRatio(aspectRatio string) bool {
 func (v *Validator) allowedAudioSource(source string) bool {
 	_, ok := v.config().AllowedAudioSources[strings.ToLower(strings.TrimSpace(source))]
 	return ok
+}
+
+func momentReferenceKey(assetID string, moment models.StoryMoment) string {
+	if moment.MediaType == models.MediaTypeVideo || moment.StartMicros != 0 || moment.EndMicros != 0 {
+		return fmt.Sprintf("video:%s:%s:%d:%d", assetID, moment.VideoAnalysisVersion, moment.StartMicros, moment.EndMicros)
+	}
+	return fmt.Sprintf("photo:%s:%s", assetID, moment.MomentID)
+}
+
+func durationMatchesVideoRange(durationMS int, startMicros, endMicros int64) bool {
+	expectedMS := int((endMicros - startMicros) / 1000)
+	return absInt(durationMS-expectedMS) <= 1
+}
+
+func absInt(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 func firstNonEmpty(values ...string) string {

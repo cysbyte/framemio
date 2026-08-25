@@ -2,7 +2,7 @@ import {spawn} from 'node:child_process';
 import {mkdir, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import type {CompositionSpec, TimelineClip} from '../types.js';
+import type {CompositionSpec, KenBurnsTransform, TimelineClip} from '../types.js';
 import {canonicalJson, stableHash} from '../determinism.js';
 
 export interface RemotionRenderer {
@@ -49,19 +49,49 @@ export class RemotionCliRenderer implements RemotionRenderer {
   }
 }
 
+type PhotoTimelineClip = TimelineClip & {transform: KenBurnsTransform};
+
 function concatVideoFilter(composition: CompositionSpec): string {
-  const filters = composition.clips.map((clip, index) => {
-    const scaleAndCrop = clip.transform.kind === 'video' && clip.transform.crop === 'fit'
-      ? `scale=${composition.resolution.width}:${composition.resolution.height}:force_original_aspect_ratio=decrease,pad=${composition.resolution.width}:${composition.resolution.height}:(ow-iw)/2:(oh-ih)/2`
-      : `scale=${composition.resolution.width}:${composition.resolution.height}:force_original_aspect_ratio=increase,crop=${composition.resolution.width}:${composition.resolution.height}`;
-    return `[${index}:v]${scaleAndCrop},setsar=1,fps=${composition.fps},trim=duration=${clipDurationSeconds(clip)},setpts=PTS-STARTPTS[v${index}]`;
-  });
+  const filters = composition.clips.map((clip, index) => isPhotoTimelineClip(clip)
+    ? photoVideoFilter(clip, index, composition)
+    : sourceVideoFilter(clip, index, composition));
   const inputs = composition.clips.map((_, index) => `[v${index}]`).join('');
   return [...filters, `${inputs}concat=n=${composition.clips.length}:v=1:a=0,format=yuv420p[outv]`].join(';');
 }
 
+function isPhotoTimelineClip(clip: TimelineClip): clip is PhotoTimelineClip {
+  return clip.transform.kind === 'photo';
+}
+
+function sourceVideoFilter(clip: TimelineClip, index: number, composition: CompositionSpec): string {
+  const scaleAndCrop = clip.transform.kind === 'video' && clip.transform.crop === 'fit'
+    ? `scale=${composition.resolution.width}:${composition.resolution.height}:force_original_aspect_ratio=decrease,pad=${composition.resolution.width}:${composition.resolution.height}:(ow-iw)/2:(oh-ih)/2`
+    : `scale=${composition.resolution.width}:${composition.resolution.height}:force_original_aspect_ratio=increase,crop=${composition.resolution.width}:${composition.resolution.height}`;
+  return `[${index}:v]${scaleAndCrop},setsar=1,fps=${composition.fps},trim=duration=${clipDurationSeconds(clip)},setpts=PTS-STARTPTS[v${index}]`;
+}
+
+function photoVideoFilter(clip: PhotoTimelineClip, index: number, composition: CompositionSpec): string {
+  const transform = clip.transform;
+  const denominator = Math.max(1, clip.duration_frames - 1);
+  const progress = `on/${denominator}`;
+  const fromScale = ffmpegNumber(transform.from_scale);
+  const toScale = ffmpegNumber(transform.to_scale);
+  const fromX = ffmpegNumber(transform.from_x);
+  const toX = ffmpegNumber(transform.to_x);
+  const fromY = ffmpegNumber(transform.from_y);
+  const toY = ffmpegNumber(transform.to_y);
+  const zoom = `${fromScale}+(${toScale}-${fromScale})*${progress}`;
+  const x = `iw/2-(iw/zoom/2)+(${fromX}+(${toX}-${fromX})*${progress})*iw`;
+  const y = `ih/2-(ih/zoom/2)+(${fromY}+(${toY}-${fromY})*${progress})*ih`;
+  return `[${index}:v]scale=${composition.resolution.width}:${composition.resolution.height}:force_original_aspect_ratio=increase,crop=${composition.resolution.width}:${composition.resolution.height},setsar=1,fps=${composition.fps},zoompan=z='${zoom}':x='${x}':y='${y}':d=1:s=${composition.resolution.width}x${composition.resolution.height}:fps=${composition.fps},trim=duration=${clipDurationSeconds(clip)},setpts=PTS-STARTPTS[v${index}]`;
+}
+
 function clipDurationSeconds(clip: {duration_ms: number}): string {
   return Math.max(0.001, clip.duration_ms / 1000).toFixed(3);
+}
+
+function ffmpegNumber(value: number): string {
+  return Number.isFinite(value) ? value.toFixed(4) : '0.0000';
 }
 
 function isHeifImagePath(filePath: string): boolean {

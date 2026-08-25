@@ -168,6 +168,9 @@ func TestStoryPlanHandlerReusesVideoAnalysisForSelectedVideo(t *testing.T) {
 	if !hasStoryMoment(plan.Moments, video.ID, models.MediaTypeVideo) {
 		t.Fatalf("expected reused selected video analysis to produce a video moment, got %+v", plan.Moments)
 	}
+	if !hasStoryMoment(plan.Moments, photo.ID, models.MediaTypePhoto) {
+		t.Fatalf("expected mixed story plan to retain selected photo moment, got %+v", plan.Moments)
+	}
 }
 
 func hasStoryMoment(moments []models.StoryMoment, mediaID string, mediaType models.MediaType) bool {
@@ -180,3 +183,59 @@ func hasStoryMoment(moments []models.StoryMoment, mediaID string, mediaType mode
 }
 
 func ptrFloat64(value float64) *float64 { return &value }
+
+func TestMediaClustersGroupsCoherentMixedMedia(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.August, 25, 8, 30, 0, 0, time.UTC)
+	photo1Time := now
+	photo2Time := now.Add(45 * time.Minute)
+	videoTime := now.Add(70 * time.Minute)
+	project := models.StoryProject{ID: "project-cluster", UserID: "user-1", MediaIDs: []string{"photo-1", "photo-2", "video-1"}, CreatedAt: now}
+	mediaByID := map[string]models.MediaAsset{
+		"photo-1": {ID: "photo-1", CreationDate: &photo1Time},
+		"photo-2": {ID: "photo-2", CreationDate: &photo2Time},
+		"video-1": {ID: "video-1", CreationDate: &videoTime},
+	}
+	clusters := mediaClusters(project, mediaByID, []models.PhotoAnalysis{
+		{PhotoID: "photo-1", Location: "Lake", Labels: []string{"family"}},
+		{PhotoID: "photo-2", Location: "Lake", Labels: []string{"family", "park"}},
+	}, []models.VideoAnalysis{{VideoID: "video-1", DetectedLocations: []string{"Lake"}, DetectedActivities: []string{"family"}}})
+	if len(clusters) != 1 || len(clusters[0].MediaIDs) != 3 {
+		t.Fatalf("expected coherent mixed media to form one cluster, got %+v", clusters)
+	}
+}
+
+func TestMediaClustersSeparatesUnrelatedMedia(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.August, 25, 8, 0, 0, 0, time.UTC)
+	coffeeTime := now
+	catTime := now.Add(3 * time.Hour)
+	towerTime := now.Add(7 * time.Hour)
+	gameTime := now.Add(10 * time.Hour)
+	project := models.StoryProject{ID: "project-unrelated", UserID: "user-1", MediaIDs: []string{"coffee", "cat", "tower", "game"}, CreatedAt: now}
+	mediaByID := map[string]models.MediaAsset{
+		"coffee": {ID: "coffee", CreationDate: &coffeeTime},
+		"cat":    {ID: "cat", CreationDate: &catTime},
+		"tower":  {ID: "tower", CreationDate: &towerTime},
+		"game":   {ID: "game", CreationDate: &gameTime},
+	}
+	clusters := mediaClusters(project, mediaByID, []models.PhotoAnalysis{
+		{PhotoID: "coffee", Labels: []string{"coffee"}},
+		{PhotoID: "cat", Labels: []string{"cat"}},
+		{PhotoID: "tower", Location: "Tokyo Tower", Labels: []string{"landmark"}},
+	}, []models.VideoAnalysis{{VideoID: "game", DetectedActivities: []string{"football"}}})
+	if len(clusters) < 2 {
+		t.Fatalf("expected unrelated media to remain separated, got %+v", clusters)
+	}
+}
+
+func TestDefaultStoryDurationAdaptsToMemorySetSize(t *testing.T) {
+	t.Parallel()
+	if got := defaultStoryDuration(models.StoryProject{MediaIDs: []string{"a", "b", "c", "d"}}); got != 16*time.Second {
+		t.Fatalf("4-media duration = %s, want 16s", got)
+	}
+	large := models.StoryProject{MediaIDs: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"}}
+	if got := defaultStoryDuration(large); got != 30*time.Second {
+		t.Fatalf("large story duration = %s, want 30s", got)
+	}
+}
