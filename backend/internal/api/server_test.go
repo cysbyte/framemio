@@ -705,6 +705,10 @@ func (s *countingObjectStorage) ObjectExists(ctx context.Context, key string) (b
 	return s.base.ObjectExists(ctx, key)
 }
 
+func (s *countingObjectStorage) PresignedDownloadURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
+	return s.base.PresignedDownloadURL(ctx, key, expiry)
+}
+
 func (s *countingObjectStorage) CompletionCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()

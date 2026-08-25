@@ -86,6 +86,29 @@ struct StoryPreviewView: View {
 
     private func previewHero(_ story: Story) -> some View {
         ZStack(alignment: .bottomLeading) {
+            if let videoURL = story.videoURL, story.status == .ready {
+                // The render finished and the server returned a playable URL, so
+                // this is the final film and autoplay is the whole point.
+                StoryVideoPlayer(url: videoURL, autoplays: true)
+                    .aspectRatio(FrameMioMetrics.storyAspectRatio, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
+            } else {
+                // Still rendering or failed, so show the decorative gradient
+                // placeholder with progress overlay.
+                heroPlaceholder(story)
+            }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                .stroke(FrameMioColors.inverseInk.opacity(0.2), lineWidth: FrameMioMetrics.borderWidth)
+        }
+        .frameMioElevation(.floating)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Story preview, \(story.status.rawValue)")
+    }
+
+    private func heroPlaceholder(_ story: Story) -> some View {
+        ZStack(alignment: .bottomLeading) {
             RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
                 .fill(
                     LinearGradient(
@@ -122,13 +145,6 @@ struct StoryPreviewView: View {
             }
             .padding(FrameMioSpacing.xl)
         }
-        .overlay {
-            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
-                .stroke(FrameMioColors.inverseInk.opacity(0.2), lineWidth: FrameMioMetrics.borderWidth)
-        }
-        .frameMioElevation(.floating)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Story preview, \(story.status.rawValue)")
     }
 
     private func storySummary(_ story: Story) -> some View {

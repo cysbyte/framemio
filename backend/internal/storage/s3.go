@@ -6,6 +6,7 @@ import (
 	"math"
 	"path"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -35,6 +36,7 @@ type ObjectStorage interface {
 	CompleteUpload(ctx context.Context, session models.UploadSession, parts []models.CompletedUploadPart) (string, error)
 	AbortUpload(ctx context.Context, session models.UploadSession) error
 	ObjectExists(ctx context.Context, key string) (bool, error)
+	PresignedDownloadURL(ctx context.Context, key string, expiry time.Duration) (string, error)
 }
 
 type S3ObjectStorage struct {
@@ -290,6 +292,26 @@ func (s *S3ObjectStorage) ObjectExists(ctx context.Context, key string) (bool, e
 	return true, nil
 }
 
+// PresignedDownloadURL grants temporary read access to one object. Rendered
+// films are played straight from S3 by the device, so the bytes never pass
+// through the API.
+func (s *S3ObjectStorage) PresignedDownloadURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
+	if key == "" {
+		return "", fmt.Errorf("object key is required")
+	}
+	if expiry <= 0 {
+		expiry = s.expiry
+	}
+	presigned, err := s.presigner.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	}, s3.WithPresignExpires(expiry))
+	if err != nil {
+		return "", fmt.Errorf("presign s3 download: %w", err)
+	}
+	return presigned.URL, nil
+}
+
 type StaticObjectStorage struct {
 	BaseURL            string
 	PartSizeBytes      int64
@@ -356,4 +378,11 @@ func (s StaticObjectStorage) AbortUpload(_ context.Context, _ models.UploadSessi
 
 func (s StaticObjectStorage) ObjectExists(_ context.Context, _ string) (bool, error) {
 	return true, nil
+}
+
+func (s StaticObjectStorage) PresignedDownloadURL(_ context.Context, key string, _ time.Duration) (string, error) {
+	if key == "" {
+		return "", fmt.Errorf("object key is required")
+	}
+	return strings.TrimSuffix(s.BaseURL, "/") + "/" + key, nil
 }

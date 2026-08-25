@@ -15,6 +15,7 @@ import (
 )
 
 const iosMaxStoryUploadBytes int64 = 1_000_000_000
+const iosStoryVideoURLExpiry = 2 * time.Hour
 
 type iosStory struct {
 	ID        string   `json:"id"`
@@ -341,7 +342,52 @@ func (s *Server) makeIOSStory(request *http.Request, userID string, project mode
 	if story.Duration <= 0 {
 		story.Duration = float64(max(8, len(project.MediaIDs)*4))
 	}
+	story.VideoURL = s.iosStoryVideoURL(request, userID, project)
 	return story
+}
+
+// iosStoryVideoURL resolves the playable film for a finished project. A ready
+// project with no URL renders as an inert play button on the device, so every
+// failure path here is logged rather than silently dropped.
+func (s *Server) iosStoryVideoURL(request *http.Request, userID string, project models.StoryProject) *string {
+	if project.Status != models.ProjectStatusReady {
+		return nil
+	}
+	if s.ObjectStorage == nil {
+		s.Logger.Warn("cannot build iOS story video url without object storage", "user_id", userID, "project_id", project.ID)
+		return nil
+	}
+	jobs, err := s.Store.ListProjectJobs(request.Context(), userID, project.ID)
+	if err != nil {
+		s.Logger.Warn("list jobs for iOS story video url failed", "user_id", userID, "project_id", project.ID, "error", err)
+		return nil
+	}
+	// Latest completed render wins: a re-render supersedes earlier artifacts.
+	var artifactKey string
+	var completedAt time.Time
+	for _, job := range jobs {
+		if job.Type != models.JobTypeVideoRender || job.Status != models.JobStatusCompleted || job.ArtifactS3Key == "" {
+			continue
+		}
+		stamp := job.UpdatedAt
+		if job.CompletedAt != nil {
+			stamp = *job.CompletedAt
+		}
+		if artifactKey == "" || stamp.After(completedAt) {
+			artifactKey = job.ArtifactS3Key
+			completedAt = stamp
+		}
+	}
+	if artifactKey == "" {
+		s.Logger.Warn("ready iOS story has no completed render artifact", "user_id", userID, "project_id", project.ID, "job_count", len(jobs))
+		return nil
+	}
+	url, err := s.ObjectStorage.PresignedDownloadURL(request.Context(), artifactKey, iosStoryVideoURLExpiry)
+	if err != nil {
+		s.Logger.Warn("presign iOS story video url failed", "user_id", userID, "project_id", project.ID, "artifact_s3_key", artifactKey, "error", err)
+		return nil
+	}
+	return &url
 }
 
 func iosStoryStatus(status models.ProjectStatus) string {

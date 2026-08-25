@@ -7,6 +7,7 @@ final class StoryPreviewViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var activeAction: StoryPreviewAction?
     @Published var errorMessage: String?
+    @Published var isPlayingVideo = false
 
     private let storyID: String
     private let storyService: StoryService
@@ -20,6 +21,23 @@ final class StoryPreviewViewModel: ObservableObject {
 
     var isPerformingAction: Bool {
         activeAction != nil
+    }
+
+    /// The film can be watched: the render finished and the server handed back a
+    /// playable URL. A ready story without a URL is not playable, so the hero
+    /// must not offer a play affordance that would do nothing.
+    var playableVideoURL: URL? {
+        guard let story, story.status == .ready else { return nil }
+        return story.videoURL
+    }
+
+    var canPlayVideo: Bool {
+        playableVideoURL != nil
+    }
+
+    func playVideo() {
+        guard canPlayVideo else { return }
+        isPlayingVideo = true
     }
 
     var progressTitle: String {

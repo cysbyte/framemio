@@ -26,6 +26,10 @@ func (s testObjectStorage) CompleteUpload(context.Context, models.UploadSession,
 	return "", nil
 }
 
+func (s testObjectStorage) PresignedDownloadURL(_ context.Context, key string, _ time.Duration) (string, error) {
+	return "https://objects.test/" + key, nil
+}
+
 func (s testObjectStorage) AbortUpload(context.Context, models.UploadSession) error {
 	return nil
 }
