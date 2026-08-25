@@ -255,6 +255,45 @@ func TestInvalidStoryPlanFailsProjectInsteadOfRendering(t *testing.T) {
 	}
 }
 
+func TestExplicitRenderRequestCanRetryTerminalRenderJob(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore, publisher, coordinator, project, _ := setupProject(t, models.MediaTypePhoto)
+	plan := completeThroughStoryPlan(t, memoryStore, publisher, coordinator, project, "retry-key")
+	failedRender := latestMessageOfType(t, publisher, models.JobTypeVideoRender)
+	if _, err := coordinator.UpdateJobStatus(ctx, failedRender.JobID, models.JobStatusRunning, 0.1, "", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordinator.UpdateJobStatus(ctx, failedRender.JobID, models.JobStatusFailed, 0.1, "render_failed", "ffmpeg failed", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordinator.UpdateJobStatus(ctx, failedRender.JobID, models.JobStatusRunning, 0.1, "", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordinator.UpdateJobStatus(ctx, failedRender.JobID, models.JobStatusFailed, 0.1, "render_failed", "ffmpeg failed again", "", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	retryJob, err := coordinator.RecordValidationAndQueueRender(ctx, project.UserID, project.ID, "manual-retry-1", plan.Version, plan.Output.Preset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retryJob.ID == failedRender.JobID || retryJob.Status != models.JobStatusQueued {
+		t.Fatalf("expected new queued retry render job, got %+v", retryJob)
+	}
+	if countMessageType(publisher.Messages(), models.JobTypeVideoRender) != 2 {
+		t.Fatalf("expected original and manual retry render messages, got %+v", publisher.Messages())
+	}
+
+	duplicate, err := coordinator.RecordValidationAndQueueRender(ctx, project.UserID, project.ID, "manual-retry-2", plan.Version, plan.Output.Preset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if duplicate.ID != retryJob.ID {
+		t.Fatalf("expected active retry render to be reused, got %s want %s", duplicate.ID, retryJob.ID)
+	}
+}
+
 // completeThroughStoryPlan drives the analysis chain to a completed STORY_PLAN
 // job with a stored plan, which is the state the auto-advance reacts to.
 func completeThroughStoryPlan(t *testing.T, memoryStore *store.MemoryStore, publisher *queue.MemoryPublisher, coordinator *Coordinator, project models.StoryProject, idempotencyKey string) models.StoryPlan {

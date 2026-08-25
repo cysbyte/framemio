@@ -12,7 +12,7 @@ RUN npm run build
 FROM node:22-bookworm-slim
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends awscli ca-certificates chromium ffmpeg fonts-liberation \
+  && apt-get install -y --no-install-recommends awscli ca-certificates chromium ffmpeg fonts-liberation libheif-examples \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

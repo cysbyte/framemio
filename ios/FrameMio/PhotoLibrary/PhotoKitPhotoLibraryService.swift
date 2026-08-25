@@ -140,8 +140,19 @@ final class PhotoKitPhotoLibraryService: PhotoLibraryService, MediaSelectionServ
             .appendingPathComponent("Uploads", isDirectory: true)
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
 
+        if !asset.isVideo {
+            return try await materializePhotoAsJPEG(
+                phAsset: phAsset,
+                resource: resource,
+                asset: asset,
+                directory: directory,
+                allowsNetworkAccess: allowsNetworkAccess,
+                progress: progress
+            )
+        }
+
         let type = UTType(resource.uniformTypeIdentifier)
-        let fileExtension = type?.preferredFilenameExtension ?? (asset.isVideo ? "mov" : "jpg")
+        let fileExtension = type?.preferredFilenameExtension ?? "mov"
         let fileURL = directory
             .appendingPathComponent("\(asset.id.hashValue)-\(UUID().uuidString).\(fileExtension)")
 
@@ -186,8 +197,70 @@ final class PhotoKitPhotoLibraryService: PhotoLibraryService, MediaSelectionServ
         return OriginalMediaFile(
             url: fileURL,
             fileName: resource.originalFilename,
-            contentType: type?.preferredMIMEType ?? (asset.isVideo ? "video/quicktime" : "image/jpeg"),
+            contentType: type?.preferredMIMEType ?? "video/quicktime",
             fileSizeBytes: fileSize
+        )
+    }
+
+
+    private func materializePhotoAsJPEG(
+        phAsset: PHAsset,
+        resource: PHAssetResource,
+        asset: MediaAsset,
+        directory: URL,
+        allowsNetworkAccess: Bool,
+        progress: (@Sendable (Double) -> Void)?
+    ) async throws -> OriginalMediaFile {
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .highQualityFormat
+        options.resizeMode = .none
+        options.isNetworkAccessAllowed = allowsNetworkAccess
+        options.version = .current
+        options.progressHandler = { value, _, _, _ in
+            progress?(value)
+        }
+
+        let requestIDBox = ImageRequestIDBox()
+        let jpegData = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let requestID = imageManager.requestImage(
+                    for: phAsset,
+                    targetSize: PHImageManagerMaximumSize,
+                    contentMode: .default,
+                    options: options
+                ) { image, info in
+                    if let cancelled = info?[PHImageCancelledKey] as? Bool, cancelled {
+                        requestIDBox.resume(.failure(CancellationError()), continuation: continuation)
+                    } else if let error = info?[PHImageErrorKey] as? Error {
+                        requestIDBox.resume(.failure(error), continuation: continuation)
+                    } else if let image, let data = image.jpegData(compressionQuality: 0.9) {
+                        requestIDBox.resume(.success(data), continuation: continuation)
+                    } else {
+                        requestIDBox.resume(.failure(AppError.unsupportedMedia), continuation: continuation)
+                    }
+                }
+                requestIDBox.set(requestID, imageManager: imageManager)
+            }
+        } onCancel: {
+            requestIDBox.cancel(imageManager: imageManager)
+        }
+
+        let fileURL = directory
+            .appendingPathComponent("\(asset.id.hashValue)-\(UUID().uuidString).jpg")
+        do {
+            try jpegData.write(to: fileURL, options: .atomic)
+        } catch {
+            try? FileManager.default.removeItem(at: fileURL)
+            throw error
+        }
+
+        let baseName = (resource.originalFilename as NSString).deletingPathExtension
+        let fileName = (baseName.isEmpty ? "photo" : baseName) + ".jpg"
+        return OriginalMediaFile(
+            url: fileURL,
+            fileName: fileName,
+            contentType: "image/jpeg",
+            fileSizeBytes: Int64(jpegData.count)
         )
     }
 

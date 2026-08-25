@@ -175,8 +175,17 @@ final class StoryPreviewViewModel: ObservableObject {
             } catch is CancellationError {
                 return
             } catch {
-                errorMessage = AppError.from(error).localizedDescription
-                return
+                let appError = AppError.from(error)
+                guard story?.status.shouldPoll == true, appError.isTransientPollingError else {
+                    errorMessage = appError.localizedDescription
+                    return
+                }
+                isLoading = false
+                do {
+                    try await Task.sleep(nanoseconds: 5_000_000_000)
+                } catch {
+                    return
+                }
             }
         }
     }
@@ -259,6 +268,17 @@ enum StoryPreviewAction: Hashable, Sendable {
             "Replacing moment"
         case .removeMoment:
             "Removing moment"
+        }
+    }
+}
+
+private extension AppError {
+    var isTransientPollingError: Bool {
+        switch self {
+        case .networkUnavailable, .server(statusCode: 408), .server(statusCode: 429), .server(statusCode: 500...599):
+            true
+        default:
+            false
         }
     }
 }

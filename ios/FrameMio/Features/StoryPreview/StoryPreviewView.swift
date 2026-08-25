@@ -132,7 +132,7 @@ struct StoryPreviewView: View {
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
-                Image(systemName: story.status == .ready ? "play.fill" : "sparkles")
+                Image(systemName: heroPlaceholderIcon(for: story.status))
                     .font(FrameMioTypography.memorySymbol)
                     .foregroundStyle(FrameMioColors.inverseInk)
                     .frame(width: 76, height: 76)
@@ -147,6 +147,17 @@ struct StoryPreviewView: View {
         }
     }
 
+    private func heroPlaceholderIcon(for status: StoryStatus) -> String {
+        switch status {
+        case .failed:
+            "exclamationmark.triangle.fill"
+        case .ready:
+            "play.fill"
+        case .queued, .analyzing, .rendering:
+            "sparkles"
+        }
+    }
+
     private func storySummary(_ story: Story) -> some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
             Tag(story.context.rawValue, systemImage: story.context.icon)
@@ -158,7 +169,8 @@ struct StoryPreviewView: View {
                 .font(FrameMioTypography.body)
                 .foregroundStyle(FrameMioColors.secondaryInk)
 
-            if story.status != .ready {
+            switch story.status {
+            case .queued, .analyzing, .rendering:
                 StoryWaitingAnimation()
                     .padding(.top, FrameMioSpacing.xs)
 
@@ -166,6 +178,15 @@ struct StoryPreviewView: View {
                 Text("Your story is finished outside the app, so the interface stays calm and responsive.")
                     .font(FrameMioTypography.footnote)
                     .foregroundStyle(FrameMioColors.secondaryInk)
+            case .failed:
+                Label(
+                    "Rendering failed. Tap Retry, or choose different media and create a new story.",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                    .font(FrameMioTypography.footnote)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+            case .ready:
+                EmptyView()
             }
         }
         .padding(FrameMioSpacing.xl)

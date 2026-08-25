@@ -164,7 +164,7 @@ func (c *Consumer) handleMessage(ctx context.Context, handler Handler, received 
 		slog.String("job_id", message.JobID), slog.String("media_id", message.MediaID),
 		slog.Int("receive_count", receiveCount), slog.Any("error", err),
 	)
-	if domain.IsPermanent(err) || receiveCount >= c.maxAttempts {
+	if domain.IsPermanent(err) {
 		if failErr := handler.MarkFailed(ctx, message, err); failErr != nil {
 			c.logger.Error("record terminal video analysis failure", slog.String("job_id", message.JobID), slog.Any("error", failErr))
 			return
@@ -172,7 +172,11 @@ func (c *Consumer) handleMessage(ctx context.Context, handler Handler, received 
 		c.delete(ctx, *received.ReceiptHandle)
 		return
 	}
-	backoff := time.Duration(math.Pow(2, float64(receiveCount-1))) * 15 * time.Second
+	backoffAttempt := receiveCount
+	if c.maxAttempts > 0 {
+		backoffAttempt = min(backoffAttempt, c.maxAttempts)
+	}
+	backoff := time.Duration(math.Pow(2, float64(backoffAttempt-1))) * 15 * time.Second
 	backoff = min(backoff, c.visibilityTimeout)
 	_, changeErr := c.client.ChangeMessageVisibility(ctx, &sqs.ChangeMessageVisibilityInput{
 		QueueUrl: aws.String(c.queueURL), ReceiptHandle: received.ReceiptHandle, VisibilityTimeout: int32(backoff.Seconds()),

@@ -2,7 +2,7 @@ import {spawn} from 'node:child_process';
 import {mkdir, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import type {CompositionSpec} from '../types.js';
+import type {CompositionSpec, TimelineClip} from '../types.js';
 import {canonicalJson, stableHash} from '../determinism.js';
 
 export interface RemotionRenderer {
@@ -64,6 +64,11 @@ function clipDurationSeconds(clip: {duration_ms: number}): string {
   return Math.max(0.001, clip.duration_ms / 1000).toFixed(3);
 }
 
+function isHeifImagePath(filePath: string): boolean {
+  const extension = path.extname(filePath).toLowerCase();
+  return extension === '.heic' || extension === '.heif';
+}
+
 async function run(command: string, args: string[], timeoutMs: number): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const child = spawn(command, args, {stdio: ['ignore', 'pipe', 'pipe']});
@@ -93,13 +98,16 @@ async function run(command: string, args: string[], timeoutMs: number): Promise<
 
 export interface FfmpegCompositionRendererOptions {
   ffmpegBinary?: string;
+  heifConvertBinary?: string;
 }
 
 export class FfmpegCompositionRenderer implements RemotionRenderer {
   private readonly ffmpegBinary: string;
+  private readonly heifConvertBinary: string;
 
   constructor(options: FfmpegCompositionRendererOptions = {}) {
     this.ffmpegBinary = options.ffmpegBinary ?? 'ffmpeg';
+    this.heifConvertBinary = options.heifConvertBinary ?? 'heif-convert';
   }
 
   async renderComposition(composition: CompositionSpec, outputPath: string): Promise<void> {
@@ -116,7 +124,9 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
     }
     const args = ['-hide_banner', '-loglevel', 'error', '-y'];
     for (const timelineClip of composition.clips) {
-      const inputPath = timelineClip.media_type === 'video' ? timelineClip.prepared_path : timelineClip.source_path;
+      const inputPath = timelineClip.media_type === 'video'
+        ? timelineClip.prepared_path
+        : await this.prepareStillImageInput(timelineClip, outputPath);
       if (timelineClip.media_type !== 'video') {
         args.push('-loop', '1', '-t', clipDurationSeconds(timelineClip));
       }
@@ -141,5 +151,14 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
       outputPath,
     );
     await run(this.ffmpegBinary, args, 15 * 60 * 1000);
+  }
+
+  private async prepareStillImageInput(clip: TimelineClip, outputPath: string): Promise<string> {
+    if (!isHeifImagePath(clip.source_path)) {
+      return clip.source_path;
+    }
+    const convertedPath = path.join(path.dirname(outputPath), `${clip.clip_id}.jpg`);
+    await run(this.heifConvertBinary, [clip.source_path, convertedPath], 60 * 1000);
+    return convertedPath;
   }
 }

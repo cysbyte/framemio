@@ -68,11 +68,6 @@ async function handleMessage(received: ReceivedJobMessage, dependencies: {
     return false;
   }
   console.info(JSON.stringify({level: 'info', msg: 'handling render message', job_id: message.jobId, project_id: message.projectId, receive_count: received.receiveCount}));
-  if (received.receiveCount > config.maxReceiveCount) {
-    await backend.markFailed(message.jobId, new Error('render job exceeded queue receive limit'));
-    await queue.delete(received.receiptHandle);
-    return true;
-  }
   try {
     await backend.markRunning(message.jobId, 0.08);
     const input = await backend.renderInput(message.jobId);

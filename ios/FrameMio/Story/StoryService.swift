@@ -38,11 +38,13 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
+            let appError = AppError.from(error)
             let cachedStories = try await persistence.loadStories()
-            guard let cachedStory = cachedStories.first(where: { $0.id == id }) else {
-                throw AppError.from(error)
+            if (appError == .networkUnavailable || appError == .invalidConfiguration),
+               let cachedStory = cachedStories.first(where: { $0.id == id }) {
+                return cachedStory
             }
-            return cachedStory
+            throw appError
         }
     }
 
@@ -68,9 +70,7 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
     }
 
     func retryProcessing(id: String) async throws -> Story {
-        try await updateCachedStory(id: id) { story in
-            story.status = .queued
-        }
+        try await requestRender(id: id)
     }
 
     func regenerateStory(id: String) async throws -> Story {
@@ -80,6 +80,10 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
     }
 
     func renderAgain(id: String) async throws -> Story {
+        try await requestRender(id: id)
+    }
+
+    private func requestRender(id: String) async throws -> Story {
         let body: Data
         do {
             body = try encoder.encode(["output_preset": "social"])
@@ -91,7 +95,7 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
                 method: .post,
                 path: "/projects/\(id)/render",
                 body: body,
-                headers: ["Idempotency-Key": "ios-render-\(id)"]
+                headers: ["Idempotency-Key": "ios-render-\(id)-\(UUID().uuidString)"]
             )
         )
         return try await story(id: id)

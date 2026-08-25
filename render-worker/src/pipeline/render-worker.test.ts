@@ -131,6 +131,64 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
   }
 });
 
+
+test('ffmpeg fallback renderer converts HEIC photos before rendering', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'framemio-heic-render-test-'));
+  const fakeFfmpeg = path.join(root, 'fake-ffmpeg.cjs');
+  const fakeHeifConvert = path.join(root, 'fake-heif-convert.cjs');
+  const heifArgsPath = path.join(root, 'heif-args.json');
+  const ffmpegArgsPath = path.join(root, 'ffmpeg-args.json');
+  const outputPath = path.join(root, 'story.mp4');
+  await writeFile(fakeFfmpeg, `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.writeFileSync(process.env.FRAMEMIO_FFMPEG_ARGS_PATH, JSON.stringify(args));
+fs.writeFileSync(args[args.length - 1], 'fake mp4');
+`, 'utf8');
+  await writeFile(fakeHeifConvert, `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.writeFileSync(process.env.FRAMEMIO_HEIF_ARGS_PATH, JSON.stringify(args));
+fs.writeFileSync(args[1], 'fake jpeg');
+`, 'utf8');
+  await chmod(fakeFfmpeg, 0o755);
+  await chmod(fakeHeifConvert, 0o755);
+
+  const previousFfmpegArgsPath = process.env.FRAMEMIO_FFMPEG_ARGS_PATH;
+  const previousHeifArgsPath = process.env.FRAMEMIO_HEIF_ARGS_PATH;
+  process.env.FRAMEMIO_FFMPEG_ARGS_PATH = ffmpegArgsPath;
+  process.env.FRAMEMIO_HEIF_ARGS_PATH = heifArgsPath;
+  try {
+    const [photo] = fixtureMediaAssets();
+    const heicPhoto = {...photo, file_name: 'IMG_0111.HEIC', content_type: 'image/heic'};
+    const storyPlan = fixtureStoryPlan({moments: [{...fixtureStoryPlan().moments[0], asset_id: heicPhoto.id}]});
+    const composition = buildComposition(storyPlan, [heicPhoto], new Map([[heicPhoto.id, '/asset/IMG_0111.HEIC']]), new Map(), {
+      work_dir: root,
+      assets_dir: path.join(root, 'assets'),
+      clips_dir: path.join(root, 'clips'),
+      output_file: outputPath,
+      composition_file: path.join(root, 'composition.json'),
+    });
+
+    await new FfmpegCompositionRenderer({ffmpegBinary: fakeFfmpeg, heifConvertBinary: fakeHeifConvert}).renderComposition(composition, outputPath);
+
+    assert.deepEqual(JSON.parse(await readFile(heifArgsPath, 'utf8')), ['/asset/IMG_0111.HEIC', path.join(root, `${composition.clips[0].clip_id}.jpg`)]);
+    const ffmpegArgs = JSON.parse(await readFile(ffmpegArgsPath, 'utf8')) as string[];
+    assert.equal(ffmpegArgs[ffmpegArgs.indexOf('-i') + 1], path.join(root, `${composition.clips[0].clip_id}.jpg`));
+  } finally {
+    if (previousFfmpegArgsPath === undefined) {
+      delete process.env.FRAMEMIO_FFMPEG_ARGS_PATH;
+    } else {
+      process.env.FRAMEMIO_FFMPEG_ARGS_PATH = previousFfmpegArgsPath;
+    }
+    if (previousHeifArgsPath === undefined) {
+      delete process.env.FRAMEMIO_HEIF_ARGS_PATH;
+    } else {
+      process.env.FRAMEMIO_HEIF_ARGS_PATH = previousHeifArgsPath;
+    }
+  }
+});
+
 test('supports the required output aspect ratios', () => {
   assert.deepEqual(resolutionForAspectRatio('9:16'), {width: 1080, height: 1920});
   assert.deepEqual(resolutionForAspectRatio('1:1'), {width: 1080, height: 1080});

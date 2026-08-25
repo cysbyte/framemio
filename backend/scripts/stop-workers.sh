@@ -6,6 +6,11 @@ ECS_CLUSTER="${ECS_CLUSTER:-my-cluster}"
 VIDEO_WORKER_SERVICE="${VIDEO_WORKER_SERVICE:-framemio-video-intelligence-worker-service-xuttbpns}"
 RENDER_WORKER_SERVICE="${RENDER_WORKER_SERVICE:-framemio-render-worker-service-chw8cyt4}"
 WAIT_FOR_STABLE="${WAIT_FOR_STABLE:-true}"
+AWS_USE_PROXY="${AWS_USE_PROXY:-false}"
+
+if [[ "$AWS_USE_PROXY" != "true" ]]; then
+  unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
+fi
 
 services=("$VIDEO_WORKER_SERVICE" "$RENDER_WORKER_SERVICE")
 

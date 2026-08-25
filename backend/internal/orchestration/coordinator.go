@@ -154,7 +154,18 @@ func (c *Coordinator) RecordValidationAndQueueRender(ctx context.Context, userID
 			return models.ProcessingJob{}, err
 		}
 	}
-	return c.createStageJob(ctx, userID, projectID, "", models.JobTypeVideoRender, configuration, stableRenderKey(projectID, storyPlanVersion, preset), true)
+	renderKey := stableRenderKey(projectID, storyPlanVersion, preset)
+	renderJob, err := c.createStageJob(ctx, userID, projectID, "", models.JobTypeVideoRender, configuration, renderKey, true)
+	if err != nil {
+		return models.ProcessingJob{}, err
+	}
+	if strings.TrimSpace(idempotencyKey) == "" || !models.IsTerminalJobStatus(renderJob.Status) {
+		return renderJob, nil
+	}
+	if activeJob, ok, err := c.activeRenderJob(ctx, userID, projectID, storyPlanVersion, preset); err != nil || ok {
+		return activeJob, err
+	}
+	return c.createStageJob(ctx, userID, projectID, "", models.JobTypeVideoRender, configuration, renderKey+":retry:"+strings.TrimSpace(idempotencyKey), true)
 }
 
 func (c *Coordinator) UpdateJobStatus(ctx context.Context, jobID string, status models.JobStatus, progress float64, errorCode, errorMessage, artifactS3Key, artifactType string) (models.ProcessingJob, error) {
@@ -282,6 +293,23 @@ func (c *Coordinator) enqueueStoryPlanIfReady(ctx context.Context, userID, proje
 	}
 	_, err = c.createStageJob(ctx, userID, projectID, "", models.JobTypeStoryPlan, map[string]string{"pipeline_version": PipelineVersion}, stableStageKey(projectID, "", models.JobTypeStoryPlan), true)
 	return err
+}
+
+func (c *Coordinator) activeRenderJob(ctx context.Context, userID, projectID string, storyPlanVersion int, outputPreset string) (models.ProcessingJob, bool, error) {
+	jobs, err := c.Store.ListProjectJobs(ctx, userID, projectID)
+	if err != nil {
+		return models.ProcessingJob{}, false, err
+	}
+	version := strconv.Itoa(storyPlanVersion)
+	for _, job := range jobs {
+		if job.Type != models.JobTypeVideoRender || models.IsTerminalJobStatus(job.Status) {
+			continue
+		}
+		if job.Configuration["story_plan_version"] == version && valueOrDefault(strings.TrimSpace(job.Configuration["output_preset"]), defaultOutputPreset) == outputPreset {
+			return job, true, nil
+		}
+	}
+	return models.ProcessingJob{}, false, nil
 }
 
 func (c *Coordinator) createStageJob(ctx context.Context, userID, projectID, mediaID string, jobType models.JobType, configuration map[string]string, idempotencyKey string, publish bool) (models.ProcessingJob, error) {
