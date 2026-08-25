@@ -57,7 +57,12 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
         }
 
         let data = try await apiClient.data(
-            for: APIRequest(method: .post, path: "/v1/stories", body: body)
+            for: APIRequest(
+                method: .post,
+                path: "/v1/stories",
+                body: body,
+                headers: ["Idempotency-Key": "ios-story-\(UUID().uuidString)"]
+            )
         )
         do {
             let story = try decoder.decode(Story.self, from: data)

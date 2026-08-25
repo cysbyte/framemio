@@ -253,7 +253,11 @@ func buildCandidates(request Request, selected map[string]struct{}, clusters map
 		})
 	}
 	for _, analysis := range request.VideoAnalyses {
-		if analysis.ProjectID != "" && analysis.ProjectID != request.ProjectID {
+		mediaID := strings.TrimSpace(analysis.VideoID)
+		if mediaID == "" {
+			continue
+		}
+		if analysis.ProjectID != "" && analysis.ProjectID != request.ProjectID && !hasMedia(selected, mediaID) {
 			continue
 		}
 		for _, segment := range analysis.Segments {
@@ -261,10 +265,6 @@ func buildCandidates(request Request, selected map[string]struct{}, clusters map
 				continue
 			}
 			if segment.EndMicros <= segment.StartMicros || segment.StartMicros < 0 || segment.EndMicros > analysis.DurationMicros {
-				continue
-			}
-			mediaID := strings.TrimSpace(analysis.VideoID)
-			if mediaID == "" {
 				continue
 			}
 			clusterID := clusterForMedia(clusters, mediaID)

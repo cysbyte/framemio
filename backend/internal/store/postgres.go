@@ -594,14 +594,18 @@ func (s *PostgresStore) GetVideoAnalysis(ctx context.Context, userID, videoID, a
 }
 
 func (s *PostgresStore) ListProjectAnalyses(ctx context.Context, userID, projectID string) ([]models.MediaAnalysis, []models.VideoAnalysis, error) {
-	if _, err := s.GetProject(ctx, userID, projectID); err != nil {
+	project, err := s.GetProject(ctx, userID, projectID)
+	if err != nil {
 		return nil, nil, err
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT kind, data
 		FROM framemio_domain_records
-		WHERE user_id=$1 AND project_id=$2 AND kind IN ('analysis','video_analysis')
-		ORDER BY kind, media_id, created_at DESC`, userID, projectID)
+		WHERE user_id=$1 AND (
+			(kind='analysis' AND project_id=$2) OR
+			(kind='video_analysis' AND media_id = ANY($3))
+		)
+		ORDER BY kind, media_id, created_at DESC`, userID, projectID, project.MediaIDs)
 	if err != nil {
 		return nil, nil, err
 	}

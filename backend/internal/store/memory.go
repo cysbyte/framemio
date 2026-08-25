@@ -406,9 +406,13 @@ func (s *MemoryStore) ListProjectAnalyses(_ context.Context, userID, projectID s
 			photoAnalyses = append(photoAnalyses, analysis)
 		}
 	}
+	projectMedia := make(map[string]struct{}, len(project.MediaIDs))
+	for _, mediaID := range project.MediaIDs {
+		projectMedia[mediaID] = struct{}{}
+	}
 	latestVideoByMedia := make(map[string]models.VideoAnalysis)
 	for _, analysis := range s.videoAnalyses {
-		if analysis.ProjectID != projectID {
+		if _, selected := projectMedia[analysis.VideoID]; !selected {
 			continue
 		}
 		current, ok := latestVideoByMedia[analysis.VideoID]
