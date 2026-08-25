@@ -50,6 +50,8 @@ struct StoryPreviewView: View {
 
     private var initialLoadingProgress: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            StoryWaitingAnimation()
+
             FrameMioProgressView(value: viewModel.progressValue, title: viewModel.progressTitle)
 
             Text("Your story is being assembled securely in the background.")
@@ -141,6 +143,9 @@ struct StoryPreviewView: View {
                 .foregroundStyle(FrameMioColors.secondaryInk)
 
             if story.status != .ready {
+                StoryWaitingAnimation()
+                    .padding(.top, FrameMioSpacing.xs)
+
                 FrameMioProgressView(value: viewModel.progressValue, title: viewModel.progressTitle)
                 Text("Your story is finished outside the app, so the interface stays calm and responsive.")
                     .font(FrameMioTypography.footnote)
