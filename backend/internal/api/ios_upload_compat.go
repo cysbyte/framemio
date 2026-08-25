@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -255,6 +256,10 @@ func (s *Server) notifyIOSUploadComplete(response http.ResponseWriter, request *
 	etag, err := s.ObjectStorage.CompleteUpload(request.Context(), session, nil)
 	if err != nil {
 		s.Logger.Error("verify iOS object upload failed", "user_id", user.ID, "upload_id", input.UploadID, "media_id", input.MediaID, "error", err)
+		if errors.Is(err, storage.ErrUploadSizeMismatch) {
+			s.writeError(response, http.StatusConflict, "stale_upload_size", "uploaded object size does not match the authorized media size; retry upload authorization")
+			return
+		}
 		s.internalError(response, err, "verify iOS object upload")
 		return
 	}

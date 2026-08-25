@@ -69,6 +69,7 @@ final class RemoteMediaUploadAuthorizer: MediaUploadAuthorizer, @unchecked Senda
 
 actor MockMediaUploadAuthorizer: MediaUploadAuthorizer {
     private var sessionsByIdempotencyKey: [String: UploadSession] = [:]
+    private(set) var requestedIdempotencyKeys: [String] = []
     private(set) var createSessionCallCount = 0
     private(set) var completedMultipartUploads: [[MultipartPartCompletion]] = []
     private(set) var completedNotifications: [UploadCompletionNotification] = []
@@ -78,6 +79,7 @@ actor MockMediaUploadAuthorizer: MediaUploadAuthorizer {
         idempotencyKey: String
     ) async throws -> UploadSession {
         createSessionCallCount += 1
+        requestedIdempotencyKeys.append(idempotencyKey)
         if let session = sessionsByIdempotencyKey[idempotencyKey] {
             return session
         }

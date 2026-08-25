@@ -63,6 +63,78 @@ final class MediaUploadTests: XCTestCase {
         XCTAssertEqual(requestCount, 3)
     }
 
+    func testFailedUploadReauthorizesWhenMaterializedFileSizeChanged() async throws {
+        let asset = makeAsset(id: "icloud-photo", kind: .image)
+        let stagedURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FrameMio-stale-size-\(UUID().uuidString).jpg")
+        try Data(repeating: 9, count: 200).write(to: stagedURL)
+        defer { try? FileManager.default.removeItem(at: stagedURL) }
+
+        let uploadID = MediaUpload.makeID(for: asset.id, optimization: .original)
+        let staleSession = UploadSession(
+            uploadID: "upload-stale",
+            mediaID: "media-stale",
+            s3Key: "users/user-1/media/media-stale/icloud-photo.jpg",
+            strategy: .single,
+            partSizeBytes: 100,
+            s3MultipartUploadID: nil,
+            expiresAt: Date().addingTimeInterval(3_600),
+            completed: nil,
+            parts: [
+                UploadPart(
+                    partNumber: 1,
+                    offsetBytes: 0,
+                    lengthBytes: 100,
+                    presignedURL: URL(string: "https://s3.example.test/stale/1?X-Amz-SignedHeaders=host")!,
+                    status: .completed,
+                    attempts: 1,
+                    eTag: "etag-stale",
+                    lastError: nil
+                )
+            ]
+        )
+        let staleUpload = MediaUpload(
+            id: uploadID,
+            assetID: asset.id,
+            localIdentifier: asset.localIdentifier,
+            mediaID: staleSession.mediaID,
+            mediaType: .photo,
+            fileName: "icloud-photo.jpg",
+            contentType: "image/jpeg",
+            fileSizeBytes: 100,
+            duration: nil,
+            creationDate: asset.creationDate,
+            pixelWidth: asset.pixelWidth,
+            pixelHeight: asset.pixelHeight,
+            orientation: .portrait,
+            optimization: .original,
+            status: .failed,
+            uploadedBytes: 100,
+            authorizationIdempotencyKey: nil,
+            session: staleSession,
+            stagedFileURL: stagedURL,
+            lastError: "uploaded object size does not match authorization",
+            updatedAt: Date()
+        )
+        let source = makeSource(asset: asset, byteCount: 999)
+        let authorizer = MockMediaUploadAuthorizer()
+        let storage = MockDirectObjectStorageClient()
+        let store = MockMediaUploadStore(uploads: [staleUpload])
+        let service = makeService(source: source, authorizer: authorizer, storage: storage, store: store)
+
+        let uploads = try await service.resumePendingUploads(options: makeOptions(), progress: { _ in })
+
+        let upload = try XCTUnwrap(uploads.first)
+        let requestSizes = await storage.requests.map(\.fileSizeBytes)
+        let requestedKeys = await authorizer.requestedIdempotencyKeys
+        XCTAssertEqual(upload.status, .completed)
+        XCTAssertEqual(upload.fileSizeBytes, 200)
+        XCTAssertEqual(upload.uploadedBytes, 200)
+        XCTAssertEqual(upload.session?.parts.first?.lengthBytes, 200)
+        XCTAssertEqual(requestSizes, [200])
+        XCTAssertEqual(requestedKeys, [MediaUpload.makeAuthorizationID(for: uploadID, fileSizeBytes: 200)])
+    }
+
     func testDuplicateUploadReturnsCompletedRecordWithoutUploadingAgain() async throws {
         let asset = makeAsset(id: "duplicate-photo", kind: .image)
         let source = makeSource(asset: asset, byteCount: 128 * 1_024)

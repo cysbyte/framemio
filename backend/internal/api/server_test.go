@@ -401,6 +401,38 @@ func TestIOSUploadContractCompatibility(t *testing.T) {
 	}
 }
 
+func TestIOSUploadCompletionReturnsConflictForSizeMismatch(t *testing.T) {
+	t.Parallel()
+	memoryStore := store.NewMemoryStore()
+	handler := newTestServerWithStorage(memoryStore, queue.NewMemoryPublisher(), &sizeMismatchObjectStorage{base: storage.StaticObjectStorage{
+		BaseURL: "https://uploads.example.test", PartSizeBytes: 5 * 1024 * 1024, MultipartThreshold: 10 * 1024 * 1024,
+	}}).Handler()
+
+	upload := performJSON(t, handler, http.MethodPost, "/v1/media/upload-sessions", map[string]any{
+		"idempotencyKey": "media-upload-original-stale-size",
+		"metadata": map[string]any{
+			"assetID": "stale-size", "mediaType": "photo", "contentType": "image/jpeg", "fileName": "IMG_0001.JPG",
+			"fileSizeBytes": 100, "pixelWidth": 4032, "pixelHeight": 3024, "orientation": "landscape",
+			"optimization": "original", "preferredPartSizeBytes": 8 * 1024 * 1024,
+		},
+	}, "", true, nil)
+	if upload.Code != http.StatusCreated {
+		t.Fatalf("create iOS upload status = %d, body = %s", upload.Code, upload.Body.String())
+	}
+	var session iosUploadSessionResponse
+	decodeResponse(t, upload, &session)
+
+	complete := performJSON(t, handler, http.MethodPost, "/v1/media/uploads/complete", map[string]any{
+		"mediaId": session.MediaID, "uploadId": session.UploadID, "s3Key": session.S3Key, "mediaType": "photo",
+	}, "", true, nil)
+	if complete.Code != http.StatusConflict {
+		t.Fatalf("size mismatch completion status = %d, body = %s", complete.Code, complete.Body.String())
+	}
+	if !strings.Contains(complete.Body.String(), "stale_upload_size") {
+		t.Fatalf("expected stale_upload_size response, body = %s", complete.Body.String())
+	}
+}
+
 func TestIOSUploadSessionDetectsMutableSignedHeaders(t *testing.T) {
 	t.Parallel()
 	unsafe := models.UploadSession{Parts: []models.UploadPart{{UploadURL: "https://s3.example.test/object?X-Amz-SignedHeaders=content-length%3Bcontent-type%3Bhost"}}}
@@ -722,6 +754,34 @@ func newTestServerWithStorage(memoryStore *store.MemoryStore, publisher *queue.M
 		Logger:        slog.New(slog.NewJSONHandler(io.Discard, nil)),
 		Now:           func() time.Time { return time.Date(2026, time.August, 19, 10, 0, 0, 0, time.UTC) },
 	})
+}
+
+type sizeMismatchObjectStorage struct {
+	base storage.StaticObjectStorage
+}
+
+func (s *sizeMismatchObjectStorage) AuthorizeUpload(ctx context.Context, request storage.UploadAuthorizationRequest) (models.UploadSession, error) {
+	return s.base.AuthorizeUpload(ctx, request)
+}
+
+func (s *sizeMismatchObjectStorage) RefreshUpload(ctx context.Context, session models.UploadSession, request storage.UploadRefreshRequest) (models.UploadSession, error) {
+	return s.base.RefreshUpload(ctx, session, request)
+}
+
+func (s *sizeMismatchObjectStorage) CompleteUpload(context.Context, models.UploadSession, []models.CompletedUploadPart) (string, error) {
+	return "", storage.ErrUploadSizeMismatch
+}
+
+func (s *sizeMismatchObjectStorage) AbortUpload(ctx context.Context, session models.UploadSession) error {
+	return s.base.AbortUpload(ctx, session)
+}
+
+func (s *sizeMismatchObjectStorage) ObjectExists(ctx context.Context, key string) (bool, error) {
+	return s.base.ObjectExists(ctx, key)
+}
+
+func (s *sizeMismatchObjectStorage) PresignedDownloadURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
+	return s.base.PresignedDownloadURL(ctx, key, expiry)
 }
 
 type countingObjectStorage struct {

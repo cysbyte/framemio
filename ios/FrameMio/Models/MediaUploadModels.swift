@@ -103,9 +103,9 @@ struct MediaUpload: Identifiable, Codable, Hashable, Sendable {
     let localIdentifier: String?
     var mediaID: String?
     let mediaType: UploadMediaType
-    let fileName: String
-    let contentType: String
-    let fileSizeBytes: Int64
+    var fileName: String
+    var contentType: String
+    var fileSizeBytes: Int64
     let duration: TimeInterval?
     let creationDate: Date?
     let pixelWidth: Int
@@ -114,6 +114,7 @@ struct MediaUpload: Identifiable, Codable, Hashable, Sendable {
     let optimization: MediaUploadOptimization
     var status: UploadStatus
     var uploadedBytes: Int64
+    var authorizationIdempotencyKey: String?
     var session: UploadSession?
     var stagedFileURL: URL?
     var lastError: String?
@@ -126,8 +127,16 @@ struct MediaUpload: Identifiable, Codable, Hashable, Sendable {
         return min(1, max(0, Double(uploadedBytes) / Double(fileSizeBytes)))
     }
 
+    var effectiveAuthorizationIdempotencyKey: String {
+        authorizationIdempotencyKey ?? id
+    }
+
     static func makeID(for assetID: String, optimization: MediaUploadOptimization) -> String {
         "media-upload-\(optimization.rawValue)-\(assetID)"
+    }
+
+    static func makeAuthorizationID(for uploadID: String, fileSizeBytes: Int64) -> String {
+        "\(uploadID)-bytes-\(fileSizeBytes)"
     }
 }
 

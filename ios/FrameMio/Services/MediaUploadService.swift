@@ -150,6 +150,10 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
             optimization: options.optimization,
             status: .queued,
             uploadedBytes: 0,
+            authorizationIdempotencyKey: MediaUpload.makeAuthorizationID(
+                for: MediaUpload.makeID(for: asset.id, optimization: options.optimization),
+                fileSizeBytes: mediaFile.fileSizeBytes
+            ),
             session: nil,
             stagedFileURL: mediaFile.url,
             lastError: nil,
@@ -258,6 +262,9 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
             guard var record else {
                 throw AppError.persistenceFailure
             }
+            if reconcileUploadRecord(&record, with: mediaFile) {
+                mediaUploadDebugLog("uploadOne reconciled materialized file upload=\(record.id) asset=\(record.assetID) bytes=\(record.fileSizeBytes)")
+            }
             record.status = .authorizing
             record.lastError = nil
             record.updatedAt = Date()
@@ -268,7 +275,7 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
                 mediaUploadDebugLog("authorizing session upload=\(record.id) asset=\(record.assetID) bytes=\(record.fileSizeBytes) header_safe_refresh=\(session?.requiresHeaderSafeRefresh == true)")
                 session = try await authorizer.createUploadSession(
                     metadata: uploadMetadata(from: record, options: options),
-                    idempotencyKey: record.id
+                    idempotencyKey: record.effectiveAuthorizationIdempotencyKey
                 )
                 mediaUploadDebugLog("authorized session upload=\(record.id) session=\(session?.uploadID ?? "nil") media=\(session?.mediaID ?? "nil") strategy=\(session?.strategy.rawValue ?? "nil") parts=\(session?.parts.count ?? 0) completed_parts=\(session?.parts.filter(\.isCompleted).count ?? 0) usable=\(session?.isUsable() ?? false)")
                 record.session = session
@@ -473,6 +480,25 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         }
     }
 
+    private func reconcileUploadRecord(_ record: inout MediaUpload, with mediaFile: OriginalMediaFile) -> Bool {
+        let changed = record.fileName != mediaFile.fileName
+            || record.contentType != mediaFile.contentType
+            || record.fileSizeBytes != mediaFile.fileSizeBytes
+        guard changed else { return false }
+
+        record.fileName = mediaFile.fileName
+        record.contentType = mediaFile.contentType
+        record.fileSizeBytes = mediaFile.fileSizeBytes
+        record.uploadedBytes = 0
+        record.mediaID = nil
+        record.session = nil
+        record.authorizationIdempotencyKey = MediaUpload.makeAuthorizationID(
+            for: record.id,
+            fileSizeBytes: mediaFile.fileSizeBytes
+        )
+        return true
+    }
+
     private func uploadMetadata(from record: MediaUpload, options: MediaUploadOptions) -> MediaUploadMetadata {
         MediaUploadMetadata(
             assetID: record.assetID,
@@ -510,7 +536,7 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         mediaUploadDebugLog("refreshing upload session upload=\(record.id) session=\(session.uploadID) expires_at=\(expiresAt)")
         let refreshed = try await authorizer.createUploadSession(
             metadata: uploadMetadata(from: record, options: options),
-            idempotencyKey: record.id
+            idempotencyKey: record.effectiveAuthorizationIdempotencyKey
         )
         return mergeCompletedParts(from: session, into: refreshed)
     }
@@ -557,7 +583,7 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
                     url: stagedURL,
                     fileName: existing?.fileName ?? "media",
                     contentType: existing?.contentType ?? "application/octet-stream",
-                    fileSizeBytes: existing?.fileSizeBytes ?? 0
+                    fileSizeBytes: materializedFileSize(at: stagedURL) ?? existing?.fileSizeBytes ?? 0
                 ),
                 false
             )
@@ -568,6 +594,10 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
             progress: nil
         )
         return (file, true)
+    }
+
+    private func materializedFileSize(at url: URL) -> Int64? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value
     }
 
     private func makePartFileIfNeeded(

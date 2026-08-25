@@ -334,6 +334,10 @@ func (s *Server) completeMedia(response http.ResponseWriter, request *http.Reque
 	}
 	etag, err := s.ObjectStorage.CompleteUpload(request.Context(), session, input.Parts)
 	if err != nil {
+		if errors.Is(err, storage.ErrUploadSizeMismatch) {
+			s.writeError(response, http.StatusConflict, "stale_upload_size", "uploaded object size does not match the authorized media size; retry upload authorization")
+			return
+		}
 		s.internalError(response, err, "complete object upload")
 		return
 	}

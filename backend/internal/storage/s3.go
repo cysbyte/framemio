@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"path"
@@ -16,6 +17,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/framemio/backend/internal/models"
 )
+
+var ErrUploadSizeMismatch = errors.New("uploaded object size does not match authorization")
 
 type UploadAuthorizationRequest struct {
 	UserID        string
@@ -204,8 +207,10 @@ func (s *S3ObjectStorage) CompleteUpload(ctx context.Context, session models.Upl
 		if err != nil {
 			return "", fmt.Errorf("verify s3 object: %w", err)
 		}
-		if aws.ToInt64(head.ContentLength) != sessionSize(session) {
-			return "", fmt.Errorf("uploaded object size does not match authorization")
+		actualSize := aws.ToInt64(head.ContentLength)
+		expectedSize := sessionSize(session)
+		if actualSize != expectedSize {
+			return "", fmt.Errorf("%w: got %d bytes, want %d", ErrUploadSizeMismatch, actualSize, expectedSize)
 		}
 		return aws.ToString(head.ETag), nil
 	}
