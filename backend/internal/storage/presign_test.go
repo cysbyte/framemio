@@ -19,10 +19,32 @@ func newTestS3Storage() *S3ObjectStorage {
 		Credentials: credentials.NewStaticCredentialsProvider("AKIAEXAMPLE", "secretexample", ""),
 	})
 	return &S3ObjectStorage{
-		bucket:    "framemio-media",
-		expiry:    2 * time.Hour,
-		client:    client,
-		presigner: s3.NewPresignClient(client),
+		bucket:             "framemio-media",
+		partSizeBytes:      8 * 1024 * 1024,
+		multipartThreshold: 8 * 1024 * 1024,
+		expiry:             2 * time.Hour,
+		client:             client,
+		presigner:          s3.NewPresignClient(client),
+	}
+}
+
+func TestPresignedSingleUploadSignsOnlyHost(t *testing.T) {
+	presigned, err := newTestS3Storage().presignPutObjectUpload(context.Background(), "uploads/photo.jpg")
+	if err != nil {
+		t.Fatalf("presign single upload: %v", err)
+	}
+	if got := signedHeaders(t, presigned.URL); got != "host" {
+		t.Errorf("X-Amz-SignedHeaders = %q, want host; iOS background uploads may rewrite content headers", got)
+	}
+}
+
+func TestPresignedMultipartUploadPartSignsOnlyHost(t *testing.T) {
+	presigned, err := newTestS3Storage().presignUploadPart(context.Background(), "uploads/video.mov", "multipart-upload-id", 1)
+	if err != nil {
+		t.Fatalf("presign multipart upload part: %v", err)
+	}
+	if got := signedHeaders(t, presigned.URL); got != "host" {
+		t.Errorf("X-Amz-SignedHeaders = %q, want host; iOS background uploads may rewrite content headers", got)
 	}
 }
 
@@ -80,3 +102,11 @@ func TestPresignedDownloadURLDefaultsExpiryAndRequiresKey(t *testing.T) {
 	}
 }
 
+func signedHeaders(t *testing.T, raw string) string {
+	t.Helper()
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("parse presigned url: %v", err)
+	}
+	return parsed.Query().Get("X-Amz-SignedHeaders")
+}

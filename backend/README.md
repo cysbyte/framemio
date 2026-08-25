@@ -36,10 +36,12 @@ render worker ──── progress/S3 result ─────> internal callback
 
 ## Public API
 
-All public endpoints require `Authorization: Bearer <token>`. Creation endpoints require `Idempotency-Key`, except the versioned iOS upload adapter, which receives the existing app idempotency key in its JSON body.
+All protected public endpoints require `Authorization: Bearer <access_token>`. The anonymous auth bootstrap and refresh endpoints are intentionally unauthenticated; they return app credentials for the iOS Keychain. Creation endpoints require `Idempotency-Key`, except the versioned iOS upload adapter, which receives the existing app idempotency key in its JSON body.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
+| `POST` | `/v1/auth/anonymous` | Create or retrieve an anonymous app user and return access/refresh tokens. |
+| `POST` | `/v1/auth/refresh` | Exchange a refresh token for a new short-lived access token and new refresh token. |
 | `POST` | `/media/upload-session` | Create or replay a direct-S3 upload authorization. |
 | `POST` | `/media` | Verify/finalize an upload and mark the media ready. |
 | `GET` | `/media/:id` | Read an owned media record. |
@@ -102,13 +104,15 @@ The publisher rejects missing identifiers, unsupported job types, oversized conf
 
 ## Authentication
 
-The initial authenticator accepts an HMAC-SHA256 signed bearer token:
+The iOS app uses anonymous application authentication on first launch and stores credentials in Keychain. `POST /v1/auth/anonymous` accepts an installation identifier, creates or retrieves an anonymous user, and returns a short-lived access token plus a longer-lived refresh token. Protected requests send only the access token as `Authorization: Bearer <access_token>`.
+
+The initial authenticator accepts HMAC-SHA256 signed tokens:
 
 ```text
-base64url({"sub":"user-id","email":"optional","exp":unix_timestamp}).base64url(signature)
+base64url({"sub":"user-id","email":"optional","exp":unix_timestamp,"typ":"access|refresh"}).base64url(signature)
 ```
 
-`AUTH_HMAC_SECRET` signs/verifies public bearer tokens. `INTERNAL_API_TOKEN` is a separate worker-only secret. Neither value belongs in the iOS application. Replace the initial HMAC boundary with the production identity provider/JWKS verifier before public launch if authentication is delegated to an external provider.
+`AUTH_HMAC_SECRET` signs/verifies public bearer tokens. Access tokens are accepted by protected public endpoints; refresh tokens are accepted only by `/v1/auth/refresh`. `INTERNAL_API_TOKEN` is a separate worker-only secret. Neither value belongs in the iOS application. Replace the initial HMAC boundary with the production identity provider/JWKS verifier before public launch if authentication is delegated to an external provider.
 
 ## Configuration
 

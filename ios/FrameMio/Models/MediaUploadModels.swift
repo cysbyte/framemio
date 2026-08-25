@@ -71,6 +71,19 @@ struct UploadSession: Codable, Hashable, Sendable {
         completed == true
     }
 
+    var requiresHeaderSafeRefresh: Bool {
+        if isAlreadyUploaded {
+            return false
+        }
+        return parts.contains { part in
+            guard let components = URLComponents(url: part.presignedURL, resolvingAgainstBaseURL: false) else {
+                return true
+            }
+            let signedHeaders = components.queryItems?.first { $0.name == "X-Amz-SignedHeaders" }?.value
+            return signedHeaders != "host"
+        }
+    }
+
     /// A completed session is usable regardless of expiry: its presigned URLs
     /// are never refreshed by the server, and nothing remains to upload.
     func isUsable(at date: Date = Date()) -> Bool {

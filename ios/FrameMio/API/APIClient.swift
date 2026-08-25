@@ -121,6 +121,7 @@ final class URLSessionAPIClient: APIClient, @unchecked Sendable {
 final class KeychainAuthTokenProvider: AuthTokenProvider, @unchecked Sendable {
     private let service: String
     private let account: String
+    private let refreshAccount: String
     private let installationAccount: String
     private let baseURL: URL?
     private let session: URLSession
@@ -130,12 +131,14 @@ final class KeychainAuthTokenProvider: AuthTokenProvider, @unchecked Sendable {
     init(
         service: String = "com.framemio.app",
         account: String = "access-token",
+        refreshAccount: String = "refresh-token",
         installationAccount: String = "anonymous-installation-id",
         baseURL: URL? = nil,
         session: URLSession = .shared
     ) {
         self.service = service
         self.account = account
+        self.refreshAccount = refreshAccount
         self.installationAccount = installationAccount
         self.baseURL = baseURL
         self.session = session
@@ -147,6 +150,10 @@ final class KeychainAuthTokenProvider: AuthTokenProvider, @unchecked Sendable {
         }
         guard let baseURL else {
             return nil
+        }
+        if let refreshToken = storedValue(account: refreshAccount),
+           let token = await refreshAccessToken(baseURL: baseURL, refreshToken: refreshToken) {
+            return token
         }
         return await issueAnonymousToken(baseURL: baseURL)
     }
@@ -174,12 +181,45 @@ final class KeychainAuthTokenProvider: AuthTokenProvider, @unchecked Sendable {
                   (200..<300).contains(httpResponse.statusCode) else {
                 return nil
             }
-            let token = try decoder.decode(AnonymousAuthResponse.self, from: data).accessToken
-            saveValue(token, account: account)
+            let token = try saveAuthResponse(data)
             return token
         } catch {
             return nil
         }
+    }
+
+    private func refreshAccessToken(baseURL: URL, refreshToken: String) async -> String? {
+        var url = baseURL
+        for component in "v1/auth/refresh".split(separator: "/") {
+            url.appendPathComponent(String(component))
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? encoder.encode(RefreshAuthRequest(refreshToken: refreshToken))
+
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200..<300).contains(httpResponse.statusCode) else {
+                deleteValue(account: refreshAccount)
+                return nil
+            }
+            return try saveAuthResponse(data)
+        } catch {
+            return nil
+        }
+    }
+
+    private func saveAuthResponse(_ data: Data) throws -> String {
+        let response = try decoder.decode(AnonymousAuthResponse.self, from: data)
+        saveValue(response.accessToken, account: account)
+        if let refreshToken = response.refreshToken {
+            saveValue(refreshToken, account: refreshAccount)
+        }
+        return response.accessToken
     }
 
     private func saveNewInstallationID() -> String {
@@ -239,11 +279,21 @@ private struct AnonymousAuthRequest: Encodable {
     }
 }
 
+private struct RefreshAuthRequest: Encodable {
+    let refreshToken: String
+
+    enum CodingKeys: String, CodingKey {
+        case refreshToken = "refresh_token"
+    }
+}
+
 private struct AnonymousAuthResponse: Decodable {
     let accessToken: String
+    let refreshToken: String?
 
     enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
+        case refreshToken = "refresh_token"
     }
 }
 

@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -30,13 +31,13 @@ type iosUploadMediaMetadata struct {
 }
 
 type iosUploadSessionResponse struct {
-	UploadID            string                  `json:"uploadID"`
-	MediaID             string                  `json:"mediaID"`
-	S3Key               string                  `json:"s3Key"`
-	Strategy            models.UploadStrategy   `json:"strategy"`
-	PartSizeBytes       int64                   `json:"partSizeBytes"`
-	S3MultipartUploadID *string                 `json:"s3MultipartUploadID,omitempty"`
-	ExpiresAt           *string                 `json:"expiresAt,omitempty"`
+	UploadID            string                `json:"uploadID"`
+	MediaID             string                `json:"mediaID"`
+	S3Key               string                `json:"s3Key"`
+	Strategy            models.UploadStrategy `json:"strategy"`
+	PartSizeBytes       int64                 `json:"partSizeBytes"`
+	S3MultipartUploadID *string               `json:"s3MultipartUploadID,omitempty"`
+	ExpiresAt           *string               `json:"expiresAt,omitempty"`
 	// Completed reports that the bytes for this session are already in S3.
 	// Presigned part URLs are not refreshed for a completed session, so without
 	// this the client is handed expired URLs described as pending work and
@@ -80,7 +81,7 @@ func (s *Server) createIOSUploadSession(response http.ResponseWriter, request *h
 		return
 	}
 	if existing, err := s.Store.GetUploadSessionByIdempotency(request.Context(), user.ID, input.IdempotencyKey); err == nil {
-		session, refreshed, refreshErr := s.refreshIOSUploadSessionIfExpired(request, user.ID, existing)
+		session, refreshed, refreshErr := s.refreshIOSUploadSessionIfNeeded(request, user.ID, existing)
 		if refreshErr != nil {
 			s.internalError(response, refreshErr, "refresh iOS upload session")
 			return
@@ -296,12 +297,13 @@ func makeIOSUploadSession(session models.UploadSession) iosUploadSessionResponse
 	}
 }
 
-func (s *Server) refreshIOSUploadSessionIfExpired(request *http.Request, userID string, session models.UploadSession) (models.UploadSession, bool, error) {
+func (s *Server) refreshIOSUploadSessionIfNeeded(request *http.Request, userID string, session models.UploadSession) (models.UploadSession, bool, error) {
 	if session.CompletedAt != nil {
 		s.Logger.Info("skip refresh for completed iOS upload session", "user_id", userID, "upload_id", session.ID, "media_id", session.MediaID, "strategy", string(session.Strategy), "completed_at", session.CompletedAt)
 		return session, false, nil
 	}
-	if session.ExpiresAt.After(s.Now().UTC().Add(15 * time.Minute)) {
+	expiresSoon := !session.ExpiresAt.After(s.Now().UTC().Add(15 * time.Minute))
+	if !expiresSoon && !iosUploadSessionUsesMutableSignedHeaders(session) {
 		return session, false, nil
 	}
 	media, err := s.Store.GetMedia(request.Context(), userID, session.MediaID)
@@ -318,8 +320,21 @@ func (s *Server) refreshIOSUploadSessionIfExpired(request *http.Request, userID 
 	if err := s.Store.UpdateUploadSession(request.Context(), refreshed); err != nil {
 		return models.UploadSession{}, false, err
 	}
-	s.Logger.Info("refreshed expired iOS upload session", "user_id", userID, "upload_id", refreshed.ID, "media_id", refreshed.MediaID, "strategy", string(refreshed.Strategy), "expires_at", refreshed.ExpiresAt)
+	s.Logger.Info("refreshed iOS upload session", "user_id", userID, "upload_id", refreshed.ID, "media_id", refreshed.MediaID, "strategy", string(refreshed.Strategy), "expires_at", refreshed.ExpiresAt, "expired", expiresSoon)
 	return refreshed, true, nil
+}
+
+func iosUploadSessionUsesMutableSignedHeaders(session models.UploadSession) bool {
+	for _, part := range session.Parts {
+		parsed, err := url.Parse(part.UploadURL)
+		if err != nil {
+			return true
+		}
+		if strings.TrimSpace(parsed.Query().Get("X-Amz-SignedHeaders")) != "host" {
+			return true
+		}
+	}
+	return false
 }
 
 func iosTimeString(value time.Time) string {

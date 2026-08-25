@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -82,14 +83,7 @@ func (s *S3ObjectStorage) AuthorizeUpload(ctx context.Context, request UploadAut
 		key = fmt.Sprintf("users/%s/media/%s", request.UserID, request.MediaID)
 	}
 	if request.FileSizeBytes < s.multipartThreshold {
-		presigned, err := s.presigner.PresignPutObject(ctx, &s3.PutObjectInput{
-			Bucket:        aws.String(s.bucket),
-			Key:           aws.String(key),
-			ContentType:   aws.String(request.ContentType),
-			ContentLength: aws.Int64(request.FileSizeBytes),
-		}, func(options *s3.PresignOptions) {
-			options.Expires = s.expiry
-		})
+		presigned, err := s.presignPutObjectUpload(ctx, key)
 		if err != nil {
 			return models.UploadSession{}, fmt.Errorf("presign s3 object: %w", err)
 		}
@@ -128,15 +122,7 @@ func (s *S3ObjectStorage) AuthorizeUpload(ctx context.Context, request UploadAut
 		if remaining := request.FileSizeBytes - offset; remaining < length {
 			length = remaining
 		}
-		part, err := s.presigner.PresignUploadPart(ctx, &s3.UploadPartInput{
-			Bucket:        aws.String(s.bucket),
-			Key:           aws.String(key),
-			UploadId:      created.UploadId,
-			PartNumber:    aws.Int32(int32(number)),
-			ContentLength: aws.Int64(length),
-		}, func(options *s3.PresignOptions) {
-			options.Expires = s.expiry
-		})
+		part, err := s.presignUploadPart(ctx, key, aws.ToString(created.UploadId), number)
 		if err != nil {
 			_, _ = s.client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
 				Bucket: aws.String(s.bucket), Key: aws.String(key), UploadId: created.UploadId,
@@ -165,14 +151,7 @@ func (s *S3ObjectStorage) RefreshUpload(ctx context.Context, session models.Uplo
 	refreshed := session
 	refreshed.ExpiresAt = expiresAt
 	if refreshed.Strategy == models.UploadStrategySingle {
-		presigned, err := s.presigner.PresignPutObject(ctx, &s3.PutObjectInput{
-			Bucket:        aws.String(s.bucket),
-			Key:           aws.String(refreshed.S3Key),
-			ContentType:   aws.String(request.ContentType),
-			ContentLength: aws.Int64(request.FileSizeBytes),
-		}, func(options *s3.PresignOptions) {
-			options.Expires = s.expiry
-		})
+		presigned, err := s.presignPutObjectUpload(ctx, refreshed.S3Key)
 		if err != nil {
 			return models.UploadSession{}, fmt.Errorf("refresh s3 object upload: %w", err)
 		}
@@ -189,15 +168,7 @@ func (s *S3ObjectStorage) RefreshUpload(ctx context.Context, session models.Uplo
 	}
 	for index := range refreshed.Parts {
 		part := &refreshed.Parts[index]
-		presigned, err := s.presigner.PresignUploadPart(ctx, &s3.UploadPartInput{
-			Bucket:        aws.String(s.bucket),
-			Key:           aws.String(refreshed.S3Key),
-			UploadId:      aws.String(refreshed.MultipartUploadID),
-			PartNumber:    aws.Int32(int32(part.PartNumber)),
-			ContentLength: aws.Int64(part.LengthBytes),
-		}, func(options *s3.PresignOptions) {
-			options.Expires = s.expiry
-		})
+		presigned, err := s.presignUploadPart(ctx, refreshed.S3Key, refreshed.MultipartUploadID, part.PartNumber)
 		if err != nil {
 			return models.UploadSession{}, fmt.Errorf("refresh s3 part %d: %w", part.PartNumber, err)
 		}
@@ -205,6 +176,26 @@ func (s *S3ObjectStorage) RefreshUpload(ctx context.Context, session models.Uplo
 		part.ExpiresAt = expiresAt
 	}
 	return refreshed, nil
+}
+
+func (s *S3ObjectStorage) presignPutObjectUpload(ctx context.Context, key string) (*v4.PresignedHTTPRequest, error) {
+	return s.presigner.PresignPutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	}, func(options *s3.PresignOptions) {
+		options.Expires = s.expiry
+	})
+}
+
+func (s *S3ObjectStorage) presignUploadPart(ctx context.Context, key, uploadID string, partNumber int) (*v4.PresignedHTTPRequest, error) {
+	return s.presigner.PresignUploadPart(ctx, &s3.UploadPartInput{
+		Bucket:     aws.String(s.bucket),
+		Key:        aws.String(key),
+		UploadId:   aws.String(uploadID),
+		PartNumber: aws.Int32(int32(partNumber)),
+	}, func(options *s3.PresignOptions) {
+		options.Expires = s.expiry
+	})
 }
 
 func (s *S3ObjectStorage) CompleteUpload(ctx context.Context, session models.UploadSession, parts []models.CompletedUploadPart) (string, error) {

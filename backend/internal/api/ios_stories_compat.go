@@ -137,6 +137,9 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 		s.writeError(response, http.StatusBadRequest, "invalid_story", "context and at least one asset are required")
 		return
 	}
+	if !s.allowExpensiveOperation(response, user.ID, "create_ios_story") {
+		return
+	}
 	s.Logger.Info("creating iOS story", "user_id", user.ID, "context", input.Context, "asset_count", len(input.Assets), "analysis_count", len(input.Analyses), "idempotency_key_present", strings.TrimSpace(request.Header.Get("Idempotency-Key")) != "")
 	resolved, err := s.resolveIOSStoryAssets(request, user.ID, input.Assets)
 	if err != nil {

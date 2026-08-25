@@ -264,8 +264,8 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
             try await store.save(record)
 
             var session = record.session
-            if session == nil || session?.isUsable() == false {
-                mediaUploadDebugLog("authorizing session upload=\(record.id) asset=\(record.assetID) bytes=\(record.fileSizeBytes)")
+            if session == nil || session?.isUsable() == false || session?.requiresHeaderSafeRefresh == true {
+                mediaUploadDebugLog("authorizing session upload=\(record.id) asset=\(record.assetID) bytes=\(record.fileSizeBytes) header_safe_refresh=\(session?.requiresHeaderSafeRefresh == true)")
                 session = try await authorizer.createUploadSession(
                     metadata: uploadMetadata(from: record, options: options),
                     idempotencyKey: record.id

@@ -34,6 +34,7 @@ type Server struct {
 	Logger             *slog.Logger
 	Now                func() time.Time
 	InternalToken      string
+	ExpensiveLimiter   ExpensiveOperationLimiter
 }
 
 func NewServer(dependencies Server) *Server {
@@ -48,6 +49,9 @@ func NewServer(dependencies Server) *Server {
 	}
 	if dependencies.Orchestrator == nil && dependencies.Store != nil && dependencies.Publisher != nil {
 		dependencies.Orchestrator = orchestration.New(orchestration.Coordinator{Store: dependencies.Store, Publisher: dependencies.Publisher, Activator: dependencies.Activator, Logger: dependencies.Logger, Now: dependencies.Now})
+	}
+	if dependencies.ExpensiveLimiter == nil {
+		dependencies.ExpensiveLimiter = NewInMemoryExpensiveOperationLimiter(ExpensiveOperationLimits{})
 	}
 	return &dependencies
 }
@@ -67,6 +71,10 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 	}
 	if request.URL.Path == "/v1/auth/anonymous" {
 		s.createAnonymousToken(response, request)
+		return
+	}
+	if request.URL.Path == "/v1/auth/refresh" {
+		s.refreshAnonymousToken(response, request)
 		return
 	}
 	if strings.HasPrefix(request.URL.Path, "/internal/jobs/") {
@@ -93,6 +101,12 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
+
+	user, ok := s.authenticate(response, request)
+	if !ok {
+		return
+	}
+	request = request.WithContext(contextWithAuthenticatedUser(request.Context(), user))
 
 	if request.URL.Path == "/media/upload-session" {
 		if request.Method == http.MethodPost {
@@ -405,6 +419,9 @@ func (s *Server) analyzeProject(response http.ResponseWriter, request *http.Requ
 		s.writeError(response, http.StatusBadRequest, "invalid_project_id", "project id is required")
 		return
 	}
+	if !s.allowExpensiveOperation(response, user.ID, "analyze_project") {
+		return
+	}
 	if s.Orchestrator == nil {
 		s.internalError(response, errors.New("job orchestrator not configured"), "job orchestrator not configured")
 		return
@@ -483,6 +500,9 @@ func (s *Server) renderProject(response http.ResponseWriter, request *http.Reque
 	input.OutputPreset = strings.TrimSpace(input.OutputPreset)
 	if input.OutputPreset == "" || len(input.OutputPreset) > 100 {
 		s.writeError(response, http.StatusBadRequest, "invalid_output_preset", "output preset is invalid")
+		return
+	}
+	if !s.allowExpensiveOperation(response, user.ID, "render_project") {
 		return
 	}
 	plan, err := s.Store.GetStoryPlan(request.Context(), user.ID, projectID)
@@ -798,6 +818,14 @@ func (s *Server) getInternalJob(request *http.Request, jobID string) (models.Pro
 	return s.Store.GetJobByID(request.Context(), jobID)
 }
 
+func (s *Server) allowExpensiveOperation(response http.ResponseWriter, userID, operation string) bool {
+	if s.ExpensiveLimiter == nil || s.ExpensiveLimiter.Allow(userID, operation, s.Now().UTC()) {
+		return true
+	}
+	s.writeError(response, http.StatusTooManyRequests, "rate_limited", "too many story operations; please try again later")
+	return false
+}
+
 func (s *Server) authenticateInternal(response http.ResponseWriter, request *http.Request) bool {
 	provided := request.Header.Get("X-FrameMio-Internal-Token")
 	if s.InternalToken == "" || len(provided) != len(s.InternalToken) || subtle.ConstantTimeCompare([]byte(provided), []byte(s.InternalToken)) != 1 {
@@ -808,6 +836,9 @@ func (s *Server) authenticateInternal(response http.ResponseWriter, request *htt
 }
 
 func (s *Server) authenticate(response http.ResponseWriter, request *http.Request) (models.User, bool) {
+	if user, ok := authenticatedUserFromContext(request.Context()); ok {
+		return user, true
+	}
 	if s.Authenticator == nil {
 		s.writeError(response, http.StatusInternalServerError, "auth_not_configured", "authentication is not configured")
 		return models.User{}, false

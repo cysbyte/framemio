@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -400,6 +401,19 @@ func TestIOSUploadContractCompatibility(t *testing.T) {
 	}
 }
 
+func TestIOSUploadSessionDetectsMutableSignedHeaders(t *testing.T) {
+	t.Parallel()
+	unsafe := models.UploadSession{Parts: []models.UploadPart{{UploadURL: "https://s3.example.test/object?X-Amz-SignedHeaders=content-length%3Bcontent-type%3Bhost"}}}
+	if !iosUploadSessionUsesMutableSignedHeaders(unsafe) {
+		t.Fatal("expected old signed content headers to require refresh")
+	}
+
+	safe := models.UploadSession{Parts: []models.UploadPart{{UploadURL: "https://s3.example.test/object?X-Amz-SignedHeaders=host"}}}
+	if iosUploadSessionUsesMutableSignedHeaders(safe) {
+		t.Fatal("host-only signed headers should not require refresh")
+	}
+}
+
 func TestIOSStoriesCompatibilityCreatesProjectAndFetchesStories(t *testing.T) {
 	t.Parallel()
 
@@ -648,13 +662,47 @@ func TestAnonymousAuthIssuesUsableToken(t *testing.T) {
 	}
 	var token authTokenResponse
 	decodeResponse(t, issued, &token)
-	if token.AccessToken == "" || token.User.ID != "ios-anon-device-1" {
+	if token.AccessToken == "" || token.RefreshToken == "" || token.RefreshExpiresAt == nil || token.User.ID != "ios-anon-device-1" {
 		t.Fatalf("unexpected token response: %+v", token)
+	}
+	if !token.ExpiresAt.Equal(now.Add(anonymousAccessTokenTTL)) || !token.RefreshExpiresAt.Equal(now.Add(anonymousRefreshTokenTTL)) {
+		t.Fatalf("unexpected token expiry: %+v", token)
 	}
 
 	stories := performJSON(t, handler, http.MethodGet, "/v1/stories", nil, "", false, map[string]string{"Authorization": "Bearer " + token.AccessToken})
 	if stories.Code != http.StatusOK {
 		t.Fatalf("list stories status = %d, body = %s", stories.Code, stories.Body.String())
+	}
+
+	refreshed := performJSON(t, handler, http.MethodPost, "/v1/auth/refresh", map[string]any{"refresh_token": token.RefreshToken}, "", false, nil)
+	if refreshed.Code != http.StatusOK {
+		t.Fatalf("refresh status = %d, body = %s", refreshed.Code, refreshed.Body.String())
+	}
+	var refreshedToken authTokenResponse
+	decodeResponse(t, refreshed, &refreshedToken)
+	if refreshedToken.AccessToken == "" || refreshedToken.RefreshToken == "" || refreshedToken.User.ID != token.User.ID {
+		t.Fatalf("unexpected refreshed token response: %+v", refreshedToken)
+	}
+
+	refreshAsAccess := performJSON(t, handler, http.MethodGet, "/v1/stories", nil, "", false, map[string]string{"Authorization": "Bearer " + token.RefreshToken})
+	if refreshAsAccess.Code != http.StatusUnauthorized {
+		t.Fatalf("refresh token must not authorize protected routes: %d body = %s", refreshAsAccess.Code, refreshAsAccess.Body.String())
+	}
+}
+
+func TestHMACTokenAuthenticatorRejectsExpiredAccessToken(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.August, 19, 10, 0, 0, 0, time.UTC)
+	secret := []byte("a-secret-with-at-least-thirty-two-characters")
+	authenticator := HMACTokenAuthenticator{Secret: secret, Now: func() time.Time { return now }}
+	token, err := authenticator.IssueToken(models.User{ID: "user-expired"}, now.Add(-time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/v1/stories", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	if _, err := authenticator.Authenticate(context.Background(), request); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("expected expired token to be rejected, got %v", err)
 	}
 }
 
