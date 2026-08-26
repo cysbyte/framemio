@@ -355,8 +355,7 @@ struct StoryPreviewView: View {
     }
 
     private var editStoryButton: some View {
-        SecondaryButton(title: "Edit Story", systemImage: "slider.horizontal.3") {
-            FrameMioHaptics.secondaryAction()
+        PrimaryButton(title: "Edit Story", systemImage: "wand.and.sparkles") {
             isShowingEditStory = true
         }
         .disabled(viewModel.isPerformingAction)
@@ -464,13 +463,15 @@ struct StoryPreviewView: View {
     }
 
     private func fallbackMomentTitle(kind: StoryMomentPresentation.Kind, index: Int) -> String {
-        return switch kind {
-        case .photo:
-            "Photo moment"
-        case .video:
-            "Video moment"
-        case .livePhoto:
-            "Live Photo moment"
+        switch index {
+        case 0:
+            return "Opening moment"
+        case 1:
+            return "The next memory"
+        case 2:
+            return "A favorite part"
+        default:
+            return "Moment \(index + 1)"
         }
     }
 

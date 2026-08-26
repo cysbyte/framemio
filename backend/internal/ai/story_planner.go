@@ -253,10 +253,7 @@ func buildCandidates(request Request, selected map[string]struct{}, clusters map
 			timestamp = requestTimestampFallback(request)
 		}
 		duration := photoDuration(request.StoryType, photo)
-		caption := strings.TrimSpace(photo.Caption)
-		if caption == "" {
-			caption = strings.TrimSpace(photo.Description)
-		}
+		caption := photoMomentTitle(photo)
 		candidates = append(candidates, candidate{
 			moment: models.StoryMoment{
 				AssetID: mediaID, MediaID: mediaID, MediaType: models.MediaTypePhoto,
@@ -289,16 +286,23 @@ func buildCandidates(request Request, selected map[string]struct{}, clusters map
 			clusterID := clusterForMedia(clusters, mediaID)
 			score := videoScore(analysis, segment, selected, clusterID)
 			endMicros := selectedVideoEndMicros(segment)
+			caption := captionFromSegment(segment)
+			reason := reasonFromSegment(segment)
+			narrative := firstNonEmpty(caption, reason)
 			moment := models.StoryMoment{
 				AssetID: mediaID, MediaID: mediaID, MediaType: models.MediaTypeVideo,
 				VideoAnalysisVersion: analysis.AnalysisVersion,
 				StartMicros:          segment.StartMicros, EndMicros: endMicros,
-				Narrative: segment.Description, Caption: captionFromSegment(segment),
-				DurationMS: videoDuration(segment), Reason: reasonFromSegment(segment), Score: score,
+				Narrative: narrative, Caption: caption,
+				DurationMS: videoDuration(segment), Reason: reason, Score: score,
 				CropIntent: cropIntentFor(analysis, segment), Transition: "cut",
 			}
 			if clusterID != "" {
-				moment.Reason = moment.Reason + " · cluster:" + clusterID
+				if moment.Reason != "" {
+					moment.Reason = moment.Reason + " · cluster:" + clusterID
+				} else {
+					moment.Reason = "cluster:" + clusterID
+				}
 			}
 			candidates = append(candidates, candidate{
 				moment: moment, sourceTime: midpoint(segment.StartMicros, segment.EndMicros), score: score,
@@ -511,33 +515,35 @@ func normalizeVisualStyle(value models.VisualStyle) models.VisualStyle {
 }
 
 func titleFor(storyType models.StoryType, request Request, moments []models.StoryMoment) string {
+	if storyType == models.StoryTypeCustom || storyType == models.StoryTypeToday || storyType == models.StoryTypeWeekend {
+		if title := titleFromMoments(request, moments); title != "" {
+			return title
+		}
+	}
 	switch storyType {
 	case models.StoryTypeToday:
-		return "Your day in moments"
+		return "Your Day"
 	case models.StoryTypeWeekend:
-		return "A weekend to remember"
+		return "A Weekend to Remember"
 	case models.StoryTypeTrip:
-		return titleWithLocation("A trip worth remembering", request)
+		return titleWithLocation("A Trip Worth Remembering", request)
 	case models.StoryTypeBirthday:
-		return "A birthday worth holding onto"
+		return "A Birthday Worth Holding Onto"
 	case models.StoryTypeFamily:
-		return "Family, remembered beautifully"
+		return "Family, Remembered Beautifully"
 	case models.StoryTypeFriends:
-		return "Moments with friends"
+		return "Moments With Friends"
 	case models.StoryTypePet:
-		return "Little moments, big love"
+		return "Little Moments, Big Love"
 	case models.StoryTypeEvent:
-		return titleWithLocation("Event highlights", request)
+		return titleWithLocation("Event Highlights", request)
 	case models.StoryTypeCustom:
-		if trimmed := strings.TrimSpace(request.UserInstructions); trimmed != "" {
+		if trimmed := humanText(request.UserInstructions); trimmed != "" {
 			return truncateText(trimmed, 42)
 		}
 		fallthrough
 	default:
-		if len(moments) > 0 {
-			return "Your moments"
-		}
-		return "A memory story"
+		return "Your Story"
 	}
 }
 
@@ -573,6 +579,29 @@ func musicMoodFor(storyType models.StoryType, request Request, moments []models.
 		}
 		return "cinematic and calm"
 	}
+}
+
+func titleFromMoments(request Request, moments []models.StoryMoment) string {
+	if len(request.MediaClusters) == 1 {
+		cluster := request.MediaClusters[0]
+		if label := humanText(cluster.Label); label != "" {
+			if location := humanText(cluster.Location); location != "" {
+				return truncateText(toDisplayTitle(label+" in "+location), 42)
+			}
+			return truncateText(toDisplayTitle(label), 42)
+		}
+	}
+	for _, moment := range moments {
+		for _, value := range []string{moment.Caption, moment.Narrative, moment.Reason} {
+			if text := humanText(value); text != "" {
+				return truncateText(toDisplayTitle(text), 42)
+			}
+		}
+	}
+	if location := firstNonEmpty(request.Locations...); location != "" {
+		return truncateText("Memories in "+location, 42)
+	}
+	return ""
 }
 
 func titleWithLocation(prefix string, request Request) string {
@@ -665,30 +694,54 @@ func selectedVideoEndMicros(segment models.VideoSegment) int64 {
 }
 
 func captionFromSegment(segment models.VideoSegment) string {
-	if text := strings.TrimSpace(segment.Description); text != "" && (segment.Recommended || segment.StoryRelevance >= 0.7) {
+	if text := humanText(segment.Description); text != "" && (segment.Recommended || segment.StoryRelevance >= 0.7) {
 		return text
 	}
-	if len(segment.Reasons) > 0 {
-		return segment.Reasons[0]
+	for _, reason := range segment.Reasons {
+		if text := humanText(reason); text != "" {
+			return text
+		}
 	}
 	return ""
 }
 
 func reasonFromSegment(segment models.VideoSegment) string {
-	if len(segment.Reasons) > 0 {
-		return strings.Join(segment.Reasons, " · ")
+	parts := make([]string, 0, len(segment.Reasons))
+	for _, reason := range segment.Reasons {
+		if text := humanText(reason); text != "" {
+			parts = append(parts, text)
+		}
 	}
-	return strings.TrimSpace(segment.Description)
+	if len(parts) > 0 {
+		return strings.Join(parts, " · ")
+	}
+	return humanText(segment.Description)
+}
+
+func photoMomentTitle(photo models.PhotoAnalysis) string {
+	if text := humanText(photo.Caption); text != "" {
+		return text
+	}
+	if text := humanText(photo.Description); text != "" {
+		return text
+	}
+	if text := humanText(photo.Location); text != "" {
+		return text + " memory"
+	}
+	return ""
 }
 
 func photoReason(photo models.PhotoAnalysis) string {
-	if strings.TrimSpace(photo.Description) != "" {
-		return strings.TrimSpace(photo.Description)
+	if text := humanText(photo.Description); text != "" {
+		return text
 	}
-	if strings.TrimSpace(photo.Caption) != "" {
-		return strings.TrimSpace(photo.Caption)
+	if text := humanText(photo.Caption); text != "" {
+		return text
 	}
-	return "A meaningful photo moment"
+	if text := humanText(photo.Location); text != "" {
+		return text + " memory"
+	}
+	return ""
 }
 
 func cropIntentFor(analysis models.VideoAnalysis, segment models.VideoSegment) string {
@@ -748,6 +801,55 @@ func requestTimestampFallback(request Request) int64 {
 		return request.Timestamps[0].UTC().UnixMicro()
 	}
 	return time.Now().UTC().UnixMicro()
+}
+
+func humanText(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || isGenericMediaText(trimmed) {
+		return ""
+	}
+	trimmed = strings.Split(trimmed, " · cluster:")[0]
+	return strings.Trim(trimmed, " .")
+}
+
+func isGenericMediaText(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = strings.TrimSuffix(normalized, ".")
+	switch normalized {
+	case "special moments", "special moments story", "your moments", "your day in moments", "a memory story",
+		"opening moment", "the next memory", "a favorite part",
+		"photo moment", "video moment", "live photo moment", "a meaningful photo moment",
+		"first uploaded image", "updated image", "uploaded image", "image", "photo", "video",
+		"strong opening video moment", "strong middle video moment", "strong ending video moment":
+		return true
+	default:
+		return strings.HasPrefix(normalized, "photo moment ") || strings.HasPrefix(normalized, "video moment ") || strings.HasPrefix(normalized, "moment ")
+	}
+}
+
+func toDisplayTitle(value string) string {
+	words := strings.Fields(value)
+	if len(words) == 0 {
+		return ""
+	}
+	if len(words) > 6 {
+		words = words[:6]
+	}
+	minor := map[string]struct{}{
+		"a": {}, "an": {}, "and": {}, "at": {}, "by": {}, "for": {}, "in": {}, "of": {}, "on": {}, "the": {}, "to": {}, "with": {},
+	}
+	for index, word := range words {
+		lower := strings.ToLower(strings.Trim(word, " .,;:!?"))
+		if lower == "" {
+			continue
+		}
+		if _, isMinor := minor[lower]; isMinor && index != 0 {
+			words[index] = lower
+			continue
+		}
+		words[index] = strings.ToUpper(lower[:1]) + lower[1:]
+	}
+	return strings.Join(words, " ")
 }
 
 func firstNonEmpty(values ...string) string {

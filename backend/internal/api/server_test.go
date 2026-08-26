@@ -549,7 +549,6 @@ func TestIOSStoriesCompatibilityDeletesStory(t *testing.T) {
 	}
 }
 
-
 func TestIOSStoryEditQueuesStoryPlanRevisionWithoutReanalysis(t *testing.T) {
 	t.Parallel()
 
@@ -1126,6 +1125,23 @@ func createReadyIOSMediaWithIdempotency(t *testing.T, handler http.Handler, asse
 		t.Fatalf("complete iOS upload status = %d, body = %s", complete.Code, complete.Body.String())
 	}
 	return uploadResponse
+}
+
+func TestIOSStoryPresentationSuppressesGenericNames(t *testing.T) {
+	t.Parallel()
+	moments := []iosStoryMoment{
+		{ID: "one", MediaID: "photo-1", Type: "photo", Title: "Opening moment", Description: "Family breakfast by the window", Selected: true},
+		{ID: "two", MediaID: "video-1", Type: "video", Title: "Everyone laughing near the lake", Selected: true},
+	}
+	if got := iosDisplayStoryTitle("Special moments story", moments, "Special moments"); got != "Family breakfast by the window" {
+		t.Fatalf("story title = %q", got)
+	}
+	if got := iosMomentTitle(models.StoryMoment{Caption: "Video moment", Narrative: "Everyone laughing near the lake"}, string(models.MediaTypeVideo), 0); got != "Everyone laughing near the lake" {
+		t.Fatalf("moment title = %q", got)
+	}
+	if got := fallbackIOSMomentTitle(string(models.MediaTypePhoto), 0); got == "Photo moment 1" || got == "Video moment 1" {
+		t.Fatalf("generic fallback survived: %q", got)
+	}
 }
 
 func assertSmallIdentifierOnlyMessage(t *testing.T, message queue.JobMessage) {

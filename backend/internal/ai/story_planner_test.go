@@ -109,6 +109,46 @@ func TestPlannerKeepsPhotoWhenSelectedVideoSegmentsOutscorePhotos(t *testing.T) 
 	}
 }
 
+func TestPlannerUsesAnalysisForStoryAndMomentNames(t *testing.T) {
+	t.Parallel()
+	planner := &Planner{Now: func() time.Time { return time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC) }}
+	plan, err := planner.Plan(context.Background(), Request{
+		ProjectID:        "project-names",
+		DesiredDuration:  12 * time.Second,
+		StoryType:        models.StoryTypeCustom,
+		VisualStyle:      models.VisualStyleCinematic,
+		SelectedMediaIDs: []string{"photo-1", "video-1"},
+		PhotoAnalyses: []models.PhotoAnalysis{{
+			ID: "photo-analysis-1", PhotoID: "photo-1", ProjectID: "project-names", AnalysisVersion: "photo-v1",
+			TimestampMicros: 1_000_000, Caption: "First uploaded image", Description: "Family breakfast by the window",
+			MemoryValue: 0.9, EmotionalValue: 0.8, VisualQuality: 0.7, StoryRelevance: 0.9, Selected: true,
+		}},
+		VideoAnalyses: []models.VideoAnalysis{{
+			ID: "video-analysis-1", VideoID: "video-1", ProjectID: "project-names", AnalysisVersion: "video-v1", DurationMicros: 8_000_000,
+			QualitySignals: models.VideoQualitySignals{OverallScore: 0.8},
+			Segments: []models.VideoSegment{{
+				SegmentID: "segment-1", SceneID: "scene-1", StartMicros: 0, EndMicros: 4_000_000, Description: "Strong opening video moment",
+				Reasons: []string{"Everyone laughing near the lake"}, Importance: 0.9, MemoryValue: 0.9, EmotionalValue: 0.9, StoryRelevance: 0.9, VisualQuality: 0.7, Recommended: true,
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.ToLower(plan.TitleText), "special moments") || strings.Contains(strings.ToLower(plan.TitleText), "your moments") {
+		t.Fatalf("story title should be analysis-derived, got %q", plan.TitleText)
+	}
+	if !strings.Contains(strings.ToLower(plan.TitleText), "family breakfast") {
+		t.Fatalf("story title should use meaningful analysis text, got %q", plan.TitleText)
+	}
+	for _, moment := range plan.Moments {
+		combined := strings.ToLower(moment.Caption + " " + moment.Narrative + " " + moment.Reason)
+		if strings.Contains(combined, "first uploaded image") || strings.Contains(combined, "strong opening video moment") || strings.Contains(combined, "meaningful photo moment") {
+			t.Fatalf("generic moment name leaked into story plan: %+v", moment)
+		}
+	}
+}
+
 func TestPlannerSelectsMeaningfulVideoRanges(t *testing.T) {
 	t.Parallel()
 	planner := &Planner{Now: func() time.Time { return time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC) }}
@@ -186,7 +226,6 @@ func TestPlannerBuildsVideoOnlyStoryAcrossVideos(t *testing.T) {
 		t.Fatalf("expected each selected video to contribute, got %+v", plan.Moments)
 	}
 }
-
 
 func TestPlannerExcludesRemovedMomentsDuringRevision(t *testing.T) {
 	t.Parallel()

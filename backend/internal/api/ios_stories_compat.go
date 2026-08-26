@@ -659,6 +659,7 @@ func (s *Server) makeIOSStory(request *http.Request, userID string, project mode
 		}
 	}
 	story.AvailableMoments = s.iosAvailableMoments(request, project, mediaByID, story.Moments)
+	story.Title = iosDisplayStoryTitle(story.Title, story.Moments, project.Context)
 	if story.Duration <= 0 {
 		story.Duration = float64(max(8, len(project.MediaIDs)*4))
 	}
@@ -784,18 +785,79 @@ func storyAssetIDsFromMoments(moments []iosStoryMoment) []string {
 
 func iosMomentTitle(moment models.StoryMoment, mediaType string, index int) string {
 	for _, value := range []string{moment.Caption, moment.Narrative, moment.Reason} {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return truncateIOSConfigValue(trimmed, 36)
+		if title := iosHumanMomentTitle(value); title != "" {
+			return truncateIOSConfigValue(title, 36)
 		}
 	}
 	return fallbackIOSMomentTitle(mediaType, index)
 }
 
-func fallbackIOSMomentTitle(mediaType string, index int) string {
-	if mediaType == string(models.MediaTypeVideo) {
-		return fmt.Sprintf("Video moment %d", index+1)
+func iosHumanMomentTitle(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || isGenericIOSMomentText(trimmed) {
+		return ""
 	}
-	return fmt.Sprintf("Photo moment %d", index+1)
+	trimmed = strings.Split(trimmed, " · cluster:")[0]
+	trimmed = strings.Trim(trimmed, " .")
+	return trimmed
+}
+
+func isGenericIOSMomentText(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = strings.TrimSuffix(normalized, ".")
+	if strings.HasPrefix(normalized, "cluster:") {
+		return true
+	}
+	switch normalized {
+	case "special moments", "special moments story", "your moments", "your day in moments", "a memory story",
+		"opening moment", "the next memory", "a favorite part",
+		"photo moment", "video moment", "live photo moment", "a meaningful photo moment",
+		"first uploaded image", "updated image", "uploaded image", "image", "photo", "video",
+		"strong opening video moment", "strong middle video moment", "strong ending video moment":
+		return true
+	default:
+		return strings.HasPrefix(normalized, "photo moment ") || strings.HasPrefix(normalized, "video moment ") || strings.HasPrefix(normalized, "moment ")
+	}
+}
+
+func fallbackIOSMomentTitle(_ string, index int) string {
+	switch index {
+	case 0:
+		return "Opening moment"
+	case 1:
+		return "The next memory"
+	case 2:
+		return "A favorite part"
+	default:
+		return fmt.Sprintf("Moment %d", index+1)
+	}
+}
+
+func iosDisplayStoryTitle(title string, moments []iosStoryMoment, context string) string {
+	if trimmed := strings.TrimSpace(title); trimmed != "" && !isGenericIOSMomentText(trimmed) {
+		return truncateIOSConfigValue(trimmed, 42)
+	}
+	if title := iosStoryTitleFromMoments(moments); title != "" {
+		return title
+	}
+	if trimmed := strings.TrimSpace(context); trimmed != "" && !isGenericIOSMomentText(trimmed) {
+		return truncateIOSConfigValue(trimmed, 42)
+	}
+	return "Your Story"
+}
+
+func iosStoryTitleFromMoments(moments []iosStoryMoment) string {
+	for _, moment := range moments {
+		if title := iosHumanMomentTitle(moment.Description); title != "" {
+			return truncateIOSConfigValue(title, 42)
+		}
+	}
+	for _, moment := range moments {
+		if title := iosHumanMomentTitle(moment.Title); title != "" {
+			return truncateIOSConfigValue(title, 42)
+		}
+	}
+	return ""
 }
 
 // iosStoryVideoURL resolves the latest completed film artifact. Revisions can
