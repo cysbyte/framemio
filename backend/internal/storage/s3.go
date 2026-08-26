@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"path"
 	"sort"
 	"strings"
@@ -50,6 +51,7 @@ type S3ObjectStorage struct {
 	expiry             time.Duration
 	client             *s3.Client
 	presigner          *s3.PresignClient
+	downloadBaseURL    string
 }
 
 func NewS3ObjectStorage(ctx context.Context, bucket string, partSizeBytes int64, multipartThreshold int64, expiry time.Duration) (*S3ObjectStorage, error) {
@@ -181,6 +183,29 @@ func (s *S3ObjectStorage) RefreshUpload(ctx context.Context, session models.Uplo
 	return refreshed, nil
 }
 
+// SetDownloadBaseURL configures a CDN/public read origin for generated media
+// downloads. Uploads still use S3 presigned URLs; only read URLs returned to
+// clients are rewritten. Passing an empty value restores direct S3 presigned
+// downloads.
+func (s *S3ObjectStorage) SetDownloadBaseURL(rawURL string) error {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		s.downloadBaseURL = ""
+		return nil
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("parse media download base url: %w", err)
+	}
+	if parsed.Scheme != "https" || parsed.Host == "" {
+		return fmt.Errorf("media download base url must be an https URL with a host")
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	s.downloadBaseURL = strings.TrimRight(parsed.String(), "/")
+	return nil
+}
+
 func (s *S3ObjectStorage) presignPutObjectUpload(ctx context.Context, key string) (*v4.PresignedHTTPRequest, error) {
 	return s.presigner.PresignPutObject(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(s.bucket),
@@ -289,11 +314,15 @@ func (s *S3ObjectStorage) ObjectExists(ctx context.Context, key string) (bool, e
 }
 
 // PresignedDownloadURL grants temporary read access to one object. Rendered
-// films are played straight from S3 by the device, so the bytes never pass
-// through the API.
+// films are played directly by the device, so the bytes never pass through the
+// API. When a CDN base URL is configured, the returned read URL uses that CDN
+// instead of a direct S3 presigned URL.
 func (s *S3ObjectStorage) PresignedDownloadURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
 	if key == "" {
 		return "", fmt.Errorf("object key is required")
+	}
+	if s.downloadBaseURL != "" {
+		return joinDownloadBaseURL(s.downloadBaseURL, key)
 	}
 	if expiry <= 0 {
 		expiry = s.expiry
@@ -315,6 +344,27 @@ func (s *S3ObjectStorage) PresignedDownloadURL(ctx context.Context, key string, 
 		return "", fmt.Errorf("presign s3 download: %w", err)
 	}
 	return presigned.URL, nil
+}
+
+func joinDownloadBaseURL(baseURL, key string) (string, error) {
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("parse media download base url: %w", err)
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("media download base url must include scheme and host")
+	}
+	basePath := strings.TrimRight(parsed.Path, "/")
+	objectPath := strings.TrimLeft(key, "/")
+	if basePath == "" {
+		parsed.Path = "/" + objectPath
+	} else {
+		parsed.Path = basePath + "/" + objectPath
+	}
+	parsed.RawPath = ""
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String(), nil
 }
 
 type StaticObjectStorage struct {

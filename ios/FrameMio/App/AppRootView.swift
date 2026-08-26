@@ -26,7 +26,7 @@ struct AppRootView: View {
                     path.append(.mediaPicker(context: context))
                 },
                 onOpenStory: { story in
-                    path.append(.storyPreview(storyID: story.id))
+                    path.append(.storyPreview(story: story))
                 },
                 onOpenAllStories: {
                     path.append(.allStories)
@@ -49,7 +49,7 @@ struct AppRootView: View {
             AllStoriesView(
                 viewModel: homeViewModel,
                 onOpenStory: { story in
-                    path.append(.storyPreview(storyID: story.id))
+                    path.append(.storyPreview(story: story))
                 }
             )
         case let .mediaPicker(context):
@@ -77,7 +77,7 @@ struct AppRootView: View {
                     path.append(.storyCreating(context: context, assets: assets, launchID: UUID()))
                 },
                 onCreated: { story in
-                    path.append(.storyPreview(storyID: story.id))
+                    path.append(.storyPreview(story: story))
                 }
             )
         case let .storyCreating(context, assets, launchID):
@@ -92,10 +92,10 @@ struct AppRootView: View {
                     mediaUploadStore: dependencies.mediaUploadStore
                 )
             )
-        case let .storyPreview(storyID):
+        case let .storyPreview(story):
             StoryPreviewView(
                 viewModel: StoryPreviewViewModel(
-                    storyID: storyID,
+                    story: story,
                     storyService: dependencies.storyService,
                     photoLibrary: dependencies.photoLibrary,
                     mediaUploadStore: dependencies.mediaUploadStore

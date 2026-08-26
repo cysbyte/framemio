@@ -30,6 +30,23 @@ final class StoryPreviewViewModel: ObservableObject {
     private var launchCancellable: AnyCancellable?
 
     init(
+        story: Story,
+        storyService: StoryService,
+        photoLibrary: PhotoLibraryService,
+        mediaUploadStore: MediaUploadStore
+    ) {
+        self.story = story
+        storyID = story.id
+        launchContext = nil
+        launchAssets = []
+        launchID = nil
+        storyLaunchCoordinator = nil
+        self.storyService = storyService
+        self.photoLibrary = photoLibrary
+        self.mediaUploadStore = mediaUploadStore
+    }
+
+    init(
         storyID: String,
         storyService: StoryService,
         photoLibrary: PhotoLibraryService,
@@ -114,8 +131,16 @@ final class StoryPreviewViewModel: ObservableObject {
             guard let self else { return }
             defer { thumbnailTasks[storyAssetID] = nil }
             do {
-                guard let asset = await resolveMomentAsset(forStoryAssetID: storyAssetID) else { return }
-                let data = try await photoLibrary.requestThumbnail(for: asset, targetSize: targetSize)
+                if let asset = await resolveMomentAsset(forStoryAssetID: storyAssetID) {
+                    let data = try await photoLibrary.requestThumbnail(for: asset, targetSize: targetSize)
+                    try Task.checkCancellation()
+                    if let image = UIImage(data: data) {
+                        momentThumbnails[storyAssetID] = image
+                        return
+                    }
+                }
+                guard let remoteURL = remoteThumbnailURL(forStoryAssetID: storyAssetID) else { return }
+                let data = try await Self.downloadThumbnail(from: remoteURL)
                 try Task.checkCancellation()
                 if let image = UIImage(data: data) {
                     momentThumbnails[storyAssetID] = image
@@ -129,6 +154,13 @@ final class StoryPreviewViewModel: ObservableObject {
     func cancelThumbnail(forStoryAssetID storyAssetID: String) {
         thumbnailTasks[storyAssetID]?.cancel()
         thumbnailTasks[storyAssetID] = nil
+    }
+
+    private func remoteThumbnailURL(forStoryAssetID storyAssetID: String) -> URL? {
+        let allMoments = (story?.moments ?? []) + (story?.availableMoments ?? [])
+        return allMoments.first { moment in
+            moment.id == storyAssetID || moment.mediaID == storyAssetID
+        }?.thumbnailURL
     }
 
     var progressTitle: String {
@@ -420,6 +452,22 @@ final class StoryPreviewViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    private nonisolated static func downloadThumbnail(from remoteURL: URL) async throws -> Data {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.requestCachePolicy = .returnCacheDataElseLoad
+        configuration.waitsForConnectivity = true
+        configuration.timeoutIntervalForRequest = 20
+        configuration.timeoutIntervalForResource = 30
+        let session = URLSession(configuration: configuration)
+        defer { session.finishTasksAndInvalidate() }
+
+        let (data, response) = try await session.data(from: remoteURL)
+        if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+            throw AppError.server(statusCode: httpResponse.statusCode)
+        }
+        return data
     }
 
     private nonisolated static func downloadVideoForSaving(from remoteURL: URL) async throws -> URL {

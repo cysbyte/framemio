@@ -102,6 +102,29 @@ func TestPresignedDownloadURLDefaultsExpiryAndRequiresKey(t *testing.T) {
 	}
 }
 
+func TestDownloadBaseURLUsesCloudFront(t *testing.T) {
+	storage := newTestS3Storage()
+	if err := storage.SetDownloadBaseURL("https://d3j31q5bw6z6w5.cloudfront.net"); err != nil {
+		t.Fatalf("set download base url: %v", err)
+	}
+	raw, err := storage.PresignedDownloadURL(context.Background(), "users/user_123/renders/story final.mp4", time.Hour)
+	if err != nil {
+		t.Fatalf("download url: %v", err)
+	}
+	if got, want := raw, "https://d3j31q5bw6z6w5.cloudfront.net/users/user_123/renders/story%20final.mp4"; got != want {
+		t.Errorf("download url = %q, want %q", got, want)
+	}
+	if strings.Contains(raw, "X-Amz-Signature") {
+		t.Errorf("cdn download url should not include s3 presign query: %q", raw)
+	}
+}
+
+func TestDownloadBaseURLRejectsNonHTTPS(t *testing.T) {
+	if err := newTestS3Storage().SetDownloadBaseURL("http://d3j31q5bw6z6w5.cloudfront.net"); err == nil {
+		t.Fatal("expected non-https download base url to be rejected")
+	}
+}
+
 func signedHeaders(t *testing.T, raw string) string {
 	t.Helper()
 	parsed, err := url.Parse(raw)

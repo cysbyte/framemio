@@ -49,6 +49,10 @@ func main() {
 		logger.Error("configure object storage", slog.Any("error", err))
 		os.Exit(1)
 	}
+	if err := objects.SetDownloadBaseURL(configuration.MediaDownloadBaseURL); err != nil {
+		logger.Error("configure media download base url", slog.Any("error", err))
+		os.Exit(1)
+	}
 	publisher, err := queue.NewSQSPublisher(ctx, configuration.SQSQueueURL)
 	if err != nil {
 		logger.Error("configure queue", slog.Any("error", err))
@@ -116,6 +120,7 @@ type configuration struct {
 	Port                    string
 	DatabaseURL             string
 	S3Bucket                string
+	MediaDownloadBaseURL    string
 	SQSQueueURL             string
 	AuthHMACSecret          string
 	InternalAPIToken        string
@@ -132,6 +137,7 @@ func loadConfiguration() (configuration, error) {
 		Port:                    environment("PORT", "8080"),
 		DatabaseURL:             os.Getenv("DATABASE_URL"),
 		S3Bucket:                os.Getenv("S3_MEDIA_BUCKET"),
+		MediaDownloadBaseURL:    environment("MEDIA_DOWNLOAD_BASE_URL", os.Getenv("MEDIA_CDN_BASE_URL")),
 		SQSQueueURL:             os.Getenv("SQS_PROCESSING_QUEUE_URL"),
 		AuthHMACSecret:          os.Getenv("AUTH_HMAC_SECRET"),
 		InternalAPIToken:        os.Getenv("INTERNAL_API_TOKEN"),

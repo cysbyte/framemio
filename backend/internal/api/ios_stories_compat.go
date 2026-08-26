@@ -653,12 +653,12 @@ func (s *Server) makeIOSStory(request *http.Request, userID string, project mode
 			story.Duration = float64(plan.TotalDurationMS) / 1000
 		}
 		story.Description = iosStoryDescription(plan)
-		story.Moments = iosStoryMoments(plan, mediaByID)
+		story.Moments = s.iosStoryMoments(request, plan, mediaByID)
 		if len(story.Moments) > 0 {
 			story.AssetIDs = storyAssetIDsFromMoments(story.Moments)
 		}
 	}
-	story.AvailableMoments = iosAvailableMoments(project, mediaByID, story.Moments)
+	story.AvailableMoments = s.iosAvailableMoments(request, project, mediaByID, story.Moments)
 	if story.Duration <= 0 {
 		story.Duration = float64(max(8, len(project.MediaIDs)*4))
 	}
@@ -689,7 +689,7 @@ func iosStoryDescription(plan models.StoryPlan) string {
 	return truncateIOSConfigValue(strings.Join(parts, ". "), 220)
 }
 
-func iosStoryMoments(plan models.StoryPlan, mediaByID map[string]models.MediaAsset) []iosStoryMoment {
+func (s *Server) iosStoryMoments(request *http.Request, plan models.StoryPlan, mediaByID map[string]models.MediaAsset) []iosStoryMoment {
 	moments := make([]iosStoryMoment, 0, len(plan.Moments))
 	for index, moment := range plan.Moments {
 		mediaID := storyMomentMediaID(moment)
@@ -706,17 +706,37 @@ func iosStoryMoments(plan models.StoryPlan, mediaByID map[string]models.MediaAss
 		if momentID == "" {
 			momentID = fmt.Sprintf("%s-%d", mediaID, index)
 		}
+		var thumbnailURL *string
+		if media, ok := mediaByID[mediaID]; ok {
+			thumbnailURL = s.iosStoryThumbnailURL(request, media)
+		}
 		moments = append(moments, iosStoryMoment{
-			ID:          momentID,
-			MomentID:    momentID,
-			MediaID:     mediaID,
-			Type:        mediaType,
-			Title:       iosMomentTitle(moment, mediaType, index),
-			Description: firstNonEmptyIOSText(strings.TrimSpace(moment.Narrative), strings.TrimSpace(moment.Caption), strings.TrimSpace(moment.Reason)),
-			Selected:    true,
+			ID:           momentID,
+			MomentID:     momentID,
+			MediaID:      mediaID,
+			Type:         mediaType,
+			ThumbnailURL: thumbnailURL,
+			Title:        iosMomentTitle(moment, mediaType, index),
+			Description:  firstNonEmptyIOSText(strings.TrimSpace(moment.Narrative), strings.TrimSpace(moment.Caption), strings.TrimSpace(moment.Reason)),
+			Selected:     true,
 		})
 	}
 	return moments
+}
+
+func (s *Server) iosStoryThumbnailURL(request *http.Request, media models.MediaAsset) *string {
+	if s.ObjectStorage == nil || media.S3Key == "" {
+		return nil
+	}
+	if media.Type != models.MediaTypePhoto && media.Type != models.MediaTypeLivePhoto {
+		return nil
+	}
+	url, err := s.ObjectStorage.PresignedDownloadURL(request.Context(), media.S3Key, iosStoryVideoURLExpiry)
+	if err != nil {
+		s.Logger.Warn("presign iOS story thumbnail url failed", "media_id", media.ID, "s3_key", media.S3Key, "error", err)
+		return nil
+	}
+	return &url
 }
 
 func firstNonEmptyIOSText(values ...string) string {
@@ -728,7 +748,7 @@ func firstNonEmptyIOSText(values ...string) string {
 	return ""
 }
 
-func iosAvailableMoments(project models.StoryProject, mediaByID map[string]models.MediaAsset, selected []iosStoryMoment) []iosStoryMoment {
+func (s *Server) iosAvailableMoments(request *http.Request, project models.StoryProject, mediaByID map[string]models.MediaAsset, selected []iosStoryMoment) []iosStoryMoment {
 	selectedMedia := make(map[string]struct{}, len(selected))
 	for _, moment := range selected {
 		selectedMedia[moment.MediaID] = struct{}{}
@@ -741,11 +761,12 @@ func iosAvailableMoments(project models.StoryProject, mediaByID map[string]model
 		}
 		_, isSelected := selectedMedia[mediaID]
 		available = append(available, iosStoryMoment{
-			ID:       mediaID,
-			MediaID:  mediaID,
-			Type:     string(media.Type),
-			Title:    fallbackIOSMomentTitle(string(media.Type), index),
-			Selected: isSelected,
+			ID:           mediaID,
+			MediaID:      mediaID,
+			Type:         string(media.Type),
+			ThumbnailURL: s.iosStoryThumbnailURL(request, media),
+			Title:        fallbackIOSMomentTitle(string(media.Type), index),
+			Selected:     isSelected,
 		})
 	}
 	return available

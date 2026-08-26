@@ -132,6 +132,8 @@ Optional environment variables:
 PORT                                  # default: 8080
 UPLOAD_PART_SIZE_BYTES                # default: 8 MiB, minimum S3 part size enforced
 UPLOAD_MULTIPART_THRESHOLD_BYTES      # default: 16 MiB
+MEDIA_DOWNLOAD_BASE_URL               # optional CDN base for generated video/photo download URLs, e.g. https://d3j31q5bw6z6w5.cloudfront.net
+MEDIA_CDN_BASE_URL                    # backwards-compatible alias if MEDIA_DOWNLOAD_BASE_URL is unset
 AWS_REGION / standard AWS credentials # consumed by AWS SDK default configuration
 DATABASE_AUTH_MODE                    # set to iam for production RDS
 ```
