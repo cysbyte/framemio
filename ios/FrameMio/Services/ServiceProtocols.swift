@@ -160,12 +160,14 @@ protocol APIClient: Sendable {
 }
 
 protocol StoryService: Sendable {
+    func cachedStories() async throws -> [Story]
     func listStories() async throws -> [Story]
     func story(id: String) async throws -> Story
     func createStory(request: CreateStoryRequest) async throws -> Story
     func retryProcessing(id: String) async throws -> Story
     func regenerateStory(id: String) async throws -> Story
     func renderAgain(id: String) async throws -> Story
+    func saveStoryEdits(storyID: String, request: StoryEditRequest) async throws -> Story
     func deleteStory(id: String) async throws
     func replaceMoment(storyID: String, assetID: String) async throws -> Story
     func removeMoment(storyID: String, assetID: String) async throws -> Story

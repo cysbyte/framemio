@@ -11,13 +11,20 @@ struct StoryVideoPlayer: View {
     let url: URL
     let autoplays: Bool
     let isPlaybackEnabled: Bool
+    let accessibilityTitle: String
 
     @StateObject private var controller: StoryVideoPlayerController
 
-    init(url: URL, autoplays: Bool = true, isPlaybackEnabled: Bool = true) {
+    init(
+        url: URL,
+        autoplays: Bool = true,
+        isPlaybackEnabled: Bool = true,
+        accessibilityTitle: String = "Your film"
+    ) {
         self.url = url
         self.autoplays = autoplays
         self.isPlaybackEnabled = isPlaybackEnabled
+        self.accessibilityTitle = accessibilityTitle
         _controller = StateObject(wrappedValue: StoryVideoPlayerController(url: url))
     }
 
@@ -31,7 +38,7 @@ struct StoryVideoPlayer: View {
             .onChange(of: isPlaybackEnabled) { _, enabled in
                 controller.setPlaybackEnabled(enabled, autoplays: autoplays)
             }
-            .accessibilityLabel("Your film")
+            .accessibilityLabel(accessibilityTitle)
     }
 }
 

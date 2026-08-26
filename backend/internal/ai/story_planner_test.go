@@ -187,6 +187,24 @@ func TestPlannerBuildsVideoOnlyStoryAcrossVideos(t *testing.T) {
 	}
 }
 
+
+func TestPlannerExcludesRemovedMomentsDuringRevision(t *testing.T) {
+	t.Parallel()
+	request := storyPlannerRequest()
+	request.Version = 8
+	request.ExcludedMomentIDs = []string{"video-1:video-analysis-v1:0:4000000"}
+
+	plan, err := (&Planner{}).Plan(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, moment := range plan.Moments {
+		if moment.MomentID == "video-1:video-analysis-v1:0:4000000" {
+			t.Fatalf("excluded moment reached story plan: %+v", plan.Moments)
+		}
+	}
+}
+
 func TestValidateStoryPlanRejectsBrokenReferences(t *testing.T) {
 	t.Parallel()
 	plan := models.StoryPlan{

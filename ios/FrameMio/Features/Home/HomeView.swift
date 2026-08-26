@@ -7,17 +7,20 @@ struct HomeView: View {
     @ObservedObject private var viewModel: HomeViewModel
     let onCreateStory: (MomentContext) -> Void
     let onOpenStory: (Story) -> Void
+    let onOpenAllStories: () -> Void
     let onOpenSettings: () -> Void
 
     init(
         viewModel: HomeViewModel,
         onCreateStory: @escaping (MomentContext) -> Void,
         onOpenStory: @escaping (Story) -> Void,
+        onOpenAllStories: @escaping () -> Void,
         onOpenSettings: @escaping () -> Void
     ) {
         _viewModel = ObservedObject(wrappedValue: viewModel)
         self.onCreateStory = onCreateStory
         self.onOpenStory = onOpenStory
+        self.onOpenAllStories = onOpenAllStories
         self.onOpenSettings = onOpenSettings
     }
 
@@ -224,7 +227,12 @@ struct HomeView: View {
 
     private var recentStories: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            SectionHeader(title: "Recent stories", subtitle: "Made from your moments")
+            SectionHeader(
+                title: "Recent stories",
+                subtitle: "Made from your moments",
+                actionTitle: "See all",
+                action: onOpenAllStories
+            )
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: FrameMioSpacing.md) {
@@ -255,6 +263,118 @@ struct HomeView: View {
             get: { viewModel.errorMessage != nil },
             set: { if !$0 { viewModel.errorMessage = nil } }
         )
+    }
+}
+
+
+struct AllStoriesView: View {
+    @ObservedObject private var viewModel: HomeViewModel
+    @State private var pageIndex = 0
+    let onOpenStory: (Story) -> Void
+
+    private let pageSize = 10
+
+    init(viewModel: HomeViewModel, onOpenStory: @escaping (Story) -> Void) {
+        _viewModel = ObservedObject(wrappedValue: viewModel)
+        self.onOpenStory = onOpenStory
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
+                SectionHeader(
+                    title: "All stories",
+                    subtitle: pageSubtitle
+                )
+
+                LazyVStack(spacing: FrameMioSpacing.md) {
+                    ForEach(pageStories) { story in
+                        StoryCard(
+                            title: story.title,
+                            subtitle: storySubtitle(for: story),
+                            image: viewModel.coverImage(for: story),
+                            duration: story.duration,
+                            action: { onOpenStory(story) }
+                        )
+                    }
+                }
+
+                if pageCount > 1 {
+                    paginationControls
+                }
+            }
+            .padding(.horizontal, FrameMioSpacing.lg)
+            .padding(.top, FrameMioSpacing.lg)
+            .padding(.bottom, FrameMioSpacing.xxxl)
+        }
+        .background(FrameMioColors.canvas.ignoresSafeArea())
+        .navigationTitle("All stories")
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: pageIndex) {
+            viewModel.loadCovers(for: pageStories)
+        }
+        .refreshable { viewModel.load() }
+        .onChange(of: viewModel.allStories.count) { _, _ in
+            pageIndex = min(pageIndex, max(pageCount - 1, 0))
+        }
+    }
+
+    private var pageStories: [Story] {
+        let startIndex = pageIndex * pageSize
+        guard startIndex < viewModel.allStories.count else { return [] }
+        let endIndex = min(startIndex + pageSize, viewModel.allStories.count)
+        return Array(viewModel.allStories[startIndex..<endIndex])
+    }
+
+    private var pageCount: Int {
+        max(1, Int(ceil(Double(viewModel.allStories.count) / Double(pageSize))))
+    }
+
+    private var pageSubtitle: String {
+        guard !viewModel.allStories.isEmpty else { return "No stories yet" }
+        let firstStory = pageIndex * pageSize + 1
+        let lastStory = min(firstStory + pageStories.count - 1, viewModel.allStories.count)
+        return "Showing \(firstStory)–\(lastStory) of \(viewModel.allStories.count)"
+    }
+
+    private var paginationControls: some View {
+        HStack(spacing: FrameMioSpacing.md) {
+            Button {
+                pageIndex = max(pageIndex - 1, 0)
+            } label: {
+                Label("Previous", systemImage: "chevron.left")
+            }
+            .disabled(pageIndex == 0)
+
+            Spacer()
+
+            Text("Page \(pageIndex + 1) of \(pageCount)")
+                .font(FrameMioTypography.footnote)
+                .foregroundStyle(FrameMioColors.secondaryInk)
+
+            Spacer()
+
+            Button {
+                pageIndex = min(pageIndex + 1, pageCount - 1)
+            } label: {
+                Label("Next", systemImage: "chevron.right")
+                    .labelStyle(.titleAndIcon)
+            }
+            .disabled(pageIndex >= pageCount - 1)
+        }
+        .font(FrameMioTypography.headline)
+        .foregroundStyle(FrameMioColors.accent)
+        .padding(FrameMioSpacing.md)
+        .background(
+            FrameMioColors.surface.opacity(0.86),
+            in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+        )
+    }
+
+    private func storySubtitle(for story: Story) -> String {
+        let date = story.createdAt.formatted(.dateTime.month(.abbreviated).day())
+        let moments = story.assetIDs.count == 1 ? "1 moment" : "\(story.assetIDs.count) moments"
+        return "\(date) · \(moments)"
     }
 }
 

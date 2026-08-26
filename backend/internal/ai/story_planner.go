@@ -15,18 +15,20 @@ import (
 )
 
 type Request struct {
-	ProjectID        string
-	Version          int
-	DesiredDuration  time.Duration
-	StoryType        models.StoryType
-	VisualStyle      models.VisualStyle
-	UserInstructions string
-	SelectedMediaIDs []string
-	Timestamps       []time.Time
-	Locations        []string
-	PhotoAnalyses    []models.PhotoAnalysis
-	VideoAnalyses    []models.VideoAnalysis
-	MediaClusters    []models.MediaCluster
+	ProjectID         string
+	Version           int
+	DesiredDuration   time.Duration
+	StoryType         models.StoryType
+	VisualStyle       models.VisualStyle
+	UserInstructions  string
+	SelectedMediaIDs  []string
+	ExcludedMediaIDs  []string
+	ExcludedMomentIDs []string
+	Timestamps        []time.Time
+	Locations         []string
+	PhotoAnalyses     []models.PhotoAnalysis
+	VideoAnalyses     []models.VideoAnalysis
+	MediaClusters     []models.MediaCluster
 }
 
 type Planner struct {
@@ -59,8 +61,20 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 	for _, mediaID := range request.SelectedMediaIDs {
 		selected[mediaID] = struct{}{}
 	}
+	excludedMedia := make(map[string]struct{}, len(request.ExcludedMediaIDs))
+	for _, mediaID := range request.ExcludedMediaIDs {
+		if trimmed := strings.TrimSpace(mediaID); trimmed != "" {
+			excludedMedia[trimmed] = struct{}{}
+		}
+	}
+	excludedMoments := make(map[string]struct{}, len(request.ExcludedMomentIDs))
+	for _, momentID := range request.ExcludedMomentIDs {
+		if trimmed := strings.TrimSpace(momentID); trimmed != "" {
+			excludedMoments[trimmed] = struct{}{}
+		}
+	}
 	clusterByMedia := buildClusterIndex(request.MediaClusters)
-	candidates := buildCandidates(request, selected, clusterByMedia)
+	candidates := filterExcludedCandidates(buildCandidates(request, selected, clusterByMedia), excludedMedia, excludedMoments)
 	if len(candidates) == 0 {
 		return models.StoryPlan{}, errors.New("story planner requires at least one usable analysis")
 	}
@@ -296,6 +310,23 @@ func buildCandidates(request Request, selected map[string]struct{}, clusters map
 	return candidates
 }
 
+func filterExcludedCandidates(candidates []candidate, excludedMedia, excludedMoments map[string]struct{}) []candidate {
+	if len(excludedMedia) == 0 && len(excludedMoments) == 0 {
+		return candidates
+	}
+	filtered := make([]candidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if _, excluded := excludedMedia[candidate.mediaID]; excluded {
+			continue
+		}
+		if _, excluded := excludedMoments[momentKey(candidate.moment)]; excluded {
+			continue
+		}
+		filtered = append(filtered, candidate)
+	}
+	return filtered
+}
+
 func selectCandidates(candidates []candidate, desired time.Duration) []candidate {
 	if len(candidates) == 0 {
 		return nil
@@ -458,7 +489,7 @@ func validStoryType(value models.StoryType) bool {
 
 func validVisualStyle(value models.VisualStyle) bool {
 	switch value {
-	case "", models.VisualStyleCinematic, models.VisualStyleCalm, models.VisualStyleWarm, models.VisualStyleMinimal, models.VisualStyleElegant:
+	case "", models.VisualStyleNatural, models.VisualStyleCinematic, models.VisualStyleCalm, models.VisualStyleWarm, models.VisualStylePlayful, models.VisualStyleMinimal, models.VisualStyleElegant:
 		return true
 	default:
 		return false

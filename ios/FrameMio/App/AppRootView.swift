@@ -28,6 +28,9 @@ struct AppRootView: View {
                 onOpenStory: { story in
                     path.append(.storyPreview(storyID: story.id))
                 },
+                onOpenAllStories: {
+                    path.append(.allStories)
+                },
                 onOpenSettings: {
                     path.append(.settings)
                 }
@@ -42,6 +45,13 @@ struct AppRootView: View {
     @ViewBuilder
     private func destination(for route: AppRoute) -> some View {
         switch route {
+        case .allStories:
+            AllStoriesView(
+                viewModel: homeViewModel,
+                onOpenStory: { story in
+                    path.append(.storyPreview(storyID: story.id))
+                }
+            )
         case let .mediaPicker(context):
             MediaPickerView(
                 viewModel: MediaPickerViewModel(
@@ -77,12 +87,19 @@ struct AppRootView: View {
                     assets: assets,
                     launchID: launchID,
                     storyLaunchCoordinator: storyLaunchCoordinator,
-                    storyService: dependencies.storyService
+                    storyService: dependencies.storyService,
+                    photoLibrary: dependencies.photoLibrary,
+                    mediaUploadStore: dependencies.mediaUploadStore
                 )
             )
         case let .storyPreview(storyID):
             StoryPreviewView(
-                viewModel: StoryPreviewViewModel(storyID: storyID, storyService: dependencies.storyService)
+                viewModel: StoryPreviewViewModel(
+                    storyID: storyID,
+                    storyService: dependencies.storyService,
+                    photoLibrary: dependencies.photoLibrary,
+                    mediaUploadStore: dependencies.mediaUploadStore
+                )
             )
         case .settings:
             SettingsView(viewModel: SettingsViewModel(photoLibrary: dependencies.photoLibrary))

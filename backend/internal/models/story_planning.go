@@ -21,9 +21,11 @@ const (
 type VisualStyle string
 
 const (
+	VisualStyleNatural   VisualStyle = "natural"
 	VisualStyleCinematic VisualStyle = "cinematic"
 	VisualStyleCalm      VisualStyle = "calm"
 	VisualStyleWarm      VisualStyle = "warm"
+	VisualStylePlayful   VisualStyle = "playful"
 	VisualStyleMinimal   VisualStyle = "minimal"
 	VisualStyleElegant   VisualStyle = "elegant"
 )

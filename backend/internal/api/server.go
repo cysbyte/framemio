@@ -166,6 +166,10 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 				return
 			}
 		}
+		if len(parts) == 4 && parts[3] == "versions" && request.Method == http.MethodPost {
+			s.createIOSStoryVersion(response, request, parts[2])
+			return
+		}
 		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}

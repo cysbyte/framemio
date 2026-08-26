@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,22 +47,71 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 	if planner == nil {
 		planner = &ai.Planner{Now: h.Now}
 	}
-	plan, err := planner.Plan(ctx, ai.Request{
-		ProjectID:        project.ID,
-		Version:          1,
-		DesiredDuration:  defaultStoryDuration(project),
-		StoryType:        storyTypeFromContext(project.Context),
-		VisualStyle:      models.VisualStyleCinematic,
-		UserInstructions: project.Context,
-		SelectedMediaIDs: append([]string(nil), project.MediaIDs...),
-		PhotoAnalyses:    photoAnalyses,
-		VideoAnalyses:    videoAnalyses,
-		MediaClusters:    mediaClusters(project, mediaByID, photoAnalyses, videoAnalyses),
-	})
+	request := h.storyPlanRequest(project, job.Configuration, photoAnalyses, videoAnalyses, mediaClusters(project, mediaByID, photoAnalyses, videoAnalyses))
+	plan, err := planner.Plan(ctx, request)
 	if err != nil {
 		return err
 	}
+	if mood := strings.TrimSpace(job.Configuration["music_mood"]); mood != "" {
+		plan.MusicMood = mood
+		if plan.Audio == nil {
+			plan.Audio = &models.StoryAudio{Source: "adaptive"}
+		}
+		plan.Audio.Mood = mood
+	}
 	return h.Store.SaveStoryPlan(ctx, job.UserID, plan)
+}
+
+func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configuration map[string]string, photoAnalyses []models.PhotoAnalysis, videoAnalyses []models.VideoAnalysis, clusters []models.MediaCluster) ai.Request {
+	version, _ := strconv.Atoi(strings.TrimSpace(configuration["story_plan_version"]))
+	duration := defaultStoryDuration(project)
+	if seconds, _ := strconv.Atoi(strings.TrimSpace(configuration["target_duration_seconds"])); seconds > 0 {
+		duration = time.Duration(seconds) * time.Second
+	}
+	selectedMediaIDs := splitStoryPlanConfigList(configuration["selected_media_ids"])
+	if len(selectedMediaIDs) == 0 {
+		selectedMediaIDs = append([]string(nil), project.MediaIDs...)
+	}
+	instructions := strings.TrimSpace(configuration["user_instructions"])
+	if instructions == "" {
+		instructions = project.Context
+	}
+	style := models.VisualStyle(strings.TrimSpace(configuration["visual_style"]))
+	if style == "" {
+		style = models.VisualStyleCinematic
+	}
+	return ai.Request{
+		ProjectID:         project.ID,
+		Version:           version,
+		DesiredDuration:   duration,
+		StoryType:         storyTypeFromContext(project.Context),
+		VisualStyle:       style,
+		UserInstructions:  instructions,
+		SelectedMediaIDs:  selectedMediaIDs,
+		ExcludedMediaIDs:  splitStoryPlanConfigList(configuration["excluded_media_ids"]),
+		ExcludedMomentIDs: splitStoryPlanConfigList(configuration["excluded_moment_ids"]),
+		PhotoAnalyses:     photoAnalyses,
+		VideoAnalyses:     videoAnalyses,
+		MediaClusters:     clusters,
+	}
+}
+
+func splitStoryPlanConfigList(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if _, ok := seen[part]; ok {
+			continue
+		}
+		seen[part] = struct{}{}
+		result = append(result, part)
+	}
+	return result
 }
 
 func (h StoryPlanHandler) photoAnalyses(project models.StoryProject, mediaByID map[string]models.MediaAsset, mediaAnalyses []models.MediaAnalysis) []models.PhotoAnalysis {

@@ -13,6 +13,10 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
         decoder = FrameMioJSONCoding.apiDecoder()
     }
 
+    func cachedStories() async throws -> [Story] {
+        try await persistence.loadStories()
+    }
+
     func listStories() async throws -> [Story] {
         do {
             let data = try await apiClient.data(for: APIRequest(method: .get, path: "/v1/stories"))
@@ -79,13 +83,51 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
     }
 
     func regenerateStory(id: String) async throws -> Story {
-        try await updateCachedStory(id: id) { story in
-            story.status = .analyzing
-        }
+        try await saveStoryEdits(
+            storyID: id,
+            request: StoryEditRequest(
+                removeMomentIDs: [],
+                removeMediaIDs: [],
+                addMediaIDs: [],
+                replace: [],
+                musicMood: nil,
+                style: nil,
+                targetDuration: nil,
+                instruction: "Make another version of this story."
+            )
+        )
     }
 
     func renderAgain(id: String) async throws -> Story {
         try await requestRender(id: id)
+    }
+
+    func saveStoryEdits(storyID: String, request: StoryEditRequest) async throws -> Story {
+        guard request.hasChanges else {
+            return try await story(id: storyID)
+        }
+        let body: Data
+        do {
+            body = try encoder.encode(request)
+        } catch {
+            throw AppError.invalidResponse
+        }
+        let data = try await apiClient.data(
+            for: APIRequest(
+                method: .post,
+                path: "/v1/stories/\(storyID)/versions",
+                body: body,
+                headers: ["Idempotency-Key": "ios-story-edit-\(storyID)-\(UUID().uuidString)"]
+            )
+        )
+        do {
+            let updated = try decoder.decode(Story.self, from: data)
+            let existing = try await persistence.loadStories()
+            try await persistence.saveStories([updated] + existing.filter { $0.id != updated.id })
+            return updated
+        } catch {
+            throw AppError.invalidResponse
+        }
     }
 
     func deleteStory(id: String) async throws {
@@ -155,6 +197,10 @@ final class MockStoryService: StoryService, @unchecked Sendable {
         self.persistence = persistence
     }
 
+    func cachedStories() async throws -> [Story] {
+        try await persistence.loadStories()
+    }
+
     func listStories() async throws -> [Story] {
         try await Task.sleep(for: .milliseconds(180))
         let existing = try await persistence.loadStories()
@@ -217,6 +263,26 @@ final class MockStoryService: StoryService, @unchecked Sendable {
     func renderAgain(id: String) async throws -> Story {
         try await mutateStory(id: id) { story in
             story.status = .rendering
+        }
+    }
+
+    func saveStoryEdits(storyID: String, request: StoryEditRequest) async throws -> Story {
+        try await mutateStory(id: storyID) { story in
+            if !request.removeMediaIDs.isEmpty || !request.removeMomentIDs.isEmpty {
+                let removed = Set(request.removeMediaIDs + request.removeMomentIDs)
+                story.assetIDs.removeAll { removed.contains($0) }
+                story.moments = story.moments?.filter { !removed.contains($0.id) && !removed.contains($0.mediaID) }
+            }
+            for mediaID in request.addMediaIDs where !story.assetIDs.contains(mediaID) {
+                story.assetIDs.append(mediaID)
+            }
+            if let style = request.style, !style.isEmpty {
+                story.description = "FrameMio is making this version feel \(style)."
+            }
+            if let targetDuration = request.targetDuration {
+                story.duration = targetDuration
+            }
+            story.status = .analyzing
         }
     }
 

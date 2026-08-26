@@ -5,6 +5,7 @@ struct PrimaryButton: View {
     let systemImage: String?
     let action: () -> Void
     var isDisabled = false
+    var isLoading = false
     @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
@@ -12,7 +13,7 @@ struct PrimaryButton: View {
             FrameMioHaptics.primaryAction()
             action()
         } label: {
-            ButtonLabel(title: title, systemImage: systemImage)
+            ButtonLabel(title: title, systemImage: systemImage, isLoading: isLoading)
                 .foregroundStyle(FrameMioColors.inverseInk)
                 .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.buttonHeight)
                 .background(
@@ -23,7 +24,7 @@ struct PrimaryButton: View {
         }
         .buttonStyle(FrameMioPressButtonStyle())
         .opacity(isDisabled || !isEnabled ? FrameMioOpacity.disabled : 1)
-        .disabled(isDisabled)
+        .disabled(isDisabled || isLoading)
         .accessibilityLabel(title)
     }
 }
@@ -31,10 +32,16 @@ struct PrimaryButton: View {
 private struct ButtonLabel: View {
     let title: String
     let systemImage: String?
+    let isLoading: Bool
 
     var body: some View {
         HStack(spacing: FrameMioSpacing.xs) {
-            if let systemImage {
+            if isLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(FrameMioColors.inverseInk)
+                    .accessibilityHidden(true)
+            } else if let systemImage {
                 Image(systemName: systemImage)
                     .font(FrameMioTypography.headline)
                     .symbolRenderingMode(.monochrome)

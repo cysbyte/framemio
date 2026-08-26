@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,20 +19,51 @@ const iosMaxStoryUploadBytes int64 = 1_000_000_000
 const iosStoryVideoURLExpiry = 2 * time.Hour
 
 type iosStory struct {
-	ID        string   `json:"id"`
-	Title     string   `json:"title"`
-	Context   string   `json:"context"`
-	CreatedAt string   `json:"createdAt"`
-	Duration  float64  `json:"duration"`
-	AssetIDs  []string `json:"assetIDs"`
-	Status    string   `json:"status"`
-	VideoURL  *string  `json:"videoURL,omitempty"`
+	ID               string           `json:"id"`
+	Title            string           `json:"title"`
+	Context          string           `json:"context"`
+	CreatedAt        string           `json:"createdAt"`
+	Duration         float64          `json:"duration"`
+	AssetIDs         []string         `json:"assetIDs"`
+	Status           string           `json:"status"`
+	VideoURL         *string          `json:"videoURL,omitempty"`
+	Description      string           `json:"description,omitempty"`
+	Moments          []iosStoryMoment `json:"moments,omitempty"`
+	AvailableMoments []iosStoryMoment `json:"availableMoments,omitempty"`
+}
+
+type iosStoryMoment struct {
+	ID           string  `json:"id"`
+	MomentID     string  `json:"momentId,omitempty"`
+	MediaID      string  `json:"mediaId"`
+	Type         string  `json:"type,omitempty"`
+	ThumbnailURL *string `json:"thumbnailUrl,omitempty"`
+	Title        string  `json:"title,omitempty"`
+	Description  string  `json:"description,omitempty"`
+	Selected     bool    `json:"selected"`
 }
 
 type iosCreateStoryRequest struct {
 	Context  string             `json:"context"`
 	Assets   []iosStoryAsset    `json:"assets"`
 	Analyses []iosStoryAnalysis `json:"analyses"`
+}
+
+type iosStoryEditRequest struct {
+	RemoveMomentIDs []string                `json:"removeMomentIds,omitempty"`
+	RemoveMediaIDs  []string                `json:"removeMediaIds,omitempty"`
+	AddMediaIDs     []string                `json:"addMediaIds,omitempty"`
+	Replace         []iosStoryMomentReplace `json:"replace,omitempty"`
+	MusicMood       string                  `json:"musicMood,omitempty"`
+	Style           string                  `json:"style,omitempty"`
+	TargetDuration  float64                 `json:"targetDuration,omitempty"`
+	Instruction     string                  `json:"instruction,omitempty"`
+}
+
+type iosStoryMomentReplace struct {
+	FromMomentID string `json:"fromMomentId,omitempty"`
+	FromMediaID  string `json:"fromMediaId,omitempty"`
+	ToMediaID    string `json:"toMediaId"`
 }
 
 type iosStoryAsset struct {
@@ -98,6 +130,253 @@ func (s *Server) deleteIOSStory(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	s.writeJSON(response, http.StatusOK, map[string]bool{"deleted": true})
+}
+
+func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *http.Request, storyID string) {
+	user, ok := s.authenticate(response, request)
+	if !ok {
+		return
+	}
+	storyID = strings.TrimSpace(storyID)
+	if storyID == "" {
+		s.writeError(response, http.StatusBadRequest, "invalid_story", "story id is required")
+		return
+	}
+	var input iosStoryEditRequest
+	if !s.decodeJSON(response, request, &input) {
+		return
+	}
+	project, err := s.Store.GetProject(request.Context(), user.ID, storyID)
+	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	if !s.allowExpensiveOperation(response, user.ID, "edit_ios_story") {
+		return
+	}
+	config, err := s.iosStoryEditConfiguration(request, user.ID, project, input)
+	if err != nil {
+		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
+			s.writeError(response, http.StatusBadRequest, "invalid_story_edit", "edit references media or moments that do not belong to this story")
+			return
+		}
+		s.internalError(response, err, "prepare iOS story edit")
+		return
+	}
+	if s.Orchestrator == nil {
+		s.internalError(response, errors.New("job orchestrator not configured"), "job orchestrator not configured")
+		return
+	}
+	job, err := s.Orchestrator.RequestStoryPlanRevision(request.Context(), user.ID, project.ID, request.Header.Get("Idempotency-Key"), config)
+	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	s.Logger.Info("queued iOS story revision", "user_id", user.ID, "project_id", project.ID, "job_id", job.ID)
+	updated, err := s.Store.GetProject(request.Context(), user.ID, project.ID)
+	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	s.writeJSON(response, http.StatusAccepted, s.makeIOSStory(request, user.ID, updated))
+}
+
+func (s *Server) iosStoryEditConfiguration(request *http.Request, userID string, project models.StoryProject, input iosStoryEditRequest) (map[string]string, error) {
+	projectMedia := make(map[string]struct{}, len(project.MediaIDs))
+	for _, mediaID := range project.MediaIDs {
+		projectMedia[mediaID] = struct{}{}
+	}
+	latest, err := s.Store.GetStoryPlan(request.Context(), userID, project.ID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, err
+	}
+
+	selected := make(map[string]struct{}, len(project.MediaIDs))
+	if len(latest.Moments) > 0 {
+		for _, moment := range latest.Moments {
+			mediaID := storyMomentMediaID(moment)
+			if mediaID != "" {
+				selected[mediaID] = struct{}{}
+			}
+		}
+	} else {
+		for _, mediaID := range project.MediaIDs {
+			selected[mediaID] = struct{}{}
+		}
+	}
+	excludedMedia := make(map[string]struct{})
+	excludedMoments := make(map[string]struct{})
+	for _, mediaID := range cleanStringList(input.RemoveMediaIDs) {
+		if _, ok := projectMedia[mediaID]; !ok {
+			return nil, store.ErrConflict
+		}
+		excludedMedia[mediaID] = struct{}{}
+		delete(selected, mediaID)
+	}
+	for _, momentID := range cleanStringList(input.RemoveMomentIDs) {
+		if len(latest.Moments) > 0 && !storyPlanHasMoment(latest, momentID) {
+			return nil, store.ErrConflict
+		}
+		excludedMoments[momentID] = struct{}{}
+		if mediaID := mediaIDForStoryMoment(latest, momentID); mediaID != "" {
+			delete(selected, mediaID)
+		}
+	}
+	for _, replacement := range input.Replace {
+		toMediaID := strings.TrimSpace(replacement.ToMediaID)
+		if _, ok := projectMedia[toMediaID]; !ok || toMediaID == "" {
+			return nil, store.ErrConflict
+		}
+		if fromMomentID := strings.TrimSpace(replacement.FromMomentID); fromMomentID != "" {
+			if len(latest.Moments) > 0 && !storyPlanHasMoment(latest, fromMomentID) {
+				return nil, store.ErrConflict
+			}
+			excludedMoments[fromMomentID] = struct{}{}
+			if mediaID := mediaIDForStoryMoment(latest, fromMomentID); mediaID != "" {
+				delete(selected, mediaID)
+			}
+		}
+		if fromMediaID := strings.TrimSpace(replacement.FromMediaID); fromMediaID != "" {
+			if _, ok := projectMedia[fromMediaID]; !ok {
+				return nil, store.ErrConflict
+			}
+			excludedMedia[fromMediaID] = struct{}{}
+			delete(selected, fromMediaID)
+		}
+		selected[toMediaID] = struct{}{}
+	}
+	for _, mediaID := range cleanStringList(input.AddMediaIDs) {
+		if _, ok := projectMedia[mediaID]; !ok {
+			return nil, store.ErrConflict
+		}
+		selected[mediaID] = struct{}{}
+		delete(excludedMedia, mediaID)
+	}
+	if len(selected) == 0 {
+		return nil, store.ErrConflict
+	}
+
+	version := latest.Version + 1
+	if version <= 1 {
+		version = 1
+	}
+	config := map[string]string{
+		"story_plan_version": strconv.Itoa(version),
+		"selected_media_ids": strings.Join(sortedKeys(selected), ","),
+	}
+	if len(excludedMedia) > 0 {
+		config["excluded_media_ids"] = strings.Join(sortedKeys(excludedMedia), ",")
+	}
+	if len(excludedMoments) > 0 {
+		config["excluded_moment_ids"] = strings.Join(sortedKeys(excludedMoments), ",")
+	}
+	if input.TargetDuration > 0 {
+		if input.TargetDuration < 5 || input.TargetDuration > 60 {
+			return nil, store.ErrConflict
+		}
+		config["target_duration_seconds"] = strconv.Itoa(int(input.TargetDuration + 0.5))
+	}
+	if style := normalizeIOSStoryEditStyle(input.Style); style != "" {
+		config["visual_style"] = style
+	}
+	if mood := normalizeIOSMusicMood(input.MusicMood); mood != "" {
+		config["music_mood"] = mood
+	}
+	if instruction := strings.TrimSpace(sanitizeIOSStoryText(input.Instruction)); instruction != "" {
+		config["user_instructions"] = truncateIOSConfigValue(instruction, 480)
+	}
+	config["edit_intent"] = "ios_story_refinement"
+	return config, nil
+}
+
+func storyPlanHasMoment(plan models.StoryPlan, momentID string) bool {
+	momentID = strings.TrimSpace(momentID)
+	for _, moment := range plan.Moments {
+		if moment.MomentID == momentID || storyMomentMediaID(moment) == momentID {
+			return true
+		}
+	}
+	return false
+}
+
+func mediaIDForStoryMoment(plan models.StoryPlan, momentID string) string {
+	momentID = strings.TrimSpace(momentID)
+	for _, moment := range plan.Moments {
+		if moment.MomentID == momentID || storyMomentMediaID(moment) == momentID {
+			return storyMomentMediaID(moment)
+		}
+	}
+	return ""
+}
+
+func storyMomentMediaID(moment models.StoryMoment) string {
+	if strings.TrimSpace(moment.MediaID) != "" {
+		return strings.TrimSpace(moment.MediaID)
+	}
+	return strings.TrimSpace(moment.AssetID)
+}
+
+func cleanStringList(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	cleaned := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		cleaned = append(cleaned, value)
+	}
+	return cleaned
+}
+
+func sortedKeys(values map[string]struct{}) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func normalizeIOSStoryEditStyle(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "natural":
+		return string(models.VisualStyleNatural)
+	case "cinematic":
+		return string(models.VisualStyleCinematic)
+	case "warm":
+		return string(models.VisualStyleWarm)
+	case "playful":
+		return string(models.VisualStylePlayful)
+	case "calm":
+		return string(models.VisualStyleCalm)
+	case "minimal":
+		return string(models.VisualStyleMinimal)
+	case "elegant":
+		return string(models.VisualStyleElegant)
+	default:
+		return ""
+	}
+}
+
+func normalizeIOSMusicMood(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "warm", "cinematic", "playful", "calm", "energetic", "natural":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return ""
+	}
+}
+
+func truncateIOSConfigValue(value string, maxLength int) string {
+	if len(value) <= maxLength {
+		return value
+	}
+	return strings.TrimSpace(value[:maxLength])
 }
 
 func (s *Server) reconcileIOSStoryProgress(request *http.Request, userID string, project models.StoryProject) models.StoryProject {
@@ -355,15 +634,31 @@ func (s *Server) makeIOSStory(request *http.Request, userID string, project mode
 		AssetIDs:  append([]string(nil), project.MediaIDs...),
 		Status:    iosStoryStatus(project.Status),
 	}
+	mediaByID := make(map[string]models.MediaAsset, len(project.MediaIDs))
 	for _, mediaID := range project.MediaIDs {
 		media, err := s.Store.GetMedia(request.Context(), userID, mediaID)
 		if err != nil {
 			continue
 		}
+		mediaByID[mediaID] = media
 		if media.DurationSeconds != nil {
 			story.Duration += *media.DurationSeconds
 		}
 	}
+	if plan, err := s.Store.GetStoryPlan(request.Context(), userID, project.ID); err == nil {
+		if strings.TrimSpace(plan.TitleText) != "" {
+			story.Title = plan.TitleText
+		}
+		if plan.TotalDurationMS > 0 {
+			story.Duration = float64(plan.TotalDurationMS) / 1000
+		}
+		story.Description = iosStoryDescription(plan)
+		story.Moments = iosStoryMoments(plan, mediaByID)
+		if len(story.Moments) > 0 {
+			story.AssetIDs = storyAssetIDsFromMoments(story.Moments)
+		}
+	}
+	story.AvailableMoments = iosAvailableMoments(project, mediaByID, story.Moments)
 	if story.Duration <= 0 {
 		story.Duration = float64(max(8, len(project.MediaIDs)*4))
 	}
@@ -371,11 +666,122 @@ func (s *Server) makeIOSStory(request *http.Request, userID string, project mode
 	return story
 }
 
-// iosStoryVideoURL resolves the playable film for a finished project. A ready
-// project with no URL renders as an inert play button on the device, so every
-// failure path here is logged rather than silently dropped.
+func iosStoryDescription(plan models.StoryPlan) string {
+	parts := make([]string, 0, 3)
+	if strings.TrimSpace(plan.UserInstructions) != "" {
+		parts = append(parts, strings.TrimSpace(plan.UserInstructions))
+	}
+	for _, moment := range plan.Moments {
+		text := strings.TrimSpace(moment.Narrative)
+		if text == "" {
+			text = strings.TrimSpace(moment.Caption)
+		}
+		if text != "" {
+			parts = append(parts, text)
+		}
+		if len(parts) >= 3 {
+			break
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return truncateIOSConfigValue(strings.Join(parts, ". "), 220)
+}
+
+func iosStoryMoments(plan models.StoryPlan, mediaByID map[string]models.MediaAsset) []iosStoryMoment {
+	moments := make([]iosStoryMoment, 0, len(plan.Moments))
+	for index, moment := range plan.Moments {
+		mediaID := storyMomentMediaID(moment)
+		if mediaID == "" {
+			continue
+		}
+		mediaType := string(moment.MediaType)
+		if mediaType == "" {
+			if media, ok := mediaByID[mediaID]; ok {
+				mediaType = string(media.Type)
+			}
+		}
+		momentID := strings.TrimSpace(moment.MomentID)
+		if momentID == "" {
+			momentID = fmt.Sprintf("%s-%d", mediaID, index)
+		}
+		moments = append(moments, iosStoryMoment{
+			ID:          momentID,
+			MomentID:    momentID,
+			MediaID:     mediaID,
+			Type:        mediaType,
+			Title:       iosMomentTitle(moment, mediaType, index),
+			Description: firstNonEmptyIOSText(strings.TrimSpace(moment.Narrative), strings.TrimSpace(moment.Caption), strings.TrimSpace(moment.Reason)),
+			Selected:    true,
+		})
+	}
+	return moments
+}
+
+func firstNonEmptyIOSText(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func iosAvailableMoments(project models.StoryProject, mediaByID map[string]models.MediaAsset, selected []iosStoryMoment) []iosStoryMoment {
+	selectedMedia := make(map[string]struct{}, len(selected))
+	for _, moment := range selected {
+		selectedMedia[moment.MediaID] = struct{}{}
+	}
+	available := make([]iosStoryMoment, 0, len(project.MediaIDs))
+	for index, mediaID := range project.MediaIDs {
+		media, ok := mediaByID[mediaID]
+		if !ok {
+			continue
+		}
+		_, isSelected := selectedMedia[mediaID]
+		available = append(available, iosStoryMoment{
+			ID:       mediaID,
+			MediaID:  mediaID,
+			Type:     string(media.Type),
+			Title:    fallbackIOSMomentTitle(string(media.Type), index),
+			Selected: isSelected,
+		})
+	}
+	return available
+}
+
+func storyAssetIDsFromMoments(moments []iosStoryMoment) []string {
+	assetIDs := make([]string, 0, len(moments))
+	for _, moment := range moments {
+		if strings.TrimSpace(moment.MediaID) != "" {
+			assetIDs = append(assetIDs, moment.MediaID)
+		}
+	}
+	return assetIDs
+}
+
+func iosMomentTitle(moment models.StoryMoment, mediaType string, index int) string {
+	for _, value := range []string{moment.Caption, moment.Narrative, moment.Reason} {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return truncateIOSConfigValue(trimmed, 36)
+		}
+	}
+	return fallbackIOSMomentTitle(mediaType, index)
+}
+
+func fallbackIOSMomentTitle(mediaType string, index int) string {
+	if mediaType == string(models.MediaTypeVideo) {
+		return fmt.Sprintf("Video moment %d", index+1)
+	}
+	return fmt.Sprintf("Photo moment %d", index+1)
+}
+
+// iosStoryVideoURL resolves the latest completed film artifact. Revisions can
+// leave a project rendering or failed while an older completed render is still
+// valid, so this intentionally checks render jobs instead of only project status.
 func (s *Server) iosStoryVideoURL(request *http.Request, userID string, project models.StoryProject) *string {
-	if project.Status != models.ProjectStatusReady {
+	if project.Status == models.ProjectStatusDraft {
 		return nil
 	}
 	if s.ObjectStorage == nil {

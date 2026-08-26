@@ -549,6 +549,111 @@ func TestIOSStoriesCompatibilityDeletesStory(t *testing.T) {
 	}
 }
 
+
+func TestIOSStoryEditQueuesStoryPlanRevisionWithoutReanalysis(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	handler := newTestServer(memoryStore, publisher).Handler()
+
+	first := createReadyIOSMedia(t, handler, "asset-edit-photo-1", models.MediaTypePhoto)
+	second := createReadyIOSMedia(t, handler, "asset-edit-photo-2", models.MediaTypePhoto)
+	storyResponse := performJSON(t, handler, http.MethodPost, "/v1/stories", map[string]any{
+		"context": "Special moments",
+		"assets": []map[string]any{
+			{"id": "asset-edit-photo-1", "kind": "image", "pixelWidth": 3024, "pixelHeight": 4032},
+			{"id": "asset-edit-photo-2", "kind": "image", "pixelWidth": 3024, "pixelHeight": 4032},
+		},
+	}, "", true, nil)
+	if storyResponse.Code != http.StatusCreated {
+		t.Fatalf("create iOS story status = %d, body = %s", storyResponse.Code, storyResponse.Body.String())
+	}
+	var story iosStory
+	decodeResponse(t, storyResponse, &story)
+
+	now := time.Date(2026, time.August, 19, 10, 0, 0, 0, time.UTC)
+	if err := memoryStore.SaveStoryPlan(context.Background(), "user-1", models.StoryPlan{
+		SchemaVersion:       models.StoryPlanSchemaVersionV1,
+		ID:                  "plan-existing",
+		ProjectID:           story.ID,
+		Version:             1,
+		RequestedDurationMS: 8000,
+		StoryType:           models.StoryTypeCustom,
+		VisualStyle:         models.VisualStyleNatural,
+		TitleText:           "Special moments",
+		EndingText:          "The moments that stay with us.",
+		MusicMood:           "warm",
+		Moments: []models.StoryMoment{
+			{MomentID: "breakfast", AssetID: first.MediaID, MediaID: first.MediaID, MediaType: models.MediaTypePhoto, Narrative: "Breakfast", DurationMS: 4000, CropIntent: "fit", Transition: "fade_in"},
+			{MomentID: "lake", AssetID: second.MediaID, MediaID: second.MediaID, MediaType: models.MediaTypePhoto, Narrative: "Lake", DurationMS: 4000, CropIntent: "fit", Transition: "crossfade"},
+		},
+		Audio:           &models.StoryAudio{Source: "adaptive", Mood: "warm"},
+		Output:          models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 8, Preset: "premium-memory"},
+		TotalDurationMS: 8000,
+		CreatedAt:       now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	editResponse := performJSON(t, handler, http.MethodPost, "/v1/stories/"+story.ID+"/versions", map[string]any{
+		"removeMomentIds": []string{"breakfast"},
+		"style":           "cinematic",
+		"musicMood":       "calm",
+		"targetDuration":  15,
+		"instruction":     "Make it quieter.",
+	}, "edit-key", true, nil)
+	if editResponse.Code != http.StatusAccepted {
+		t.Fatalf("edit iOS story status = %d, body = %s", editResponse.Code, editResponse.Body.String())
+	}
+	var edited iosStory
+	decodeResponse(t, editResponse, &edited)
+	if edited.Status != "analyzing" {
+		t.Fatalf("expected analyzing response, got %+v", edited)
+	}
+
+	messages := publisher.Messages()
+	if len(messages) != 2 {
+		t.Fatalf("expected initial and revision story-plan messages, got %+v", messages)
+	}
+	last := messages[len(messages)-1]
+	if last.JobType != models.JobTypeStoryPlan || last.MediaID != "" {
+		t.Fatalf("edit should queue only a project-level story plan job, got %+v", last)
+	}
+	if last.Configuration["story_plan_version"] != "2" || last.Configuration["visual_style"] != "cinematic" || last.Configuration["music_mood"] != "calm" {
+		t.Fatalf("unexpected edit config: %+v", last.Configuration)
+	}
+	if strings.Contains(last.Configuration["selected_media_ids"], first.MediaID) || !strings.Contains(last.Configuration["selected_media_ids"], second.MediaID) {
+		t.Fatalf("selected media did not reflect removed moment: %+v", last.Configuration)
+	}
+}
+
+func TestIOSStoryEditRejectsForeignMediaReference(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	handler := newTestServer(memoryStore, publisher).Handler()
+
+	createReadyIOSMedia(t, handler, "asset-edit-owned", models.MediaTypePhoto)
+	storyResponse := performJSON(t, handler, http.MethodPost, "/v1/stories", map[string]any{
+		"context": "Special moments",
+		"assets":  []map[string]any{{"id": "asset-edit-owned", "kind": "image", "pixelWidth": 3024, "pixelHeight": 4032}},
+	}, "", true, nil)
+	if storyResponse.Code != http.StatusCreated {
+		t.Fatalf("create iOS story status = %d, body = %s", storyResponse.Code, storyResponse.Body.String())
+	}
+	var story iosStory
+	decodeResponse(t, storyResponse, &story)
+
+	editResponse := performJSON(t, handler, http.MethodPost, "/v1/stories/"+story.ID+"/versions", map[string]any{
+		"addMediaIds": []string{"media-not-in-this-project"},
+	}, "edit-key", true, nil)
+	if editResponse.Code != http.StatusBadRequest {
+		t.Fatalf("expected invalid media reference to be rejected, got %d body=%s", editResponse.Code, editResponse.Body.String())
+	}
+}
+
 func TestIOSStoriesCompatibilityResolvesByteScopedUploadKeys(t *testing.T) {
 	t.Parallel()
 

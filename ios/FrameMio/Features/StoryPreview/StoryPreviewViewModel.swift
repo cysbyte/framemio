@@ -1,6 +1,8 @@
 import Combine
 import Foundation
 import Photos
+import SwiftUI
+import UIKit
 
 @MainActor
 final class StoryPreviewViewModel: ObservableObject {
@@ -11,6 +13,8 @@ final class StoryPreviewViewModel: ObservableObject {
     @Published var confirmationMessage: String?
     @Published var didDeleteStory = false
     @Published var isPlayingVideo = false
+    @Published private(set) var momentAssets: [String: MediaAsset] = [:]
+    @Published private(set) var momentThumbnails: [String: UIImage] = [:]
 
     private var storyID: String?
     private let launchContext: MomentContext?
@@ -18,17 +22,27 @@ final class StoryPreviewViewModel: ObservableObject {
     private let launchID: UUID?
     private let storyLaunchCoordinator: StoryLaunchCoordinator?
     private let storyService: StoryService
+    private let photoLibrary: PhotoLibraryService
+    private let mediaUploadStore: MediaUploadStore
     private var loadTask: Task<Void, Never>?
     private var actionTask: Task<Void, Never>?
+    private var thumbnailTasks: [String: Task<Void, Never>] = [:]
     private var launchCancellable: AnyCancellable?
 
-    init(storyID: String, storyService: StoryService) {
+    init(
+        storyID: String,
+        storyService: StoryService,
+        photoLibrary: PhotoLibraryService,
+        mediaUploadStore: MediaUploadStore
+    ) {
         self.storyID = storyID
         launchContext = nil
         launchAssets = []
         launchID = nil
         storyLaunchCoordinator = nil
         self.storyService = storyService
+        self.photoLibrary = photoLibrary
+        self.mediaUploadStore = mediaUploadStore
     }
 
     init(
@@ -36,7 +50,9 @@ final class StoryPreviewViewModel: ObservableObject {
         assets: [MediaAsset],
         launchID: UUID,
         storyLaunchCoordinator: StoryLaunchCoordinator,
-        storyService: StoryService
+        storyService: StoryService,
+        photoLibrary: PhotoLibraryService,
+        mediaUploadStore: MediaUploadStore
     ) {
         storyID = nil
         launchContext = context
@@ -44,6 +60,8 @@ final class StoryPreviewViewModel: ObservableObject {
         self.launchID = launchID
         self.storyLaunchCoordinator = storyLaunchCoordinator
         self.storyService = storyService
+        self.photoLibrary = photoLibrary
+        self.mediaUploadStore = mediaUploadStore
         launchCancellable = storyLaunchCoordinator.objectWillChange.sink { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.objectWillChange.send()
@@ -67,6 +85,10 @@ final class StoryPreviewViewModel: ObservableObject {
         return story.videoURL
     }
 
+    var previewVideoURL: URL? {
+        story?.videoURL
+    }
+
     var canPlayVideo: Bool {
         playableVideoURL != nil
     }
@@ -74,6 +96,39 @@ final class StoryPreviewViewModel: ObservableObject {
     func playVideo() {
         guard canPlayVideo else { return }
         isPlayingVideo = true
+    }
+
+    func momentAsset(for storyAssetID: String) -> MediaAsset? {
+        momentAssets[storyAssetID] ?? launchAssets.first { $0.id == storyAssetID }
+    }
+
+    func image(forStoryAssetID storyAssetID: String) -> Image? {
+        guard let image = momentThumbnails[storyAssetID] else { return nil }
+        return Image(uiImage: image)
+    }
+
+    func loadThumbnail(forStoryAssetID storyAssetID: String, targetSize: CGSize) {
+        guard momentThumbnails[storyAssetID] == nil, thumbnailTasks[storyAssetID] == nil else { return }
+
+        thumbnailTasks[storyAssetID] = Task { [weak self, photoLibrary] in
+            guard let self else { return }
+            defer { thumbnailTasks[storyAssetID] = nil }
+            do {
+                guard let asset = await resolveMomentAsset(forStoryAssetID: storyAssetID) else { return }
+                let data = try await photoLibrary.requestThumbnail(for: asset, targetSize: targetSize)
+                try Task.checkCancellation()
+                if let image = UIImage(data: data) {
+                    momentThumbnails[storyAssetID] = image
+                }
+            } catch is CancellationError {
+            } catch {
+            }
+        }
+    }
+
+    func cancelThumbnail(forStoryAssetID storyAssetID: String) {
+        thumbnailTasks[storyAssetID]?.cancel()
+        thumbnailTasks[storyAssetID] = nil
     }
 
     var progressTitle: String {
@@ -170,6 +225,7 @@ final class StoryPreviewViewModel: ObservableObject {
             do {
                 let latest = try await storyService.story(id: storyID)
                 story = latest
+                cacheLaunchAssets(for: latest)
                 errorMessage = nil
                 isLoading = false
 
@@ -214,6 +270,13 @@ final class StoryPreviewViewModel: ObservableObject {
         }
     }
 
+    func saveStoryEdits(_ request: StoryEditRequest) {
+        guard let storyID, request.hasChanges else { return }
+        perform(.editStory) { [storyService] in
+            try await storyService.saveStoryEdits(storyID: storyID, request: request)
+        }
+    }
+
     func saveVideoToPhotos() {
         guard let videoURL = playableVideoURL, activeAction == nil else { return }
         actionTask?.cancel()
@@ -224,7 +287,9 @@ final class StoryPreviewViewModel: ObservableObject {
             confirmationMessage = nil
             defer { activeAction = nil }
             do {
-                try await Self.saveVideoToPhotoLibrary(from: videoURL)
+                try await Self.withTimeout(seconds: 150) {
+                    try await Self.saveVideoToPhotoLibrary(from: videoURL)
+                }
                 confirmationMessage = "Saved to Photos."
                 FrameMioHaptics.success()
             } catch is CancellationError {
@@ -237,14 +302,34 @@ final class StoryPreviewViewModel: ObservableObject {
     func replaceMoment(assetID: String) {
         guard let storyID else { return }
         perform(.replaceMoment) { [storyService] in
-            try await storyService.replaceMoment(storyID: storyID, assetID: assetID)
+            let request = StoryEditRequest(
+                removeMomentIDs: [],
+                removeMediaIDs: [],
+                addMediaIDs: [assetID],
+                replace: [],
+                musicMood: nil,
+                style: nil,
+                targetDuration: nil,
+                instruction: "Use this moment in a new version."
+            )
+            return try await storyService.saveStoryEdits(storyID: storyID, request: request)
         }
     }
 
     func removeMoment(assetID: String) {
         guard let storyID else { return }
         perform(.removeMoment) { [storyService] in
-            try await storyService.removeMoment(storyID: storyID, assetID: assetID)
+            let request = StoryEditRequest(
+                removeMomentIDs: [],
+                removeMediaIDs: [assetID],
+                addMediaIDs: [],
+                replace: [],
+                musicMood: nil,
+                style: nil,
+                targetDuration: nil,
+                instruction: "Remove this moment from the story."
+            )
+            return try await storyService.saveStoryEdits(storyID: storyID, request: request)
         }
     }
 
@@ -268,21 +353,58 @@ final class StoryPreviewViewModel: ObservableObject {
         }
     }
 
+    private func cacheLaunchAssets(for story: Story) {
+        guard !launchAssets.isEmpty else { return }
+        let storyMediaIDs = Set(story.assetIDs + (story.availableMoments ?? []).map(\.mediaID))
+        for asset in launchAssets where storyMediaIDs.contains(asset.id) {
+            momentAssets[asset.id] = asset
+        }
+    }
+
+    private func resolveMomentAsset(forStoryAssetID storyAssetID: String) async -> MediaAsset? {
+        if let asset = momentAsset(for: storyAssetID) {
+            return asset
+        }
+        do {
+            guard let upload = try await mediaUploadStore.allUploads().first(where: {
+                $0.mediaID == storyAssetID || $0.assetID == storyAssetID
+            }) else {
+                return nil
+            }
+            let asset = MediaAsset(
+                id: storyAssetID,
+                localIdentifier: upload.localIdentifier,
+                kind: mediaKind(for: upload.mediaType),
+                creationDate: upload.creationDate,
+                duration: upload.duration ?? 0,
+                pixelWidth: upload.pixelWidth,
+                pixelHeight: upload.pixelHeight
+            )
+            momentAssets[storyAssetID] = asset
+            return asset
+        } catch {
+            return nil
+        }
+    }
+
+    private func mediaKind(for uploadType: UploadMediaType) -> MediaKind {
+        switch uploadType {
+        case .photo:
+            .image
+        case .video:
+            .video
+        case .livePhoto:
+            .livePhoto
+        }
+    }
+
     private nonisolated static func saveVideoToPhotoLibrary(from remoteURL: URL) async throws {
         let authorization = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
         guard authorization == .authorized || authorization == .limited else {
-            throw AppError.notAuthorized
+            throw AppError.message("Allow FrameMio to add videos to Photos to save your story.")
         }
 
-        let (downloadedURL, response) = try await URLSession.shared.download(from: remoteURL)
-        if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-            throw AppError.server(statusCode: httpResponse.statusCode)
-        }
-
-        let localURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("framemio-story-\(UUID().uuidString)")
-            .appendingPathExtension("mp4")
-        try FileManager.default.moveItem(at: downloadedURL, to: localURL)
+        let localURL = try await downloadVideoForSaving(from: remoteURL)
         defer { try? FileManager.default.removeItem(at: localURL) }
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -300,6 +422,53 @@ final class StoryPreviewViewModel: ObservableObject {
         }
     }
 
+    private nonisolated static func downloadVideoForSaving(from remoteURL: URL) async throws -> URL {
+        if remoteURL.isFileURL {
+            return remoteURL
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.urlCache = nil
+        configuration.waitsForConnectivity = true
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 120
+        let session = URLSession(configuration: configuration)
+        defer { session.finishTasksAndInvalidate() }
+
+        let (downloadedURL, response) = try await session.download(from: remoteURL)
+        if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+            throw AppError.server(statusCode: httpResponse.statusCode)
+        }
+
+        let localURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("framemio-story-\(UUID().uuidString)")
+            .appendingPathExtension("mp4")
+        try FileManager.default.moveItem(at: downloadedURL, to: localURL)
+        return localURL
+    }
+
+    private nonisolated static func withTimeout<T: Sendable>(
+        seconds: TimeInterval,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await operation()
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw AppError.message("Saving took too long. Check your connection and try again.")
+            }
+
+            guard let result = try await group.next() else {
+                throw AppError.cancelled
+            }
+            group.cancelAll()
+            return result
+        }
+    }
+
     private func perform(_ action: StoryPreviewAction, operation: @escaping @Sendable () async throws -> Story) {
         guard activeAction == nil else { return }
         actionTask?.cancel()
@@ -309,7 +478,12 @@ final class StoryPreviewViewModel: ObservableObject {
             errorMessage = nil
             defer { activeAction = nil }
             do {
-                story = try await operation()
+                let updatedStory = try await operation()
+                story = updatedStory
+                cacheLaunchAssets(for: updatedStory)
+                if updatedStory.status.shouldPoll {
+                    load()
+                }
                 FrameMioHaptics.success()
             } catch is CancellationError {
             } catch {
@@ -321,6 +495,7 @@ final class StoryPreviewViewModel: ObservableObject {
     deinit {
         loadTask?.cancel()
         actionTask?.cancel()
+        thumbnailTasks.values.forEach { $0.cancel() }
     }
 }
 
@@ -330,6 +505,7 @@ enum StoryPreviewAction: Hashable, Sendable {
     case renderAgain
     case saveVideo
     case deleteStory
+    case editStory
     case replaceMoment
     case removeMoment
 
@@ -345,6 +521,8 @@ enum StoryPreviewAction: Hashable, Sendable {
             "Saving"
         case .deleteStory:
             "Removing story"
+        case .editStory:
+            "Saving changes"
         case .replaceMoment:
             "Replacing moment"
         case .removeMoment:

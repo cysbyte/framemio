@@ -13,9 +13,13 @@ enum HomeMockState: Hashable, Sendable {
 @MainActor
 final class HomeViewModel: ObservableObject {
     @Published private(set) var stories: [Story] = []
+    @Published private(set) var allStories: [Story] = []
     @Published private(set) var covers: [String: UIImage] = [:]
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
+
+    private static let homeStoryLimit = 7
+    private static let coverCacheDirectoryName = "StoryCovers"
 
     private let storyService: StoryService
     private let mockState: HomeMockState?
@@ -38,9 +42,13 @@ final class HomeViewModel: ObservableObject {
                 if let mockState {
                     try await loadMockData(for: mockState)
                 } else {
-                    let loadedStories = try await storyService.listStories()
-                    stories = loadedStories
-                    loadGeneratedVideoCovers(for: loadedStories)
+                    let cachedStories = sortedStories(try await storyService.cachedStories())
+                    if !cachedStories.isEmpty {
+                        updateStories(cachedStories)
+                    }
+
+                    let loadedStories = sortedStories(try await storyService.listStories())
+                    updateStories(loadedStories)
                 }
                 errorMessage = nil
             } catch is CancellationError {
@@ -55,32 +63,113 @@ final class HomeViewModel: ObservableObject {
         return Image(uiImage: image)
     }
 
+    func loadCovers(for stories: [Story]) {
+        loadGeneratedVideoCovers(for: stories)
+    }
+
+    private func updateStories(_ loadedStories: [Story]) {
+        allStories = loadedStories
+        stories = latestHomeStories(loadedStories)
+        loadGeneratedVideoCovers(for: stories)
+    }
+
+    private func sortedStories(_ stories: [Story]) -> [Story] {
+        stories.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    private func latestHomeStories(_ stories: [Story]) -> [Story] {
+        Array(sortedStories(stories).prefix(Self.homeStoryLimit))
+    }
+
     private func loadGeneratedVideoCovers(for stories: [Story]) {
-        let storyIDs = Set(stories.map(\.id))
-        covers = covers.filter { storyIDs.contains($0.key) }
-        let staleCoverTaskIDs = coverTasks.keys.filter { !storyIDs.contains($0) }
+        let storyIDs = Set(allStories.map(\.id))
+        covers = covers.filter { storyIDs.isEmpty || storyIDs.contains($0.key) }
+        let staleCoverTaskIDs = coverTasks.keys.filter { !storyIDs.isEmpty && !storyIDs.contains($0) }
         for storyID in staleCoverTaskIDs {
             coverTasks[storyID]?.cancel()
             coverTasks[storyID] = nil
+        }
+        if !storyIDs.isEmpty {
+            Self.removeCachedCovers(excludingStoryIDs: storyIDs)
         }
 
         for story in stories where story.status == .ready && covers[story.id] == nil && coverTasks[story.id] == nil {
             guard let videoURL = story.videoURL else { continue }
             let storyID = story.id
+
+            if let cachedImage = Self.cachedVideoCover(storyID: storyID, videoURL: videoURL) {
+                covers[storyID] = cachedImage
+                continue
+            }
+
             coverTasks[storyID] = Task { [weak self] in
                 let image = await Self.generateVideoCover(from: videoURL)
                 guard !Task.isCancelled else { return }
-                await self?.finishGeneratedVideoCover(storyID: storyID, image: image)
+                self?.finishGeneratedVideoCover(storyID: storyID, videoURL: videoURL, image: image)
             }
         }
     }
 
-    private func finishGeneratedVideoCover(storyID: String, image: UIImage?) {
+    private func finishGeneratedVideoCover(storyID: String, videoURL: URL, image: UIImage?) {
         coverTasks[storyID] = nil
-        guard stories.contains(where: { $0.id == storyID }) else { return }
+        guard allStories.contains(where: { $0.id == storyID }) else { return }
         if let image {
             covers[storyID] = image
+            Self.saveVideoCover(image, storyID: storyID, videoURL: videoURL)
         }
+    }
+
+    private nonisolated static func cachedVideoCover(storyID: String, videoURL: URL) -> UIImage? {
+        let fileURL = coverCacheFileURL(storyID: storyID, videoURL: videoURL)
+        guard let data = try? Data(contentsOf: fileURL) else { return nil }
+        return UIImage(data: data)
+    }
+
+    private nonisolated static func saveVideoCover(_ image: UIImage, storyID: String, videoURL: URL) {
+        guard let data = image.jpegData(compressionQuality: 0.82) else { return }
+        let directory = coverCacheDirectory
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try data.write(to: coverCacheFileURL(storyID: storyID, videoURL: videoURL), options: .atomic)
+        } catch {
+        }
+    }
+
+    private nonisolated static func removeCachedCovers(excludingStoryIDs validStoryIDs: Set<String>) {
+        let directory = coverCacheDirectory
+        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return }
+        let validPrefixes = Set(validStoryIDs.map { safeCacheComponent($0) + "-" })
+        for file in files where !validPrefixes.contains(where: { file.lastPathComponent.hasPrefix($0) }) {
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+
+    private nonisolated static var coverCacheDirectory: URL {
+        let baseURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return baseURL.appendingPathComponent(coverCacheDirectoryName, isDirectory: true)
+    }
+
+    private nonisolated static func coverCacheFileURL(storyID: String, videoURL: URL) -> URL {
+        let artifactKey = videoURL.path.isEmpty ? videoURL.absoluteString : videoURL.path
+        let fileName = "\(safeCacheComponent(storyID))-\(fnv1a64Hex(artifactKey)).jpg"
+        return coverCacheDirectory.appendingPathComponent(fileName, isDirectory: false)
+    }
+
+    private nonisolated static func safeCacheComponent(_ value: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let scalars = value.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" }
+        let sanitized = String(scalars)
+        return sanitized.isEmpty ? "story" : sanitized
+    }
+
+    private nonisolated static func fnv1a64Hex(_ value: String) -> String {
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 0x100000001b3
+        }
+        return String(hash, radix: 16)
     }
 
     private nonisolated static func generateVideoCover(from url: URL) async -> UIImage? {
@@ -117,7 +206,7 @@ final class HomeViewModel: ObservableObject {
 
         switch state {
         case .loading, .populated:
-            stories = Self.mockStories
+            updateStories(Self.mockStories)
             covers = Dictionary(uniqueKeysWithValues: stories.enumerated().map { index, story in
                 (story.id, Self.makeCover(index: index))
             })

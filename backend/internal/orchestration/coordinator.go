@@ -168,6 +168,49 @@ func (c *Coordinator) RecordValidationAndQueueRender(ctx context.Context, userID
 	return c.createStageJob(ctx, userID, projectID, "", models.JobTypeVideoRender, configuration, renderKey+":retry:"+strings.TrimSpace(idempotencyKey), true)
 }
 
+// RequestStoryPlanRevision queues a new StoryPlan job for high-level story edit
+// intent. It reuses existing media analyses and never restarts media
+// preprocessing, transcription, or video understanding.
+func (c *Coordinator) RequestStoryPlanRevision(ctx context.Context, userID, projectID, idempotencyKey string, configuration map[string]string) (models.ProcessingJob, error) {
+	project, err := c.Store.GetProject(ctx, userID, projectID)
+	if err != nil {
+		return models.ProcessingJob{}, err
+	}
+	if len(project.MediaIDs) == 0 {
+		return models.ProcessingJob{}, store.ErrConflict
+	}
+	config := inheritConfiguration(configuration)
+	config["pipeline_version"] = PipelineVersion
+	version, _ := strconv.Atoi(strings.TrimSpace(config["story_plan_version"]))
+	if version <= 0 {
+		latest, err := c.Store.GetStoryPlan(ctx, userID, projectID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return models.ProcessingJob{}, err
+		}
+		version = latest.Version + 1
+		if version <= 1 {
+			version = 1
+		}
+		config["story_plan_version"] = strconv.Itoa(version)
+	}
+	key := strings.TrimSpace(idempotencyKey)
+	if key == "" {
+		key = stableStoryRevisionKey(projectID, version)
+	} else {
+		key = projectID + ":story_revision:" + key
+	}
+	job, err := c.createStageJob(ctx, userID, projectID, "", models.JobTypeStoryPlan, config, key, true)
+	if err != nil {
+		return models.ProcessingJob{}, err
+	}
+	if !models.IsTerminalJobStatus(job.Status) {
+		if err := c.Store.SetProjectStatus(ctx, userID, projectID, models.ProjectStatusAnalyzing); err != nil {
+			return models.ProcessingJob{}, err
+		}
+	}
+	return job, nil
+}
+
 func (c *Coordinator) UpdateJobStatus(ctx context.Context, jobID string, status models.JobStatus, progress float64, errorCode, errorMessage, artifactS3Key, artifactType string) (models.ProcessingJob, error) {
 	job, err := c.Store.GetJobByID(ctx, jobID)
 	if err != nil {
@@ -408,6 +451,10 @@ func smallConfiguration(configuration map[string]string) map[string]string {
 
 func stableStageKey(projectID, mediaID string, jobType models.JobType) string {
 	return projectID + ":" + mediaID + ":" + string(jobType) + ":" + PipelineVersion
+}
+
+func stableStoryRevisionKey(projectID string, storyPlanVersion int) string {
+	return projectID + ":" + strconv.Itoa(storyPlanVersion) + ":" + string(models.JobTypeStoryPlan) + ":revision:" + PipelineVersion
 }
 
 func stableValidateKey(projectID string, storyPlanVersion int, outputPreset string) string {
