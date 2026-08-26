@@ -1,3 +1,4 @@
+import AVFoundation
 import Combine
 import Foundation
 import SwiftUI
@@ -19,6 +20,7 @@ final class HomeViewModel: ObservableObject {
     private let storyService: StoryService
     private let mockState: HomeMockState?
     private var loadTask: Task<Void, Never>?
+    private var coverTasks: [String: Task<Void, Never>] = [:]
 
     init(storyService: StoryService, mockState: HomeMockState? = nil) {
         self.storyService = storyService
@@ -36,8 +38,9 @@ final class HomeViewModel: ObservableObject {
                 if let mockState {
                     try await loadMockData(for: mockState)
                 } else {
-                    stories = try await storyService.listStories()
-                    covers = [:]
+                    let loadedStories = try await storyService.listStories()
+                    stories = loadedStories
+                    loadGeneratedVideoCovers(for: loadedStories)
                 }
                 errorMessage = nil
             } catch is CancellationError {
@@ -50,6 +53,61 @@ final class HomeViewModel: ObservableObject {
     func coverImage(for story: Story) -> Image? {
         guard let image = covers[story.id] else { return nil }
         return Image(uiImage: image)
+    }
+
+    private func loadGeneratedVideoCovers(for stories: [Story]) {
+        let storyIDs = Set(stories.map(\.id))
+        covers = covers.filter { storyIDs.contains($0.key) }
+        let staleCoverTaskIDs = coverTasks.keys.filter { !storyIDs.contains($0) }
+        for storyID in staleCoverTaskIDs {
+            coverTasks[storyID]?.cancel()
+            coverTasks[storyID] = nil
+        }
+
+        for story in stories where story.status == .ready && covers[story.id] == nil && coverTasks[story.id] == nil {
+            guard let videoURL = story.videoURL else { continue }
+            let storyID = story.id
+            coverTasks[storyID] = Task { [weak self] in
+                let image = await Self.generateVideoCover(from: videoURL)
+                guard !Task.isCancelled else { return }
+                await self?.finishGeneratedVideoCover(storyID: storyID, image: image)
+            }
+        }
+    }
+
+    private func finishGeneratedVideoCover(storyID: String, image: UIImage?) {
+        coverTasks[storyID] = nil
+        guard stories.contains(where: { $0.id == storyID }) else { return }
+        if let image {
+            covers[storyID] = image
+        }
+    }
+
+    private nonisolated static func generateVideoCover(from url: URL) async -> UIImage? {
+        await Task.detached(priority: .utility) {
+            autoreleasepool {
+                let asset = AVURLAsset(url: url)
+                let generator = AVAssetImageGenerator(asset: asset)
+                generator.appliesPreferredTrackTransform = true
+                generator.maximumSize = CGSize(width: 900, height: 560)
+
+                for seconds in [0.2, 0, 1.0] {
+                    do {
+                        let time = CMTime(seconds: seconds, preferredTimescale: 600)
+                        let image = try generator.copyCGImage(at: time, actualTime: nil)
+                        return UIImage(cgImage: image)
+                    } catch {
+                        continue
+                    }
+                }
+                return nil
+            }
+        }.value
+    }
+
+    deinit {
+        loadTask?.cancel()
+        coverTasks.values.forEach { $0.cancel() }
     }
 
     private func loadMockData(for state: HomeMockState) async throws {
@@ -142,9 +200,5 @@ final class HomeViewModel: ObservableObject {
             UIColor.white.withAlphaComponent(0.42).setFill()
             context.cgContext.fillEllipse(in: sun)
         }
-    }
-
-    deinit {
-        loadTask?.cancel()
     }
 }

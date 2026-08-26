@@ -347,6 +347,52 @@ size
 checksum where available
 ```
 
+
+## 6.1 Current iOS upload contract
+
+The current iOS flow uses authenticated direct-S3 upload sessions:
+
+```text
+iOS
+  ↓
+POST /v1/media/upload-sessions
+  ↓
+Go API validates authenticated user and idempotency key
+  ↓
+Go API creates media + upload session records
+  ↓
+Go API returns presigned single-part or multipart URLs
+  ↓
+iOS uploads bytes directly to private S3
+  ↓
+iOS calls /v1/media/uploads/complete or /v1/media/upload-sessions/:id/complete
+  ↓
+Go API marks media ready
+```
+
+Important implementation details:
+
+- upload-session creation requires `Authorization: Bearer <accessToken>`
+- upload idempotency is scoped to the authenticated user
+- S3 object keys are scoped under the authenticated user and media/project identifiers
+- completed upload sessions must not have their presigned URLs refreshed
+- stale or expired pending upload sessions may be refreshed without changing the media identity
+- iOS may use byte-scoped authorization idempotency keys so a retried upload of the same local asset and byte size can converge on the existing media record
+
+## 6.2 Source format correctness
+
+Do not trust filename extensions or client content type as the only source of truth.
+
+Real iPhones can produce combinations such as:
+
+```text
+filename: IMG_0111.HEIC
+content type: image/heic
+actual bytes: JPEG
+```
+
+The backend should preserve source metadata for traceability, but workers that decode media must be robust to mismatches. The render worker currently detects JPEG magic bytes for `.HEIC`/`.HEIF` paths and bypasses HEIC conversion when the source is already JPEG.
+
 ---
 
 # 7. Authentication and authorization
@@ -389,6 +435,55 @@ API requests
 
 The access token is stored securely on iOS.
 
+
+## 7.2.1 Current anonymous authentication implementation
+
+FrameMio currently implements anonymous application authentication with no visible sign-in/sign-out requirement:
+
+```text
+First launch
+  ↓
+iOS creates/stores anonymous installation ID in Keychain
+  ↓
+POST /v1/auth/anonymous { installation_id }
+  ↓
+Go API creates or retrieves user ios-anon-<installation_id>
+  ↓
+Go API returns short-lived access token + refresh token
+  ↓
+iOS stores tokens in Keychain
+```
+
+Current token behavior:
+
+- access tokens are HMAC-SHA256 signed bearer tokens
+- refresh tokens are HMAC-SHA256 signed bearer tokens with a distinct token type
+- token validation verifies signature, expiration, subject, and token type
+- authenticated user identity is attached to request context before protected route handling
+- access tokens are accepted by protected public API routes
+- refresh tokens are accepted only by `/v1/auth/refresh`
+- refresh tokens must not authorize protected routes
+- `AUTH_HMAC_SECRET` must be server-only and at least 32 characters
+- `INTERNAL_API_TOKEN` is separate and is used only for worker-to-API internal callbacks
+
+The initial HMAC implementation is a production boundary for the current self-hosted API. If FrameMio later delegates identity to an external provider, replace this boundary with a verifier such as JWKS without changing handler ownership checks.
+
+## 7.2.2 Current iOS token behavior
+
+The iOS API client obtains and attaches tokens automatically:
+
+```text
+API request
+  ↓
+KeychainAuthTokenProvider.accessToken()
+  ↓
+Authorization: Bearer <accessToken>
+  ↓
+if API returns 401, invalidate access token and retry once with a freshly issued/refreshed token
+```
+
+The app must not show Sign In or Sign Out as a prerequisite for first use. Sign in with Apple remains an identity-upgrade/account-linking feature.
+
 ## 7.3 Authorization
 
 Every resource must be owned by an authenticated identity.
@@ -417,6 +512,21 @@ database ownership check
 ```
 
 For every project/media/job request, enforce ownership.
+
+
+This applies to all user-owned domain records:
+
+- users
+- upload sessions
+- media
+- projects
+- jobs
+- PhotoAnalysis
+- VideoAnalysis
+- StoryPlans
+- render outputs
+
+Handlers must derive `userID` from the authenticated request context. They must never trust a request body, query string, or route parameter as proof of ownership.
 
 Example:
 
@@ -519,6 +629,53 @@ GET  /v1/projects/:id/video
 
 Exact routes may differ if the repository already established a coherent convention. Do not rename routes solely to match this document.
 
+
+## 8.2 Current implemented public routes
+
+Current public routes include both the newer iOS compatibility routes and older project/media routes. Preserve existing clients when changing them.
+
+Authentication:
+
+```text
+POST /v1/auth/anonymous
+POST /v1/auth/refresh
+```
+
+Current iOS upload/story compatibility:
+
+```text
+POST /v1/media/upload-sessions
+POST /v1/media/upload-sessions/:id/complete
+POST /v1/media/uploads/complete
+GET  /v1/stories
+POST /v1/stories
+GET  /v1/stories/:id
+```
+
+Existing project/media routes:
+
+```text
+POST /media/upload-session
+POST /media
+GET  /media/:id
+POST /projects
+POST /projects/:id/analyze
+GET  /projects/:id/status
+GET  /projects/:id/story
+POST /projects/:id/render
+```
+
+Internal worker routes:
+
+```text
+GET  /internal/jobs/:id/render-input
+POST /internal/jobs/:id/status
+POST /internal/jobs/:id/analysis
+POST /internal/jobs/:id/story-plan
+```
+
+Internal routes are protected by `X-FrameMio-Internal-Token`; public routes are protected by `Authorization: Bearer <accessToken>` after anonymous authentication.
+
 ---
 
 # 9. SQS rules
@@ -551,6 +708,27 @@ Large data belongs in:
 - PostgreSQL, when it is structured and reasonably sized
 
 SQS should contain enough information for a worker to locate the required data.
+
+
+## 9.1 Current job message contract
+
+Current job messages are identifier-only and may include bounded string configuration:
+
+```json
+{
+  "jobId": "job-...",
+  "projectId": "project-...",
+  "mediaId": "media-...",
+  "jobType": "VIDEO_RENDER",
+  "configuration": {
+    "pipeline_version": "async-pipeline-v1",
+    "story_plan_version": "1",
+    "output_preset": "premium-memory"
+  }
+}
+```
+
+Do not add raw media, transcripts, StoryPlan JSON blobs, frame arrays, or presigned URL lists to SQS messages. Workers must load durable state from the Go API/PostgreSQL and media/artifacts from S3.
 
 ---
 
@@ -594,6 +772,20 @@ FAILED
 CANCELLED
 ```
 
+
+Project-level status currently maps to the iOS user-facing flow:
+
+```text
+draft       → queued / preparing
+analyzing   → Finding meaningful moments
+story_ready → internal StoryPlan complete state; should normally advance to rendering
+rendering   → Creating your film
+ready       → playable final video is available
+failed      → retry is required
+```
+
+A render job is only successful when it completes with a bounded S3 `artifact_s3_key` for the final MP4. A ready project without a completed render artifact is invalid for playback and should be logged.
+
 ## 10.1 Idempotency
 
 Every stage must be safely retryable.
@@ -622,6 +814,9 @@ If rendering fails:
 retry rendering
 do not rerun AI analysis
 ```
+
+
+Current orchestration supports this by creating a new render job for the same StoryPlan/version/preset when a prior render reached a terminal failed state and the caller supplies a new idempotency key. Rendering retries must reuse the existing StoryPlan and must not re-run VideoAnalysis, transcription, or story planning unless explicitly requested.
 
 ---
 
@@ -664,6 +859,14 @@ Use FFmpeg for media preprocessing.
 Do not duplicate media-processing logic unnecessarily between iOS and backend.
 
 Backend video preprocessing should be the canonical processing path.
+
+
+Current implementation notes:
+
+- frame extraction seeks before opening the input (`-ss` before `-i`) for faster representative-frame extraction
+- preprocessing artifacts are cached by user, media, input/analysis version, and source ETag
+- VideoAnalysis is cached by user, media, input version, understanding version, provider/model, and source ETag
+- force reanalysis should reuse deterministic preprocessing where possible and append a new semantic analysis version rather than overwriting old records
 
 ## 11.2 Frame selection
 
@@ -718,6 +921,23 @@ Output should contain timestamped segments:
 The rest of the application must not depend on one specific transcription provider.
 
 No transcript should be placed in SQS.
+
+
+## 12.1 Transcription failure behavior
+
+Transcription is useful evidence, but it must not be a single point of failure for visual memories.
+
+Current behavior:
+
+```text
+if video has audio and transcription succeeds:
+    include timestamped transcript in VideoEvidence
+else if transcription fails or times out:
+    log a warning
+    continue with visual-only evidence
+```
+
+This preserves the pipeline boundary: the Video Intelligence Worker may still create `VideoAnalysis` from frames, scenes, metadata, and quality signals when speech evidence is unavailable.
 
 ---
 
@@ -945,6 +1165,52 @@ Never invent an asset or timestamp.
 
 StoryPlan must not contain renderer-specific implementation details unless they are part of a deliberately stable rendering contract.
 
+
+## 16.1 Current StoryPlan schema contract
+
+Current schema version is `story_plan_v1`.
+
+Top-level fields include:
+
+```text
+id
+project_id
+version
+requested_duration_ms
+story_type
+visual_style
+title_text
+ending_text
+music_mood
+user_instructions
+moments
+captions
+audio
+output
+total_duration_ms
+```
+
+Each `StoryMoment` is the renderer-stable selection unit:
+
+```text
+moment_id
+asset_id
+media_id
+media_type
+video_analysis_version
+start_micros
+end_micros
+narrative
+caption
+duration_ms
+crop_intent
+transition
+reason
+score
+```
+
+Photo moments must have positive `duration_ms` and no source timestamps. Video moments must have `start_micros`, `end_micros`, a matching `duration_ms`, and a valid `video_analysis_version`.
+
 ---
 
 # 17. StoryPlan Validator
@@ -968,6 +1234,18 @@ Check:
 The validator must NOT use AI.
 
 Invalid StoryPlans must never reach rendering.
+
+
+Current validator behavior includes:
+
+- project exists and belongs to authenticated user
+- referenced media belongs to the project
+- duplicate moment references are rejected for identical photo or identical video range references
+- video moment timestamps must be inside the source duration
+- video `duration_ms` must match `end_micros - start_micros`
+- video moments must reference an existing VideoAnalysis version
+- photo moments must not define video timestamps
+- referenced S3 objects must be resolvable before rendering
 
 ---
 
@@ -1057,6 +1335,36 @@ Text:
 - captions
 - optional chapter text
 - ending
+
+
+## 18.3 Current render-worker contract
+
+The render worker currently:
+
+1. receives a `VIDEO_RENDER` SQS message
+2. calls `GET /internal/jobs/:id/render-input`
+3. loads the validated StoryPlan and source media references
+4. downloads source assets from private S3
+5. trims video moments to exact StoryPlan source ranges
+6. applies deterministic Ken Burns-style motion to photo moments
+7. builds a deterministic composition
+8. renders/encodes an MP4 with FFmpeg/Remotion-compatible composition logic
+9. uploads the final MP4 to the configured S3 key
+10. calls `POST /internal/jobs/:id/status` with `COMPLETED` and `artifact_s3_key`
+
+The renderer must not call AI and must not choose or reorder story moments. It executes the StoryPlan.
+
+## 18.4 Render input resilience
+
+The renderer must be resilient to common iPhone media realities:
+
+- vertical videos and photos
+- HEIC/HEIF photo filenames
+- photo files whose extension/content type does not match the actual bytes
+- multiple selected ranges from the same source video
+- photo-only, video-only, and mixed photo/video StoryPlans
+
+When a `.HEIC` or `.HEIF` source contains JPEG bytes, the renderer should use the source image directly rather than failing HEIC conversion.
 
 ---
 
@@ -1159,6 +1467,24 @@ https://api.framemio.com
 
 Workers should remain private.
 
+
+## 20.2 Worker activation and manual scaling
+
+Current AWS operation supports both queued workers and one-off ECS task activation:
+
+- backend orchestration publishes identifier-only SQS messages
+- when configured, the Go API can start one-off ECS Fargate worker tasks for video, story planning, and rendering stages
+- long-running worker services can also be manually scaled with scripts
+
+Current helper scripts:
+
+```text
+backend/scripts/run-workers.sh   # scale video + render worker services up
+backend/scripts/stop-workers.sh  # scale video + render worker services to 0
+```
+
+`desiredCount` is the ECS service's target number of running tasks. Setting `DESIRED_COUNT=2 backend/scripts/run-workers.sh` should request two running tasks for each configured worker service. Scaling services to 0 is acceptable for cost control, but queued jobs will not make progress unless either one-off ECS activation is enabled or a worker service/task is running.
+
 ---
 
 # 21. Security requirements
@@ -1180,6 +1506,18 @@ Use presigned URLs for controlled upload/download.
 Every API resource must enforce ownership.
 
 Every expensive operation must be rate limited.
+
+
+Expensive public operations include:
+
+- creating iOS stories
+- creating upload sessions
+- starting analysis
+- starting render/re-render
+
+Current per-user rate limiting is enforced for story creation, analysis, and render/re-render. Upload-session quotas should also remain protected because direct S3 upload authorization creates storage and bandwidth cost.
+
+Rate limits and quotas must be applied per authenticated user, not per client-provided user identifier.
 
 Especially protect:
 
@@ -1231,39 +1569,41 @@ A typical project should follow:
 ```text
 1. User opens FrameMio
 
-2. User chooses "Make My Day"
+2. iOS silently obtains anonymous application authentication
 
-3. iOS identifies candidate media
+3. User chooses "Make My Day"
 
-4. iOS performs lightweight local analysis
+4. iOS identifies selected/candidate photos and videos
 
-5. iOS requests upload session
+5. iOS performs lightweight local analysis
 
-6. iOS uploads media directly to S3
+6. iOS requests authenticated upload sessions
 
-7. Go API creates analysis jobs
+7. iOS uploads media directly to private S3
 
-8. SQS distributes jobs
+8. Go API creates project and stage jobs
 
-9. Video Worker preprocesses videos
+9. SQS distributes identifier-only jobs
 
-10. Transcription runs when useful
+10. Video Worker preprocesses videos; photo evidence comes from uploaded media plus lightweight local analysis
 
-11. Multimodal AI creates VideoAnalysis
+11. Transcription runs when useful and falls back to visual-only evidence when unavailable
 
-12. Story Planner creates StoryPlan
+12. Multimodal AI creates VideoAnalysis for videos
 
-13. StoryPlan Validator validates it
+13. Story Planner combines PhotoAnalysis, VideoAnalysis, metadata, and clusters into StoryPlan
 
-14. Render Worker renders MP4
+14. StoryPlan Validator validates deterministically
 
-15. Final video is uploaded to S3
+15. Render Worker renders mixed photo/video MP4 from the validated StoryPlan
 
-16. iPhone receives completion status
+16. Final video is uploaded to S3
 
-17. User watches video
+17. iPhone receives completion status and presigned playback URL
 
-18. User can:
+18. User watches video
+
+19. User can:
     - regenerate
     - remove moment
     - replace moment
@@ -1304,6 +1644,9 @@ Do not rerun:
 - story planning
 
 Use the existing validated StoryPlan.
+
+
+If a render failed after a valid StoryPlan was stored, retry rendering only. The retry should create/reuse a render job for the same story plan version and output preset, then execute the render worker. Do not restart upload, analysis, transcription, or planning for this failure class.
 
 ## If the user explicitly asks to reanalyze
 
@@ -1854,25 +2197,25 @@ Do not expand the feature surface while the core pipeline is unstable.
 The first meaningful milestone is:
 
 ```text
-A real iPhone video
+Real iPhone photos + videos
        ↓
-FrameMio
+FrameMio anonymous auth
        ↓
-S3
+authenticated presigned S3 upload
        ↓
-Video Intelligence
+Video Intelligence for videos + PhotoAnalysis for photos
        ↓
 VideoAnalysis
        ↓
-StoryPlan
+StoryPlan with selected photo moments and exact video ranges
        ↓
-Validator
+deterministic Validator
        ↓
-Remotion
+Render Worker / Remotion / FFmpeg
        ↓
-final MP4
+final MP4 in private S3
        ↓
-iPhone playback
+presigned iPhone playback
 ```
 
 The system should successfully do this repeatedly.

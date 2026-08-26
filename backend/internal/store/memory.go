@@ -234,6 +234,50 @@ func (s *MemoryStore) ListProjects(_ context.Context, userID string) ([]models.S
 	return projects, nil
 }
 
+func (s *MemoryStore) DeleteProject(_ context.Context, userID, projectID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	project, ok := s.projects[projectID]
+	if !ok {
+		return ErrNotFound
+	}
+	if project.UserID != userID {
+		return ErrInvalidOwner
+	}
+	delete(s.projects, projectID)
+	for key, existingID := range s.projectByIdem {
+		if existingID == projectID {
+			delete(s.projectByIdem, key)
+		}
+	}
+	for key, job := range s.jobs {
+		if job.UserID == userID && job.ProjectID == projectID {
+			delete(s.jobs, key)
+		}
+	}
+	for key, existingID := range s.jobByIdem {
+		if _, ok := s.jobs[existingID]; !ok {
+			delete(s.jobByIdem, key)
+		}
+	}
+	for key, analysis := range s.analyses {
+		if analysis.ProjectID == projectID {
+			delete(s.analyses, key)
+		}
+	}
+	for key, analysis := range s.videoAnalyses {
+		if analysis.ProjectID == projectID {
+			delete(s.videoAnalyses, key)
+		}
+	}
+	for key, plan := range s.storyPlans {
+		if plan.ProjectID == projectID {
+			delete(s.storyPlans, key)
+		}
+	}
+	return nil
+}
+
 func (s *MemoryStore) SetProjectStatus(_ context.Context, userID, projectID string, status models.ProjectStatus) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

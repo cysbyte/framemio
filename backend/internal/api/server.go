@@ -156,9 +156,15 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 	}
 	if strings.HasPrefix(request.URL.Path, "/v1/stories/") {
 		parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
-		if request.Method == http.MethodGet && len(parts) == 3 {
-			s.getIOSStory(response, request, parts[2])
-			return
+		if len(parts) == 3 {
+			switch request.Method {
+			case http.MethodGet:
+				s.getIOSStory(response, request, parts[2])
+				return
+			case http.MethodDelete:
+				s.deleteIOSStory(response, request, parts[2])
+				return
+			}
 		}
 		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return

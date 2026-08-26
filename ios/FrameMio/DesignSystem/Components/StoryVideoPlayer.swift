@@ -10,21 +10,26 @@ import SwiftUI
 struct StoryVideoPlayer: View {
     let url: URL
     let autoplays: Bool
+    let isPlaybackEnabled: Bool
 
     @StateObject private var controller: StoryVideoPlayerController
 
-    init(url: URL, autoplays: Bool = true) {
+    init(url: URL, autoplays: Bool = true, isPlaybackEnabled: Bool = true) {
         self.url = url
         self.autoplays = autoplays
+        self.isPlaybackEnabled = isPlaybackEnabled
         _controller = StateObject(wrappedValue: StoryVideoPlayerController(url: url))
     }
 
     var body: some View {
         VideoPlayer(player: controller.player)
-            .onAppear { controller.start(autoplays: autoplays) }
+            .onAppear { controller.setPlaybackEnabled(isPlaybackEnabled, autoplays: autoplays) }
             .onDisappear { controller.pause() }
-            .onChange(of: url) { newURL in
-                controller.replace(url: newURL, autoplays: autoplays)
+            .onChange(of: url) { _, newURL in
+                controller.replace(url: newURL, autoplays: autoplays && isPlaybackEnabled)
+            }
+            .onChange(of: isPlaybackEnabled) { _, enabled in
+                controller.setPlaybackEnabled(enabled, autoplays: autoplays)
             }
             .accessibilityLabel("Your film")
     }
@@ -48,6 +53,14 @@ final class StoryVideoPlayerController: ObservableObject {
         try? AVAudioSession.sharedInstance().setActive(true)
         if autoplays {
             player.play()
+        }
+    }
+
+    func setPlaybackEnabled(_ isEnabled: Bool, autoplays: Bool) {
+        if isEnabled {
+            start(autoplays: autoplays)
+        } else {
+            pause()
         }
     }
 

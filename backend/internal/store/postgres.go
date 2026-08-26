@@ -377,6 +377,22 @@ func (s *PostgresStore) ListProjects(ctx context.Context, userID string) ([]mode
 	return projects, rows.Err()
 }
 
+func (s *PostgresStore) DeleteProject(ctx context.Context, userID, projectID string) error {
+	if _, err := s.GetProject(ctx, userID, projectID); err != nil {
+		return err
+	}
+	_, err := s.pool.Exec(ctx, `
+		DELETE FROM framemio_domain_records
+		WHERE user_id=$1 AND (
+			(kind='project' AND id=$2) OR
+			(project_id=$2 AND kind IN ('analysis','video_analysis','story_plan','job'))
+		)`, userID, projectID)
+	if err != nil {
+		return fmt.Errorf("delete project: %w", err)
+	}
+	return nil
+}
+
 func (s *PostgresStore) SetProjectStatus(ctx context.Context, userID, projectID string, status models.ProjectStatus) error {
 	var project models.StoryProject
 	if err := s.get(ctx, "project", userID, projectID, &project); err != nil {

@@ -88,6 +88,11 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
         try await requestRender(id: id)
     }
 
+    func deleteStory(id: String) async throws {
+        _ = try await apiClient.data(for: APIRequest(method: .delete, path: "/v1/stories/\(id)"))
+        try await persistence.removeStory(id: id)
+    }
+
     private func requestRender(id: String) async throws -> Story {
         let body: Data
         do {
@@ -213,6 +218,11 @@ final class MockStoryService: StoryService, @unchecked Sendable {
         try await mutateStory(id: id) { story in
             story.status = .rendering
         }
+    }
+
+    func deleteStory(id: String) async throws {
+        try await Task.sleep(for: .milliseconds(140))
+        try await persistence.removeStory(id: id)
     }
 
     func replaceMoment(storyID: String, assetID: String) async throws -> Story {

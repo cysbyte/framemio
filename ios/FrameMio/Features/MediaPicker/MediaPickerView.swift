@@ -1,9 +1,13 @@
+import Photos
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 struct MediaPickerView: View {
     @Environment(\.openURL) private var openURL
     @ObservedObject private var viewModel: MediaPickerViewModel
+    @State private var captureMode: MomentCaptureMode?
+    @State private var captureErrorMessage: String?
     let onContinue: ([MediaAsset]) -> Void
 
     init(viewModel: MediaPickerViewModel, onContinue: @escaping ([MediaAsset]) -> Void) {
@@ -22,14 +26,7 @@ struct MediaPickerView: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if viewModel.totalAssetCount == 0 {
-                EmptyState(
-                    systemImage: "photo.on.rectangle.angled",
-                    title: "No moments found",
-                    message: "Try another starting point or give FrameMio access to your photo library.",
-                    actionTitle: "Try Again",
-                    action: { viewModel.load() }
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                emptyMomentsState
             } else {
                 mediaBrowser
             }
@@ -43,7 +40,7 @@ struct MediaPickerView: View {
             .ignoresSafeArea()
         }
         .navigationTitle(viewModel.context.pickerTitle)
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Text("\(viewModel.selectedCount)")
@@ -58,11 +55,22 @@ struct MediaPickerView: View {
             }
         }
         .task { viewModel.load() }
+        .sheet(item: $captureMode) { mode in
+            CameraCaptureView(mode: mode) { result in
+                captureMode = nil
+                handleCaptureResult(result)
+            }
+        }
         .alert("Photo access needed", isPresented: errorBinding) {
             Button("Try Again") { viewModel.load() }
             Button("Dismiss", role: .cancel) { viewModel.errorMessage = nil }
         } message: {
             Text(viewModel.errorMessage ?? "")
+        }
+        .alert("Capture unavailable", isPresented: captureErrorBinding) {
+            Button("OK", role: .cancel) { captureErrorMessage = nil }
+        } message: {
+            Text(captureErrorMessage ?? "")
         }
     }
 
@@ -74,6 +82,8 @@ struct MediaPickerView: View {
                 if viewModel.authorization == .limited {
                     limitedAccessNotice
                 }
+
+                captureMomentActions
 
                 filterPicker
 
@@ -190,6 +200,69 @@ struct MediaPickerView: View {
         .accessibilityElement(children: .combine)
     }
 
+    private var captureMomentActions: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            HStack(alignment: .top, spacing: FrameMioSpacing.sm) {
+                Image(systemName: "camera.fill")
+                    .font(FrameMioTypography.headline)
+                    .foregroundStyle(FrameMioColors.accent)
+                    .frame(width: 36, height: 36)
+                    .background(FrameMioColors.accentMuted.opacity(0.74), in: Circle())
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
+                    Text("Add a fresh moment")
+                        .font(FrameMioTypography.headline)
+                        .foregroundStyle(FrameMioColors.ink)
+
+                    Text("Take one more photo or record a quick clip, then FrameMio will refresh this selection.")
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            captureButtons
+        }
+        .padding(FrameMioSpacing.md)
+        .background(
+            FrameMioColors.surface.opacity(0.78),
+            in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous)
+                .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var captureButtons: some View {
+        VStack(spacing: FrameMioSpacing.sm) {
+            PrimaryButton(title: "Take Photo", systemImage: "camera.fill") {
+                presentCapture(.photo)
+            }
+
+            SecondaryButton(title: "Record Video", systemImage: "video.fill") {
+                presentCapture(.video)
+            }
+        }
+    }
+
+    private var emptyMomentsState: some View {
+        VStack(spacing: FrameMioSpacing.md) {
+            EmptyState(
+                systemImage: "camera.fill",
+                title: "No moments found",
+                message: "Capture something new now. FrameMio will save it to your photo library and refresh this view."
+            )
+
+            captureButtons
+                .frame(maxWidth: FrameMioMetrics.emptyStateMaxWidth)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, FrameMioSpacing.lg)
+    }
+
     private var accessState: some View {
         EmptyState(
             systemImage: viewModel.authorization == .restricted ? "lock.fill" : "photo.on.rectangle.angled",
@@ -249,10 +322,137 @@ struct MediaPickerView: View {
         openURL(settingsURL)
     }
 
+    private func presentCapture(_ mode: MomentCaptureMode) {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            captureErrorMessage = "Camera capture is not available on this device."
+            return
+        }
+        captureMode = mode
+    }
+
+    private func handleCaptureResult(_ result: Result<Void, Error>) {
+        switch result {
+        case .success:
+            viewModel.load()
+        case .failure(let error):
+            captureErrorMessage = AppError.from(error).localizedDescription
+        }
+    }
+
     private var errorBinding: Binding<Bool> {
         Binding(
             get: { viewModel.errorMessage != nil },
             set: { if !$0 { viewModel.errorMessage = nil } }
         )
+    }
+
+    private var captureErrorBinding: Binding<Bool> {
+        Binding(
+            get: { captureErrorMessage != nil },
+            set: { if !$0 { captureErrorMessage = nil } }
+        )
+    }
+}
+
+private enum MomentCaptureMode: String, Identifiable {
+    case photo
+    case video
+
+    var id: String { rawValue }
+
+    var mediaTypes: [String] {
+        switch self {
+        case .photo:
+            [UTType.image.identifier]
+        case .video:
+            [UTType.movie.identifier]
+        }
+    }
+
+    var cameraCaptureMode: UIImagePickerController.CameraCaptureMode {
+        switch self {
+        case .photo: .photo
+        case .video: .video
+        }
+    }
+}
+
+private struct CameraCaptureView: UIViewControllerRepresentable {
+    let mode: MomentCaptureMode
+    let onComplete: (Result<Void, Error>) -> Void
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.mediaTypes = mode.mediaTypes
+        picker.cameraCaptureMode = mode.cameraCaptureMode
+        picker.videoQuality = .typeHigh
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onComplete: onComplete)
+    }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        private let onComplete: (Result<Void, Error>) -> Void
+
+        init(onComplete: @escaping (Result<Void, Error>) -> Void) {
+            self.onComplete = onComplete
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            picker.dismiss(animated: true)
+            onComplete(.success(()))
+        }
+
+        func imagePickerController(
+            _ picker: UIImagePickerController,
+            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+        ) {
+            if let image = info[.originalImage] as? UIImage {
+                savePhoto(image, picker: picker)
+                return
+            }
+            if let videoURL = info[.mediaURL] as? URL {
+                saveVideo(videoURL, picker: picker)
+                return
+            }
+            picker.dismiss(animated: true)
+            onComplete(.failure(AppError.invalidResponse))
+        }
+
+        private func savePhoto(_ image: UIImage, picker: UIImagePickerController) {
+            PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.creationRequestForAsset(from: image)
+            } completionHandler: { [onComplete] _, error in
+                DispatchQueue.main.async {
+                    picker.dismiss(animated: true)
+                    if let error {
+                        onComplete(.failure(error))
+                    } else {
+                        onComplete(.success(()))
+                    }
+                }
+            }
+        }
+
+        private func saveVideo(_ videoURL: URL, picker: UIImagePickerController) {
+            PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: videoURL)
+            } completionHandler: { [onComplete] _, error in
+                DispatchQueue.main.async {
+                    picker.dismiss(animated: true)
+                    if let error {
+                        onComplete(.failure(error))
+                    } else {
+                        onComplete(.success(()))
+                    }
+                }
+            }
+        }
     }
 }

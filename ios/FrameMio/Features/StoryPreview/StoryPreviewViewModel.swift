@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import Photos
 
 @MainActor
 final class StoryPreviewViewModel: ObservableObject {
@@ -7,6 +8,8 @@ final class StoryPreviewViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var activeAction: StoryPreviewAction?
     @Published var errorMessage: String?
+    @Published var confirmationMessage: String?
+    @Published var didDeleteStory = false
     @Published var isPlayingVideo = false
 
     private var storyID: String?
@@ -211,6 +214,26 @@ final class StoryPreviewViewModel: ObservableObject {
         }
     }
 
+    func saveVideoToPhotos() {
+        guard let videoURL = playableVideoURL, activeAction == nil else { return }
+        actionTask?.cancel()
+        actionTask = Task { [weak self] in
+            guard let self else { return }
+            activeAction = .saveVideo
+            errorMessage = nil
+            confirmationMessage = nil
+            defer { activeAction = nil }
+            do {
+                try await Self.saveVideoToPhotoLibrary(from: videoURL)
+                confirmationMessage = "Saved to Photos."
+                FrameMioHaptics.success()
+            } catch is CancellationError {
+            } catch {
+                errorMessage = AppError.from(error).localizedDescription
+            }
+        }
+    }
+
     func replaceMoment(assetID: String) {
         guard let storyID else { return }
         perform(.replaceMoment) { [storyService] in
@@ -222,6 +245,58 @@ final class StoryPreviewViewModel: ObservableObject {
         guard let storyID else { return }
         perform(.removeMoment) { [storyService] in
             try await storyService.removeMoment(storyID: storyID, assetID: assetID)
+        }
+    }
+
+    func deleteStory() {
+        guard let storyID, activeAction == nil else { return }
+        actionTask?.cancel()
+        actionTask = Task { [weak self] in
+            guard let self else { return }
+            activeAction = .deleteStory
+            errorMessage = nil
+            defer { activeAction = nil }
+            do {
+                try await storyService.deleteStory(id: storyID)
+                story = nil
+                didDeleteStory = true
+                FrameMioHaptics.success()
+            } catch is CancellationError {
+            } catch {
+                errorMessage = AppError.from(error).localizedDescription
+            }
+        }
+    }
+
+    private nonisolated static func saveVideoToPhotoLibrary(from remoteURL: URL) async throws {
+        let authorization = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        guard authorization == .authorized || authorization == .limited else {
+            throw AppError.notAuthorized
+        }
+
+        let (downloadedURL, response) = try await URLSession.shared.download(from: remoteURL)
+        if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+            throw AppError.server(statusCode: httpResponse.statusCode)
+        }
+
+        let localURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("framemio-story-\(UUID().uuidString)")
+            .appendingPathExtension("mp4")
+        try FileManager.default.moveItem(at: downloadedURL, to: localURL)
+        defer { try? FileManager.default.removeItem(at: localURL) }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: localURL)
+            } completionHandler: { success, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if success {
+                    continuation.resume(returning: ())
+                } else {
+                    continuation.resume(throwing: AppError.persistenceFailure)
+                }
+            }
         }
     }
 
@@ -253,6 +328,8 @@ enum StoryPreviewAction: Hashable, Sendable {
     case retry
     case regenerate
     case renderAgain
+    case saveVideo
+    case deleteStory
     case replaceMoment
     case removeMoment
 
@@ -264,6 +341,10 @@ enum StoryPreviewAction: Hashable, Sendable {
             "Regenerating"
         case .renderAgain:
             "Rendering again"
+        case .saveVideo:
+            "Saving"
+        case .deleteStory:
+            "Removing story"
         case .replaceMoment:
             "Replacing moment"
         case .removeMoment:

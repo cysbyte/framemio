@@ -505,6 +505,50 @@ func TestIOSStoriesCompatibilityCreatesProjectAndFetchesStories(t *testing.T) {
 	}
 }
 
+func TestIOSStoriesCompatibilityDeletesStory(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	handler := newTestServer(memoryStore, publisher).Handler()
+
+	createReadyIOSMedia(t, handler, "asset-delete-photo", models.MediaTypePhoto)
+	storyResponse := performJSON(t, handler, http.MethodPost, "/v1/stories", map[string]any{
+		"context": "Special moments",
+		"assets": []map[string]any{{
+			"id":          "asset-delete-photo",
+			"kind":        "image",
+			"pixelWidth":  3024,
+			"pixelHeight": 4032,
+		}},
+	}, "", true, nil)
+	if storyResponse.Code != http.StatusCreated {
+		t.Fatalf("create iOS story status = %d, body = %s", storyResponse.Code, storyResponse.Body.String())
+	}
+	var story iosStory
+	decodeResponse(t, storyResponse, &story)
+
+	deleteResponse := performJSON(t, handler, http.MethodDelete, "/v1/stories/"+story.ID, nil, "", true, nil)
+	if deleteResponse.Code != http.StatusOK {
+		t.Fatalf("delete iOS story status = %d, body = %s", deleteResponse.Code, deleteResponse.Body.String())
+	}
+
+	getResponse := performJSON(t, handler, http.MethodGet, "/v1/stories/"+story.ID, nil, "", true, nil)
+	if getResponse.Code != http.StatusNotFound {
+		t.Fatalf("get deleted iOS story status = %d, body = %s", getResponse.Code, getResponse.Body.String())
+	}
+
+	listResponse := performJSON(t, handler, http.MethodGet, "/v1/stories", nil, "", true, nil)
+	if listResponse.Code != http.StatusOK {
+		t.Fatalf("list iOS stories status = %d, body = %s", listResponse.Code, listResponse.Body.String())
+	}
+	var stories []iosStory
+	decodeResponse(t, listResponse, &stories)
+	if len(stories) != 0 {
+		t.Fatalf("deleted story still listed: %+v", stories)
+	}
+}
+
 func TestIOSStoriesCompatibilityResolvesByteScopedUploadKeys(t *testing.T) {
 	t.Parallel()
 

@@ -83,6 +83,23 @@ func (s *Server) getIOSStory(response http.ResponseWriter, request *http.Request
 	s.writeJSON(response, http.StatusOK, s.makeIOSStory(request, user.ID, project))
 }
 
+func (s *Server) deleteIOSStory(response http.ResponseWriter, request *http.Request, storyID string) {
+	user, ok := s.authenticate(response, request)
+	if !ok {
+		return
+	}
+	storyID = strings.TrimSpace(storyID)
+	if storyID == "" {
+		s.writeError(response, http.StatusBadRequest, "invalid_story", "story id is required")
+		return
+	}
+	if err := s.Store.DeleteProject(request.Context(), user.ID, storyID); err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	s.writeJSON(response, http.StatusOK, map[string]bool{"deleted": true})
+}
+
 func (s *Server) reconcileIOSStoryProgress(request *http.Request, userID string, project models.StoryProject) models.StoryProject {
 	// story_ready is included because a StoryPlan that completed before the
 	// pipeline queued its render leaves the project parked there forever, which

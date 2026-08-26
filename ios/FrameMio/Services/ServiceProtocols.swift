@@ -139,6 +139,7 @@ struct APIRequest: Sendable {
     enum Method: String, Sendable {
         case get = "GET"
         case post = "POST"
+        case delete = "DELETE"
     }
 
     let method: Method
@@ -165,6 +166,7 @@ protocol StoryService: Sendable {
     func retryProcessing(id: String) async throws -> Story
     func regenerateStory(id: String) async throws -> Story
     func renderAgain(id: String) async throws -> Story
+    func deleteStory(id: String) async throws
     func replaceMoment(storyID: String, assetID: String) async throws -> Story
     func removeMoment(storyID: String, assetID: String) async throws -> Story
 }
@@ -172,6 +174,7 @@ protocol StoryService: Sendable {
 protocol StoryPersistence: Sendable {
     func loadStories() async throws -> [Story]
     func saveStories(_ stories: [Story]) async throws
+    func removeStory(id: String) async throws
 }
 
 protocol MediaUploadStore: Sendable {

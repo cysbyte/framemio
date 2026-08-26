@@ -36,6 +36,11 @@ actor UserDefaultsStoryPersistence: StoryPersistence {
             throw AppError.persistenceFailure
         }
     }
+
+    func removeStory(id: String) async throws {
+        let stories = try await loadStories().filter { $0.id != id }
+        try await saveStories(stories)
+    }
 }
 
 actor MockStoryPersistence: StoryPersistence {
@@ -47,5 +52,9 @@ actor MockStoryPersistence: StoryPersistence {
 
     func saveStories(_ stories: [Story]) async throws {
         self.stories = stories
+    }
+
+    func removeStory(id: String) async throws {
+        stories.removeAll { $0.id == id }
     }
 }

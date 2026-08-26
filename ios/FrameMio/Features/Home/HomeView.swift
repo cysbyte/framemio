@@ -95,18 +95,12 @@ struct HomeView: View {
     private var hero: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.xl) {
             HStack(alignment: .center, spacing: FrameMioSpacing.sm) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: FrameMioRadius.medium, style: .continuous)
-                        .fill(FrameMioColors.accentMuted)
-                    RoundedRectangle(cornerRadius: FrameMioRadius.small, style: .continuous)
-                        .fill(FrameMioColors.ink)
-                        .frame(width: 30, height: 30)
-                    Image(systemName: "play.fill")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(FrameMioColors.inverseInk)
-                }
-                .frame(width: 48, height: 48)
-                .accessibilityHidden(true)
+                Image("AppLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 48, height: 48)
+                    .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.medium, style: .continuous))
+                    .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
                     Text("FrameMio")

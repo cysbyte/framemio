@@ -27,6 +27,7 @@ type Store interface {
 	CreateProject(ctx context.Context, project models.StoryProject, idempotencyKey string) (models.StoryProject, bool, error)
 	GetProject(ctx context.Context, userID, projectID string) (models.StoryProject, error)
 	ListProjects(ctx context.Context, userID string) ([]models.StoryProject, error)
+	DeleteProject(ctx context.Context, userID, projectID string) error
 	SetProjectStatus(ctx context.Context, userID, projectID string, status models.ProjectStatus) error
 	CreateJob(ctx context.Context, job models.ProcessingJob, idempotencyKey string) (models.ProcessingJob, bool, error)
 	GetJob(ctx context.Context, userID, jobID string) (models.ProcessingJob, error)
