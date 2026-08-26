@@ -157,7 +157,55 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
     assert.match(filterComplex, /\[1:v\]/);
     assert.match(filterComplex, /zoompan=z=/);
     assert.match(filterComplex, /concat=n=2:v=1:a=0/);
-    assert.equal(args[args.indexOf('-map') + 1], '[outv]');
+    assert.match(filterComplex, /anullsrc=channel_layout=stereo:sample_rate=48000/);
+    assert.match(filterComplex, /\[1:a\]atrim=duration=4\.500,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0\.6480\[a1\]/);
+    assert.match(filterComplex, /\[a0\]\[a1\]concat=n=2:v=0:a=1\[outa\]/);
+    assert.deepEqual(args.flatMap((arg, index) => arg === '-map' ? [args[index + 1]] : []), ['[outv]', '[outa]']);
+    assert.equal(args.includes('-an'), false);
+    assert.equal(args.includes('-c:a'), true);
+  } finally {
+    if (previousArgsPath === undefined) {
+      delete process.env.FRAMEMIO_FFMPEG_ARGS_PATH;
+    } else {
+      process.env.FRAMEMIO_FFMPEG_ARGS_PATH = previousArgsPath;
+    }
+  }
+});
+
+
+test('ffmpeg fallback renderer strips audio when original audio is disabled', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'framemio-muted-ffmpeg-render-test-'));
+  const fakeFfmpeg = path.join(root, 'fake-ffmpeg.cjs');
+  const argsPath = path.join(root, 'ffmpeg-args.json');
+  const outputPath = path.join(root, 'story.mp4');
+  await writeFile(fakeFfmpeg, `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.writeFileSync(process.env.FRAMEMIO_FFMPEG_ARGS_PATH, JSON.stringify(args));
+fs.writeFileSync(args[args.length - 1], 'fake mp4');
+`, 'utf8');
+  await chmod(fakeFfmpeg, 0o755);
+
+  const previousArgsPath = process.env.FRAMEMIO_FFMPEG_ARGS_PATH;
+  process.env.FRAMEMIO_FFMPEG_ARGS_PATH = argsPath;
+  try {
+    const assets = fixtureMediaAssets();
+    const assetPaths = new Map(assets.map((asset) => [asset.id, `/asset/${asset.file_name}`]));
+    const composition = buildComposition(fixtureStoryPlan({audio: {source: 'none'}}), assets, assetPaths, new Map(), {
+      work_dir: root,
+      assets_dir: path.join(root, 'assets'),
+      clips_dir: path.join(root, 'clips'),
+      output_file: outputPath,
+      composition_file: path.join(root, 'composition.json'),
+    });
+
+    await new FfmpegCompositionRenderer({ffmpegBinary: fakeFfmpeg}).renderComposition(composition, outputPath);
+
+    const args = JSON.parse(await readFile(argsPath, 'utf8')) as string[];
+    const filterComplex = args[args.indexOf('-filter_complex') + 1];
+    assert.doesNotMatch(filterComplex, /\[outa\]/);
+    assert.deepEqual(args.flatMap((arg, index) => arg === '-map' ? [args[index + 1]] : []), ['[outv]']);
+    assert.equal(args.includes('-an'), true);
   } finally {
     if (previousArgsPath === undefined) {
       delete process.env.FRAMEMIO_FFMPEG_ARGS_PATH;

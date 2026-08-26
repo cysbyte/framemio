@@ -51,12 +51,27 @@ export class RemotionCliRenderer implements RemotionRenderer {
 
 type PhotoTimelineClip = TimelineClip & {transform: KenBurnsTransform};
 
-function concatVideoFilter(composition: CompositionSpec): string {
-  const filters = composition.clips.map((clip, index) => isPhotoTimelineClip(clip)
+interface ConcatFilter {
+  filter: string;
+  hasAudio: boolean;
+}
+
+function concatFilter(composition: CompositionSpec): ConcatFilter {
+  const videoFilters = composition.clips.map((clip, index) => isPhotoTimelineClip(clip)
     ? photoVideoFilter(clip, index, composition)
     : sourceVideoFilter(clip, index, composition));
-  const inputs = composition.clips.map((_, index) => `[v${index}]`).join('');
-  return [...filters, `${inputs}concat=n=${composition.clips.length}:v=1:a=0,format=yuv420p[outv]`].join(';');
+  const videoInputs = composition.clips.map((_, index) => `[v${index}]`).join('');
+  const filters = [...videoFilters, `${videoInputs}concat=n=${composition.clips.length}:v=1:a=0,format=yuv420p[outv]`];
+  if (!composition.audio.original_audio) {
+    return {filter: filters.join(';'), hasAudio: false};
+  }
+
+  const audioFilters = composition.clips.map((clip, index) => isPhotoTimelineClip(clip)
+    ? silentAudioFilter(clip, index)
+    : sourceAudioFilter(clip, index, composition));
+  const audioInputs = composition.clips.map((_, index) => `[a${index}]`).join('');
+  filters.push(...audioFilters, `${audioInputs}concat=n=${composition.clips.length}:v=0:a=1[outa]`);
+  return {filter: filters.join(';'), hasAudio: true};
 }
 
 function isPhotoTimelineClip(clip: TimelineClip): clip is PhotoTimelineClip {
@@ -68,6 +83,15 @@ function sourceVideoFilter(clip: TimelineClip, index: number, composition: Compo
     ? `scale=${composition.resolution.width}:${composition.resolution.height}:force_original_aspect_ratio=decrease,pad=${composition.resolution.width}:${composition.resolution.height}:(ow-iw)/2:(oh-ih)/2`
     : `scale=${composition.resolution.width}:${composition.resolution.height}:force_original_aspect_ratio=increase,crop=${composition.resolution.width}:${composition.resolution.height}`;
   return `[${index}:v]${scaleAndCrop},setsar=1,fps=${composition.fps},trim=duration=${clipDurationSeconds(clip)},setpts=PTS-STARTPTS[v${index}]`;
+}
+
+function sourceAudioFilter(clip: TimelineClip, index: number, composition: CompositionSpec): string {
+  const volume = ffmpegNumber(clip.volume * composition.audio.original_volume);
+  return `[${index}:a]atrim=duration=${clipDurationSeconds(clip)},asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=${volume}[a${index}]`;
+}
+
+function silentAudioFilter(clip: TimelineClip, index: number): string {
+  return `anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration=${clipDurationSeconds(clip)},asetpts=PTS-STARTPTS,aformat=sample_fmts=fltp:channel_layouts=stereo[a${index}]`;
 }
 
 function photoVideoFilter(clip: PhotoTimelineClip, index: number, composition: CompositionSpec): string {
@@ -176,16 +200,23 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
       }
       args.push('-i', inputPath);
     }
+    const filter = concatFilter(composition);
     args.push(
       '-filter_complex',
-      concatVideoFilter(composition),
+      filter.filter,
       '-map',
       '[outv]',
+    );
+    if (filter.hasAudio) {
+      args.push('-map', '[outa]', '-c:a', 'aac', '-b:a', '192k');
+    } else {
+      args.push('-an');
+    }
+    args.push(
       '-t',
       durationSeconds.toFixed(3),
       '-r',
       String(composition.fps),
-      '-an',
       '-c:v',
       'libx264',
       '-pix_fmt',

@@ -669,14 +669,11 @@ func (s *Server) makeIOSStory(request *http.Request, userID string, project mode
 
 func iosStoryDescription(plan models.StoryPlan) string {
 	parts := make([]string, 0, 3)
-	if strings.TrimSpace(plan.UserInstructions) != "" {
-		parts = append(parts, strings.TrimSpace(plan.UserInstructions))
+	if text := iosHumanMomentText(plan.UserInstructions); text != "" {
+		parts = append(parts, text)
 	}
 	for _, moment := range plan.Moments {
-		text := strings.TrimSpace(moment.Narrative)
-		if text == "" {
-			text = strings.TrimSpace(moment.Caption)
-		}
+		text := firstHumanIOSText(moment.Narrative, moment.Caption, moment.Reason)
 		if text != "" {
 			parts = append(parts, text)
 		}
@@ -718,7 +715,7 @@ func (s *Server) iosStoryMoments(request *http.Request, plan models.StoryPlan, m
 			Type:         mediaType,
 			ThumbnailURL: thumbnailURL,
 			Title:        iosMomentTitle(moment, mediaType, index),
-			Description:  firstNonEmptyIOSText(strings.TrimSpace(moment.Narrative), strings.TrimSpace(moment.Caption), strings.TrimSpace(moment.Reason)),
+			Description:  firstHumanIOSText(moment.Narrative, moment.Caption, moment.Reason),
 			Selected:     true,
 		})
 	}
@@ -740,10 +737,10 @@ func (s *Server) iosStoryThumbnailURL(request *http.Request, media models.MediaA
 	return &url
 }
 
-func firstNonEmptyIOSText(values ...string) string {
+func firstHumanIOSText(values ...string) string {
 	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
+		if text := iosHumanMomentText(value); text != "" {
+			return text
 		}
 	}
 	return ""
@@ -793,12 +790,19 @@ func iosMomentTitle(moment models.StoryMoment, mediaType string, index int) stri
 }
 
 func iosHumanMomentTitle(value string) string {
+	return iosHumanMomentText(value)
+}
+
+func iosHumanMomentText(value string) string {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" || isGenericIOSMomentText(trimmed) {
 		return ""
 	}
 	trimmed = strings.Split(trimmed, " · cluster:")[0]
 	trimmed = strings.Trim(trimmed, " .")
+	if trimmed == "" || isGenericIOSMomentText(trimmed) {
+		return ""
+	}
 	return trimmed
 }
 
@@ -806,6 +810,11 @@ func isGenericIOSMomentText(value string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(value))
 	normalized = strings.TrimSuffix(normalized, ".")
 	if strings.HasPrefix(normalized, "cluster:") {
+		return true
+	}
+	if strings.Contains(normalized, "external ai understanding is disabled") ||
+		strings.Contains(normalized, "selected from available frame evidence") ||
+		strings.Contains(normalized, "video moment selected from visual evidence") {
 		return true
 	}
 	switch normalized {

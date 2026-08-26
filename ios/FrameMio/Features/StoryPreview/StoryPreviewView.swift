@@ -38,7 +38,7 @@ struct StoryPreviewView: View {
             .padding(.bottom, FrameMioSpacing.xxxl)
         }
         .background(FrameMioColors.canvas.ignoresSafeArea())
-        .navigationTitle("Your Story")
+        .navigationTitle("My Story")
         .navigationBarTitleDisplayMode(.inline)
         .task { viewModel.load() }
         .onChange(of: viewModel.didDeleteStory) { _, didDelete in
@@ -69,7 +69,6 @@ struct StoryPreviewView: View {
                     story: story,
                     moments: momentPresentations(for: story),
                     availableMoments: availableMomentPresentations(for: story),
-                    videoURL: viewModel.previewVideoURL,
                     activeAction: viewModel.activeAction,
                     isPerformingAction: viewModel.isPerformingAction,
                     imageProvider: { viewModel.image(forStoryAssetID: $0) },
@@ -355,7 +354,7 @@ struct StoryPreviewView: View {
     }
 
     private var editStoryButton: some View {
-        PrimaryButton(title: "Edit Story", systemImage: "wand.and.sparkles") {
+        PrimaryButton(title: "Edit Story", systemImage: "square.and.pencil") {
             isShowingEditStory = true
         }
         .disabled(viewModel.isPerformingAction)
@@ -440,16 +439,32 @@ struct StoryPreviewView: View {
     }
 
     private func availableMomentPresentations(for story: Story) -> [StoryMomentPresentation] {
-        guard let availableMoments = story.availableMoments, !availableMoments.isEmpty else { return [] }
-        return availableMoments.enumerated().map { index, metadata in
-            let asset = viewModel.momentAsset(for: metadata.mediaID)
+        if let availableMoments = story.availableMoments, !availableMoments.isEmpty {
+            return availableMoments.enumerated().map { index, metadata in
+                let asset = viewModel.momentAsset(for: metadata.mediaID)
+                let kind = momentKind(metadata: metadata, asset: asset)
+                return StoryMomentPresentation(
+                    id: metadata.id,
+                    assetID: metadata.mediaID,
+                    title: nonEmpty(metadata.title) ?? fallbackMomentTitle(kind: kind, index: index),
+                    subtitle: momentSubtitle(kind: kind, asset: asset),
+                    description: nonEmpty(metadata.description),
+                    kind: kind,
+                    duration: kind == .video ? asset?.duration : nil
+                )
+            }
+        }
+
+        return story.assetIDs.enumerated().map { index, assetID in
+            let metadata = story.moments?.first { $0.mediaID == assetID || $0.id == assetID }
+            let asset = viewModel.momentAsset(for: assetID)
             let kind = momentKind(metadata: metadata, asset: asset)
             return StoryMomentPresentation(
-                id: metadata.id,
-                assetID: metadata.mediaID,
-                title: nonEmpty(metadata.title) ?? fallbackMomentTitle(kind: kind, index: index),
+                id: metadata?.id ?? "available-\(assetID)-\(index)",
+                assetID: assetID,
+                title: nonEmpty(metadata?.title) ?? fallbackMomentTitle(kind: kind, index: index),
                 subtitle: momentSubtitle(kind: kind, asset: asset),
-                description: nonEmpty(metadata.description),
+                description: nonEmpty(metadata?.description),
                 kind: kind,
                 duration: kind == .video ? asset?.duration : nil
             )
@@ -750,7 +765,6 @@ private struct EditStorySheet: View {
     let story: Story
     let moments: [StoryMomentPresentation]
     let availableMoments: [StoryMomentPresentation]
-    let videoURL: URL?
     let activeAction: StoryPreviewAction?
     let isPerformingAction: Bool
     let imageProvider: (String) -> Image?
@@ -788,7 +802,6 @@ private struct EditStorySheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: FrameMioSpacing.xl) {
-                    preview
                     if story.status == .failed {
                         failedState
                     } else if isPerformingAction && activeAction == .editStory {
@@ -837,18 +850,17 @@ private struct EditStorySheet: View {
                 .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $isShowingAddMoment) {
-                MomentSelectionSheet(
-                    title: "Add to Story",
+                AddMomentSelectionSheet(
                     moments: selectableMoments,
                     imageProvider: imageProvider,
                     onAppearMoment: onAppearMoment,
-                    onSelect: { moment in
-                        draft.add(moment)
+                    onAdd: { selectedMoments in
+                        selectedMoments.forEach { draft.add($0) }
                         isShowingAddMoment = false
                     },
                     onCancel: { isShowingAddMoment = false }
                 )
-                .presentationDetents([.medium, .large])
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
             .sheet(item: $replacingMoment) { source in
@@ -867,44 +879,6 @@ private struct EditStorySheet: View {
                 .presentationDragIndicator(.visible)
             }
         }
-    }
-
-    private var preview: some View {
-        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            Text(story.title.isEmpty ? "Your Day" : story.title)
-                .font(FrameMioTypography.title)
-                .foregroundStyle(FrameMioColors.ink)
-                .lineLimit(2)
-            if let videoURL {
-                StoryVideoPlayer(url: videoURL, autoplays: false, accessibilityTitle: "Edit story preview")
-                    .aspectRatio(9.0 / 16.0, contentMode: .fit)
-                    .frame(maxWidth: 220)
-                    .frame(maxWidth: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
-                    .frameMioElevation(.subtle)
-            } else {
-                videoPreviewPlaceholder
-            }
-        }
-    }
-
-    private var videoPreviewPlaceholder: some View {
-        RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
-            .fill(FrameMioColors.surface)
-            .aspectRatio(9.0 / 16.0, contentMode: .fit)
-            .frame(maxWidth: 220)
-            .frame(maxWidth: .infinity)
-            .overlay {
-                VStack(spacing: FrameMioSpacing.sm) {
-                    Image(systemName: "sparkles")
-                        .font(FrameMioTypography.title)
-                    Text("Preview will update when the story is ready.")
-                        .font(FrameMioTypography.footnote)
-                        .multilineTextAlignment(.center)
-                }
-                .foregroundStyle(FrameMioColors.secondaryInk)
-                .padding(FrameMioSpacing.lg)
-            }
     }
 
     private var failedState: some View {
@@ -942,17 +916,13 @@ private struct EditStorySheet: View {
                     .font(FrameMioTypography.body)
                     .foregroundStyle(FrameMioColors.secondaryInk)
             } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: FrameMioSpacing.md) {
-                        ForEach(displayedMoments) { moment in
-                            StoryMomentCard(moment: moment, image: imageProvider(moment.assetID)) {
-                                selectedMoment = moment
-                            }
-                            .frame(width: 132)
-                            .onAppear { onAppearMoment(moment.assetID) }
+                LazyVStack(spacing: FrameMioSpacing.sm) {
+                    ForEach(displayedMoments) { moment in
+                        StoryMomentRow(moment: moment, image: imageProvider(moment.assetID)) {
+                            selectedMoment = moment
                         }
+                        .onAppear { onAppearMoment(moment.assetID) }
                     }
-                    .padding(.vertical, FrameMioSpacing.xs)
                 }
             }
         }
@@ -967,7 +937,7 @@ private struct EditStorySheet: View {
                 .font(FrameMioTypography.headline)
                 .foregroundStyle(FrameMioColors.accent)
         }
-        .disabled(selectableMoments.isEmpty || isPerformingAction)
+        .disabled(isPerformingAction)
         .accessibilityLabel("Add moment")
     }
 
@@ -986,7 +956,7 @@ private struct EditStorySheet: View {
     private var lengthSection: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
             SectionHeader(title: "Length", subtitle: "FrameMio decides what to keep")
-            HStack(spacing: FrameMioSpacing.sm) {
+            LazyVGrid(columns: optionGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
                 ForEach(lengthOptions, id: \.self) { seconds in
                     optionChip(title: "\(seconds)s", isSelected: Int((draft.targetDuration ?? story.duration).rounded()) == seconds) {
                         draft.targetDuration = TimeInterval(seconds)
@@ -1021,17 +991,18 @@ private struct EditStorySheet: View {
     private func optionSection(title: String, options: [String], selected: String, onSelect: @escaping (String) -> Void) -> some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
             SectionHeader(title: title)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: FrameMioSpacing.sm) {
-                    ForEach(options, id: \.self) { option in
-                        optionChip(title: option, isSelected: option.caseInsensitiveCompare(selected) == .orderedSame) {
-                            onSelect(option)
-                        }
+            LazyVGrid(columns: optionGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
+                ForEach(options, id: \.self) { option in
+                    optionChip(title: option, isSelected: option.caseInsensitiveCompare(selected) == .orderedSame) {
+                        onSelect(option)
                     }
                 }
-                .padding(.vertical, FrameMioSpacing.xs)
             }
         }
+    }
+
+    private var optionGridColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: 108), spacing: FrameMioSpacing.sm, alignment: .leading)]
     }
 
     private func optionChip(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
@@ -1093,6 +1064,67 @@ private struct EditStoryDraft {
     }
 }
 
+private struct StoryMomentRow: View {
+    let moment: StoryMomentPresentation
+    let image: Image?
+    let action: () -> Void
+
+    var body: some View {
+        Button {
+            FrameMioHaptics.secondaryAction()
+            action()
+        } label: {
+            HStack(spacing: FrameMioSpacing.md) {
+                MediaThumbnail(
+                    image: image,
+                    duration: moment.duration,
+                    isLivePhoto: moment.kind == .livePhoto,
+                    aspectRatio: 1,
+                    placeholderSystemImage: moment.kind.placeholderName,
+                    accessibilityTitle: moment.title
+                )
+                .frame(width: 72, height: 72)
+                .overlay(alignment: .center) {
+                    if moment.kind == .video {
+                        Image(systemName: moment.kind.iconName)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(FrameMioColors.inverseInk)
+                            .frame(width: 30, height: 30)
+                            .background(FrameMioColors.mediaScrim, in: Circle())
+                            .accessibilityHidden(true)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
+                    Text(moment.title)
+                        .font(FrameMioTypography.headline)
+                        .foregroundStyle(FrameMioColors.ink)
+                        .lineLimit(2)
+                    Text(moment.description ?? moment.subtitle)
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                        .lineLimit(2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(FrameMioColors.tertiaryInk)
+                    .accessibilityHidden(true)
+            }
+            .padding(FrameMioSpacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.medium, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: FrameMioRadius.medium, style: .continuous)
+                    .stroke(FrameMioColors.divider.opacity(0.42), lineWidth: FrameMioMetrics.borderWidth)
+            }
+        }
+        .buttonStyle(FrameMioPressButtonStyle())
+        .accessibilityLabel(moment.title)
+    }
+}
+
 private struct EditMomentSheet: View {
     let moment: StoryMomentPresentation
     let image: Image?
@@ -1145,6 +1177,187 @@ private struct EditMomentSheet: View {
     }
 }
 
+private struct AddMomentSelectionSheet: View {
+    let moments: [StoryMomentPresentation]
+    let imageProvider: (String) -> Image?
+    let onAppearMoment: (String) -> Void
+    let onAdd: ([StoryMomentPresentation]) -> Void
+    let onCancel: () -> Void
+
+    @State private var selectedAssetIDs = Set<String>()
+    @State private var filter = PhotoLibraryMediaFilter.all
+
+    private var displayedMoments: [StoryMomentPresentation] {
+        switch filter {
+        case .all:
+            return moments
+        case .photos:
+            return moments.filter { $0.kind == .photo || $0.kind == .livePhoto }
+        case .videos:
+            return moments.filter { $0.kind == .video }
+        }
+    }
+
+    private var selectedMoments: [StoryMomentPresentation] {
+        moments.filter { selectedAssetIDs.contains($0.assetID) }
+    }
+
+    private var selectedCount: Int {
+        selectedAssetIDs.count
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if moments.isEmpty {
+                    EmptyState(
+                        systemImage: "photo.on.rectangle.angled",
+                        title: "All source media is already in this story",
+                        message: "Add Moment shows photos and videos from the original story selection that are not currently used. Remove a moment or create a new story to choose different source media.",
+                        actionTitle: nil,
+                        action: nil
+                    )
+                    .padding(FrameMioSpacing.lg)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
+                            intro
+                            filterPicker
+
+                            if displayedMoments.isEmpty {
+                                EmptyState(
+                                    systemImage: filter == .videos ? "video.slash" : "photo.on.rectangle.angled",
+                                    title: "Nothing in this filter",
+                                    message: "Try another media filter to keep exploring available moments."
+                                )
+                                .frame(maxWidth: .infinity)
+                            } else {
+                                LazyVGrid(columns: gridColumns, spacing: FrameMioSpacing.xxs) {
+                                    ForEach(displayedMoments) { moment in
+                                        mediaCell(for: moment)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(FrameMioSpacing.lg)
+                    }
+                    .safeAreaInset(edge: .bottom) {
+                        addAction
+                    }
+                }
+            }
+            .background(FrameMioColors.canvas.ignoresSafeArea())
+            .navigationTitle("Add to Story")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onCancel)
+                }
+            }
+        }
+    }
+
+    private var intro: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
+            Text("Choose more source media")
+                .font(FrameMioTypography.title)
+                .foregroundStyle(FrameMioColors.ink)
+            Text("Select photos or videos that were part of this story’s original source media but are not currently in the film. FrameMio will decide the best placement and pacing.")
+                .font(FrameMioTypography.body)
+                .foregroundStyle(FrameMioColors.secondaryInk)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var filterPicker: some View {
+        Picker(
+            "Media type",
+            selection: Binding(
+                get: { filter },
+                set: { filter = $0 }
+            )
+        ) {
+            ForEach(PhotoLibraryMediaFilter.allCases, id: \.self) { filter in
+                Text(filter.title).tag(filter)
+            }
+        }
+        .pickerStyle(.segmented)
+        .tint(FrameMioColors.accent)
+        .padding(FrameMioSpacing.xs)
+        .background(FrameMioColors.surface.opacity(0.72), in: RoundedRectangle(cornerRadius: FrameMioRadius.pill, style: .continuous))
+        .accessibilityLabel("Filter media")
+    }
+
+    private func mediaCell(for moment: StoryMomentPresentation) -> some View {
+        MediaThumbnail(
+            image: imageProvider(moment.assetID),
+            duration: moment.kind == .video ? moment.duration : nil,
+            isLivePhoto: moment.kind == .livePhoto,
+            isSelected: selectedAssetIDs.contains(moment.assetID),
+            aspectRatio: FrameMioMetrics.thumbnailAspectRatio,
+            placeholderSystemImage: moment.kind.placeholderName,
+            accessibilityTitle: moment.title,
+            action: { toggle(moment) }
+        )
+        .onAppear { onAppearMoment(moment.assetID) }
+    }
+
+    private var addAction: some View {
+        VStack(spacing: FrameMioSpacing.xs) {
+            Text(selectionSummary)
+                .font(FrameMioTypography.footnote)
+                .foregroundStyle(FrameMioColors.secondaryInk)
+
+            PrimaryButton(title: addButtonTitle, systemImage: "checkmark") {
+                onAdd(selectedMoments)
+            }
+            .disabled(selectedAssetIDs.isEmpty)
+        }
+        .padding(.horizontal, FrameMioSpacing.lg)
+        .padding(.top, FrameMioSpacing.md)
+        .padding(.bottom, FrameMioSpacing.md)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(FrameMioColors.divider.opacity(0.5))
+                .frame(height: FrameMioMetrics.borderWidth)
+        }
+    }
+
+    private var selectionSummary: String {
+        switch selectedCount {
+        case 0: "Select unused photos or videos"
+        case 1: "1 moment selected"
+        default: "\(selectedCount) moments selected"
+        }
+    }
+
+    private var addButtonTitle: String {
+        switch selectedCount {
+        case 0: "Add Moments"
+        case 1: "Add 1 Moment"
+        default: "Add \(selectedCount) Moments"
+        }
+    }
+
+    private var gridColumns: [GridItem] {
+        Array(
+            repeating: GridItem(.flexible(), spacing: FrameMioSpacing.xxs),
+            count: FrameMioMetrics.mediaGridColumnCount
+        )
+    }
+
+    private func toggle(_ moment: StoryMomentPresentation) {
+        if selectedAssetIDs.contains(moment.assetID) {
+            selectedAssetIDs.remove(moment.assetID)
+        } else {
+            selectedAssetIDs.insert(moment.assetID)
+        }
+        FrameMioHaptics.selection()
+    }
+}
+
 private struct MomentSelectionSheet: View {
     let title: String
     let moments: [StoryMomentPresentation]
@@ -1159,17 +1372,19 @@ private struct MomentSelectionSheet: View {
                 if moments.isEmpty {
                     EmptyState(
                         systemImage: "sparkles",
-                        title: "No more moments yet",
-                        message: "Upload more photos or videos to add them to this story.",
+                        title: title == "Add to Story" ? "All available moments are already in this story" : "No more moments yet",
+                        message: title == "Add to Story"
+                            ? "Add Moment shows photos and videos from this story’s source media that are not currently used. Choosing brand-new iPhone media will need a separate import step."
+                            : "Upload more photos or videos to add them to this story.",
                         actionTitle: nil,
                         action: nil
                     )
                     .padding(FrameMioSpacing.lg)
                 } else {
                     ScrollView {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: FrameMioSpacing.md)], spacing: FrameMioSpacing.md) {
+                        LazyVStack(spacing: FrameMioSpacing.sm) {
                             ForEach(moments) { moment in
-                                StoryMomentCard(moment: moment, image: imageProvider(moment.assetID)) {
+                                StoryMomentRow(moment: moment, image: imageProvider(moment.assetID)) {
                                     onSelect(moment)
                                 }
                                 .onAppear { onAppearMoment(moment.assetID) }

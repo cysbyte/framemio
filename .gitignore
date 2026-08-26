@@ -12,3 +12,7 @@ xcuserdata/
 
 # macOS
 .DS_Store
+# Generated local media samples for manual app testing.
+sample-media/
+__pycache__/
+*.pyc

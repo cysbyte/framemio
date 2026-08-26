@@ -1142,6 +1142,17 @@ func TestIOSStoryPresentationSuppressesGenericNames(t *testing.T) {
 	if got := fallbackIOSMomentTitle(string(models.MediaTypePhoto), 0); got == "Photo moment 1" || got == "Video moment 1" {
 		t.Fatalf("generic fallback survived: %q", got)
 	}
+	technicalReason := "Selected from available frame evidence while external AI understanding is disabled."
+	if got := iosMomentTitle(models.StoryMoment{Reason: technicalReason}, string(models.MediaTypeVideo), 0); got != "Opening moment" {
+		t.Fatalf("technical fallback reason leaked into moment title: %q", got)
+	}
+	plan := models.StoryPlan{
+		UserInstructions: technicalReason,
+		Moments:          []models.StoryMoment{{Reason: technicalReason}, {Caption: "Everyone laughing by the lake"}},
+	}
+	if got := iosStoryDescription(plan); got != "Everyone laughing by the lake" {
+		t.Fatalf("story description = %q", got)
+	}
 }
 
 func assertSmallIdentifierOnlyMessage(t *testing.T, message queue.JobMessage) {
