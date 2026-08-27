@@ -232,6 +232,7 @@ func (c *Coordinator) UpdateJobStatus(ctx context.Context, jobID string, status 
 	if err != nil {
 		return models.ProcessingJob{}, err
 	}
+	c.Logger.Info("job status updated", slog.String("job_id", updated.ID), slog.String("job_type", string(updated.Type)), slog.String("project_id", updated.ProjectID), slog.String("media_id", updated.MediaID), slog.String("previous_status", string(job.Status)), slog.String("status", string(updated.Status)), slog.Float64("progress", updated.Progress), slog.Int("attempt", updated.Attempt), slog.Bool("has_artifact", updated.ArtifactS3Key != ""))
 	if err := c.AdvanceAfterJob(ctx, updated); err != nil {
 		return models.ProcessingJob{}, err
 	}
@@ -240,11 +241,13 @@ func (c *Coordinator) UpdateJobStatus(ctx context.Context, jobID string, status 
 
 func (c *Coordinator) AdvanceAfterJob(ctx context.Context, job models.ProcessingJob) error {
 	if job.Status == models.JobStatusFailed || job.Status == models.JobStatusCancelled {
+		c.Logger.Warn("job terminal failure; marking project failed", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID), slog.String("status", string(job.Status)), slog.String("error_code", job.ErrorCode))
 		return c.Store.SetProjectStatus(ctx, job.UserID, job.ProjectID, models.ProjectStatusFailed)
 	}
 	if job.Status != models.JobStatusCompleted {
 		return nil
 	}
+	c.Logger.Info("advancing after completed job", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID))
 	switch job.Type {
 	case models.JobTypeMediaPreprocess:
 		media, err := c.Store.GetMedia(ctx, job.UserID, job.MediaID)
@@ -319,6 +322,7 @@ func (c *Coordinator) enqueueStoryPlanIfReady(ctx context.Context, userID, proje
 		return err
 	}
 	if hasCompletedStage(jobs, "", models.JobTypeStoryPlan) || hasActiveStage(jobs, "", models.JobTypeStoryPlan) {
+		c.Logger.Info("story plan enqueue skipped", slog.String("project_id", projectID), slog.String("reason", "story_plan_already_exists_or_active"))
 		return nil
 	}
 	for _, mediaID := range project.MediaIDs {
@@ -331,9 +335,11 @@ func (c *Coordinator) enqueueStoryPlanIfReady(ctx context.Context, userID, proje
 			requiredStage = models.JobTypeVideoUnderstand
 		}
 		if !hasCompletedStage(jobs, mediaID, requiredStage) {
+			c.Logger.Info("story plan waiting for media stage", slog.String("project_id", projectID), slog.String("media_id", mediaID), slog.String("media_type", string(media.Type)), slog.String("required_stage", string(requiredStage)))
 			return nil
 		}
 	}
+	c.Logger.Info("all media stages complete; queueing story plan", slog.String("project_id", projectID), slog.Int("media_count", len(project.MediaIDs)))
 	_, err = c.createStageJob(ctx, userID, projectID, "", models.JobTypeStoryPlan, map[string]string{"pipeline_version": PipelineVersion}, stableStageKey(projectID, "", models.JobTypeStoryPlan), true)
 	return err
 }
@@ -386,9 +392,12 @@ func (c *Coordinator) publishJob(ctx context.Context, job models.ProcessingJob) 
 	}
 	c.Logger.Info("published job message", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)))
 	if c.Activator != nil {
+		c.Logger.Info("activating worker for job", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID))
 		if err := c.Activator.Activate(ctx, message); err != nil {
 			c.Logger.Warn("worker activation failed", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.Any("error", err))
 		}
+	} else {
+		c.Logger.Info("worker activation skipped", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("reason", "activator_not_configured"))
 	}
 	return nil
 }

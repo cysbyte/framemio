@@ -71,6 +71,7 @@ func TestWorkerRunOnceProcessesAvailableSameHandlerMessage(t *testing.T) {
 	}
 	consumer := &memoryConsumer{received: []queue.ReceivedJobMessage{
 		{Message: queue.JobMessage{JobID: otherJob.ID, ProjectID: project.ID, JobType: otherJob.Type}, ReceiptHandle: "receipt-other-story"},
+		{Message: queue.JobMessage{JobID: targetJob.ID, ProjectID: project.ID, JobType: targetJob.Type}, ReceiptHandle: "receipt-target-story"},
 	}}
 	worker := Worker{
 		Store:       memoryStore,
@@ -87,8 +88,8 @@ func TestWorkerRunOnceProcessesAvailableSameHandlerMessage(t *testing.T) {
 			t.Fatalf("same-handler job should not be released immediately: %+v", consumer.extended)
 		}
 	}
-	if len(consumer.deleted) != 1 || consumer.deleted[0] != "receipt-other-story" {
-		t.Fatalf("available same-handler message was not deleted after processing: %+v", consumer.deleted)
+	if len(consumer.deleted) != 2 || consumer.deleted[0] != "receipt-other-story" || consumer.deleted[1] != "receipt-target-story" {
+		t.Fatalf("available same-handler messages were not deleted after processing: %+v", consumer.deleted)
 	}
 	otherAfter, err := memoryStore.GetJob(ctx, project.UserID, otherJob.ID)
 	if err != nil {
@@ -101,8 +102,8 @@ func TestWorkerRunOnceProcessesAvailableSameHandlerMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if targetAfter.Status != models.JobStatusQueued {
-		t.Fatalf("target job should remain queued for its own task: %+v", targetAfter)
+	if targetAfter.Status != models.JobStatusCompleted {
+		t.Fatalf("target job should complete after the available job: %+v", targetAfter)
 	}
 }
 

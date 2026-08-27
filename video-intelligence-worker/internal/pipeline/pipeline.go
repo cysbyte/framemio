@@ -188,8 +188,10 @@ func (p *Processor) loadOrPreprocess(ctx context.Context, jobContext domain.JobC
 	if err != nil {
 		return domain.VideoEvidence{}, domain.PreprocessingArtifact{}, err
 	}
+	p.logger().Info("video preprocessing workspace created", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID))
 	defer os.RemoveAll(workspace)
 	sourcePath := filepath.Join(workspace, "source"+sourceExtension(jobContext.Media.FileName))
+	p.logger().Info("downloading source video", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Int64("expected_size_bytes", jobContext.Media.FileSizeBytes))
 	if err := retry(ctx, p.Config.StageRetries, func() error {
 		return p.Objects.DownloadFile(ctx, jobContext.Media.S3Key, sourcePath)
 	}); err != nil {
@@ -285,7 +287,12 @@ func (p *Processor) loadOrPreprocess(ctx context.Context, jobContext domain.JobC
 }
 
 func (p *Processor) extractTranscript(ctx context.Context, workspace, sourcePath, prefix string, jobContext domain.JobContext, sourceETag string, metadata domain.VideoMetadata) (domain.Transcript, string, error) {
-	if !p.Config.EnableTranscription || !metadata.HasAudio {
+	if !p.Config.EnableTranscription {
+		p.logger().Info("video transcription skipped", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.String("reason", "disabled"))
+		return domain.Transcript{}, "", nil
+	}
+	if !metadata.HasAudio {
+		p.logger().Info("video transcription skipped", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.String("reason", "no_audio_track"))
 		return domain.Transcript{}, "", nil
 	}
 	if cached, err := p.Repository.GetTranscript(ctx, jobContext.Job.UserID, jobContext.Media.ID, p.Config.TranscriptionVersion, sourceETag); err == nil {
@@ -303,13 +310,16 @@ func (p *Processor) extractTranscript(ctx context.Context, workspace, sourcePath
 		return domain.Transcript{}, "", domain.Permanent(fmt.Errorf("transcription service is required when transcription is enabled"))
 	}
 	audioPath := filepath.Join(workspace, "speech.flac")
+	p.logger().Info("extracting speech audio", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Int64("duration_micros", metadata.DurationMicros))
 	if err := retry(ctx, p.Config.StageRetries, func() error { return p.Tools.ExtractAudio(ctx, sourcePath, audioPath) }); err != nil {
 		return domain.Transcript{}, "", fmt.Errorf("extract speech audio: %w", err)
 	}
+	p.logger().Info("speech audio extracted", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID))
 	audioKey := prefix + "/audio/speech.flac"
 	if err := retry(ctx, p.Config.StageRetries, func() error { return p.Objects.UploadFile(ctx, audioKey, audioPath, "audio/flac") }); err != nil {
 		return domain.Transcript{}, "", fmt.Errorf("upload speech audio: %w", err)
 	}
+	p.logger().Info("calling speech transcriber", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID))
 	result, err := p.Transcription.Transcribe(ctx, transcription.Request{
 		UserID: jobContext.Job.UserID, ProjectID: jobContext.Project.ID, MediaID: jobContext.Media.ID,
 		SourceETag: sourceETag, SourceS3Key: audioKey, SourceLocalPath: audioPath, MediaType: "audio",

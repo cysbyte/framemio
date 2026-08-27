@@ -126,6 +126,7 @@ func (a *ECSRunTaskActivator) Activate(ctx context.Context, message queue.JobMes
 	if taskDefinition == "" {
 		return fmt.Errorf("%s task definition is not configured", reason)
 	}
+	a.logger.Info("starting one-off ECS worker task", slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)), slog.String("reason", reason), slog.String("cluster", a.cluster), slog.String("task_definition", taskDefinition), slog.String("container", containerName))
 	input := &ecs.RunTaskInput{
 		Cluster:        aws.String(a.cluster),
 		TaskDefinition: aws.String(taskDefinition),

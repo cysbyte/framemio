@@ -85,6 +85,7 @@ func (c *Consumer) RunOnce(ctx context.Context, handler Handler, targetJobID str
 	}
 	runContext, cancel := context.WithTimeout(ctx, waitTimeout)
 	defer cancel()
+	c.logger.Info("video worker run-once polling started", slog.String("target_job_id", targetJobID), slog.Duration("wait_timeout", waitTimeout))
 	for {
 		result, err := c.receive(runContext, 10)
 		if err != nil {
@@ -93,6 +94,9 @@ func (c *Consumer) RunOnce(ctx context.Context, handler Handler, targetJobID str
 				return nil
 			}
 			return err
+		}
+		if len(result.Messages) > 0 {
+			c.logger.Info("video worker run-once received messages", slog.String("target_job_id", targetJobID), slog.Int("count", len(result.Messages)))
 		}
 		for _, message := range result.Messages {
 			jobMessage, ok := c.decodeMessage(runContext, message)
@@ -108,7 +112,11 @@ func (c *Consumer) RunOnce(ctx context.Context, handler Handler, targetJobID str
 				c.logger.Info("handling available video analysis message", slog.String("target_job_id", targetJobID), slog.String("job_id", jobMessage.JobID), slog.String("job_type", jobMessage.JobType))
 			}
 			c.handleMessage(ctx, handler, message)
-			return nil
+			if targetJobID == "" || jobMessage.JobID == targetJobID {
+				c.logger.Info("video worker run-once target handled", slog.String("target_job_id", targetJobID), slog.String("job_id", jobMessage.JobID), slog.String("job_type", jobMessage.JobType))
+				return nil
+			}
+			c.logger.Info("video worker run-once continuing after available job", slog.String("target_job_id", targetJobID), slog.String("handled_job_id", jobMessage.JobID), slog.String("handled_job_type", jobMessage.JobType))
 		}
 	}
 }

@@ -39,14 +39,22 @@ export async function runRenderWorker(config = loadConfig()): Promise<void> {
 
   do {
     const received = await queue.receive(10, 20, config.visibilityTimeoutSeconds);
+    if (received.length > 0) {
+      console.info(JSON.stringify({level: 'info', msg: 'render worker run-once received messages', run_once: config.runOnce, target_job_id: config.jobID ?? '', count: received.length}));
+    }
     for (const message of received) {
       if (await handleMessage(message, {queue, backend, worker, config})) {
-        if (config.runOnce) {
+        if (config.runOnce && (!config.jobID || message.message.jobId === config.jobID)) {
+          console.info(JSON.stringify({level: 'info', msg: 'render worker run-once target handled', target_job_id: config.jobID ?? '', job_id: message.message.jobId}));
           return;
+        }
+        if (config.runOnce && config.jobID) {
+          console.info(JSON.stringify({level: 'info', msg: 'render worker run-once continuing after available job', target_job_id: config.jobID, handled_job_id: message.message.jobId}));
         }
       }
     }
     if (config.runOnce && Date.now() - startedAt >= config.waitTimeoutMs) {
+      console.error(JSON.stringify({level: 'error', msg: 'render worker run-once timed out before target', target_job_id: config.jobID ?? '', wait_timeout_ms: config.waitTimeoutMs}));
       throw new Error(`timed out waiting for render job ${config.jobID ?? ''}`);
     }
     if (!config.runOnce) {
@@ -64,6 +72,7 @@ async function handleMessage(received: ReceivedJobMessage, dependencies: {
   const {queue, backend, worker, config} = dependencies;
   const message = received.message;
   if (message.jobType !== 'VIDEO_RENDER') {
+    console.info(JSON.stringify({level: 'info', msg: 'render worker releasing non-render message', target_job_id: config.jobID ?? '', job_id: message.jobId, job_type: message.jobType}));
     await queue.release(received.receiptHandle);
     return false;
   }
