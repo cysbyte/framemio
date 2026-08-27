@@ -288,6 +288,16 @@ func (p *Processor) extractTranscript(ctx context.Context, workspace, sourcePath
 	if !p.Config.EnableTranscription || !metadata.HasAudio {
 		return domain.Transcript{}, "", nil
 	}
+	if cached, err := p.Repository.GetTranscript(ctx, jobContext.Job.UserID, jobContext.Media.ID, p.Config.TranscriptionVersion, sourceETag); err == nil {
+		normalized, validationErr := transcription.Validate(cached.Transcript, metadata.DurationMicros)
+		if validationErr == nil {
+			p.logger().Info("reusing cached video transcript", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Int("segment_count", len(normalized.Segments)))
+			return normalized, "", nil
+		}
+		p.logger().Warn("cached video transcript invalid; retranscribing", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Any("error", validationErr))
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return domain.Transcript{}, "", err
+	}
 	p.logger().Info("starting video transcription", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID))
 	if p.Transcription == nil {
 		return domain.Transcript{}, "", domain.Permanent(fmt.Errorf("transcription service is required when transcription is enabled"))

@@ -286,7 +286,7 @@ func buildCandidates(request Request, selected map[string]struct{}, clusters map
 			clusterID := clusterForMedia(clusters, mediaID)
 			score := videoScore(analysis, segment, selected, clusterID)
 			endMicros := selectedVideoEndMicros(segment)
-			caption := captionFromSegment(segment)
+			caption := firstNonEmpty(captionFromTranscript(analysis.Transcript, segment.StartMicros, endMicros), captionFromSegment(segment))
 			reason := reasonFromSegment(segment)
 			narrative := firstNonEmpty(caption, reason)
 			moment := models.StoryMoment{
@@ -705,6 +705,30 @@ func captionFromSegment(segment models.VideoSegment) string {
 	return ""
 }
 
+func captionFromTranscript(transcript models.VideoTranscript, startMicros, endMicros int64) string {
+	if !transcript.HasSpeech || endMicros <= startMicros {
+		return ""
+	}
+	parts := make([]string, 0, len(transcript.Segments))
+	for _, segment := range transcript.Segments {
+		if segment.EndMicros <= segment.StartMicros || segment.EndMicros <= startMicros || segment.StartMicros >= endMicros {
+			continue
+		}
+		overlapStart := maxInt64(segment.StartMicros, startMicros)
+		overlapEnd := minInt64(segment.EndMicros, endMicros)
+		if overlapEnd-overlapStart < 250_000 {
+			continue
+		}
+		if text := humanText(segment.Text); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return truncateText(strings.Join(parts, " "), 120)
+}
+
 func reasonFromSegment(segment models.VideoSegment) string {
 	parts := make([]string, 0, len(segment.Reasons))
 	for _, reason := range segment.Reasons {
@@ -881,6 +905,20 @@ func clamp(value float64) float64 {
 		return 1
 	}
 	return value
+}
+
+func minInt64(left, right int64) int64 {
+	if left < right {
+		return left
+	}
+	return right
+}
+
+func maxInt64(left, right int64) int64 {
+	if left > right {
+		return left
+	}
+	return right
 }
 
 func clampInt(value, minValue, maxValue int) int {

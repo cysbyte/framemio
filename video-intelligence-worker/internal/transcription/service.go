@@ -15,6 +15,8 @@ import (
 	"github.com/framemio/video-intelligence-worker/internal/domain"
 )
 
+const timestampToleranceMicros int64 = 250_000
+
 type MediaReference struct {
 	URL            string `json:"url"`
 	MediaType      string `json:"media_type"`
@@ -161,6 +163,9 @@ func Validate(transcript domain.Transcript, durationMicros int64) (domain.Transc
 	for index := range transcript.Segments {
 		segment := &transcript.Segments[index]
 		segment.Text = strings.TrimSpace(segment.Text)
+		if segment.EndMicros > durationMicros && segment.EndMicros <= durationMicros+timestampToleranceMicros {
+			segment.EndMicros = durationMicros
+		}
 		if segment.StartMicros < 0 || segment.EndMicros <= segment.StartMicros || segment.EndMicros > durationMicros || segment.Text == "" {
 			return domain.Transcript{}, fmt.Errorf("%w: segment %d has invalid timestamps or text", domain.ErrInvalidTranscript, index)
 		}
@@ -203,6 +208,9 @@ func (s *Service) retry(ctx context.Context, operation func() error) error {
 		if err := operation(); err == nil {
 			return nil
 		} else {
+			if domain.IsPermanent(err) {
+				return err
+			}
 			lastErr = err
 		}
 		if attempt+1 == attempts {

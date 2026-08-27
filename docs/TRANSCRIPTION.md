@@ -84,3 +84,5 @@ The raw-artifact threshold is configurable. Provider response bytes, media bytes
 - `EVIDENCE_URL_EXPIRY`
 
 Legacy `SPEECH_*` variables remain fallback aliases for existing environments.
+
+Production deployments use the upstream transcription service with `TRANSCRIPTION_PROVIDER=openai`, `TRANSCRIPTION_MODEL=gpt-5.4-mini-transcribe`, and `ENABLE_TRANSCRIPTION=true`.

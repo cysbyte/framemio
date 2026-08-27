@@ -91,6 +91,21 @@ func TestServiceTreatsEmptySegmentsAsNoSpeech(t *testing.T) {
 	}
 }
 
+func TestServiceClampsSmallTimestampOverflow(t *testing.T) {
+	t.Parallel()
+	provider := &fakeProvider{result: ProviderResult{Transcript: domain.Transcript{Language: "en", Segments: []domain.TranscriptSegment{{
+		StartMicros: 9_500_000, EndMicros: 10_080_000, Text: "Right at the end", Confidence: 0.82,
+	}}}}}
+	service := &Service{Provider: provider, Repository: newMemoryRepository(), Artifacts: newMemoryArtifacts(), RetryAttempts: 1}
+	result, err := service.Transcribe(context.Background(), testRequest(10*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := result.Record.Transcript.Segments[0].EndMicros; got != 10_000_000 {
+		t.Fatalf("segment end = %d, want clamped duration", got)
+	}
+}
+
 func TestServiceRetriesTransientProviderFailure(t *testing.T) {
 	t.Parallel()
 	provider := &fakeProvider{
@@ -109,6 +124,21 @@ func TestServiceRetriesTransientProviderFailure(t *testing.T) {
 	}
 	if provider.calls != 3 {
 		t.Fatalf("provider calls = %d, want 3", provider.calls)
+	}
+}
+
+func TestServiceDoesNotRetryPermanentProviderFailure(t *testing.T) {
+	t.Parallel()
+	provider := &fakeProvider{err: domain.Permanent(errors.New("unsupported audio format"))}
+	service := &Service{
+		Provider: provider, Repository: newMemoryRepository(), Artifacts: newMemoryArtifacts(),
+		RetryAttempts: 5, RetryDelay: time.Nanosecond,
+	}
+	if _, err := service.Transcribe(context.Background(), testRequest(2*time.Second)); err == nil || !domain.IsPermanent(err) {
+		t.Fatalf("expected permanent transcription error, got %v", err)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1", provider.calls)
 	}
 }
 
@@ -223,6 +253,7 @@ func (a *memoryArtifacts) PutJSON(_ context.Context, key string, value any) erro
 type fakeProvider struct {
 	calls             int
 	failuresRemaining int
+	err               error
 	result            ProviderResult
 	lastRequest       ProviderRequest
 }
@@ -233,6 +264,9 @@ func (p *fakeProvider) Transcribe(_ context.Context, request ProviderRequest) (P
 	if p.failuresRemaining > 0 {
 		p.failuresRemaining--
 		return ProviderResult{}, errors.New("temporary transcription failure")
+	}
+	if p.err != nil {
+		return ProviderResult{}, p.err
 	}
 	return p.result, nil
 }

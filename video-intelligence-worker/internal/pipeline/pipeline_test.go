@@ -104,6 +104,56 @@ func TestProcessorRequiresBackendCompletionCallback(t *testing.T) {
 	}
 }
 
+func TestProcessorReusesExistingTranscriptBeforeAudioExtraction(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.August, 19, 10, 0, 0, 0, time.UTC)
+	repository := newMemoryRepository(now)
+	objects := newMemoryObjects()
+	tools := &fakeTools{metadata: domain.VideoMetadata{
+		DurationMicros: 12_000_000, Width: 1920, Height: 1080, FPS: 30,
+		VideoCodec: "hevc", AudioCodec: "aac", BitRate: 8_000_000, FileSizeBytes: 1000, HasAudio: true,
+	}, boundaries: []domain.SceneBoundary{{TimestampMicros: 4_000_000, Score: 0.6}, {TimestampMicros: 8_000_000, Score: 0.7}}}
+	transcriber := &fakeTranscriber{}
+	provider := &fakeUnderstandingProvider{}
+	understandingService := &understanding.Service{
+		Provider: provider, Repository: repository, Artifacts: objects,
+		RetryAttempts: 1, RetryDelay: time.Nanosecond, FrameURLExpiry: time.Hour,
+		Now: func() time.Time { return now },
+	}
+	processor := &Processor{
+		Config: Config{
+			WorkRoot: t.TempDir(), AnalysisVersion: "video-v1", SceneThreshold: 0.32, MaxSceneBoundaries: 100,
+			Planner: PlannerConfig{
+				MinSceneDuration: 750 * time.Millisecond, MaxSegmentDuration: 12 * time.Second,
+				LongVideoThreshold: 5 * time.Minute, MaxFramesShort: 12, MaxFramesLong: 24,
+			},
+			DuplicateHashDistance: 4, StageRetries: 1, EnableTranscription: true,
+			TranscriptionVersion: "transcription-v1", UnderstandingVersion: "video-understanding-v1",
+			EvidenceURLExpiry: time.Hour,
+		},
+		Repository: repository, Objects: objects, Tools: tools, Transcription: transcriber, Understanding: understandingService,
+		Completion: &fakeCompletionReporter{}, Now: func() time.Time { return now },
+	}
+	repository.transcripts[cacheKey("user-1", "media-1", "transcription-v1", "etag-1")] = domain.TranscriptionRecord{
+		ID: "transcript-cached", UserID: "user-1", ProjectID: "project-1", MediaID: "media-1", SourceETag: "etag-1",
+		Version: "transcription-v1", Provider: "fake", ProviderModel: "fake-v1", Language: "en", HasSpeech: true,
+		SegmentCount: 1, DurationMicros: 12_000_000,
+		Transcript: domain.Transcript{Language: "en", HasSpeech: true, Segments: []domain.TranscriptSegment{{StartMicros: 1_000_000, EndMicros: 2_500_000, Text: "Cached dialogue"}}},
+		CreatedAt:  now, UpdatedAt: now,
+	}
+
+	result, err := processor.Process(context.Background(), repository.addJob("job-transcript-reuse", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tools.audioCalls != 0 || transcriber.calls != 0 {
+		t.Fatalf("expected cached transcript to skip audio/STT, audio=%d transcription=%d", tools.audioCalls, transcriber.calls)
+	}
+	if !result.Analysis.Transcript.HasSpeech || result.Analysis.Transcript.Segments[0].Text != "Cached dialogue" {
+		t.Fatalf("cached transcript was not propagated: %+v", result.Analysis.Transcript)
+	}
+}
+
 func TestProcessorContinuesWhenTranscriptionFails(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.August, 19, 10, 0, 0, 0, time.UTC)

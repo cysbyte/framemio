@@ -164,6 +164,8 @@ Required:
 
 AWS credentials use the default AWS SDK credential chain. API keys stay in worker secrets, never in the iOS application or queue messages.
 
+Production deployments should point `VIDEO_UNDERSTANDING_API_URL` and `TRANSCRIPTION_API_URL` at the upstream OpenAI-compatible services, use `VIDEO_UNDERSTANDING_PROVIDER=openai` with `VIDEO_UNDERSTANDING_MODEL=gpt-5.4-mini`, and enable transcription with `TRANSCRIPTION_PROVIDER=openai`, `TRANSCRIPTION_MODEL=gpt-5.4-mini-transcribe`, and `ENABLE_TRANSCRIPTION=true`.
+
 Optional tuning:
 
 - `AWS_REGION`

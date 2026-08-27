@@ -115,3 +115,5 @@ SQS messages continue to contain only job, project, media, and small version/con
 - `EVIDENCE_URL_EXPIRY`
 
 Legacy `MULTIMODAL_*` and `PROVIDER_TIMEOUT` variables remain fallback aliases for existing environments.
+
+Production deployments route through an upstream OpenAI-compatible analysis service using `VIDEO_UNDERSTANDING_PROVIDER=openai` and `VIDEO_UNDERSTANDING_MODEL=gpt-5.4-mini`; `local` / `heuristic` remain development fallbacks.

@@ -72,6 +72,38 @@ func TestHTTPTranscriptionProviderSupportsNoSpeech(t *testing.T) {
 	}
 }
 
+func TestHTTPTranscriptionProviderClassifiesPermanentClientErrors(t *testing.T) {
+	t.Parallel()
+	provider := HTTPTranscriptionProvider{
+		URL: "https://transcription.example.test/v1/transcribe",
+		Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return textResponse(http.StatusUnsupportedMediaType, "unsupported audio codec"), nil
+		})},
+	}
+	_, err := provider.Transcribe(context.Background(), transcription.ProviderRequest{
+		MediaID: "media-1", Reference: transcription.MediaReference{URL: "https://example.test/audio.flac", MediaType: "audio", DurationMicros: 2_000_000},
+	})
+	if err == nil || !domain.IsPermanent(err) {
+		t.Fatalf("expected permanent provider error, got %v", err)
+	}
+}
+
+func TestHTTPTranscriptionProviderLeavesRateLimitRetryable(t *testing.T) {
+	t.Parallel()
+	provider := HTTPTranscriptionProvider{
+		URL: "https://transcription.example.test/v1/transcribe",
+		Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return textResponse(http.StatusTooManyRequests, "rate limited"), nil
+		})},
+	}
+	_, err := provider.Transcribe(context.Background(), transcription.ProviderRequest{
+		MediaID: "media-1", Reference: transcription.MediaReference{URL: "https://example.test/audio.flac", MediaType: "audio", DurationMicros: 2_000_000},
+	})
+	if err == nil || domain.IsPermanent(err) {
+		t.Fatalf("expected retryable provider error, got %v", err)
+	}
+}
+
 func TestHTTPVideoUnderstandingProviderSendsStructuredEvidenceAndStrictSchema(t *testing.T) {
 	t.Parallel()
 	input := providerUnderstandingInput()
@@ -181,6 +213,14 @@ func jsonResponse(body string) *http.Response {
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+func textResponse(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"text/plain"}},
 		Body:       io.NopCloser(strings.NewReader(body)),
 	}
 }

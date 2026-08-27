@@ -149,6 +149,39 @@ func TestPlannerUsesAnalysisForStoryAndMomentNames(t *testing.T) {
 	}
 }
 
+func TestPlannerUsesTranscriptTextForVideoCaptions(t *testing.T) {
+	t.Parallel()
+	plan, err := (&Planner{Now: func() time.Time { return time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC) }}).Plan(context.Background(), Request{
+		ProjectID:        "project-transcript",
+		DesiredDuration:  8 * time.Second,
+		StoryType:        models.StoryTypeCustom,
+		VisualStyle:      models.VisualStyleCinematic,
+		SelectedMediaIDs: []string{"video-talk"},
+		VideoAnalyses: []models.VideoAnalysis{{
+			ID: "video-analysis-talk", VideoID: "video-talk", ProjectID: "project-transcript", AnalysisVersion: "video-v1", DurationMicros: 8_000_000,
+			Transcript: models.VideoTranscript{HasSpeech: true, Language: "en", Segments: []models.VideoTranscriptSegment{
+				{StartMicros: 1_000_000, EndMicros: 2_200_000, Text: "Look at the ducks by the lake", Confidence: 0.96},
+				{StartMicros: 2_200_000, EndMicros: 3_600_000, Text: "This is my favorite part", Confidence: 0.94},
+			}},
+			QualitySignals: models.VideoQualitySignals{OverallScore: 0.8},
+			Segments: []models.VideoSegment{{
+				SegmentID: "segment-talk", SceneID: "scene-talk", StartMicros: 1_000_000, EndMicros: 4_500_000, Description: "Family laughing near the lake",
+				Importance: 0.92, VisualQuality: 0.8, MemoryValue: 0.94, EmotionalValue: 0.93, StoryRelevance: 0.94, Recommended: true, RecommendedUsage: "hero",
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Captions) == 0 {
+		t.Fatalf("expected transcript caption, got %+v", plan)
+	}
+	captionText := strings.ToLower(plan.Captions[0].Text)
+	if !strings.Contains(captionText, "look at the ducks") || !strings.Contains(captionText, "favorite part") {
+		t.Fatalf("expected speech transcript caption, got %+v", plan.Captions)
+	}
+}
+
 func TestPlannerSelectsMeaningfulVideoRanges(t *testing.T) {
 	t.Parallel()
 	planner := &Planner{Now: func() time.Time { return time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC) }}

@@ -139,7 +139,11 @@ func postJSONBytes(ctx context.Context, client *http.Client, endpoint, apiKey st
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		return nil, fmt.Errorf("provider returned %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+		err := fmt.Errorf("provider returned %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+		if response.StatusCode != http.StatusTooManyRequests && response.StatusCode >= 400 && response.StatusCode < 500 {
+			return nil, domain.Permanent(err)
+		}
+		return nil, err
 	}
 	data, err = io.ReadAll(io.LimitReader(response.Body, limit+1))
 	if err != nil {

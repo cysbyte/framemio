@@ -2,7 +2,7 @@ import {spawn} from 'node:child_process';
 import {mkdir, open, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import type {CompositionSpec, KenBurnsTransform, TimelineClip} from '../types.js';
+import type {CompositionSpec, KenBurnsTransform, StoryCaption, TimelineClip} from '../types.js';
 import {canonicalJson, stableHash} from '../determinism.js';
 
 export interface RemotionRenderer {
@@ -56,12 +56,19 @@ interface ConcatFilter {
   hasAudio: boolean;
 }
 
-function concatFilter(composition: CompositionSpec): ConcatFilter {
+interface CaptionOverlay {
+  textFilePath: string;
+  startSeconds: string;
+  endSeconds: string;
+}
+
+function concatFilter(composition: CompositionSpec, captions: CaptionOverlay[] = []): ConcatFilter {
   const videoFilters = composition.clips.map((clip, index) => isPhotoTimelineClip(clip)
     ? photoVideoFilter(clip, index, composition)
     : sourceVideoFilter(clip, index, composition));
   const videoInputs = composition.clips.map((_, index) => `[v${index}]`).join('');
-  const filters = [...videoFilters, `${videoInputs}concat=n=${composition.clips.length}:v=1:a=0,format=yuv420p[outv]`];
+  const filters = [...videoFilters, `${videoInputs}concat=n=${composition.clips.length}:v=1:a=0,format=yuv420p[basev]`];
+  filters.push(captionVideoFilter(captions));
   if (!composition.audio.original_audio) {
     return {filter: filters.join(';'), hasAudio: false};
   }
@@ -76,6 +83,24 @@ function concatFilter(composition: CompositionSpec): ConcatFilter {
 
 function isPhotoTimelineClip(clip: TimelineClip): clip is PhotoTimelineClip {
   return clip.transform.kind === 'photo';
+}
+
+function captionVideoFilter(captions: CaptionOverlay[]): string {
+  if (captions.length === 0) {
+    return '[basev]format=yuv420p[outv]';
+  }
+  const filters: string[] = [];
+  let input = 'basev';
+  captions.forEach((caption, index) => {
+    const output = index === captions.length - 1 ? 'outv' : `captionv${index}`;
+    filters.push(`[${input}]drawtext=textfile='${escapeFilterPath(caption.textFilePath)}':fontcolor=white:fontsize=44:borderw=3:bordercolor=black@0.72:box=1:boxcolor=black@0.32:boxborderw=24:x=(w-text_w)/2:y=h-text_h-150:enable='between(t,${caption.startSeconds},${caption.endSeconds})',format=yuv420p[${output}]`);
+    input = output;
+  });
+  return filters.join(';');
+}
+
+function escapeFilterPath(filePath: string): string {
+  return filePath.replace(/\\/g, '\\\\').replace(/'/g, `\\'`).replace(/:/g, '\\:');
 }
 
 function sourceVideoFilter(clip: TimelineClip, index: number, composition: CompositionSpec): string {
@@ -116,6 +141,29 @@ function clipDurationSeconds(clip: {duration_ms: number}): string {
 
 function ffmpegNumber(value: number): string {
   return Number.isFinite(value) ? value.toFixed(4) : '0.0000';
+}
+
+function normalizeCaptionText(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').slice(0, 120);
+}
+
+function captionTiming(caption: StoryCaption, composition: CompositionSpec): {startSeconds: string; endSeconds: string} | undefined {
+  const fallbackClip = composition.clips.find((clip) => clip.clip_id === caption.moment_id || clip.asset_id === caption.moment_id);
+  const fallbackStartMs = fallbackClip ? Math.round((fallbackClip.start_frame / composition.fps) * 1000) : 0;
+  const fallbackEndMs = fallbackClip ? fallbackStartMs + fallbackClip.duration_ms : composition.duration_ms;
+  const startMs = clampNumber(caption.start_ms ?? fallbackStartMs, 0, composition.duration_ms);
+  const endMs = clampNumber(caption.end_ms ?? fallbackEndMs, startMs, composition.duration_ms);
+  if (endMs - startMs < 250) {
+    return undefined;
+  }
+  return {startSeconds: (startMs / 1000).toFixed(3), endSeconds: (endMs / 1000).toFixed(3)};
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+  return Math.max(min, Math.min(max, value));
 }
 
 function isHeifImagePath(filePath: string): boolean {
@@ -200,7 +248,8 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
       }
       args.push('-i', inputPath);
     }
-    const filter = concatFilter(composition);
+    const captions = await this.prepareCaptionOverlays(composition, outputPath);
+    const filter = concatFilter(composition, captions);
     args.push(
       '-filter_complex',
       filter.filter,
@@ -226,6 +275,25 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
       outputPath,
     );
     await run(this.ffmpegBinary, args, 15 * 60 * 1000);
+  }
+
+  private async prepareCaptionOverlays(composition: CompositionSpec, outputPath: string): Promise<CaptionOverlay[]> {
+    const overlays: CaptionOverlay[] = [];
+    const captionsDir = path.dirname(outputPath);
+    for (const [index, caption] of composition.captions.entries()) {
+      const text = normalizeCaptionText(caption.text);
+      if (!text) {
+        continue;
+      }
+      const timing = captionTiming(caption, composition);
+      if (!timing) {
+        continue;
+      }
+      const textFilePath = path.join(captionsDir, `caption-${index}-${stableHash({text, timing}).slice(0, 12)}.txt`);
+      await writeFile(textFilePath, text, 'utf8');
+      overlays.push({textFilePath, startSeconds: timing.startSeconds, endSeconds: timing.endSeconds});
+    }
+    return overlays;
   }
 
   private async prepareStillImageInput(clip: TimelineClip, outputPath: string): Promise<string> {

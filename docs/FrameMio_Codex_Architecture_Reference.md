@@ -866,6 +866,8 @@ Current implementation notes:
 - frame extraction seeks before opening the input (`-ss` before `-i`) for faster representative-frame extraction
 - preprocessing artifacts are cached by user, media, input/analysis version, and source ETag
 - VideoAnalysis is cached by user, media, input version, understanding version, provider/model, and source ETag
+- production deployments use an upstream OpenAI-compatible analysis service with `VIDEO_UNDERSTANDING_PROVIDER=openai` and `VIDEO_UNDERSTANDING_MODEL=gpt-5.4-mini`; `heuristic-v1` is a development fallback only
+- transcription uses the upstream transcription service with `TRANSCRIPTION_PROVIDER=openai`, `TRANSCRIPTION_MODEL=gpt-5.4-mini-transcribe`, and `ENABLE_TRANSCRIPTION=true`, while still falling back to visual-only evidence when the provider is unavailable
 - force reanalysis should reuse deterministic preprocessing where possible and append a new semantic analysis version rather than overwriting old records
 
 ## 11.2 Frame selection
