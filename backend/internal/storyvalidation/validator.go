@@ -242,17 +242,19 @@ func (v *Validator) Validate(ctx context.Context, userID string, plan models.Sto
 	}
 
 	if len(plan.Captions) > 0 {
-		seenCaptionMoments := make(map[string]struct{}, len(plan.Captions))
+		seenCaptions := make(map[string]struct{}, len(plan.Captions))
 		for index, caption := range plan.Captions {
 			field := fmt.Sprintf("captions[%d]", index)
 			if strings.TrimSpace(caption.MomentID) == "" {
 				problems.Add(field+".moment_id", "required", "caption moment id is required")
 			} else if _, exists := momentIDs[caption.MomentID]; !exists {
 				problems.Add(field+".moment_id", "unknown_moment", "caption references an unknown moment")
-			} else if _, duplicate := seenCaptionMoments[caption.MomentID]; duplicate {
-				problems.Add(field+".moment_id", "duplicate_reference", "caption moments must be unique")
+			}
+			captionKey := fmt.Sprintf("%s:%d:%d:%s", strings.TrimSpace(caption.MomentID), caption.StartMS, caption.EndMS, strings.TrimSpace(caption.Text))
+			if _, duplicate := seenCaptions[captionKey]; duplicate {
+				problems.Add(field, "duplicate_reference", "duplicate caption timing and text")
 			} else {
-				seenCaptionMoments[caption.MomentID] = struct{}{}
+				seenCaptions[captionKey] = struct{}{}
 			}
 			if strings.TrimSpace(caption.Text) == "" {
 				problems.Add(field+".text", "required", "caption text is required")

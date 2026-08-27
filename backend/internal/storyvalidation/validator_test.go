@@ -63,6 +63,19 @@ func TestValidateStoryPlanAcceptsMultipleSegmentsFromSameVideo(t *testing.T) {
 	}
 }
 
+func TestValidateStoryPlanAcceptsMultipleTimedCaptionsForSameMoment(t *testing.T) {
+	t.Parallel()
+	validator, plan := validStoryPlanFixture(t)
+	plan.Captions = []models.StoryCaption{
+		{MomentID: "moment-1", Text: "Look at the lake", StartMS: 0, EndMS: 1200},
+		{MomentID: "moment-1", Text: "This is beautiful", StartMS: 1200, EndMS: 2600},
+	}
+
+	if err := validator.Validate(context.Background(), "user-1", plan); err != nil {
+		t.Fatalf("validate multiple timed captions for same moment: %v", err)
+	}
+}
+
 func TestValidateStoryPlanRejectsInvalidInputs(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
