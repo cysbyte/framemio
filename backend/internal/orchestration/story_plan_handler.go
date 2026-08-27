@@ -91,19 +91,35 @@ func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configur
 	if style == "" {
 		style = models.VisualStyleCinematic
 	}
+	subtitlesEnabled := boolPointerFromConfig(configuration["subtitles_enabled"])
 	return ai.Request{
-		ProjectID:         project.ID,
-		Version:           version,
-		DesiredDuration:   duration,
-		StoryType:         storyTypeFromContext(project.Context),
-		VisualStyle:       style,
-		UserInstructions:  instructions,
-		SelectedMediaIDs:  selectedMediaIDs,
-		ExcludedMediaIDs:  splitStoryPlanConfigList(configuration["excluded_media_ids"]),
-		ExcludedMomentIDs: splitStoryPlanConfigList(configuration["excluded_moment_ids"]),
-		PhotoAnalyses:     photoAnalyses,
-		VideoAnalyses:     videoAnalyses,
-		MediaClusters:     clusters,
+		ProjectID:          project.ID,
+		Version:            version,
+		DesiredDuration:    duration,
+		StoryType:          storyTypeFromContext(project.Context),
+		VisualStyle:        style,
+		UserInstructions:   instructions,
+		SelectedMediaIDs:   selectedMediaIDs,
+		ExcludedMediaIDs:   splitStoryPlanConfigList(configuration["excluded_media_ids"]),
+		ExcludedMomentIDs:  splitStoryPlanConfigList(configuration["excluded_moment_ids"]),
+		SubtitlesEnabled:   subtitlesEnabled,
+		CaptionStylePreset: strings.TrimSpace(configuration["caption_style_preset"]),
+		PhotoAnalyses:      photoAnalyses,
+		VideoAnalyses:      videoAnalyses,
+		MediaClusters:      clusters,
+	}
+}
+
+func boolPointerFromConfig(value string) *bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "1", "yes", "on":
+		result := true
+		return &result
+	case "false", "0", "no", "off":
+		result := false
+		return &result
+	default:
+		return nil
 	}
 }
 

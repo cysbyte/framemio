@@ -151,3 +151,19 @@ type StoryCaption struct {
 	StartMS  int    `json:"start_ms,omitempty"`
 	EndMS    int    `json:"end_ms,omitempty"`
 }
+
+type CaptionStyle struct {
+	Preset               string  `json:"preset,omitempty"`
+	FontFamily           string  `json:"font_family,omitempty"`
+	FontSize             int     `json:"font_size,omitempty"`
+	TextColor            string  `json:"text_color,omitempty"`
+	StrokeColor          string  `json:"stroke_color,omitempty"`
+	StrokeWidth          int     `json:"stroke_width,omitempty"`
+	BackgroundEnabled    bool    `json:"background_enabled,omitempty"`
+	BackgroundColor      string  `json:"background_color,omitempty"`
+	BackgroundOpacity    float64 `json:"background_opacity,omitempty"`
+	Position             string  `json:"position,omitempty"`
+	BottomOffset         int     `json:"bottom_offset,omitempty"`
+	MaxLines             int     `json:"max_lines,omitempty"`
+	MaxCharactersPerLine int     `json:"max_characters_per_line,omitempty"`
+}

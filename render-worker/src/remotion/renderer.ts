@@ -2,7 +2,7 @@ import {spawn} from 'node:child_process';
 import {mkdir, open, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import type {CompositionSpec, KenBurnsTransform, StoryCaption, TimelineClip} from '../types.js';
+import type {CaptionStyle, CompositionSpec, KenBurnsTransform, StoryCaption, TimelineClip} from '../types.js';
 import {canonicalJson, stableHash} from '../determinism.js';
 
 export interface RemotionRenderer {
@@ -62,13 +62,51 @@ interface CaptionOverlay {
   endSeconds: string;
 }
 
+interface ResolvedCaptionStyle {
+  fontFamily?: string;
+  fontSize: number;
+  textColor: string;
+  strokeColor: string;
+  strokeWidth: number;
+  backgroundEnabled: boolean;
+  backgroundColor: string;
+  backgroundOpacity: number;
+  position: 'bottom' | 'middle' | 'top';
+  bottomOffset: number;
+  maxLines: number;
+  maxCharactersPerLine: number;
+}
+
+const DEFAULT_CAPTION_STYLE: ResolvedCaptionStyle = {
+  fontSize: 44,
+  textColor: 'white',
+  strokeColor: 'black',
+  strokeWidth: 3,
+  backgroundEnabled: true,
+  backgroundColor: 'black',
+  backgroundOpacity: 0.32,
+  position: 'bottom',
+  bottomOffset: 150,
+  maxLines: 3,
+  maxCharactersPerLine: 32,
+};
+
+const FONT_FAMILY_MAP = new Map<string, string>([
+  ['inter', 'DejaVu Sans'],
+  ['inter-bold', 'DejaVu Sans Bold'],
+  ['system', 'DejaVu Sans'],
+  ['system-bold', 'DejaVu Sans Bold'],
+  ['noto-sans', 'DejaVu Sans'],
+  ['noto-sans-bold', 'DejaVu Sans Bold'],
+]);
+
 function concatFilter(composition: CompositionSpec, captions: CaptionOverlay[] = []): ConcatFilter {
   const videoFilters = composition.clips.map((clip, index) => isPhotoTimelineClip(clip)
     ? photoVideoFilter(clip, index, composition)
     : sourceVideoFilter(clip, index, composition));
   const videoInputs = composition.clips.map((_, index) => `[v${index}]`).join('');
   const filters = [...videoFilters, `${videoInputs}concat=n=${composition.clips.length}:v=1:a=0,format=yuv420p[basev]`];
-  filters.push(captionVideoFilter(captions));
+  filters.push(captionVideoFilter(captions, composition.caption_style));
   if (!composition.audio.original_audio) {
     return {filter: filters.join(';'), hasAudio: false};
   }
@@ -85,18 +123,97 @@ function isPhotoTimelineClip(clip: TimelineClip): clip is PhotoTimelineClip {
   return clip.transform.kind === 'photo';
 }
 
-function captionVideoFilter(captions: CaptionOverlay[]): string {
+function captionVideoFilter(captions: CaptionOverlay[], requestedStyle?: CaptionStyle): string {
   if (captions.length === 0) {
     return '[basev]format=yuv420p[outv]';
   }
+  const style = resolveCaptionStyle(requestedStyle);
   const filters: string[] = [];
   let input = 'basev';
   captions.forEach((caption, index) => {
     const output = index === captions.length - 1 ? 'outv' : `captionv${index}`;
-    filters.push(`[${input}]drawtext=textfile='${escapeFilterPath(caption.textFilePath)}':fontcolor=white:fontsize=44:borderw=3:bordercolor=black@0.72:box=1:boxcolor=black@0.32:boxborderw=24:x=(w-text_w)/2:y=h-text_h-150:enable='between(t,${caption.startSeconds},${caption.endSeconds})',format=yuv420p[${output}]`);
+    filters.push(`[${input}]drawtext=${drawtextOptions(caption, style)},format=yuv420p[${output}]`);
     input = output;
   });
   return filters.join(';');
+}
+
+function drawtextOptions(caption: CaptionOverlay, style: ResolvedCaptionStyle): string {
+  const options = [`textfile='${escapeFilterPath(caption.textFilePath)}'`];
+  if (style.fontFamily) {
+    options.push(`font='${style.fontFamily}'`);
+  }
+  options.push(
+    `fontcolor=${style.textColor}`,
+    `fontsize=${style.fontSize}`,
+    `borderw=${style.strokeWidth}`,
+    `bordercolor=${style.strokeColor}@0.72`,
+  );
+  if (style.backgroundEnabled) {
+    options.push(
+      'box=1',
+      `boxcolor=${style.backgroundColor}@${ffmpegNumber(style.backgroundOpacity)}`,
+      `boxborderw=${Math.max(0, Math.round(style.fontSize * 0.55))}`,
+    );
+  } else {
+    options.push('box=0');
+  }
+  options.push(
+    'x=(w-text_w)/2',
+    `y=${captionYExpression(style)}`,
+    `enable='between(t,${caption.startSeconds},${caption.endSeconds})'`,
+  );
+  return options.join(':');
+}
+
+function resolveCaptionStyle(style?: CaptionStyle): ResolvedCaptionStyle {
+  const position = style?.position === 'top' || style?.position === 'middle' || style?.position === 'bottom' ? style.position : DEFAULT_CAPTION_STYLE.position;
+  return {
+    fontFamily: fontFamily(style?.font_family),
+    fontSize: wholeNumber(style?.font_size, DEFAULT_CAPTION_STYLE.fontSize, 12, 96),
+    textColor: ffmpegColor(style?.text_color, DEFAULT_CAPTION_STYLE.textColor),
+    strokeColor: ffmpegColor(style?.stroke_color, DEFAULT_CAPTION_STYLE.strokeColor),
+    strokeWidth: wholeNumber(style?.stroke_width, DEFAULT_CAPTION_STYLE.strokeWidth, 0, 12),
+    backgroundEnabled: style?.background_enabled ?? DEFAULT_CAPTION_STYLE.backgroundEnabled,
+    backgroundColor: ffmpegColor(style?.background_color, DEFAULT_CAPTION_STYLE.backgroundColor),
+    backgroundOpacity: clampNumber(style?.background_opacity ?? DEFAULT_CAPTION_STYLE.backgroundOpacity, 0, 1),
+    position,
+    bottomOffset: wholeNumber(style?.bottom_offset, DEFAULT_CAPTION_STYLE.bottomOffset, 0, 480),
+    maxLines: wholeNumber(style?.max_lines, DEFAULT_CAPTION_STYLE.maxLines, 1, 4),
+    maxCharactersPerLine: wholeNumber(style?.max_characters_per_line, DEFAULT_CAPTION_STYLE.maxCharactersPerLine, 16, 48),
+  };
+}
+
+function fontFamily(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return DEFAULT_CAPTION_STYLE.fontFamily;
+  }
+  return FONT_FAMILY_MAP.get(value.trim().toLowerCase()) ?? DEFAULT_CAPTION_STYLE.fontFamily;
+}
+
+function ffmpegColor(value: unknown, fallback: string): string {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+  const trimmed = value.trim();
+  return /^#[0-9a-fA-F]{6}$/.test(trimmed) ? `0x${trimmed.slice(1).toUpperCase()}` : fallback;
+}
+
+function wholeNumber(value: unknown, fallback: number, min: number, max: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.round(clampNumber(value, min, max));
+}
+
+function captionYExpression(style: ResolvedCaptionStyle): string {
+  if (style.position === 'top') {
+    return String(style.bottomOffset);
+  }
+  if (style.position === 'middle') {
+    return '(h-text_h)/2';
+  }
+  return `h-text_h-${style.bottomOffset}`;
 }
 
 function escapeFilterPath(filePath: string): string {
@@ -143,8 +260,8 @@ function ffmpegNumber(value: number): string {
   return Number.isFinite(value) ? value.toFixed(4) : '0.0000';
 }
 
-function normalizeCaptionText(value: string): string {
-  return wrapCaptionText(value.trim().replace(/\s+/g, ' ').slice(0, 120), 32, 3);
+function normalizeCaptionText(value: string, style: ResolvedCaptionStyle): string {
+  return wrapCaptionText(value.trim().replace(/\s+/g, ' ').slice(0, 120), style.maxCharactersPerLine, style.maxLines);
 }
 
 function wrapCaptionText(value: string, maxLineLength: number, maxLines: number): string {
@@ -307,8 +424,9 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
   private async prepareCaptionOverlays(composition: CompositionSpec, outputPath: string): Promise<CaptionOverlay[]> {
     const overlays: CaptionOverlay[] = [];
     const captionsDir = path.dirname(outputPath);
+    const captionStyle = resolveCaptionStyle(composition.caption_style);
     for (const [index, caption] of composition.captions.entries()) {
-      const text = normalizeCaptionText(caption.text);
+      const text = normalizeCaptionText(caption.text, captionStyle);
       if (!text) {
         console.info(JSON.stringify({level: 'info', msg: 'skipping empty caption overlay', project_id: composition.project_id, story_plan_id: composition.story_plan_id, caption_index: index, moment_id: caption.moment_id}));
         continue;

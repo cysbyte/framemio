@@ -112,6 +112,8 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
     let replace: [StoryMomentReplacement]
     let musicMood: String?
     let style: String?
+    let subtitlesEnabled: Bool?
+    let subtitleStyle: String?
     let targetDuration: TimeInterval?
     let instruction: String?
 
@@ -122,6 +124,8 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
         case replace
         case musicMood
         case style
+        case subtitlesEnabled
+        case subtitleStyle
         case targetDuration
         case instruction
     }
@@ -133,6 +137,8 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
             || !replace.isEmpty
             || musicMood != nil
             || style != nil
+            || subtitlesEnabled != nil
+            || subtitleStyle != nil
             || targetDuration != nil
             || instruction?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }

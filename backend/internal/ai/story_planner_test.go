@@ -220,6 +220,82 @@ func TestPlannerUsesTranscriptTextForVideoCaptions(t *testing.T) {
 	}
 }
 
+func TestPlannerSelectsCaptionStyleFromStoryContext(t *testing.T) {
+	t.Parallel()
+	planner := &Planner{Now: func() time.Time { return time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC) }}
+
+	minimalPlan, err := planner.Plan(context.Background(), Request{
+		ProjectID:       "project-minimal-caption-style",
+		DesiredDuration: 5 * time.Second,
+		StoryType:       models.StoryTypeCustom,
+		VisualStyle:     models.VisualStyleMinimal,
+		PhotoAnalyses: []models.PhotoAnalysis{{
+			ID: "photo-analysis-1", PhotoID: "photo-1", ProjectID: "project-minimal-caption-style", AnalysisVersion: "photo-v1",
+			Caption: "Quiet lake", MemoryValue: 0.9, EmotionalValue: 0.8, VisualQuality: 0.8, StoryRelevance: 0.9, Selected: true,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if minimalPlan.CaptionStyle == nil || minimalPlan.CaptionStyle.Preset != "clean_minimal" || minimalPlan.CaptionStyle.BackgroundEnabled {
+		t.Fatalf("expected clean minimal caption style, got %+v", minimalPlan.CaptionStyle)
+	}
+
+	playfulPlan, err := planner.Plan(context.Background(), Request{
+		ProjectID:       "project-playful-caption-style",
+		DesiredDuration: 5 * time.Second,
+		StoryType:       models.StoryTypeBirthday,
+		VisualStyle:     models.VisualStyleNatural,
+		PhotoAnalyses: []models.PhotoAnalysis{{
+			ID: "photo-analysis-2", PhotoID: "photo-2", ProjectID: "project-playful-caption-style", AnalysisVersion: "photo-v1",
+			Caption: "Cake candles", MemoryValue: 0.9, EmotionalValue: 0.9, VisualQuality: 0.8, StoryRelevance: 0.9, Selected: true,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if playfulPlan.CaptionStyle == nil || playfulPlan.CaptionStyle.Preset != "playful_pop" || playfulPlan.CaptionStyle.FontSize <= minimalPlan.CaptionStyle.FontSize {
+		t.Fatalf("expected playful caption style, got %+v", playfulPlan.CaptionStyle)
+	}
+}
+
+func TestPlannerHonorsSubtitleOptions(t *testing.T) {
+	t.Parallel()
+	disabled := false
+	planner := &Planner{Now: func() time.Time { return time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC) }}
+	request := Request{
+		ProjectID:          "project-subtitle-options",
+		DesiredDuration:    8 * time.Second,
+		StoryType:          models.StoryTypeCustom,
+		VisualStyle:        models.VisualStyleCinematic,
+		SelectedMediaIDs:   []string{"video-talk"},
+		SubtitlesEnabled:   &disabled,
+		CaptionStylePreset: "playful_pop",
+		VideoAnalyses: []models.VideoAnalysis{{
+			ID: "video-analysis-talk", VideoID: "video-talk", ProjectID: "project-subtitle-options", AnalysisVersion: "video-v1", DurationMicros: 8_000_000,
+			Transcript: models.VideoTranscript{HasSpeech: true, Language: "en", Segments: []models.VideoTranscriptSegment{
+				{StartMicros: 1_000_000, EndMicros: 2_200_000, Text: "Look at the lake", Confidence: 0.96},
+			}},
+			QualitySignals: models.VideoQualitySignals{OverallScore: 0.8},
+			Segments: []models.VideoSegment{{
+				SegmentID: "segment-talk", SceneID: "scene-talk", StartMicros: 1_000_000, EndMicros: 4_500_000, Description: "Family near the lake",
+				Importance: 0.92, VisualQuality: 0.8, MemoryValue: 0.94, EmotionalValue: 0.93, StoryRelevance: 0.94, Recommended: true, RecommendedUsage: "hero",
+			}},
+		}},
+	}
+
+	plan, err := planner.Plan(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Captions) != 0 {
+		t.Fatalf("expected subtitles disabled, got %+v", plan.Captions)
+	}
+	if plan.CaptionStyle == nil || plan.CaptionStyle.Preset != "playful_pop" {
+		t.Fatalf("expected selected subtitle style to be preserved, got %+v", plan.CaptionStyle)
+	}
+}
+
 func TestPlannerSelectsMeaningfulVideoRanges(t *testing.T) {
 	t.Parallel()
 	planner := &Planner{Now: func() time.Time { return time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC) }}

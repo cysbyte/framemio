@@ -650,7 +650,10 @@ POST /v1/media/uploads/complete
 GET  /v1/stories
 POST /v1/stories
 GET  /v1/stories/:id
+POST /v1/stories/:id/versions
 ```
+
+`POST /v1/stories/:id/versions` accepts edit preferences such as selected/removed media, music/style changes, `subtitlesEnabled`, and `subtitleStyle`. Subtitle preferences are stored as story-plan revision configuration (`subtitles_enabled` and `caption_style_preset`) and affect only generated `StoryPlan` captions plus renderer-safe `caption_style`; iOS never sends raw renderer commands, font paths, STT provider information, or transcript text.
 
 Existing project/media routes:
 
@@ -1187,6 +1190,7 @@ music_mood
 user_instructions
 moments
 captions
+caption_style
 audio
 output
 total_duration_ms
@@ -1212,6 +1216,8 @@ score
 ```
 
 Photo moments must have positive `duration_ms` and no source timestamps. Video moments must have `start_micros`, `end_micros`, a matching `duration_ms`, and a valid `video_analysis_version`.
+
+`caption_style` is optional renderer-safe styling metadata for captions/subtitles. It may include whitelisted presets such as `bold_social`, `cinematic_subtitle`, `clean_minimal`, and `playful_pop`, plus validated fields for font family, font size, text/stroke/background colors, background opacity, position, bottom offset, max lines, and max characters per line. It must not contain raw FFmpeg/Remotion commands, arbitrary font file paths, provider information, or transcript source details.
 
 ---
 

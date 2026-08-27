@@ -341,6 +341,8 @@ final class StoryPreviewViewModel: ObservableObject {
                 replace: [],
                 musicMood: nil,
                 style: nil,
+                subtitlesEnabled: nil,
+                subtitleStyle: nil,
                 targetDuration: nil,
                 instruction: "Use this moment in a new version."
             )
@@ -358,6 +360,8 @@ final class StoryPreviewViewModel: ObservableObject {
                 replace: [],
                 musicMood: nil,
                 style: nil,
+                subtitlesEnabled: nil,
+                subtitleStyle: nil,
                 targetDuration: nil,
                 instruction: "Remove this moment from the story."
             )

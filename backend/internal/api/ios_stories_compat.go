@@ -50,14 +50,16 @@ type iosCreateStoryRequest struct {
 }
 
 type iosStoryEditRequest struct {
-	RemoveMomentIDs []string                `json:"removeMomentIds,omitempty"`
-	RemoveMediaIDs  []string                `json:"removeMediaIds,omitempty"`
-	AddMediaIDs     []string                `json:"addMediaIds,omitempty"`
-	Replace         []iosStoryMomentReplace `json:"replace,omitempty"`
-	MusicMood       string                  `json:"musicMood,omitempty"`
-	Style           string                  `json:"style,omitempty"`
-	TargetDuration  float64                 `json:"targetDuration,omitempty"`
-	Instruction     string                  `json:"instruction,omitempty"`
+	RemoveMomentIDs  []string                `json:"removeMomentIds,omitempty"`
+	RemoveMediaIDs   []string                `json:"removeMediaIds,omitempty"`
+	AddMediaIDs      []string                `json:"addMediaIds,omitempty"`
+	Replace          []iosStoryMomentReplace `json:"replace,omitempty"`
+	MusicMood        string                  `json:"musicMood,omitempty"`
+	Style            string                  `json:"style,omitempty"`
+	SubtitlesEnabled *bool                   `json:"subtitlesEnabled,omitempty"`
+	SubtitleStyle    string                  `json:"subtitleStyle,omitempty"`
+	TargetDuration   float64                 `json:"targetDuration,omitempty"`
+	Instruction      string                  `json:"instruction,omitempty"`
 }
 
 type iosStoryMomentReplace struct {
@@ -279,6 +281,12 @@ func (s *Server) iosStoryEditConfiguration(request *http.Request, userID string,
 	if style := normalizeIOSStoryEditStyle(input.Style); style != "" {
 		config["visual_style"] = style
 	}
+	if input.SubtitlesEnabled != nil {
+		config["subtitles_enabled"] = strconv.FormatBool(*input.SubtitlesEnabled)
+	}
+	if subtitleStyle := normalizeIOSSubtitleStyle(input.SubtitleStyle); subtitleStyle != "" {
+		config["caption_style_preset"] = subtitleStyle
+	}
 	if mood := normalizeIOSMusicMood(input.MusicMood); mood != "" {
 		config["music_mood"] = mood
 	}
@@ -358,6 +366,21 @@ func normalizeIOSStoryEditStyle(value string) string {
 		return string(models.VisualStyleMinimal)
 	case "elegant":
 		return string(models.VisualStyleElegant)
+	default:
+		return ""
+	}
+}
+
+func normalizeIOSSubtitleStyle(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "bold", "bold_social":
+		return "bold_social"
+	case "cinematic", "cinematic_subtitle":
+		return "cinematic_subtitle"
+	case "minimal", "clean_minimal":
+		return "clean_minimal"
+	case "playful", "playful_pop":
+		return "playful_pop"
 	default:
 		return ""
 	}

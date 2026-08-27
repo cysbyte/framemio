@@ -7,6 +7,9 @@ type Config struct {
 	SupportedAspectRatios     map[string]struct{}
 	AllowedAudioSources       map[string]struct{}
 	AudioSourcesRequiringMood map[string]struct{}
+	AllowedCaptionPresets     map[string]struct{}
+	AllowedCaptionFonts       map[string]struct{}
+	AllowedCaptionPositions   map[string]struct{}
 	MaxTitleLength            int
 	MaxEndingLength           int
 	MaxMusicMoodLength        int
@@ -18,6 +21,11 @@ type Config struct {
 	MaxTransitionLength       int
 	MaxPresetLength           int
 	MaxAudioSourceLength      int
+	MaxCaptionFontSize        int
+	MaxCaptionStrokeWidth     int
+	MaxCaptionBottomOffset    int
+	MaxCaptionLines           int
+	MaxCaptionLineCharacters  int
 }
 
 func DefaultConfig() Config {
@@ -40,6 +48,25 @@ func DefaultConfig() Config {
 			"licensed": {},
 			"custom":   {},
 		},
+		AllowedCaptionPresets: map[string]struct{}{
+			"bold_social":        {},
+			"cinematic_subtitle": {},
+			"clean_minimal":      {},
+			"playful_pop":        {},
+		},
+		AllowedCaptionFonts: map[string]struct{}{
+			"inter":          {},
+			"inter-bold":     {},
+			"system":         {},
+			"system-bold":    {},
+			"noto-sans":      {},
+			"noto-sans-bold": {},
+		},
+		AllowedCaptionPositions: map[string]struct{}{
+			"bottom": {},
+			"middle": {},
+			"top":    {},
+		},
 		MaxTitleLength:            120,
 		MaxEndingLength:           180,
 		MaxMusicMoodLength:        80,
@@ -51,5 +78,10 @@ func DefaultConfig() Config {
 		MaxTransitionLength:       32,
 		MaxPresetLength:           64,
 		MaxAudioSourceLength:      32,
+		MaxCaptionFontSize:        96,
+		MaxCaptionStrokeWidth:     12,
+		MaxCaptionBottomOffset:    480,
+		MaxCaptionLines:           4,
+		MaxCaptionLineCharacters:  48,
 	}
 }

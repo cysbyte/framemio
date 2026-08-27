@@ -36,6 +36,15 @@ func New(store store.Store, objectStorage storage.ObjectStorage, config Config) 
 	if config.AudioSourcesRequiringMood == nil {
 		config.AudioSourcesRequiringMood = DefaultConfig().AudioSourcesRequiringMood
 	}
+	if config.AllowedCaptionPresets == nil {
+		config.AllowedCaptionPresets = DefaultConfig().AllowedCaptionPresets
+	}
+	if config.AllowedCaptionFonts == nil {
+		config.AllowedCaptionFonts = DefaultConfig().AllowedCaptionFonts
+	}
+	if config.AllowedCaptionPositions == nil {
+		config.AllowedCaptionPositions = DefaultConfig().AllowedCaptionPositions
+	}
 	if config.MaxTitleLength == 0 {
 		config.MaxTitleLength = DefaultConfig().MaxTitleLength
 	}
@@ -68,6 +77,21 @@ func New(store store.Store, objectStorage storage.ObjectStorage, config Config) 
 	}
 	if config.MaxAudioSourceLength == 0 {
 		config.MaxAudioSourceLength = DefaultConfig().MaxAudioSourceLength
+	}
+	if config.MaxCaptionFontSize == 0 {
+		config.MaxCaptionFontSize = DefaultConfig().MaxCaptionFontSize
+	}
+	if config.MaxCaptionStrokeWidth == 0 {
+		config.MaxCaptionStrokeWidth = DefaultConfig().MaxCaptionStrokeWidth
+	}
+	if config.MaxCaptionBottomOffset == 0 {
+		config.MaxCaptionBottomOffset = DefaultConfig().MaxCaptionBottomOffset
+	}
+	if config.MaxCaptionLines == 0 {
+		config.MaxCaptionLines = DefaultConfig().MaxCaptionLines
+	}
+	if config.MaxCaptionLineCharacters == 0 {
+		config.MaxCaptionLineCharacters = DefaultConfig().MaxCaptionLineCharacters
 	}
 	return &Validator{Store: store, ObjectStorage: objectStorage, Config: config}
 }
@@ -267,6 +291,46 @@ func (v *Validator) Validate(ctx context.Context, userID string, plan models.Sto
 		}
 	}
 
+	if plan.CaptionStyle != nil {
+		style := plan.CaptionStyle
+		if strings.TrimSpace(style.Preset) != "" && !v.allowedCaptionPreset(style.Preset) {
+			problems.Add("caption_style.preset", "unsupported_caption_preset", "caption style preset is unsupported")
+		}
+		if strings.TrimSpace(style.FontFamily) != "" && !v.allowedCaptionFont(style.FontFamily) {
+			problems.Add("caption_style.font_family", "unsupported_caption_font", "caption font is unsupported")
+		}
+		if style.FontSize < 0 || style.FontSize > config.MaxCaptionFontSize {
+			problems.Add("caption_style.font_size", "out_of_range", fmt.Sprintf("caption font size must be between 0 and %d", config.MaxCaptionFontSize))
+		}
+		if strings.TrimSpace(style.TextColor) != "" && !isHexColor(style.TextColor) {
+			problems.Add("caption_style.text_color", "invalid_color", "caption text color must be a #RRGGBB color")
+		}
+		if strings.TrimSpace(style.StrokeColor) != "" && !isHexColor(style.StrokeColor) {
+			problems.Add("caption_style.stroke_color", "invalid_color", "caption stroke color must be a #RRGGBB color")
+		}
+		if style.StrokeWidth < 0 || style.StrokeWidth > config.MaxCaptionStrokeWidth {
+			problems.Add("caption_style.stroke_width", "out_of_range", fmt.Sprintf("caption stroke width must be between 0 and %d", config.MaxCaptionStrokeWidth))
+		}
+		if strings.TrimSpace(style.BackgroundColor) != "" && !isHexColor(style.BackgroundColor) {
+			problems.Add("caption_style.background_color", "invalid_color", "caption background color must be a #RRGGBB color")
+		}
+		if style.BackgroundOpacity < 0 || style.BackgroundOpacity > 1 {
+			problems.Add("caption_style.background_opacity", "out_of_range", "caption background opacity must be between 0 and 1")
+		}
+		if strings.TrimSpace(style.Position) != "" && !v.allowedCaptionPosition(style.Position) {
+			problems.Add("caption_style.position", "unsupported_caption_position", "caption position is unsupported")
+		}
+		if style.BottomOffset < 0 || style.BottomOffset > config.MaxCaptionBottomOffset {
+			problems.Add("caption_style.bottom_offset", "out_of_range", fmt.Sprintf("caption bottom offset must be between 0 and %d", config.MaxCaptionBottomOffset))
+		}
+		if style.MaxLines < 0 || style.MaxLines > config.MaxCaptionLines {
+			problems.Add("caption_style.max_lines", "out_of_range", fmt.Sprintf("caption max lines must be between 0 and %d", config.MaxCaptionLines))
+		}
+		if style.MaxCharactersPerLine < 0 || style.MaxCharactersPerLine > config.MaxCaptionLineCharacters {
+			problems.Add("caption_style.max_characters_per_line", "out_of_range", fmt.Sprintf("caption line length must be between 0 and %d", config.MaxCaptionLineCharacters))
+		}
+	}
+
 	if plan.Audio != nil {
 		if strings.TrimSpace(plan.Audio.Source) == "" {
 			problems.Add("audio.source", "required", "audio source is required")
@@ -307,6 +371,15 @@ func (v *Validator) config() Config {
 	if config.AudioSourcesRequiringMood == nil {
 		config.AudioSourcesRequiringMood = defaults.AudioSourcesRequiringMood
 	}
+	if config.AllowedCaptionPresets == nil {
+		config.AllowedCaptionPresets = defaults.AllowedCaptionPresets
+	}
+	if config.AllowedCaptionFonts == nil {
+		config.AllowedCaptionFonts = defaults.AllowedCaptionFonts
+	}
+	if config.AllowedCaptionPositions == nil {
+		config.AllowedCaptionPositions = defaults.AllowedCaptionPositions
+	}
 	if config.MaxTitleLength == 0 {
 		config.MaxTitleLength = defaults.MaxTitleLength
 	}
@@ -340,6 +413,21 @@ func (v *Validator) config() Config {
 	if config.MaxAudioSourceLength == 0 {
 		config.MaxAudioSourceLength = defaults.MaxAudioSourceLength
 	}
+	if config.MaxCaptionFontSize == 0 {
+		config.MaxCaptionFontSize = defaults.MaxCaptionFontSize
+	}
+	if config.MaxCaptionStrokeWidth == 0 {
+		config.MaxCaptionStrokeWidth = defaults.MaxCaptionStrokeWidth
+	}
+	if config.MaxCaptionBottomOffset == 0 {
+		config.MaxCaptionBottomOffset = defaults.MaxCaptionBottomOffset
+	}
+	if config.MaxCaptionLines == 0 {
+		config.MaxCaptionLines = defaults.MaxCaptionLines
+	}
+	if config.MaxCaptionLineCharacters == 0 {
+		config.MaxCaptionLineCharacters = defaults.MaxCaptionLineCharacters
+	}
 	return config
 }
 
@@ -351,6 +439,34 @@ func (v *Validator) supportedAspectRatio(aspectRatio string) bool {
 func (v *Validator) allowedAudioSource(source string) bool {
 	_, ok := v.config().AllowedAudioSources[strings.ToLower(strings.TrimSpace(source))]
 	return ok
+}
+
+func (v *Validator) allowedCaptionPreset(preset string) bool {
+	_, ok := v.config().AllowedCaptionPresets[strings.ToLower(strings.TrimSpace(preset))]
+	return ok
+}
+
+func (v *Validator) allowedCaptionFont(font string) bool {
+	_, ok := v.config().AllowedCaptionFonts[strings.ToLower(strings.TrimSpace(font))]
+	return ok
+}
+
+func (v *Validator) allowedCaptionPosition(position string) bool {
+	_, ok := v.config().AllowedCaptionPositions[strings.ToLower(strings.TrimSpace(position))]
+	return ok
+}
+
+func isHexColor(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) != 7 || value[0] != '#' {
+		return false
+	}
+	for _, char := range value[1:] {
+		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 func momentReferenceKey(assetID string, moment models.StoryMoment) string {

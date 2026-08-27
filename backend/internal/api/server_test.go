@@ -596,11 +596,13 @@ func TestIOSStoryEditQueuesStoryPlanRevisionWithoutReanalysis(t *testing.T) {
 	}
 
 	editResponse := performJSON(t, handler, http.MethodPost, "/v1/stories/"+story.ID+"/versions", map[string]any{
-		"removeMomentIds": []string{"breakfast"},
-		"style":           "cinematic",
-		"musicMood":       "calm",
-		"targetDuration":  15,
-		"instruction":     "Make it quieter.",
+		"removeMomentIds":  []string{"breakfast"},
+		"style":            "cinematic",
+		"musicMood":        "calm",
+		"subtitlesEnabled": false,
+		"subtitleStyle":    "minimal",
+		"targetDuration":   15,
+		"instruction":      "Make it quieter.",
 	}, "edit-key", true, nil)
 	if editResponse.Code != http.StatusAccepted {
 		t.Fatalf("edit iOS story status = %d, body = %s", editResponse.Code, editResponse.Body.String())
@@ -619,7 +621,7 @@ func TestIOSStoryEditQueuesStoryPlanRevisionWithoutReanalysis(t *testing.T) {
 	if last.JobType != models.JobTypeStoryPlan || last.MediaID != "" {
 		t.Fatalf("edit should queue only a project-level story plan job, got %+v", last)
 	}
-	if last.Configuration["story_plan_version"] != "2" || last.Configuration["visual_style"] != "cinematic" || last.Configuration["music_mood"] != "calm" {
+	if last.Configuration["story_plan_version"] != "2" || last.Configuration["visual_style"] != "cinematic" || last.Configuration["music_mood"] != "calm" || last.Configuration["subtitles_enabled"] != "false" || last.Configuration["caption_style_preset"] != "clean_minimal" {
 		t.Fatalf("unexpected edit config: %+v", last.Configuration)
 	}
 	if strings.Contains(last.Configuration["selected_media_ids"], first.MediaID) || !strings.Contains(last.Configuration["selected_media_ids"], second.MediaID) {

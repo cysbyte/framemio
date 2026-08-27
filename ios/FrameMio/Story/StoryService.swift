@@ -92,6 +92,8 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
                 replace: [],
                 musicMood: nil,
                 style: nil,
+                subtitlesEnabled: nil,
+                subtitleStyle: nil,
                 targetDuration: nil,
                 instruction: "Make another version of this story."
             )

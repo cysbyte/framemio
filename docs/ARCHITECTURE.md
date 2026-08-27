@@ -41,6 +41,7 @@ Go REST/JSON API responsible for product orchestration and durable application s
 - Publishes identifier-only analysis and render jobs to AWS SQS.
 - Accepts authenticated worker callbacks for analysis, StoryPlan, progress, errors, and completed render artifacts.
 - Exposes project status, StoryPlans, and completed-video S3 references to the iOS client.
+- Accepts story edit preferences for subtitle enablement and whitelisted subtitle style presets, then translates them into StoryPlan revision configuration.
 
 The Go API must remain request-oriented. It must not perform long-running video rendering, invoke Remotion directly in the request path, or block HTTP requests while waiting for FFmpeg.
 
@@ -162,7 +163,7 @@ Initial conceptual fields:
 
 - Story identity and version.
 - Ordered moments and source asset identifiers.
-- Narrative beats and optional captions.
+- Narrative beats, optional captions, and validated caption style metadata.
 - Per-moment duration, crop intent, and transition intent.
 - Audio direction and voiceover/caption guidance, if enabled.
 - Output constraints such as aspect ratio, duration range, and quality preset.

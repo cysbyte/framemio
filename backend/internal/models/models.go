@@ -237,6 +237,7 @@ type StoryPlan struct {
 	UserInstructions    string         `json:"user_instructions,omitempty"`
 	Moments             []StoryMoment  `json:"moments"`
 	Captions            []StoryCaption `json:"captions,omitempty"`
+	CaptionStyle        *CaptionStyle  `json:"caption_style,omitempty"`
 	Audio               *StoryAudio    `json:"audio,omitempty"`
 	Output              StoryOutput    `json:"output"`
 	TotalDurationMS     int            `json:"total_duration_ms,omitempty"`

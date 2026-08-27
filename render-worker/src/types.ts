@@ -16,6 +16,7 @@ export interface StoryPlan {
   music_mood?: string;
   moments: StoryMoment[];
   captions?: StoryCaption[];
+  caption_style?: CaptionStyle;
   audio?: StoryAudio;
   output: StoryOutput;
   total_duration_ms?: number;
@@ -46,6 +47,22 @@ export interface StoryCaption {
   text: string;
   start_ms?: number;
   end_ms?: number;
+}
+
+export interface CaptionStyle {
+  preset?: 'bold_social' | 'cinematic_subtitle' | 'clean_minimal' | 'playful_pop' | string;
+  font_family?: 'inter' | 'inter-bold' | 'system' | 'system-bold' | 'noto-sans' | 'noto-sans-bold' | string;
+  font_size?: number;
+  text_color?: string;
+  stroke_color?: string;
+  stroke_width?: number;
+  background_enabled?: boolean;
+  background_color?: string;
+  background_opacity?: number;
+  position?: 'bottom' | 'middle' | 'top' | string;
+  bottom_offset?: number;
+  max_lines?: number;
+  max_characters_per_line?: number;
 }
 
 export interface StoryAudio {
@@ -166,6 +183,7 @@ export interface CompositionSpec {
   ending_text?: string;
   clips: TimelineClip[];
   captions: StoryCaption[];
+  caption_style?: CaptionStyle;
   audio: ResolvedAudio;
 }
 

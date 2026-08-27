@@ -15,20 +15,22 @@ import (
 )
 
 type Request struct {
-	ProjectID         string
-	Version           int
-	DesiredDuration   time.Duration
-	StoryType         models.StoryType
-	VisualStyle       models.VisualStyle
-	UserInstructions  string
-	SelectedMediaIDs  []string
-	ExcludedMediaIDs  []string
-	ExcludedMomentIDs []string
-	Timestamps        []time.Time
-	Locations         []string
-	PhotoAnalyses     []models.PhotoAnalysis
-	VideoAnalyses     []models.VideoAnalysis
-	MediaClusters     []models.MediaCluster
+	ProjectID          string
+	Version            int
+	DesiredDuration    time.Duration
+	StoryType          models.StoryType
+	VisualStyle        models.VisualStyle
+	UserInstructions   string
+	SelectedMediaIDs   []string
+	ExcludedMediaIDs   []string
+	ExcludedMomentIDs  []string
+	SubtitlesEnabled   *bool
+	CaptionStylePreset string
+	Timestamps         []time.Time
+	Locations          []string
+	PhotoAnalyses      []models.PhotoAnalysis
+	VideoAnalyses      []models.VideoAnalysis
+	MediaClusters      []models.MediaCluster
 }
 
 type Planner struct {
@@ -126,11 +128,18 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 			})
 		}
 	}
+	if request.SubtitlesEnabled != nil && !*request.SubtitlesEnabled {
+		captions = nil
+	}
 	storyType := normalizeStoryType(request.StoryType)
 	visualStyle := normalizeVisualStyle(request.VisualStyle)
 	titleText := titleFor(storyType, request, moments)
 	endingText := endingFor(storyType, request, moments)
 	musicMood := musicMoodFor(storyType, request, moments)
+	captionStyle := captionStyleFor(storyType, visualStyle)
+	if preset := strings.TrimSpace(request.CaptionStylePreset); preset != "" {
+		captionStyle = captionStylePreset(preset, storyType, visualStyle)
+	}
 	plan := models.StoryPlan{
 		SchemaVersion:       models.StoryPlanSchemaVersionV1,
 		ID:                  planID(request, moments),
@@ -145,6 +154,7 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 		UserInstructions:    strings.TrimSpace(request.UserInstructions),
 		Moments:             moments,
 		Captions:            captions,
+		CaptionStyle:        captionStyle,
 		Audio:               &models.StoryAudio{Source: "adaptive", Mood: musicMood},
 		Output: models.StoryOutput{
 			AspectRatio:  "9:16",
@@ -158,6 +168,58 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 		return models.StoryPlan{}, err
 	}
 	return plan, nil
+}
+
+func captionStyleFor(storyType models.StoryType, visualStyle models.VisualStyle) *models.CaptionStyle {
+	switch {
+	case visualStyle == models.VisualStyleMinimal || visualStyle == models.VisualStyleElegant:
+		return &models.CaptionStyle{
+			Preset: "clean_minimal", FontFamily: "inter", FontSize: 42, TextColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 2,
+			BackgroundEnabled: false, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 34,
+		}
+	case visualStyle == models.VisualStylePlayful || storyType == models.StoryTypeBirthday || storyType == models.StoryTypeFriends || storyType == models.StoryTypePet:
+		return &models.CaptionStyle{
+			Preset: "playful_pop", FontFamily: "inter-bold", FontSize: 56, TextColor: "#FFFFFF", StrokeColor: "#111111", StrokeWidth: 5,
+			BackgroundEnabled: true, BackgroundColor: "#111111", BackgroundOpacity: 0.28, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 28,
+		}
+	case visualStyle == models.VisualStyleCinematic || visualStyle == models.VisualStyleWarm:
+		return &models.CaptionStyle{
+			Preset: "cinematic_subtitle", FontFamily: "inter-bold", FontSize: 48, TextColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 4,
+			BackgroundEnabled: true, BackgroundColor: "#000000", BackgroundOpacity: 0.32, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 32,
+		}
+	default:
+		return &models.CaptionStyle{
+			Preset: "bold_social", FontFamily: "inter-bold", FontSize: 52, TextColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 4,
+			BackgroundEnabled: true, BackgroundColor: "#000000", BackgroundOpacity: 0.32, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 32,
+		}
+	}
+}
+
+func captionStylePreset(preset string, storyType models.StoryType, visualStyle models.VisualStyle) *models.CaptionStyle {
+	switch strings.ToLower(strings.TrimSpace(preset)) {
+	case "clean_minimal":
+		return &models.CaptionStyle{
+			Preset: "clean_minimal", FontFamily: "inter", FontSize: 42, TextColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 2,
+			BackgroundEnabled: false, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 34,
+		}
+	case "playful_pop":
+		return &models.CaptionStyle{
+			Preset: "playful_pop", FontFamily: "inter-bold", FontSize: 56, TextColor: "#FFFFFF", StrokeColor: "#111111", StrokeWidth: 5,
+			BackgroundEnabled: true, BackgroundColor: "#111111", BackgroundOpacity: 0.28, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 28,
+		}
+	case "cinematic_subtitle":
+		return &models.CaptionStyle{
+			Preset: "cinematic_subtitle", FontFamily: "inter-bold", FontSize: 48, TextColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 4,
+			BackgroundEnabled: true, BackgroundColor: "#000000", BackgroundOpacity: 0.32, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 32,
+		}
+	case "bold_social":
+		return &models.CaptionStyle{
+			Preset: "bold_social", FontFamily: "inter-bold", FontSize: 52, TextColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 4,
+			BackgroundEnabled: true, BackgroundColor: "#000000", BackgroundOpacity: 0.32, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 32,
+		}
+	default:
+		return captionStyleFor(storyType, visualStyle)
+	}
 }
 
 func ValidateStoryPlan(plan models.StoryPlan) error {

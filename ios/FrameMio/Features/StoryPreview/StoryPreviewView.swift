@@ -783,6 +783,7 @@ private struct EditStorySheet: View {
 
     private let musicOptions = ["Warm", "Cinematic", "Playful", "Calm", "Energetic"]
     private let styleOptions = ["Natural", "Cinematic", "Warm", "Playful"]
+    private let subtitleStyleOptions = ["Bold", "Cinematic", "Minimal", "Playful"]
 
     private var lengthOptions: [Int] {
         Array(Set([15, max(8, Int(story.duration.rounded())), 30])).sorted()
@@ -815,6 +816,7 @@ private struct EditStorySheet: View {
                     addMomentButton
                     musicSection
                     styleSection
+                    subtitleSection
                     lengthSection
                     anotherVersionSection
                 }
@@ -957,6 +959,32 @@ private struct EditStorySheet: View {
         }
     }
 
+    private var subtitleSection: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            SectionHeader(title: "Subtitles", subtitle: "Show spoken dialogue as captions")
+            Toggle(isOn: Binding(
+                get: { draft.subtitlesEnabled ?? true },
+                set: { draft.subtitlesEnabled = $0 }
+            )) {
+                Label("Show subtitles", systemImage: "captions.bubble")
+                    .font(FrameMioTypography.body)
+                    .foregroundStyle(FrameMioColors.ink)
+            }
+            .tint(FrameMioColors.accent)
+            .disabled(isPerformingAction)
+
+            if draft.subtitlesEnabled ?? true {
+                LazyVGrid(columns: optionGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
+                    ForEach(subtitleStyleOptions, id: \.self) { option in
+                        optionChip(title: option, isSelected: option.caseInsensitiveCompare(draft.subtitleStyle ?? "Cinematic") == .orderedSame) {
+                            draft.subtitleStyle = option.lowercased()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private var lengthSection: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
             SectionHeader(title: "Length", subtitle: "FrameMio decides what to keep")
@@ -1033,6 +1061,8 @@ private struct EditStoryDraft {
     var replacements: [StoryMomentReplacement] = []
     var musicMood: String?
     var style: String?
+    var subtitlesEnabled: Bool?
+    var subtitleStyle: String?
     var targetDuration: TimeInterval?
     var instruction: String?
 
@@ -1046,6 +1076,8 @@ private struct EditStoryDraft {
             replace: replacements,
             musicMood: musicMood,
             style: style,
+            subtitlesEnabled: subtitlesEnabled,
+            subtitleStyle: subtitleStyle,
             targetDuration: targetDuration,
             instruction: instruction?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true ? nil : instruction
         )

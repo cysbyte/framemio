@@ -174,6 +174,67 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
 });
 
 
+test('ffmpeg fallback renderer applies dynamic caption style', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'framemio-caption-style-render-test-'));
+  const fakeFfmpeg = path.join(root, 'fake-ffmpeg.cjs');
+  const argsPath = path.join(root, 'ffmpeg-args.json');
+  const outputPath = path.join(root, 'story.mp4');
+  await writeFile(fakeFfmpeg, `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.writeFileSync(process.env.FRAMEMIO_FFMPEG_ARGS_PATH, JSON.stringify(args));
+fs.writeFileSync(args[args.length - 1], 'fake mp4');
+`, 'utf8');
+  await chmod(fakeFfmpeg, 0o755);
+
+  const previousArgsPath = process.env.FRAMEMIO_FFMPEG_ARGS_PATH;
+  process.env.FRAMEMIO_FFMPEG_ARGS_PATH = argsPath;
+  try {
+    const assets = fixtureMediaAssets();
+    const assetPaths = new Map(assets.map((asset) => [asset.id, `/asset/${asset.file_name}`]));
+    const composition = buildComposition(fixtureStoryPlan({
+      caption_style: {
+        preset: 'clean_minimal',
+        font_family: 'inter-bold',
+        font_size: 58,
+        text_color: '#FFE066',
+        stroke_color: '#101010',
+        stroke_width: 6,
+        background_enabled: false,
+        position: 'top',
+        bottom_offset: 42,
+        max_lines: 2,
+        max_characters_per_line: 24,
+      },
+    }), assets, assetPaths, new Map(), {
+      work_dir: root,
+      assets_dir: path.join(root, 'assets'),
+      clips_dir: path.join(root, 'clips'),
+      output_file: outputPath,
+      composition_file: path.join(root, 'composition.json'),
+    });
+
+    await new FfmpegCompositionRenderer({ffmpegBinary: fakeFfmpeg}).renderComposition(composition, outputPath);
+
+    const args = JSON.parse(await readFile(argsPath, 'utf8')) as string[];
+    const filterComplex = args[args.indexOf('-filter_complex') + 1];
+    assert.match(filterComplex, /font='DejaVu Sans Bold'/);
+    assert.match(filterComplex, /fontcolor=0xFFE066/);
+    assert.match(filterComplex, /fontsize=58/);
+    assert.match(filterComplex, /borderw=6/);
+    assert.match(filterComplex, /bordercolor=0x101010@0\.72/);
+    assert.match(filterComplex, /box=0/);
+    assert.match(filterComplex, /y=42/);
+  } finally {
+    if (previousArgsPath === undefined) {
+      delete process.env.FRAMEMIO_FFMPEG_ARGS_PATH;
+    } else {
+      process.env.FRAMEMIO_FFMPEG_ARGS_PATH = previousArgsPath;
+    }
+  }
+});
+
+
 test('ffmpeg fallback renderer strips audio when original audio is disabled', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'framemio-muted-ffmpeg-render-test-'));
   const fakeFfmpeg = path.join(root, 'fake-ffmpeg.cjs');

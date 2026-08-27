@@ -8,7 +8,7 @@ The worker converts a validated story plan plus source media references into a f
 
 - Download only required source assets from S3/object storage.
 - Preprocess requested video clips with FFmpeg using exact StoryPlan timestamps.
-- Build a deterministic composition specification for Remotion.
+- Build a deterministic composition specification for Remotion, including validated caption style metadata.
 - Render the composition with Remotion.
 - Encode the final MP4 with FFmpeg.
 - Upload the final MP4 to S3/object storage.
@@ -22,7 +22,7 @@ For the same `StoryPlan`, source asset metadata, and renderer version, the worke
 
 - No video intelligence or semantic analysis.
 - No multimodal AI calls.
-- No StoryPlan validation beyond defensive input checks; invalid plans must be blocked by the backend validator before queueing render jobs.
+- No StoryPlan validation beyond defensive input checks; invalid plans and unsafe caption styles must be blocked by the backend validator before queueing render jobs.
 - No large media in API requests, SQS messages, or database records.
 - No PostgreSQL access; the backend persists render jobs and status before this worker runs.
 

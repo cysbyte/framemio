@@ -87,6 +87,7 @@ export function buildComposition(
     ending_text: storyPlan.ending_text,
     clips,
     captions: storyPlan.captions ?? [],
+    caption_style: storyPlan.caption_style,
     audio: resolveAudio(storyPlan, paths, fps),
   };
 }

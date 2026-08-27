@@ -76,6 +76,19 @@ func TestValidateStoryPlanAcceptsMultipleTimedCaptionsForSameMoment(t *testing.T
 	}
 }
 
+func TestValidateStoryPlanAcceptsCaptionStyle(t *testing.T) {
+	t.Parallel()
+	validator, plan := validStoryPlanFixture(t)
+	plan.CaptionStyle = &models.CaptionStyle{
+		Preset: "cinematic_subtitle", FontFamily: "inter-bold", FontSize: 48, TextColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 4,
+		BackgroundEnabled: true, BackgroundColor: "#000000", BackgroundOpacity: 0.32, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 32,
+	}
+
+	if err := validator.Validate(context.Background(), "user-1", plan); err != nil {
+		t.Fatalf("validate caption style: %v", err)
+	}
+}
+
 func TestValidateStoryPlanRejectsInvalidInputs(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -171,6 +184,14 @@ func TestValidateStoryPlanRejectsInvalidInputs(t *testing.T) {
 			},
 			field: "audio.source",
 			code:  "unsupported_audio_source",
+		},
+		{
+			name: "invalid caption style",
+			mutate: func(plan *models.StoryPlan) {
+				plan.CaptionStyle = &models.CaptionStyle{Preset: "raw-ffmpeg", FontFamily: "../../font.ttf", TextColor: "white", FontSize: 240}
+			},
+			field: "caption_style.preset",
+			code:  "unsupported_caption_preset",
 		},
 		{
 			name: "invalid schema",
