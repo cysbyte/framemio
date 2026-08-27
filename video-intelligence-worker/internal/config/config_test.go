@@ -91,6 +91,72 @@ func TestLoadRequiresDirectTranscriptionAPIKey(t *testing.T) {
 	}
 }
 
+func TestLoadAllowsDeepgramTranscriptionWithoutAdapterURL(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://framemio_app@example.test/postgres")
+	t.Setenv("S3_MEDIA_BUCKET", "framemio-media")
+	t.Setenv("SQS_VIDEO_ANALYSIS_QUEUE_URL", "https://sqs.example.test/queue")
+	t.Setenv("VIDEO_UNDERSTANDING_PROVIDER", "local")
+	t.Setenv("ENABLE_TRANSCRIPTION", "true")
+	t.Setenv("TRANSCRIPTION_PROVIDER", "deepgram")
+	t.Setenv("TRANSCRIPTION_API_URL", "")
+	t.Setenv("TRANSCRIPTION_API_KEY", "")
+	t.Setenv("DEEPGRAM_API_KEY", "deepgram-secret")
+	t.Setenv("TRANSCRIPTION_MODEL", "")
+
+	configuration, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !configuration.UsesDeepgramTranscription() || configuration.UsesDirectTranscription() {
+		t.Fatalf("unexpected transcription mode: %+v", configuration)
+	}
+	if configuration.TranscriptionAPIKey != "deepgram-secret" || configuration.TranscriptionModel != "nova-3" || configuration.TranscriptionUpstreamBaseURL != "" {
+		t.Fatalf("deepgram settings were not loaded: %+v", configuration)
+	}
+}
+
+func TestLoadPrefersDeepgramSpecificKeyAndBaseURL(t *testing.T) {
+	setRequiredEnvironment(t)
+	t.Setenv("VIDEO_UNDERSTANDING_PROVIDER", "local")
+	t.Setenv("ENABLE_TRANSCRIPTION", "true")
+	t.Setenv("TRANSCRIPTION_PROVIDER", "deepgram")
+	t.Setenv("TRANSCRIPTION_DIRECT", "true")
+	t.Setenv("TRANSCRIPTION_API_URL", "")
+	t.Setenv("TRANSCRIPTION_API_KEY", "old-openai-key")
+	t.Setenv("DEEPGRAM_API_KEY", "deepgram-secret")
+	t.Setenv("TRANSCRIPTION_UPSTREAM_BASE_URL", "https://api2.65535.space")
+	t.Setenv("DEEPGRAM_BASE_URL", "https://api.deepgram.com")
+
+	configuration, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configuration.UsesDirectTranscription() || !configuration.UsesDeepgramTranscription() {
+		t.Fatalf("unexpected transcription mode: %+v", configuration)
+	}
+	if configuration.TranscriptionAPIKey != "deepgram-secret" || configuration.TranscriptionUpstreamBaseURL != "https://api.deepgram.com" {
+		t.Fatalf("deepgram-specific env did not take precedence: %+v", configuration)
+	}
+}
+
+func TestLoadRequiresDeepgramAPIKey(t *testing.T) {
+	setRequiredEnvironment(t)
+	t.Setenv("VIDEO_UNDERSTANDING_PROVIDER", "local")
+	t.Setenv("ENABLE_TRANSCRIPTION", "true")
+	t.Setenv("TRANSCRIPTION_PROVIDER", "deepgram")
+	t.Setenv("TRANSCRIPTION_API_URL", "")
+	t.Setenv("TRANSCRIPTION_API_KEY", "")
+	t.Setenv("DEEPGRAM_API_KEY", "")
+	t.Setenv("SPEECH_API_KEY", "")
+	t.Setenv("AI_GATEWAY_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("VIDEO_UNDERSTANDING_API_KEY", "")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected missing deepgram API key error")
+	}
+}
+
 func setRequiredEnvironment(t *testing.T) {
 	t.Helper()
 	t.Setenv("DATABASE_URL", "postgres://framemio_app@example.test/postgres")

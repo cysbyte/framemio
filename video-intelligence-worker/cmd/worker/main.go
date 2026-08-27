@@ -66,7 +66,13 @@ func main() {
 		ProviderName: configuration.TranscriptionProvider, ModelName: configuration.TranscriptionModel,
 		Client: transcriptionClient,
 	})
-	if configuration.UsesDirectTranscription() {
+	if configuration.UsesDeepgramTranscription() {
+		transcriptionProvider = providers.DeepgramTranscriptionProvider{
+			BaseURL: configuration.TranscriptionUpstreamBaseURL, APIKey: configuration.TranscriptionAPIKey,
+			ProviderName: configuration.TranscriptionProvider, ModelName: configuration.TranscriptionModel,
+			Client: transcriptionClient,
+		}
+	} else if configuration.UsesDirectTranscription() {
 		transcriptionProvider = providers.OpenAICompatibleTranscriptionProvider{
 			BaseURL: configuration.TranscriptionUpstreamBaseURL, APIKey: configuration.TranscriptionAPIKey,
 			ProviderName: configuration.TranscriptionProvider, ModelName: configuration.TranscriptionModel,

@@ -83,14 +83,29 @@ func (c *Consumer) RunOnce(ctx context.Context, handler Handler, targetJobID str
 	if waitTimeout <= 0 {
 		waitTimeout = 2 * time.Minute
 	}
-	runContext, cancel := context.WithTimeout(ctx, waitTimeout)
-	defer cancel()
 	c.logger.Info("video worker run-once polling started", slog.String("target_job_id", targetJobID), slog.Duration("wait_timeout", waitTimeout))
+	idleDeadline := time.Now().Add(waitTimeout)
 	for {
-		result, err := c.receive(runContext, 10)
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		receiveContext := ctx
+		var cancel context.CancelFunc
+		if targetJobID != "" {
+			remaining := time.Until(idleDeadline)
+			if remaining <= 0 {
 				c.logger.Info("no matching video analysis job found", slog.String("target_job_id", targetJobID))
+				return nil
+			}
+			receiveContext, cancel = context.WithTimeout(ctx, remaining)
+		}
+		result, err := c.receive(receiveContext, 10)
+		if cancel != nil {
+			cancel()
+		}
+		if err != nil {
+			if targetJobID != "" && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) && ctx.Err() == nil {
+				c.logger.Info("no matching video analysis job found", slog.String("target_job_id", targetJobID))
+				return nil
+			}
+			if errors.Is(err, context.Canceled) && ctx.Err() != nil {
 				return nil
 			}
 			return err
@@ -98,25 +113,30 @@ func (c *Consumer) RunOnce(ctx context.Context, handler Handler, targetJobID str
 		if len(result.Messages) > 0 {
 			c.logger.Info("video worker run-once received messages", slog.String("target_job_id", targetJobID), slog.Int("count", len(result.Messages)))
 		}
+		handledMessage := false
 		for _, message := range result.Messages {
-			jobMessage, ok := c.decodeMessage(runContext, message)
+			jobMessage, ok := c.decodeMessage(ctx, message)
 			if !ok {
 				continue
 			}
 			if !isVideoAnalysisJobType(jobMessage.JobType) {
 				c.logger.Info("release non-video-analysis message", slog.String("job_id", jobMessage.JobID), slog.String("job_type", jobMessage.JobType))
-				c.release(runContext, message)
+				c.release(ctx, message)
 				continue
 			}
 			if targetJobID != "" && jobMessage.JobID != targetJobID {
 				c.logger.Info("handling available video analysis message", slog.String("target_job_id", targetJobID), slog.String("job_id", jobMessage.JobID), slog.String("job_type", jobMessage.JobType))
 			}
 			c.handleMessage(ctx, handler, message)
+			handledMessage = true
 			if targetJobID == "" || jobMessage.JobID == targetJobID {
 				c.logger.Info("video worker run-once target handled", slog.String("target_job_id", targetJobID), slog.String("job_id", jobMessage.JobID), slog.String("job_type", jobMessage.JobType))
 				return nil
 			}
 			c.logger.Info("video worker run-once continuing after available job", slog.String("target_job_id", targetJobID), slog.String("handled_job_id", jobMessage.JobID), slog.String("handled_job_type", jobMessage.JobType))
+		}
+		if targetJobID != "" && handledMessage {
+			idleDeadline = time.Now().Add(waitTimeout)
 		}
 	}
 }

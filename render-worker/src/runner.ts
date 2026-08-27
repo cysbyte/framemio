@@ -34,7 +34,7 @@ export async function runRenderWorker(config = loadConfig()): Promise<void> {
       : new FfmpegCompositionRenderer(),
     workRoot: config.workRoot,
   });
-  const startedAt = Date.now();
+  let idleDeadline = Date.now() + config.waitTimeoutMs;
   console.info(JSON.stringify({level: 'info', msg: 'render worker started', run_once: config.runOnce, job_id: config.jobID ?? '', renderer_mode: config.rendererMode}));
 
   do {
@@ -42,8 +42,10 @@ export async function runRenderWorker(config = loadConfig()): Promise<void> {
     if (received.length > 0) {
       console.info(JSON.stringify({level: 'info', msg: 'render worker run-once received messages', run_once: config.runOnce, target_job_id: config.jobID ?? '', count: received.length}));
     }
+    let handledMessage = false;
     for (const message of received) {
       if (await handleMessage(message, {queue, backend, worker, config})) {
+        handledMessage = true;
         if (config.runOnce && (!config.jobID || message.message.jobId === config.jobID)) {
           console.info(JSON.stringify({level: 'info', msg: 'render worker run-once target handled', target_job_id: config.jobID ?? '', job_id: message.message.jobId}));
           return;
@@ -53,14 +55,17 @@ export async function runRenderWorker(config = loadConfig()): Promise<void> {
         }
       }
     }
-    if (config.runOnce && Date.now() - startedAt >= config.waitTimeoutMs) {
+    if (config.runOnce && config.jobID && handledMessage) {
+      idleDeadline = Date.now() + config.waitTimeoutMs;
+    }
+    if (config.runOnce && Date.now() >= idleDeadline) {
       console.error(JSON.stringify({level: 'error', msg: 'render worker run-once timed out before target', target_job_id: config.jobID ?? '', wait_timeout_ms: config.waitTimeoutMs}));
       throw new Error(`timed out waiting for render job ${config.jobID ?? ''}`);
     }
     if (!config.runOnce) {
       await sleep(1000);
     }
-  } while (!config.runOnce || Date.now() - startedAt < config.waitTimeoutMs);
+  } while (!config.runOnce || Date.now() < idleDeadline);
 }
 
 async function handleMessage(received: ReceivedJobMessage, dependencies: {

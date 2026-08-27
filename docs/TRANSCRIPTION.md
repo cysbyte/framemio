@@ -85,4 +85,4 @@ The raw-artifact threshold is configurable. Provider response bytes, media bytes
 
 Legacy `SPEECH_*` variables remain fallback aliases for existing environments.
 
-Production deployments use the upstream transcription service with `TRANSCRIPTION_PROVIDER=openai`, `TRANSCRIPTION_MODEL=gpt-5.4-mini-transcribe`, and `ENABLE_TRANSCRIPTION=true`.
+Production deployments can use Deepgram prerecorded STT with `TRANSCRIPTION_PROVIDER=deepgram`, `TRANSCRIPTION_MODEL=nova-3`, `DEEPGRAM_API_KEY`, optional `DEEPGRAM_BASE_URL`, and `ENABLE_TRANSCRIPTION=true`. OpenAI-compatible upstream transcription remains available with `TRANSCRIPTION_DIRECT=true` and an authorized transcription model.

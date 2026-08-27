@@ -867,7 +867,7 @@ Current implementation notes:
 - preprocessing artifacts are cached by user, media, input/analysis version, and source ETag
 - VideoAnalysis is cached by user, media, input version, understanding version, provider/model, and source ETag
 - production deployments use either a FrameMio-compatible provider adapter or direct OpenAI-compatible video understanding with `VIDEO_UNDERSTANDING_DIRECT=true`, `VIDEO_UNDERSTANDING_PROVIDER=openai-direct`, `VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL=https://api2.65535.space`, and `VIDEO_UNDERSTANDING_MODEL=gpt-5.4-mini`; `heuristic-v1` is a development fallback only
-- transcription uses either the upstream adapter or direct OpenAI-compatible multipart audio upload with `TRANSCRIPTION_DIRECT=true`, `TRANSCRIPTION_PROVIDER=openai-direct`, `TRANSCRIPTION_UPSTREAM_BASE_URL=https://api2.65535.space`, `TRANSCRIPTION_MODEL=gpt-5.4-mini-transcribe`, and `ENABLE_TRANSCRIPTION=true`, while still falling back to visual-only evidence when the provider is unavailable
+- transcription uses the replaceable backend provider abstraction; production can use Deepgram prerecorded STT with `TRANSCRIPTION_PROVIDER=deepgram`, `TRANSCRIPTION_MODEL=nova-3`, `DEEPGRAM_API_KEY=...`, optional `DEEPGRAM_BASE_URL`, and `ENABLE_TRANSCRIPTION=true`, or an upstream/OpenAI-compatible adapter with an authorized transcription model, while still falling back to visual-only evidence when the provider is unavailable
 - force reanalysis should reuse deterministic preprocessing where possible and append a new semantic analysis version rather than overwriting old records
 
 ## 11.2 Frame selection
@@ -920,7 +920,7 @@ Output should contain timestamped segments:
 }
 ```
 
-The rest of the application must not depend on one specific transcription provider.
+The current backend provider choices are the FrameMio-compatible HTTP adapter, OpenAI-compatible multipart audio upload, and Deepgram prerecorded STT. Deepgram maps `results.utterances[].start/end/transcript` into FrameMio timestamped transcript segments and uses detected language from channel metadata when present. The rest of the application must not depend on one specific transcription provider.
 
 No transcript should be placed in SQS.
 

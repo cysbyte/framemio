@@ -85,7 +85,7 @@ func Load() (Config, error) {
 		UnderstandingImageDetail:          environment("VIDEO_UNDERSTANDING_IMAGE_DETAIL", "low"),
 		UnderstandingMaxOutputTokens:      environmentInt("VIDEO_UNDERSTANDING_MAX_OUTPUT_TOKENS", 5000),
 		TranscriptionURL:                  environmentFirst([]string{"TRANSCRIPTION_API_URL", "SPEECH_API_URL"}, ""),
-		TranscriptionAPIKey:               environmentFirst([]string{"TRANSCRIPTION_API_KEY", "SPEECH_API_KEY", "AI_GATEWAY_API_KEY", "OPENAI_API_KEY", "VIDEO_UNDERSTANDING_API_KEY"}, ""),
+		TranscriptionAPIKey:               environmentFirst([]string{"TRANSCRIPTION_API_KEY", "DEEPGRAM_API_KEY", "SPEECH_API_KEY", "AI_GATEWAY_API_KEY", "OPENAI_API_KEY", "VIDEO_UNDERSTANDING_API_KEY"}, ""),
 		TranscriptionProvider:             environmentFirst([]string{"TRANSCRIPTION_PROVIDER", "SPEECH_PROVIDER"}, "external"),
 		TranscriptionModel:                environmentFirst([]string{"TRANSCRIPTION_MODEL", "SPEECH_MODEL", "OPENAI_TRANSCRIPTION_MODEL"}, "configured-model"),
 		TranscriptionVersion:              environment("TRANSCRIPTION_VERSION", "transcription-v1"),
@@ -126,14 +126,27 @@ func Load() (Config, error) {
 	if configuration.UsesDirectUnderstanding() && configuration.UnderstandingAPIKey == "" {
 		return Config{}, errors.New("VIDEO_UNDERSTANDING_API_KEY is required when direct video understanding is enabled")
 	}
-	if configuration.EnableTranscription && !configuration.UsesDirectTranscription() && configuration.TranscriptionURL == "" {
+	if configuration.UsesDeepgramTranscription() {
+		if configuration.TranscriptionModel == "configured-model" {
+			configuration.TranscriptionModel = "nova-3"
+		}
+		if deepgramAPIKey := os.Getenv("DEEPGRAM_API_KEY"); deepgramAPIKey != "" {
+			configuration.TranscriptionAPIKey = deepgramAPIKey
+		}
+		if deepgramBaseURL := os.Getenv("DEEPGRAM_BASE_URL"); deepgramBaseURL != "" {
+			configuration.TranscriptionUpstreamBaseURL = deepgramBaseURL
+		} else if !strings.Contains(configuration.TranscriptionUpstreamBaseURL, "deepgram") {
+			configuration.TranscriptionUpstreamBaseURL = ""
+		}
+	}
+	if configuration.EnableTranscription && !configuration.UsesDirectTranscription() && !configuration.UsesDeepgramTranscription() && configuration.TranscriptionURL == "" {
 		return Config{}, errors.New("TRANSCRIPTION_API_URL is required when transcription is enabled")
 	}
 	if configuration.EnableTranscription && configuration.UsesDirectTranscription() && configuration.TranscriptionUpstreamBaseURL == "" {
 		return Config{}, errors.New("TRANSCRIPTION_UPSTREAM_BASE_URL is required when direct transcription is enabled")
 	}
-	if configuration.EnableTranscription && configuration.UsesDirectTranscription() && configuration.TranscriptionAPIKey == "" {
-		return Config{}, errors.New("TRANSCRIPTION_API_KEY is required when direct transcription is enabled")
+	if configuration.EnableTranscription && (configuration.UsesDirectTranscription() || configuration.UsesDeepgramTranscription()) && configuration.TranscriptionAPIKey == "" {
+		return Config{}, errors.New("TRANSCRIPTION_API_KEY or DEEPGRAM_API_KEY is required when transcription provider requires backend credentials")
 	}
 	if configuration.SceneThreshold <= 0 || configuration.SceneThreshold >= 1 {
 		return Config{}, errors.New("SCENE_CHANGE_THRESHOLD must be between zero and one")
@@ -166,11 +179,23 @@ func (c Config) UsesDirectUnderstanding() bool {
 }
 
 func (c Config) UsesDirectTranscription() bool {
+	if c.UsesDeepgramTranscription() {
+		return false
+	}
 	if c.TranscriptionDirect {
 		return true
 	}
 	switch strings.ToLower(strings.TrimSpace(c.TranscriptionProvider)) {
 	case "openai-direct", "gpt-direct":
+		return true
+	default:
+		return false
+	}
+}
+
+func (c Config) UsesDeepgramTranscription() bool {
+	switch strings.ToLower(strings.TrimSpace(c.TranscriptionProvider)) {
+	case "deepgram", "deepgram-direct":
 		return true
 	default:
 		return false

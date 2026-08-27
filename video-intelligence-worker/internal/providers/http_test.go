@@ -369,3 +369,79 @@ func textResponse(status int, body string) *http.Response {
 		Body:       io.NopCloser(strings.NewReader(body)),
 	}
 }
+
+func TestDeepgramTranscriptionProviderSendsPrerecordedAudioRequest(t *testing.T) {
+	t.Parallel()
+	audioFile, err := os.CreateTemp(t.TempDir(), "speech-*.flac")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := audioFile.WriteString("audio-bytes"); err != nil {
+		t.Fatal(err)
+	}
+	if err := audioFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodPost || request.URL.Path != "/v1/listen" {
+			t.Fatalf("unexpected request target: %s %s", request.Method, request.URL.String())
+		}
+		if request.Header.Get("Authorization") != "Token deepgram-secret" {
+			t.Fatalf("unexpected authorization header: %s", request.Header.Get("Authorization"))
+		}
+		if request.Header.Get("Content-Type") != "audio/flac" {
+			t.Fatalf("unexpected content type: %s", request.Header.Get("Content-Type"))
+		}
+		query := request.URL.Query()
+		if query.Get("model") != "nova-3" || query.Get("utterances") != "true" || query.Get("detect_language") != "true" || query.Get("smart_format") != "true" {
+			t.Fatalf("unexpected query: %s", request.URL.RawQuery)
+		}
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(body) != "audio-bytes" {
+			t.Fatalf("unexpected body: %q", string(body))
+		}
+		return jsonResponse(`{"results":{"channels":[{"detected_language":"en","alternatives":[{"transcript":"hello there"}]}],"utterances":[{"start":1.25,"end":2.75,"transcript":"hello there","confidence":0.97}]}}`), nil
+	})}
+	provider := DeepgramTranscriptionProvider{BaseURL: "https://api.deepgram.com", APIKey: "deepgram-secret", ProviderName: "deepgram", ModelName: "nova-3", Client: client}
+	result, err := provider.Transcribe(context.Background(), transcription.ProviderRequest{
+		MediaID: "media-1", Reference: transcription.MediaReference{LocalPath: audioFile.Name(), MediaType: "audio", DurationMicros: 4_000_000},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Transcript.Language != "en" || result.Transcript.Text != "hello there" || len(result.Transcript.Segments) != 1 {
+		t.Fatalf("unexpected transcript: %+v", result.Transcript)
+	}
+	segment := result.Transcript.Segments[0]
+	if segment.StartMicros != 1_250_000 || segment.EndMicros != 2_750_000 || segment.Text != "hello there" || segment.Confidence != 0.97 {
+		t.Fatalf("unexpected segment: %+v", segment)
+	}
+}
+
+func TestDeepgramTranscriptionProviderFallsBackToWordTiming(t *testing.T) {
+	t.Parallel()
+	transcript, err := decodeDeepgramTranscription([]byte(`{"results":{"channels":[{"alternatives":[{"transcript":"hello world","languages":["ja"],"words":[{"start":0.5,"end":0.8,"word":"hello","confidence":0.8},{"start":0.9,"end":1.4,"word":"world","confidence":0.9}]}]}]}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transcript.Language != "ja" || transcript.Text != "hello world" || len(transcript.Segments) != 1 {
+		t.Fatalf("unexpected transcript: %+v", transcript)
+	}
+	if transcript.Segments[0].StartMicros != 500_000 || transcript.Segments[0].EndMicros != 1_400_000 {
+		t.Fatalf("unexpected fallback timing: %+v", transcript.Segments[0])
+	}
+}
+
+func TestDeepgramTranscriptionProviderSupportsNoSpeech(t *testing.T) {
+	t.Parallel()
+	transcript, err := decodeDeepgramTranscription([]byte(`{"results":{"channels":[{"detected_language":"zh","alternatives":[{"transcript":""}]}],"utterances":[]}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transcript.Language != "zh" || transcript.Text != "" || len(transcript.Segments) != 0 {
+		t.Fatalf("expected empty transcript with language, got %+v", transcript)
+	}
+}
