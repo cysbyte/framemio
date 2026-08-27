@@ -104,6 +104,63 @@ func TestProcessorRequiresBackendCompletionCallback(t *testing.T) {
 	}
 }
 
+func TestProcessorRefreshesVisualOnlyCacheWhenTranscriptionIsEnabled(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.August, 19, 10, 0, 0, 0, time.UTC)
+	repository := newMemoryRepository(now)
+	objects := newMemoryObjects()
+	tools := &fakeTools{metadata: domain.VideoMetadata{
+		DurationMicros: 12_000_000, Width: 1920, Height: 1080, FPS: 30,
+		VideoCodec: "hevc", AudioCodec: "aac", BitRate: 8_000_000, FileSizeBytes: 1000, HasAudio: true,
+	}, boundaries: []domain.SceneBoundary{{TimestampMicros: 4_000_000, Score: 0.6}, {TimestampMicros: 8_000_000, Score: 0.7}}}
+	provider := &fakeUnderstandingProvider{}
+	completion := &fakeCompletionReporter{}
+	baseConfig := Config{
+		WorkRoot: t.TempDir(), AnalysisVersion: "video-v1", SceneThreshold: 0.32, MaxSceneBoundaries: 100,
+		Planner: PlannerConfig{
+			MinSceneDuration: 750 * time.Millisecond, MaxSegmentDuration: 12 * time.Second,
+			LongVideoThreshold: 5 * time.Minute, MaxFramesShort: 12, MaxFramesLong: 24,
+		},
+		DuplicateHashDistance: 4, StageRetries: 1,
+		TranscriptionVersion: "transcription-v1", UnderstandingVersion: "video-understanding-v1",
+		EvidenceURLExpiry: time.Hour,
+	}
+	visualOnly := &Processor{
+		Config: baseConfig, Repository: repository, Objects: objects, Tools: tools,
+		Understanding: &understanding.Service{Provider: provider, Repository: repository, Artifacts: objects, RetryAttempts: 1, RetryDelay: time.Nanosecond, FrameURLExpiry: time.Hour, Now: func() time.Time { return now }},
+		Completion:    completion, Now: func() time.Time { return now },
+	}
+	first, err := visualOnly.Process(context.Background(), repository.addJob("job-visual-only", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Analysis.Transcript.HasSpeech || tools.audioCalls != 0 || repository.analysisCount() != 1 {
+		t.Fatalf("expected visual-only cached analysis, audio=%d analyses=%d transcript=%+v", tools.audioCalls, repository.analysisCount(), first.Analysis.Transcript)
+	}
+
+	transcriber := &fakeTranscriber{}
+	transcriptAwareConfig := baseConfig
+	transcriptAwareConfig.EnableTranscription = true
+	transcriptAware := &Processor{
+		Config: transcriptAwareConfig, Repository: repository, Objects: objects, Tools: tools, Transcription: transcriber,
+		Understanding: &understanding.Service{Provider: provider, Repository: repository, Artifacts: objects, RetryAttempts: 1, RetryDelay: time.Nanosecond, FrameURLExpiry: time.Hour, Now: func() time.Time { return now }},
+		Completion:    completion, Now: func() time.Time { return now },
+	}
+	refreshed, err := transcriptAware.Process(context.Background(), repository.addJob("job-transcript-aware", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.Reused || !refreshed.Analysis.Transcript.HasSpeech || len(refreshed.Analysis.Transcript.Segments) != 1 {
+		t.Fatalf("expected transcript-aware analysis refresh, got %+v", refreshed)
+	}
+	if tools.audioCalls != 1 || transcriber.calls != 1 || repository.analysisCount() != 2 {
+		t.Fatalf("expected one STT refresh and a new analysis, audio=%d transcription=%d analyses=%d", tools.audioCalls, transcriber.calls, repository.analysisCount())
+	}
+	if refreshed.Analysis.InputVersion != "video-v1+speech:transcription-v1" {
+		t.Fatalf("input version = %q, want transcript-aware version", refreshed.Analysis.InputVersion)
+	}
+}
+
 func TestProcessorReusesExistingTranscriptBeforeAudioExtraction(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.August, 19, 10, 0, 0, 0, time.UTC)

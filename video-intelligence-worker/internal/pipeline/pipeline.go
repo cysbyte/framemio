@@ -327,9 +327,21 @@ func (p *Processor) inputVersion(message domain.JobMessage) string {
 		return value
 	}
 	if value := strings.TrimSpace(message.Configuration["analysis_version"]); value != "" {
-		return value
+		return p.effectiveInputVersion(value)
 	}
-	return p.Config.AnalysisVersion
+	return p.effectiveInputVersion(p.Config.AnalysisVersion)
+}
+
+func (p *Processor) effectiveInputVersion(base string) string {
+	base = strings.TrimSpace(base)
+	if !p.Config.EnableTranscription {
+		return base
+	}
+	transcriptionVersion := strings.TrimSpace(p.Config.TranscriptionVersion)
+	if transcriptionVersion == "" {
+		return base
+	}
+	return base + "+speech:" + transcriptionVersion
 }
 
 func (p *Processor) understandingVersion(message domain.JobMessage) string {

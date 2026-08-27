@@ -143,8 +143,8 @@ struct StoryPreviewView: View {
             primaryActions(story)
             storyDescription(story)
             momentsSection(story)
-            editStoryButton
-            removeStoryButton
+            editStoryButton(story)
+            removeStoryButton(story)
         }
     }
 
@@ -353,16 +353,19 @@ struct StoryPreviewView: View {
         }
     }
 
-    private var editStoryButton: some View {
+    private func editStoryButton(_ story: Story) -> some View {
         PrimaryButton(title: "Edit Story", systemImage: "square.and.pencil") {
+            guard !story.status.shouldPoll else { return }
             isShowingEditStory = true
         }
-        .disabled(viewModel.isPerformingAction)
+        .disabled(viewModel.isPerformingAction || story.status.shouldPoll)
         .accessibilityLabel("Edit story")
+        .accessibilityHint(story.status.shouldPoll ? "Editing is unavailable while FrameMio is creating this story." : "Opens story editing options.")
     }
 
-    private var removeStoryButton: some View {
+    private func removeStoryButton(_ story: Story) -> some View {
         Button(role: .destructive) {
+            guard !story.status.shouldPoll else { return }
             FrameMioHaptics.secondaryAction()
             isShowingDeleteConfirmation = true
         } label: {
@@ -384,8 +387,9 @@ struct StoryPreviewView: View {
             .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.compactButtonHeight)
         }
         .buttonStyle(FrameMioPressButtonStyle())
-        .disabled(viewModel.isPerformingAction)
+        .disabled(viewModel.isPerformingAction || story.status.shouldPoll)
         .accessibilityLabel("Remove story")
+        .accessibilityHint(story.status.shouldPoll ? "Removing is unavailable while FrameMio is creating this story." : "Removes this story from FrameMio.")
     }
 
     private var processingSteps: some View {

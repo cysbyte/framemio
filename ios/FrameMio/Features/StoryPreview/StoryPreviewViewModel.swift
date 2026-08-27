@@ -303,7 +303,7 @@ final class StoryPreviewViewModel: ObservableObject {
     }
 
     func saveStoryEdits(_ request: StoryEditRequest) {
-        guard let storyID, request.hasChanges else { return }
+        guard let storyID, request.hasChanges, story?.status.shouldPoll != true else { return }
         perform(.editStory) { [storyService] in
             try await storyService.saveStoryEdits(storyID: storyID, request: request)
         }
@@ -366,7 +366,7 @@ final class StoryPreviewViewModel: ObservableObject {
     }
 
     func deleteStory() {
-        guard let storyID, activeAction == nil else { return }
+        guard let storyID, activeAction == nil, story?.status.shouldPoll != true else { return }
         actionTask?.cancel()
         actionTask = Task { [weak self] in
             guard let self else { return }
