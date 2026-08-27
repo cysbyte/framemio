@@ -796,9 +796,9 @@ func reasonFromSegment(segment models.VideoSegment) string {
 		}
 	}
 	if len(parts) > 0 {
-		return strings.Join(parts, " · ")
+		return truncateText(strings.Join(parts, " · "), 240)
 	}
-	return humanText(segment.Description)
+	return truncateText(humanText(segment.Description), 240)
 }
 
 func photoMomentTitle(photo models.PhotoAnalysis) string {
@@ -950,10 +950,28 @@ func hasMedia(set map[string]struct{}, mediaID string) bool {
 }
 
 func truncateText(value string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
 	if len(value) <= limit {
 		return value
 	}
-	return strings.TrimSpace(value[:limit-1]) + "…"
+	suffix := "…"
+	if limit < len(suffix) {
+		return strings.Repeat(".", limit)
+	}
+	if limit == len(suffix) {
+		return suffix
+	}
+	var builder strings.Builder
+	for _, char := range value {
+		charText := string(char)
+		if builder.Len()+len(charText)+len(suffix) > limit {
+			break
+		}
+		builder.WriteString(charText)
+	}
+	return strings.TrimSpace(builder.String()) + suffix
 }
 
 func clamp(value float64) float64 {

@@ -1476,7 +1476,7 @@ Current AWS operation supports both queued workers and one-off ECS task activati
 
 - backend orchestration publishes identifier-only SQS messages
 - when configured, the Go API can start one-off ECS Fargate worker tasks for video, story planning, and rendering stages
-- long-running worker services can also be manually scaled with scripts
+- long-running worker services can also be manually scaled with scripts, but normal production worker deploys keep `desiredCount=0` and backend `RunTask` activation starts one-off tasks when jobs arrive
 
 Current helper scripts:
 

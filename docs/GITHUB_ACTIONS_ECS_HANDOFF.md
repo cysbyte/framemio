@@ -223,8 +223,8 @@ aws logs tail <log-group-name> --region us-east-1 --follow
 
 FrameMio now follows the same zero-idle ECS pattern as `product-video/worker`:
 
-- Worker ECS services are deployed with `desiredCount=0` so they do not stay running while idle.
-- Worker workflows register Application Auto Scaling scalable targets with `min=0` and `max=1` for service DesiredCount. No queue-depth scaling policy is attached by default.
+- Worker ECS services are deployed with `desiredCount=0` so they do not stay running while idle, and each worker deploy resets manual scale-ups back to zero.
+- Worker workflows register Application Auto Scaling scalable targets with `min=0` and `max=1` for service DesiredCount. No queue-depth scaling policy is attached by default because the backend starts one-off tasks directly.
 - The backend publishes the durable SQS job message first, then starts a one-off Fargate task with `ecs:RunTask` when the queued job belongs to an external worker.
 - The one-off task receives `JOB_ID`, `JOB_TYPE`, and `WORKER_RUN_ONCE=true` as container overrides.
 - The video intelligence worker supports `WORKER_RUN_ONCE=true`; it polls SQS for the matching `JOB_ID`, processes one message, deletes it on success, and exits.

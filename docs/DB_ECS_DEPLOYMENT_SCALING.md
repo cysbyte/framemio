@@ -143,9 +143,9 @@ The GitHub Actions role needs permissions to:
 - Describe and push ECR images.
 - Describe, register, create, update, and wait for ECS services/task definitions.
 - Pass `arn:aws:iam::450876624497:role/ecsTaskExecutionRole` and `arn:aws:iam::450876624497:role/FramemioECSTaskRole` to ECS.
-- Register ECS Application Auto Scaling scalable targets for worker services.
+- Register ECS Application Auto Scaling scalable targets for worker services and keep worker services at `desiredCount=0` after deploys.
 
-The scalable-target permission was required because worker workflows run:
+The scalable-target permission is required because worker workflows run this on every worker deploy, while also setting the worker ECS service desired count to `0`:
 
 ```bash
 aws application-autoscaling register-scalable-target \

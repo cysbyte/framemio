@@ -149,6 +149,36 @@ func TestPlannerUsesAnalysisForStoryAndMomentNames(t *testing.T) {
 	}
 }
 
+func TestPlannerTruncatesLongVideoReasonsForValidation(t *testing.T) {
+	t.Parallel()
+	longReason := strings.Repeat("This detailed model rationale should not prevent rendering. 夕焼けの会話を含む。", 8)
+	plan, err := (&Planner{Now: func() time.Time { return time.Date(2026, time.August, 27, 12, 0, 0, 0, time.UTC) }}).Plan(context.Background(), Request{
+		ProjectID:        "project-long-reason",
+		DesiredDuration:  8 * time.Second,
+		StoryType:        models.StoryTypeCustom,
+		VisualStyle:      models.VisualStyleCinematic,
+		SelectedMediaIDs: []string{"video-long-reason"},
+		VideoAnalyses: []models.VideoAnalysis{{
+			ID: "video-analysis-long-reason", VideoID: "video-long-reason", ProjectID: "project-long-reason", AnalysisVersion: "video-v1", DurationMicros: 8_000_000,
+			QualitySignals: models.VideoQualitySignals{OverallScore: 0.8},
+			Segments: []models.VideoSegment{{
+				SegmentID: "segment-long-reason", SceneID: "scene-long-reason", StartMicros: 0, EndMicros: 4_000_000, Description: "Family walking by the lake",
+				Importance: 0.92, VisualQuality: 0.8, MemoryValue: 0.94, EmotionalValue: 0.93, StoryRelevance: 0.94, Recommended: true, RecommendedUsage: "hero",
+				Reasons: []string{longReason},
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateStoryPlan(plan); err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Moments) == 0 || len(plan.Moments[0].Reason) > 240 {
+		t.Fatalf("expected reason to be capped at 240 bytes, got %+v", plan.Moments)
+	}
+}
+
 func TestPlannerUsesTranscriptTextForVideoCaptions(t *testing.T) {
 	t.Parallel()
 	plan, err := (&Planner{Now: func() time.Time { return time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC) }}).Plan(context.Background(), Request{
