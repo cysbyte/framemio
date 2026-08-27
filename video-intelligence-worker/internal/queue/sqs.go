@@ -105,9 +105,7 @@ func (c *Consumer) RunOnce(ctx context.Context, handler Handler, targetJobID str
 				continue
 			}
 			if targetJobID != "" && jobMessage.JobID != targetJobID {
-				c.logger.Info("release non-target video analysis message", slog.String("target_job_id", targetJobID), slog.String("job_id", jobMessage.JobID))
-				c.release(runContext, message)
-				continue
+				c.logger.Info("handling available video analysis message", slog.String("target_job_id", targetJobID), slog.String("job_id", jobMessage.JobID), slog.String("job_type", jobMessage.JobType))
 			}
 			c.handleMessage(ctx, handler, message)
 			return nil

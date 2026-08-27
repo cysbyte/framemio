@@ -63,9 +63,12 @@ async function handleMessage(received: ReceivedJobMessage, dependencies: {
 }): Promise<boolean> {
   const {queue, backend, worker, config} = dependencies;
   const message = received.message;
-  if (message.jobType !== 'VIDEO_RENDER' || (config.jobID && message.jobId !== config.jobID)) {
+  if (message.jobType !== 'VIDEO_RENDER') {
     await queue.release(received.receiptHandle);
     return false;
+  }
+  if (config.jobID && message.jobId !== config.jobID) {
+    console.info(JSON.stringify({level: 'info', msg: 'handling available render message', target_job_id: config.jobID, job_id: message.jobId}));
   }
   console.info(JSON.stringify({level: 'info', msg: 'handling render message', job_id: message.jobId, project_id: message.projectId, receive_count: received.receiveCount}));
   try {

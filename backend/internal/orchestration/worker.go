@@ -46,7 +46,7 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 			return err
 		}
 		for _, received := range receivedMessages {
-			if w.TargetJobID != "" && received.Message.JobID != w.TargetJobID {
+			if w.TargetJobID != "" && received.Message.JobID != w.TargetJobID && w.Handlers[received.Message.JobType] == nil {
 				if err := w.Consumer.ExtendVisibility(ctx, received.ReceiptHandle, 0); err != nil {
 					return err
 				}

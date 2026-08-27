@@ -57,6 +57,55 @@ func TestWorkerRunOnceReleasesNonTargetMessage(t *testing.T) {
 	}
 }
 
+func TestWorkerRunOnceProcessesAvailableSameHandlerMessage(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore, _, coordinator, project, _ := setupProject(t, models.MediaTypePhoto)
+	otherJob, _, err := memoryStore.CreateJob(ctx, models.ProcessingJob{ID: "job-other-story", UserID: project.UserID, ProjectID: project.ID, Type: models.JobTypeStoryPlan, Status: models.JobStatusQueued, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}, "other-story-job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetJob, _, err := memoryStore.CreateJob(ctx, models.ProcessingJob{ID: "job-target-story", UserID: project.UserID, ProjectID: project.ID, Type: models.JobTypeStoryPlan, Status: models.JobStatusQueued, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}, "target-story-job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer := &memoryConsumer{received: []queue.ReceivedJobMessage{
+		{Message: queue.JobMessage{JobID: otherJob.ID, ProjectID: project.ID, JobType: otherJob.Type}, ReceiptHandle: "receipt-other-story"},
+	}}
+	worker := Worker{
+		Store:       memoryStore,
+		Consumer:    consumer,
+		Coordinator: coordinator,
+		Handlers:    map[models.JobType]JobHandler{models.JobTypeStoryPlan: noopHandler{}},
+		TargetJobID: targetJob.ID,
+	}
+	if err := worker.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, timeout := range consumer.extended {
+		if timeout == 0 {
+			t.Fatalf("same-handler job should not be released immediately: %+v", consumer.extended)
+		}
+	}
+	if len(consumer.deleted) != 1 || consumer.deleted[0] != "receipt-other-story" {
+		t.Fatalf("available same-handler message was not deleted after processing: %+v", consumer.deleted)
+	}
+	otherAfter, err := memoryStore.GetJob(ctx, project.UserID, otherJob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if otherAfter.Status != models.JobStatusCompleted {
+		t.Fatalf("available same-handler job should complete: %+v", otherAfter)
+	}
+	targetAfter, err := memoryStore.GetJob(ctx, project.UserID, targetJob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targetAfter.Status != models.JobStatusQueued {
+		t.Fatalf("target job should remain queued for its own task: %+v", targetAfter)
+	}
+}
+
 func TestWorkerRunOnceProcessesQueuedTargetWithInflatedReceiveCount(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
