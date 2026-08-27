@@ -275,6 +275,7 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
       args.push('-i', inputPath);
     }
     const captions = await this.prepareCaptionOverlays(composition, outputPath);
+    console.info(JSON.stringify({level: 'info', msg: 'ffmpeg caption overlays prepared', project_id: composition.project_id, story_plan_id: composition.story_plan_id, input_caption_count: composition.captions.length, overlay_count: captions.length}));
     const filter = concatFilter(composition, captions);
     args.push(
       '-filter_complex',
@@ -309,10 +310,12 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
     for (const [index, caption] of composition.captions.entries()) {
       const text = normalizeCaptionText(caption.text);
       if (!text) {
+        console.info(JSON.stringify({level: 'info', msg: 'skipping empty caption overlay', project_id: composition.project_id, story_plan_id: composition.story_plan_id, caption_index: index, moment_id: caption.moment_id}));
         continue;
       }
       const timing = captionTiming(caption, composition);
       if (!timing) {
+        console.info(JSON.stringify({level: 'info', msg: 'skipping caption overlay with invalid timing', project_id: composition.project_id, story_plan_id: composition.story_plan_id, caption_index: index, moment_id: caption.moment_id, start_ms: caption.start_ms ?? null, end_ms: caption.end_ms ?? null, duration_ms: composition.duration_ms}));
         continue;
       }
       const textFilePath = path.join(captionsDir, `caption-${index}-${stableHash({text, timing}).slice(0, 12)}.txt`);

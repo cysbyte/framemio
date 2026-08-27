@@ -22,7 +22,7 @@ export class DeterministicRenderWorker {
 
   async render(input: RenderInput): Promise<RenderResult> {
     const rendererVersion = input.renderer_version ?? RENDER_VERSION;
-    console.info(JSON.stringify({level: 'info', msg: 'render job started', job_id: input.job_id, project_id: input.project_id, media_count: input.media_assets.length, output_s3_key: input.output_s3_key, renderer_version: rendererVersion}));
+    console.info(JSON.stringify({level: 'info', msg: 'render job started', job_id: input.job_id, project_id: input.project_id, media_count: input.media_assets.length, moment_count: input.story_plan.moments.length, caption_count: input.story_plan.captions?.length ?? 0, output_s3_key: input.output_s3_key, renderer_version: rendererVersion}));
     validateInput(input, rendererVersion);
     const fingerprint = renderFingerprint(input, rendererVersion);
     const paths = await ensureRenderDirs(this.dependencies.workRoot, fingerprint);
@@ -34,7 +34,7 @@ export class DeterministicRenderWorker {
     console.info(JSON.stringify({level: 'info', msg: 'render clips prepared', job_id: input.job_id, project_id: input.project_id, prepared_count: preparedPaths.size}));
     const composition = buildComposition(input.story_plan, input.media_assets, assetPaths, preparedPaths, paths, {rendererVersion, fps: DEFAULT_FPS});
     await writeFile(paths.composition_file, JSON.stringify(composition, null, 2), 'utf8');
-    console.info(JSON.stringify({level: 'info', msg: 'render composition built', job_id: input.job_id, project_id: input.project_id, duration_ms: composition.duration_ms, width: composition.resolution.width, height: composition.resolution.height}));
+    console.info(JSON.stringify({level: 'info', msg: 'render composition built', job_id: input.job_id, project_id: input.project_id, duration_ms: composition.duration_ms, width: composition.resolution.width, height: composition.resolution.height, clip_count: composition.clips.length, caption_count: composition.captions.length}));
     const remotionIntermediate = path.join(paths.work_dir, 'remotion-output.mp4');
     await this.dependencies.remotion.renderComposition(composition, remotionIntermediate);
     console.info(JSON.stringify({level: 'info', msg: 'remotion render completed', job_id: input.job_id, project_id: input.project_id}));

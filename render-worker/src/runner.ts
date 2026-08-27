@@ -83,6 +83,7 @@ async function handleMessage(received: ReceivedJobMessage, dependencies: {
   try {
     await backend.markRunning(message.jobId, 0.08);
     const input = await backend.renderInput(message.jobId);
+    console.info(JSON.stringify({level: 'info', msg: 'render input received', job_id: message.jobId, project_id: input.project_id, story_plan_id: input.story_plan.id, moment_count: input.story_plan.moments.length, caption_count: input.story_plan.captions?.length ?? 0, media_asset_count: input.media_assets.length}));
     const result = await worker.render(input);
     await backend.markCompleted(message.jobId, result.record.s3_key);
     await queue.delete(received.receiptHandle);

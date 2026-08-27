@@ -140,6 +140,7 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 		return Result{}, err
 	}
 	analysis := understandingResult.Analysis
+	p.logger().Info("video analysis ready", slog.String("job_id", jobContext.Job.ID), slog.String("project_id", jobContext.Project.ID), slog.String("media_id", jobContext.Media.ID), slog.String("analysis_id", analysis.ID), slog.String("analysis_version", analysis.AnalysisVersion), slog.Int("visual_segment_count", len(analysis.Segments)), slog.Bool("transcript_has_speech", analysis.Transcript.HasSpeech), slog.Int("transcript_segment_count", len(analysis.Transcript.Segments)), slog.Bool("reused", understandingResult.Reused))
 	if err := p.completeJob(ctx, jobContext.Job, analysis.EvidenceS3Key); err != nil {
 		return Result{}, err
 	}

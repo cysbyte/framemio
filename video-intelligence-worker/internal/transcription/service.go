@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -82,6 +84,7 @@ type Service struct {
 	ReferenceExpiry           time.Duration
 	RawArtifactThresholdBytes int
 	Now                       func() time.Time
+	Logger                    *slog.Logger
 }
 
 func (s *Service) Transcribe(ctx context.Context, request Request) (Result, error) {
@@ -93,6 +96,7 @@ func (s *Service) Transcribe(ctx context.Context, request Request) (Result, erro
 	}
 	if cached, err := s.Repository.GetTranscript(ctx, request.UserID, request.MediaID, request.Version, request.SourceETag); err == nil {
 		if validCachedRecord(cached, request) {
+			s.logger().Info("reusing cached transcript", slog.String("project_id", request.ProjectID), slog.String("media_id", request.MediaID), slog.String("version", request.Version), slog.Bool("has_speech", cached.Transcript.HasSpeech), slog.Int("segment_count", len(cached.Transcript.Segments)), slog.String("language", cached.Transcript.Language))
 			normalized, validationErr := Validate(cached.Transcript, request.DurationMicros)
 			if validationErr != nil {
 				return Result{}, fmt.Errorf("cached transcript is invalid: %w", validationErr)
@@ -104,6 +108,7 @@ func (s *Service) Transcribe(ctx context.Context, request Request) (Result, erro
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return Result{}, err
 	}
+	s.logger().Info("transcript cache miss", slog.String("project_id", request.ProjectID), slog.String("media_id", request.MediaID), slog.String("version", request.Version), slog.Int64("duration_micros", request.DurationMicros))
 	referenceURL, err := s.Artifacts.PresignGet(ctx, request.SourceS3Key, s.referenceExpiry())
 	if err != nil {
 		return Result{}, fmt.Errorf("presign transcription source: %w", err)
@@ -115,6 +120,7 @@ func (s *Service) Transcribe(ctx context.Context, request Request) (Result, erro
 		},
 		LanguageHint: strings.TrimSpace(request.LanguageHint),
 	}
+	s.logger().Info("calling transcription provider", slog.String("project_id", request.ProjectID), slog.String("media_id", request.MediaID), slog.String("provider", s.Provider.Name()), slog.String("model", s.Provider.Model()))
 	var providerResult ProviderResult
 	err = s.retry(ctx, func() error {
 		var providerErr error
@@ -126,8 +132,10 @@ func (s *Service) Transcribe(ctx context.Context, request Request) (Result, erro
 		return providerErr
 	})
 	if err != nil {
+		s.logger().Warn("transcription provider failed", slog.String("project_id", request.ProjectID), slog.String("media_id", request.MediaID), slog.String("provider", s.Provider.Name()), slog.String("model", s.Provider.Model()), slog.Any("error", err))
 		return Result{}, fmt.Errorf("transcription provider %s failed: %w", s.Provider.Name(), err)
 	}
+	s.logger().Info("transcription provider result validated", slog.String("project_id", request.ProjectID), slog.String("media_id", request.MediaID), slog.String("provider", s.Provider.Name()), slog.String("model", s.Provider.Model()), slog.Bool("has_speech", providerResult.Transcript.HasSpeech), slog.Int("segment_count", len(providerResult.Transcript.Segments)), slog.String("language", providerResult.Transcript.Language))
 	rawArtifactKey := ""
 	if len(providerResult.RawArtifact) >= s.rawArtifactThreshold() {
 		if !json.Valid(providerResult.RawArtifact) {
@@ -151,8 +159,10 @@ func (s *Service) Transcribe(ctx context.Context, request Request) (Result, erro
 	}
 	saved, err := s.Repository.SaveTranscript(ctx, record)
 	if err != nil {
+		s.logger().Error("save transcript failed", slog.String("project_id", request.ProjectID), slog.String("media_id", request.MediaID), slog.Bool("has_speech", record.HasSpeech), slog.Int("segment_count", record.SegmentCount), slog.Any("error", err))
 		return Result{}, err
 	}
+	s.logger().Info("transcript saved", slog.String("project_id", request.ProjectID), slog.String("media_id", request.MediaID), slog.String("transcript_id", saved.ID), slog.Bool("has_speech", saved.HasSpeech), slog.Int("segment_count", saved.SegmentCount), slog.String("language", saved.Language), slog.Bool("reused", saved.ID != record.ID))
 	return Result{Record: saved, Reused: saved.ID != record.ID}, nil
 }
 
@@ -297,4 +307,11 @@ func (s *Service) now() time.Time {
 		return s.Now()
 	}
 	return time.Now()
+}
+
+func (s *Service) logger() *slog.Logger {
+	if s.Logger != nil {
+		return s.Logger
+	}
+	return slog.New(slog.NewJSONHandler(os.Stdout, nil))
 }

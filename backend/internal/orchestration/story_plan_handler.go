@@ -3,6 +3,8 @@ package orchestration
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,6 +19,7 @@ type StoryPlanHandler struct {
 	Store   store.Store
 	Planner *ai.Planner
 	Now     func() time.Time
+	Logger  *slog.Logger
 }
 
 func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJob) error {
@@ -43,6 +46,7 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		return err
 	}
 	photoAnalyses := h.photoAnalyses(project, mediaByID, mediaAnalyses)
+	h.logger().Info("story planner input loaded", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("project_media_count", len(project.MediaIDs)), slog.Int("photo_analysis_count", len(photoAnalyses)), slog.Int("video_analysis_count", len(videoAnalyses)), slog.Int("video_with_speech_count", videoAnalysesWithSpeech(videoAnalyses)), slog.Int("transcript_segment_count", totalTranscriptSegments(videoAnalyses)))
 	planner := h.Planner
 	if planner == nil {
 		planner = &ai.Planner{Now: h.Now}
@@ -50,8 +54,10 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 	request := h.storyPlanRequest(project, job.Configuration, photoAnalyses, videoAnalyses, mediaClusters(project, mediaByID, photoAnalyses, videoAnalyses))
 	plan, err := planner.Plan(ctx, request)
 	if err != nil {
+		h.logger().Error("story planner failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Any("error", err))
 		return err
 	}
+	h.logger().Info("story planner output ready", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("moment_count", len(plan.Moments)), slog.Int("caption_count", len(plan.Captions)), slog.Int("video_moment_count", videoMomentCount(plan.Moments)))
 	if mood := strings.TrimSpace(job.Configuration["music_mood"]); mood != "" {
 		plan.MusicMood = mood
 		if plan.Audio == nil {
@@ -59,7 +65,12 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		}
 		plan.Audio.Mood = mood
 	}
-	return h.Store.SaveStoryPlan(ctx, job.UserID, plan)
+	if err := h.Store.SaveStoryPlan(ctx, job.UserID, plan); err != nil {
+		h.logger().Error("save story plan failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("caption_count", len(plan.Captions)), slog.Any("error", err))
+		return err
+	}
+	h.logger().Info("story plan saved", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("caption_count", len(plan.Captions)))
+	return nil
 }
 
 func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configuration map[string]string, photoAnalyses []models.PhotoAnalysis, videoAnalyses []models.VideoAnalysis, clusters []models.MediaCluster) ai.Request {
@@ -372,4 +383,39 @@ func storyTypeFromContext(value string) models.StoryType {
 	default:
 		return models.StoryTypeCustom
 	}
+}
+
+func (h StoryPlanHandler) logger() *slog.Logger {
+	if h.Logger != nil {
+		return h.Logger
+	}
+	return slog.New(slog.NewJSONHandler(os.Stdout, nil))
+}
+
+func videoAnalysesWithSpeech(videoAnalyses []models.VideoAnalysis) int {
+	count := 0
+	for _, analysis := range videoAnalyses {
+		if analysis.Transcript.HasSpeech && len(analysis.Transcript.Segments) > 0 {
+			count++
+		}
+	}
+	return count
+}
+
+func totalTranscriptSegments(videoAnalyses []models.VideoAnalysis) int {
+	total := 0
+	for _, analysis := range videoAnalyses {
+		total += len(analysis.Transcript.Segments)
+	}
+	return total
+}
+
+func videoMomentCount(moments []models.StoryMoment) int {
+	count := 0
+	for _, moment := range moments {
+		if moment.MediaType == models.MediaTypeVideo {
+			count++
+		}
+	}
+	return count
 }

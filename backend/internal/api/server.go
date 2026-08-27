@@ -629,6 +629,7 @@ func (s *Server) getRenderInput(response http.ResponseWriter, request *http.Requ
 	if strings.TrimSpace(outputKey) == "" {
 		outputKey = renderOutputKey(job.UserID, job.ProjectID, plan.Version, job.Configuration["output_preset"])
 	}
+	s.Logger.Info("render input prepared", slog.String("job_id", job.ID), slog.String("project_id", job.ProjectID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.Int("moment_count", len(plan.Moments)), slog.Int("caption_count", len(plan.Captions)), slog.Int("media_asset_count", len(assets)))
 	s.writeJSON(response, http.StatusOK, renderInputResponse{
 		JobID:       job.ID,
 		ProjectID:   job.ProjectID,
@@ -797,6 +798,7 @@ func (s *Server) saveJobStoryPlan(response http.ResponseWriter, request *http.Re
 	if plan.CreatedAt.IsZero() {
 		plan.CreatedAt = s.Now().UTC()
 	}
+	s.Logger.Info("internal story plan save requested", slog.String("job_id", job.ID), slog.String("project_id", job.ProjectID), slog.String("story_plan_id", plan.ID), slog.Int("moment_count", len(plan.Moments)), slog.Int("caption_count", len(plan.Captions)))
 	if err := s.Store.SaveStoryPlan(request.Context(), job.UserID, plan); err != nil {
 		s.mapStoreError(response, err)
 		return

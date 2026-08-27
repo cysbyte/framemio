@@ -194,7 +194,7 @@ func runWorkerOnce(ctx context.Context, database store.Store, coordinator *orche
 		Store:             database,
 		Consumer:          consumer,
 		Coordinator:       coordinator,
-		Handlers:          map[models.JobType]orchestration.JobHandler{models.JobTypeStoryPlan: orchestration.StoryPlanHandler{Store: database}},
+		Handlers:          map[models.JobType]orchestration.JobHandler{models.JobTypeStoryPlan: orchestration.StoryPlanHandler{Store: database, Logger: logger}},
 		Logger:            logger,
 		TargetJobID:       configuration.WorkerJobID,
 		VisibilityTimeout: 2 * time.Minute,
