@@ -144,7 +144,33 @@ function ffmpegNumber(value: number): string {
 }
 
 function normalizeCaptionText(value: string): string {
-  return value.trim().replace(/\s+/g, ' ').slice(0, 120);
+  return wrapCaptionText(value.trim().replace(/\s+/g, ' ').slice(0, 120), 32, 3);
+}
+
+function wrapCaptionText(value: string, maxLineLength: number, maxLines: number): string {
+  if (!value) {
+    return '';
+  }
+  const words = value.split(' ');
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (next.length <= maxLineLength || !current) {
+      current = next;
+      continue;
+    }
+    lines.push(current);
+    current = word;
+    if (lines.length === maxLines) {
+      break;
+    }
+  }
+  if (current && lines.length < maxLines) {
+    lines.push(current);
+  }
+  const wrapped = lines.slice(0, maxLines).join('\n');
+  return wrapped.length < value.length ? `${wrapped.trimEnd()}…` : wrapped;
 }
 
 function captionTiming(caption: StoryCaption, composition: CompositionSpec): {startSeconds: string; endSeconds: string} | undefined {

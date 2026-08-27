@@ -19,6 +19,7 @@ const timestampToleranceMicros int64 = 250_000
 
 type MediaReference struct {
 	URL            string `json:"url"`
+	LocalPath      string `json:"-"`
 	MediaType      string `json:"media_type"`
 	DurationMicros int64  `json:"duration_micros"`
 }
@@ -51,15 +52,16 @@ type ArtifactStore interface {
 }
 
 type Request struct {
-	UserID         string
-	ProjectID      string
-	MediaID        string
-	SourceETag     string
-	SourceS3Key    string
-	MediaType      string
-	DurationMicros int64
-	Version        string
-	LanguageHint   string
+	UserID          string
+	ProjectID       string
+	MediaID         string
+	SourceETag      string
+	SourceS3Key     string
+	SourceLocalPath string
+	MediaType       string
+	DurationMicros  int64
+	Version         string
+	LanguageHint    string
 }
 
 type Result struct {
@@ -109,7 +111,7 @@ func (s *Service) Transcribe(ctx context.Context, request Request) (Result, erro
 	providerRequest := ProviderRequest{
 		MediaID: request.MediaID,
 		Reference: MediaReference{
-			URL: referenceURL, MediaType: request.MediaType, DurationMicros: request.DurationMicros,
+			URL: referenceURL, LocalPath: request.SourceLocalPath, MediaType: request.MediaType, DurationMicros: request.DurationMicros,
 		},
 		LanguageHint: strings.TrimSpace(request.LanguageHint),
 	}

@@ -159,12 +159,14 @@ Required:
 - `DATABASE_URL`
 - `S3_MEDIA_BUCKET`
 - `SQS_VIDEO_ANALYSIS_QUEUE_URL`
-- `VIDEO_UNDERSTANDING_API_URL`
-- `TRANSCRIPTION_API_URL` when `ENABLE_TRANSCRIPTION=true`
+- `VIDEO_UNDERSTANDING_API_URL` unless `VIDEO_UNDERSTANDING_DIRECT=true`
+- `VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL` and API key when `VIDEO_UNDERSTANDING_DIRECT=true`
+- `TRANSCRIPTION_API_URL` when `ENABLE_TRANSCRIPTION=true` and `TRANSCRIPTION_DIRECT` is not enabled
+- `TRANSCRIPTION_UPSTREAM_BASE_URL` and API key when `ENABLE_TRANSCRIPTION=true` and `TRANSCRIPTION_DIRECT=true`
 
 AWS credentials use the default AWS SDK credential chain. API keys stay in worker secrets, never in the iOS application or queue messages.
 
-Production deployments can either point `VIDEO_UNDERSTANDING_API_URL` at a FrameMio-compatible adapter or enable direct OpenAI-compatible video understanding with `VIDEO_UNDERSTANDING_DIRECT=true`, `VIDEO_UNDERSTANDING_PROVIDER=openai-direct`, `VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL=https://api2.65535.space`, `VIDEO_UNDERSTANDING_WIRE_API=chat_completions`, and `VIDEO_UNDERSTANDING_MODEL=gpt-5.4-mini`. Transcription remains behind its provider adapter with `TRANSCRIPTION_PROVIDER=openai`, `TRANSCRIPTION_MODEL=gpt-5.4-mini-transcribe`, and `ENABLE_TRANSCRIPTION=true`.
+Production deployments can either point `VIDEO_UNDERSTANDING_API_URL` at a FrameMio-compatible adapter or enable direct OpenAI-compatible video understanding with `VIDEO_UNDERSTANDING_DIRECT=true`, `VIDEO_UNDERSTANDING_PROVIDER=openai-direct`, `VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL=https://api2.65535.space`, `VIDEO_UNDERSTANDING_WIRE_API=chat_completions`, and `VIDEO_UNDERSTANDING_MODEL=gpt-5.4-mini`. Transcription can use the provider adapter or direct OpenAI-compatible multipart audio upload with `TRANSCRIPTION_DIRECT=true`, `TRANSCRIPTION_PROVIDER=openai-direct`, `TRANSCRIPTION_UPSTREAM_BASE_URL=https://api2.65535.space`, `TRANSCRIPTION_MODEL=gpt-5.4-mini-transcribe`, and `ENABLE_TRANSCRIPTION=true`.
 
 Optional tuning:
 
@@ -178,6 +180,7 @@ Optional tuning:
 - `VIDEO_UNDERSTANDING_IMAGE_DETAIL`, `VIDEO_UNDERSTANDING_MAX_OUTPUT_TOKENS`
 - `VIDEO_UNDERSTANDING_RETRIES`, `VIDEO_UNDERSTANDING_PROVIDER_TIMEOUT`
 - `TRANSCRIPTION_API_KEY`, `TRANSCRIPTION_PROVIDER`, `TRANSCRIPTION_MODEL`
+- `TRANSCRIPTION_DIRECT`, `TRANSCRIPTION_UPSTREAM_BASE_URL`
 - `TRANSCRIPTION_VERSION`, `ENABLE_TRANSCRIPTION`
 - `TRANSCRIPTION_RETRIES`, `TRANSCRIPTION_PROVIDER_TIMEOUT`
 - `TRANSCRIPTION_RAW_ARTIFACT_THRESHOLD_BYTES`

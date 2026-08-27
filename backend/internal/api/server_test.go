@@ -1153,6 +1153,11 @@ func TestIOSStoryPresentationSuppressesGenericNames(t *testing.T) {
 	if got := iosStoryDescription(plan); got != "Everyone laughing by the lake" {
 		t.Fatalf("story description = %q", got)
 	}
+	longMoment := strings.Repeat("lake picnic with friends ", 16)
+	longPlan := models.StoryPlan{Moments: []models.StoryMoment{{Narrative: longMoment}}}
+	if got := iosStoryDescription(longPlan); len(got) <= 220 || len(got) > 800 {
+		t.Fatalf("story description length = %d, want between legacy and max limits", len(got))
+	}
 }
 
 func assertSmallIdentifierOnlyMessage(t *testing.T, message queue.JobMessage) {

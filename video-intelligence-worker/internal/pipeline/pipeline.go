@@ -312,7 +312,7 @@ func (p *Processor) extractTranscript(ctx context.Context, workspace, sourcePath
 	}
 	result, err := p.Transcription.Transcribe(ctx, transcription.Request{
 		UserID: jobContext.Job.UserID, ProjectID: jobContext.Project.ID, MediaID: jobContext.Media.ID,
-		SourceETag: sourceETag, SourceS3Key: audioKey, MediaType: "audio",
+		SourceETag: sourceETag, SourceS3Key: audioKey, SourceLocalPath: audioPath, MediaType: "audio",
 		DurationMicros: metadata.DurationMicros, Version: p.Config.TranscriptionVersion,
 	})
 	if err != nil {

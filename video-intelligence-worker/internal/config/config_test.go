@@ -53,6 +53,44 @@ func TestLoadRequiresDirectUnderstandingAPIKey(t *testing.T) {
 	}
 }
 
+func TestLoadAllowsDirectTranscriptionWithoutAdapterURL(t *testing.T) {
+	setRequiredEnvironment(t)
+	t.Setenv("VIDEO_UNDERSTANDING_PROVIDER", "local")
+	t.Setenv("ENABLE_TRANSCRIPTION", "true")
+	t.Setenv("TRANSCRIPTION_DIRECT", "true")
+	t.Setenv("TRANSCRIPTION_PROVIDER", "openai-direct")
+	t.Setenv("TRANSCRIPTION_API_URL", "")
+	t.Setenv("TRANSCRIPTION_API_KEY", "speech-secret")
+	t.Setenv("TRANSCRIPTION_UPSTREAM_BASE_URL", "https://api2.65535.space")
+
+	configuration, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !configuration.UsesDirectTranscription() || configuration.TranscriptionUpstreamBaseURL != "https://api2.65535.space" {
+		t.Fatalf("direct transcription settings were not loaded: %+v", configuration)
+	}
+}
+
+func TestLoadRequiresDirectTranscriptionAPIKey(t *testing.T) {
+	setRequiredEnvironment(t)
+	t.Setenv("VIDEO_UNDERSTANDING_PROVIDER", "local")
+	t.Setenv("ENABLE_TRANSCRIPTION", "true")
+	t.Setenv("TRANSCRIPTION_DIRECT", "true")
+	t.Setenv("TRANSCRIPTION_PROVIDER", "openai-direct")
+	t.Setenv("TRANSCRIPTION_API_URL", "")
+	t.Setenv("TRANSCRIPTION_API_KEY", "")
+	t.Setenv("SPEECH_API_KEY", "")
+	t.Setenv("AI_GATEWAY_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("VIDEO_UNDERSTANDING_API_KEY", "")
+	t.Setenv("TRANSCRIPTION_UPSTREAM_BASE_URL", "https://api2.65535.space")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected missing direct transcription API key error")
+	}
+}
+
 func setRequiredEnvironment(t *testing.T) {
 	t.Helper()
 	t.Setenv("DATABASE_URL", "postgres://framemio_app@example.test/postgres")

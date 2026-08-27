@@ -176,9 +176,16 @@ func TestPlannerUsesTranscriptTextForVideoCaptions(t *testing.T) {
 	if len(plan.Captions) == 0 {
 		t.Fatalf("expected transcript caption, got %+v", plan)
 	}
-	captionText := strings.ToLower(plan.Captions[0].Text)
-	if !strings.Contains(captionText, "look at the ducks") || !strings.Contains(captionText, "favorite part") {
-		t.Fatalf("expected speech transcript caption, got %+v", plan.Captions)
+	if len(plan.Captions) != 2 {
+		t.Fatalf("expected one timed caption per speech segment, got %+v", plan.Captions)
+	}
+	firstCaptionText := strings.ToLower(plan.Captions[0].Text)
+	secondCaptionText := strings.ToLower(plan.Captions[1].Text)
+	if !strings.Contains(firstCaptionText, "look at the ducks") || !strings.Contains(secondCaptionText, "favorite part") {
+		t.Fatalf("expected speech transcript captions, got %+v", plan.Captions)
+	}
+	if plan.Captions[0].StartMS != 0 || plan.Captions[0].EndMS != 1200 || plan.Captions[1].StartMS != 1200 || plan.Captions[1].EndMS != 2600 {
+		t.Fatalf("expected transcript captions to follow voice timing, got %+v", plan.Captions)
 	}
 }
 

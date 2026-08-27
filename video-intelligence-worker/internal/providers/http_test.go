@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -171,6 +173,49 @@ func TestHTTPVideoUnderstandingProviderRejectsUnknownResponseFields(t *testing.T
 				t.Fatal("expected strict JSON decoding failure")
 			}
 		})
+	}
+}
+
+func TestOpenAICompatibleTranscriptionProviderSendsMultipartAudio(t *testing.T) {
+	t.Parallel()
+	audioPath := t.TempDir() + "/speech.flac"
+	if err := os.WriteFile(audioPath, []byte("fixture audio"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodPost || request.URL.String() != "https://api2.65535.space/v1/audio/transcriptions" {
+			t.Fatalf("unexpected request target: %s %s", request.Method, request.URL.String())
+		}
+		if request.Header.Get("Authorization") != "Bearer secret" {
+			t.Fatalf("unexpected authorization header: %s", request.Header.Get("Authorization"))
+		}
+		reader := multipart.NewReader(request.Body, strings.TrimPrefix(request.Header.Get("Content-Type"), "multipart/form-data; boundary="))
+		form, err := reader.ReadForm(1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := form.Value["model"]; len(got) != 1 || got[0] != "gpt-5.4-mini-transcribe" {
+			t.Fatalf("unexpected model field: %+v", got)
+		}
+		if got := form.Value["response_format"]; len(got) != 1 || got[0] != "verbose_json" {
+			t.Fatalf("unexpected response_format field: %+v", got)
+		}
+		if len(form.File["file"]) != 1 {
+			t.Fatalf("expected audio file part, got %+v", form.File)
+		}
+		return jsonResponse(`{"language":"en","text":"hello there","segments":[{"start":1.25,"end":2.75,"text":"hello there"}]}`), nil
+	})}
+	provider := OpenAICompatibleTranscriptionProvider{
+		BaseURL: "https://api2.65535.space", APIKey: "secret", ProviderName: "openai-direct", ModelName: "gpt-5.4-mini-transcribe", Client: client,
+	}
+	result, err := provider.Transcribe(context.Background(), transcription.ProviderRequest{
+		MediaID: "media-1", Reference: transcription.MediaReference{LocalPath: audioPath, MediaType: "audio", DurationMicros: 4_000_000},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Transcript.Language != "en" || len(result.Transcript.Segments) != 1 || result.Transcript.Segments[0].StartMicros != 1_250_000 || result.Transcript.Segments[0].EndMicros != 2_750_000 {
+		t.Fatalf("unexpected transcript: %+v", result.Transcript)
 	}
 }
 

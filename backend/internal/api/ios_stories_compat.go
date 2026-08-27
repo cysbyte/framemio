@@ -684,7 +684,7 @@ func iosStoryDescription(plan models.StoryPlan) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return truncateIOSConfigValue(strings.Join(parts, ". "), 220)
+	return truncateIOSConfigValue(strings.Join(parts, ". "), 800)
 }
 
 func (s *Server) iosStoryMoments(request *http.Request, plan models.StoryPlan, mediaByID map[string]models.MediaAsset) []iosStoryMoment {

@@ -35,6 +35,8 @@ type Config struct {
 	TranscriptionProvider             string
 	TranscriptionModel                string
 	TranscriptionVersion              string
+	TranscriptionDirect               bool
+	TranscriptionUpstreamBaseURL      string
 	EnableTranscription               bool
 	TranscriptionRetries              int
 	TranscriptionTimeout              time.Duration
@@ -83,10 +85,12 @@ func Load() (Config, error) {
 		UnderstandingImageDetail:          environment("VIDEO_UNDERSTANDING_IMAGE_DETAIL", "low"),
 		UnderstandingMaxOutputTokens:      environmentInt("VIDEO_UNDERSTANDING_MAX_OUTPUT_TOKENS", 5000),
 		TranscriptionURL:                  environmentFirst([]string{"TRANSCRIPTION_API_URL", "SPEECH_API_URL"}, ""),
-		TranscriptionAPIKey:               environmentFirst([]string{"TRANSCRIPTION_API_KEY", "SPEECH_API_KEY"}, ""),
+		TranscriptionAPIKey:               environmentFirst([]string{"TRANSCRIPTION_API_KEY", "SPEECH_API_KEY", "AI_GATEWAY_API_KEY", "OPENAI_API_KEY", "VIDEO_UNDERSTANDING_API_KEY"}, ""),
 		TranscriptionProvider:             environmentFirst([]string{"TRANSCRIPTION_PROVIDER", "SPEECH_PROVIDER"}, "external"),
-		TranscriptionModel:                environmentFirst([]string{"TRANSCRIPTION_MODEL", "SPEECH_MODEL"}, "configured-model"),
+		TranscriptionModel:                environmentFirst([]string{"TRANSCRIPTION_MODEL", "SPEECH_MODEL", "OPENAI_TRANSCRIPTION_MODEL"}, "configured-model"),
 		TranscriptionVersion:              environment("TRANSCRIPTION_VERSION", "transcription-v1"),
+		TranscriptionDirect:               environmentBool("TRANSCRIPTION_DIRECT", false),
+		TranscriptionUpstreamBaseURL:      environmentFirst([]string{"TRANSCRIPTION_UPSTREAM_BASE_URL", "AI_SPEECH_BASE_URL", "OPENAI_SPEECH_BASE_URL", "AI_GATEWAY_BASE_URL", "OPENAI_BASE_URL", "VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL"}, ""),
 		EnableTranscription:               environmentBoolFirst([]string{"ENABLE_TRANSCRIPTION", "ENABLE_SPEECH_TO_TEXT"}, true),
 		TranscriptionRetries:              environmentInt("TRANSCRIPTION_RETRIES", 3),
 		TranscriptionTimeout:              environmentDuration("TRANSCRIPTION_PROVIDER_TIMEOUT", 90*time.Second),
@@ -122,8 +126,14 @@ func Load() (Config, error) {
 	if configuration.UsesDirectUnderstanding() && configuration.UnderstandingAPIKey == "" {
 		return Config{}, errors.New("VIDEO_UNDERSTANDING_API_KEY is required when direct video understanding is enabled")
 	}
-	if configuration.EnableTranscription && configuration.TranscriptionURL == "" {
+	if configuration.EnableTranscription && !configuration.UsesDirectTranscription() && configuration.TranscriptionURL == "" {
 		return Config{}, errors.New("TRANSCRIPTION_API_URL is required when transcription is enabled")
+	}
+	if configuration.EnableTranscription && configuration.UsesDirectTranscription() && configuration.TranscriptionUpstreamBaseURL == "" {
+		return Config{}, errors.New("TRANSCRIPTION_UPSTREAM_BASE_URL is required when direct transcription is enabled")
+	}
+	if configuration.EnableTranscription && configuration.UsesDirectTranscription() && configuration.TranscriptionAPIKey == "" {
+		return Config{}, errors.New("TRANSCRIPTION_API_KEY is required when direct transcription is enabled")
 	}
 	if configuration.SceneThreshold <= 0 || configuration.SceneThreshold >= 1 {
 		return Config{}, errors.New("SCENE_CHANGE_THRESHOLD must be between zero and one")
@@ -148,6 +158,18 @@ func (c Config) UsesDirectUnderstanding() bool {
 		return true
 	}
 	switch strings.ToLower(strings.TrimSpace(c.UnderstandingProvider)) {
+	case "openai-direct", "gpt-direct":
+		return true
+	default:
+		return false
+	}
+}
+
+func (c Config) UsesDirectTranscription() bool {
+	if c.TranscriptionDirect {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(c.TranscriptionProvider)) {
 	case "openai-direct", "gpt-direct":
 		return true
 	default:

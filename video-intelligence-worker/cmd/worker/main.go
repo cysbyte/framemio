@@ -61,12 +61,20 @@ func main() {
 	}
 	understandingClient := &http.Client{Timeout: configuration.UnderstandingTimeout}
 	transcriptionClient := &http.Client{Timeout: configuration.TranscriptionTimeout}
-	transcriptionService := &transcription.Service{
-		Provider: providers.HTTPTranscriptionProvider{
-			URL: configuration.TranscriptionURL, APIKey: configuration.TranscriptionAPIKey,
+	transcriptionProvider := transcription.TranscriptionProvider(providers.HTTPTranscriptionProvider{
+		URL: configuration.TranscriptionURL, APIKey: configuration.TranscriptionAPIKey,
+		ProviderName: configuration.TranscriptionProvider, ModelName: configuration.TranscriptionModel,
+		Client: transcriptionClient,
+	})
+	if configuration.UsesDirectTranscription() {
+		transcriptionProvider = providers.OpenAICompatibleTranscriptionProvider{
+			BaseURL: configuration.TranscriptionUpstreamBaseURL, APIKey: configuration.TranscriptionAPIKey,
 			ProviderName: configuration.TranscriptionProvider, ModelName: configuration.TranscriptionModel,
 			Client: transcriptionClient,
-		},
+		}
+	}
+	transcriptionService := &transcription.Service{
+		Provider:   transcriptionProvider,
 		Repository: repository, Artifacts: objects, RetryAttempts: configuration.TranscriptionRetries,
 		ReferenceExpiry:           configuration.PresignedEvidenceExpiry,
 		RawArtifactThresholdBytes: configuration.TranscriptionRawArtifactThreshold,

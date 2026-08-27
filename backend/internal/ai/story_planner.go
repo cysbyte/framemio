@@ -38,15 +38,22 @@ type Planner struct {
 const maxVideoMomentDuration = 5 * time.Second
 
 type candidate struct {
-	moment     models.StoryMoment
-	sourceTime int64
-	score      float64
-	repetition string
-	mediaID    string
-	clusterID  string
-	isVideo    bool
-	isSelected bool
-	isEnding   bool
+	moment      models.StoryMoment
+	captionCues []captionCue
+	sourceTime  int64
+	score       float64
+	repetition  string
+	mediaID     string
+	clusterID   string
+	isVideo     bool
+	isSelected  bool
+	isEnding    bool
+}
+
+type captionCue struct {
+	Text        string
+	StartMicros int64
+	EndMicros   int64
 }
 
 func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, error) {
@@ -108,7 +115,9 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 		}
 		moments = append(moments, entry.moment)
 		totalDuration += entry.moment.DurationMS
-		if strings.TrimSpace(entry.moment.Caption) != "" {
+		if len(entry.captionCues) > 0 {
+			captions = append(captions, timedStoryCaptions(entry.moment, entry.captionCues, totalDuration-entry.moment.DurationMS)...)
+		} else if !entry.isVideo && strings.TrimSpace(entry.moment.Caption) != "" {
 			captions = append(captions, models.StoryCaption{
 				MomentID: entry.moment.MomentID,
 				Text:     entry.moment.Caption,
@@ -286,7 +295,8 @@ func buildCandidates(request Request, selected map[string]struct{}, clusters map
 			clusterID := clusterForMedia(clusters, mediaID)
 			score := videoScore(analysis, segment, selected, clusterID)
 			endMicros := selectedVideoEndMicros(segment)
-			caption := firstNonEmpty(captionFromTranscript(analysis.Transcript, segment.StartMicros, endMicros), captionFromSegment(segment))
+			transcriptCaption := captionFromTranscript(analysis.Transcript, segment.StartMicros, endMicros)
+			caption := firstNonEmpty(transcriptCaption, captionFromSegment(segment))
 			reason := reasonFromSegment(segment)
 			narrative := firstNonEmpty(caption, reason)
 			moment := models.StoryMoment{
@@ -305,7 +315,8 @@ func buildCandidates(request Request, selected map[string]struct{}, clusters map
 				}
 			}
 			candidates = append(candidates, candidate{
-				moment: moment, sourceTime: midpoint(segment.StartMicros, segment.EndMicros), score: score,
+				moment: moment, captionCues: transcriptCaptionCues(analysis.Transcript, segment.StartMicros, endMicros),
+				sourceTime: midpoint(segment.StartMicros, segment.EndMicros), score: score,
 				repetition: repetitionKey(mediaID, clusterID, midpoint(segment.StartMicros, segment.EndMicros), segment.SceneID),
 				mediaID:    mediaID, clusterID: clusterID, isVideo: true, isSelected: hasMedia(selected, mediaID),
 			})
@@ -727,6 +738,54 @@ func captionFromTranscript(transcript models.VideoTranscript, startMicros, endMi
 		return ""
 	}
 	return truncateText(strings.Join(parts, " "), 120)
+}
+
+func transcriptCaptionCues(transcript models.VideoTranscript, startMicros, endMicros int64) []captionCue {
+	if !transcript.HasSpeech || endMicros <= startMicros {
+		return nil
+	}
+	cues := make([]captionCue, 0, len(transcript.Segments))
+	for _, segment := range transcript.Segments {
+		if segment.EndMicros <= segment.StartMicros || segment.EndMicros <= startMicros || segment.StartMicros >= endMicros {
+			continue
+		}
+		overlapStart := maxInt64(segment.StartMicros, startMicros)
+		overlapEnd := minInt64(segment.EndMicros, endMicros)
+		if overlapEnd-overlapStart < 250_000 {
+			continue
+		}
+		if text := humanText(segment.Text); text != "" {
+			cues = append(cues, captionCue{Text: truncateText(text, 120), StartMicros: overlapStart, EndMicros: overlapEnd})
+		}
+	}
+	return cues
+}
+
+func timedStoryCaptions(moment models.StoryMoment, cues []captionCue, timelineStartMS int) []models.StoryCaption {
+	if strings.TrimSpace(moment.MomentID) == "" || moment.EndMicros <= moment.StartMicros || moment.DurationMS <= 0 {
+		return nil
+	}
+	sourceDurationMS := float64(moment.EndMicros-moment.StartMicros) / 1000
+	if sourceDurationMS <= 0 {
+		return nil
+	}
+	scale := float64(moment.DurationMS) / sourceDurationMS
+	captions := make([]models.StoryCaption, 0, len(cues))
+	for _, cue := range cues {
+		text := strings.TrimSpace(cue.Text)
+		if text == "" || cue.EndMicros <= cue.StartMicros {
+			continue
+		}
+		startMS := timelineStartMS + int(math.Round((float64(cue.StartMicros-moment.StartMicros)/1000)*scale))
+		endMS := timelineStartMS + int(math.Round((float64(cue.EndMicros-moment.StartMicros)/1000)*scale))
+		startMS = clampInt(startMS, timelineStartMS, timelineStartMS+moment.DurationMS)
+		endMS = clampInt(endMS, startMS, timelineStartMS+moment.DurationMS)
+		if endMS-startMS < 250 {
+			continue
+		}
+		captions = append(captions, models.StoryCaption{MomentID: moment.MomentID, Text: text, StartMS: startMS, EndMS: endMS})
+	}
+	return captions
 }
 
 func reasonFromSegment(segment models.VideoSegment) string {
