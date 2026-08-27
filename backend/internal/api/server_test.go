@@ -962,6 +962,10 @@ func (s *sizeMismatchObjectStorage) ObjectExists(ctx context.Context, key string
 	return s.base.ObjectExists(ctx, key)
 }
 
+func (s *sizeMismatchObjectStorage) PutObject(ctx context.Context, key, contentType string, data []byte) error {
+	return s.base.PutObject(ctx, key, contentType, data)
+}
+
 func (s *sizeMismatchObjectStorage) PresignedDownloadURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
 	return s.base.PresignedDownloadURL(ctx, key, expiry)
 }
@@ -993,6 +997,10 @@ func (s *countingObjectStorage) AbortUpload(ctx context.Context, session models.
 
 func (s *countingObjectStorage) ObjectExists(ctx context.Context, key string) (bool, error) {
 	return s.base.ObjectExists(ctx, key)
+}
+
+func (s *countingObjectStorage) PutObject(ctx context.Context, key, contentType string, data []byte) error {
+	return s.base.PutObject(ctx, key, contentType, data)
 }
 
 func (s *countingObjectStorage) PresignedDownloadURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
@@ -1196,5 +1204,50 @@ func assertSmallIdentifierOnlyMessage(t *testing.T, message queue.JobMessage) {
 	}
 	if message.JobID == "" || message.ProjectID == "" || message.JobType == "" {
 		t.Fatalf("queue message is missing identifiers: %+v", message)
+	}
+}
+
+func TestMusicCatalogExposesOnlyApprovedSafeFields(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore := store.NewMemoryStore()
+	now := time.Date(2026, time.August, 28, 8, 0, 0, 0, time.UTC)
+	approved := models.MusicTrack{
+		ID:                   "music-approved",
+		Title:                "Golden Summer",
+		Status:               models.MusicTrackStatusApproved,
+		DurationSeconds:      90,
+		BPM:                  84,
+		Moods:                []string{"warm", "nostalgic"},
+		Energy:               0.42,
+		Genre:                "acoustic",
+		Instrumental:         true,
+		SpeechFriendly:       true,
+		StorageKey:           "music/music-approved/master.mp3",
+		PreviewStorageKey:    "music/music-approved/preview.mp3",
+		Provider:             "elevenlabs",
+		ProviderGenerationID: "secret-provider-id",
+		GenerationMetadata:   map[string]interface{}{"model": "music_v2"},
+		LicenseMetadata:      models.MusicLicenseMetadata{LicenseStatus: models.MusicLicenseStatusVerified},
+		CreatedAt:            now,
+		UpdatedAt:            now,
+	}
+	draft := approved
+	draft.ID = "music-draft"
+	draft.Status = models.MusicTrackStatusReview
+	if err := memoryStore.SaveMusicTrack(ctx, approved); err != nil {
+		t.Fatal(err)
+	}
+	if err := memoryStore.SaveMusicTrack(ctx, draft); err != nil {
+		t.Fatal(err)
+	}
+	handler := newTestServer(memoryStore, queue.NewMemoryPublisher()).Handler()
+	response := performJSON(t, handler, http.MethodGet, "/v1/music", nil, "", true, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("music catalog status = %d body = %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, "music-approved") || strings.Contains(body, "music-draft") || strings.Contains(body, "secret-provider-id") || strings.Contains(body, "master.mp3") || strings.Contains(body, "license") {
+		t.Fatalf("public music response leaked internal data or omitted approved track: %s", body)
 	}
 }

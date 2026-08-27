@@ -137,7 +137,7 @@ test('normalizes transitions and resolves audio deterministically', () => {
 });
 
 
-test('ffmpeg fallback renderer concatenates every story clip', async () => {
+test('ffmpeg fallback renderer mixes background music with speech ducking', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'framemio-ffmpeg-render-test-'));
   const fakeFfmpeg = path.join(root, 'fake-ffmpeg.cjs');
   const argsPath = path.join(root, 'ffmpeg-args.json');
@@ -167,7 +167,7 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
 
     const args = JSON.parse(await readFile(argsPath, 'utf8')) as string[];
     const inputs = args.flatMap((arg, index) => arg === '-i' ? [args[index + 1]] : []);
-    assert.deepEqual(inputs, ['/asset/IMG_1001.jpg', '/asset/IMG_1002.MOV']);
+    assert.deepEqual(inputs, ['/asset/IMG_1001.jpg', '/asset/IMG_1002.MOV', path.join(root, 'assets/background-audio')]);
     const filterComplex = args[args.indexOf('-filter_complex') + 1];
     assert.match(filterComplex, /\[0:v\]/);
     assert.match(filterComplex, /\[1:v\]/);
@@ -179,7 +179,13 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
     assert.match(filterComplex, /anullsrc=channel_layout=stereo:sample_rate=48000/);
     assert.match(filterComplex, /afade=t=out:st=2\.5500:d=0\.4500\[a0\]/);
     assert.match(filterComplex, /\[1:a\]atrim=duration=4\.500,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0\.6480,afade=t=in:st=0:d=0\.4500\[a1\]/);
-    assert.match(filterComplex, /\[a0\]\[a1\]concat=n=2:v=0:a=1\[outa\]/);
+    assert.match(filterComplex, /\[a0\]\[a1\]concat=n=2:v=0:a=1\[originala\]/);
+    assert.match(filterComplex, /\[2:a\]atrim=start=0\.0000:duration=7\.5000/);
+    assert.match(filterComplex, /volume=0\.3000/);
+    assert.match(filterComplex, /afade=t=in:st=0:d=0\.6000/);
+    assert.match(filterComplex, /afade=t=out:st=6\.6000:d=0\.9000/);
+    assert.match(filterComplex, /volume='if\(lt\(t,2\.9500\),1,/);
+    assert.match(filterComplex, /\[originala\]\[bga\]amix=inputs=2:duration=first:normalize=0\[outa\]/);
     assert.deepEqual(args.flatMap((arg, index) => arg === '-map' ? [args[index + 1]] : []), ['[outv]', '[outa]']);
     assert.equal(args.includes('-an'), false);
     assert.equal(args.includes('-c:a'), true);

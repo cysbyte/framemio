@@ -40,6 +40,7 @@ func DefaultConfig() Config {
 		AllowedAudioSources: map[string]struct{}{
 			"adaptive": {},
 			"none":     {},
+			"original": {},
 			"licensed": {},
 			"custom":   {},
 		},

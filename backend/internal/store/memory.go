@@ -24,6 +24,7 @@ type MemoryStore struct {
 	analyses      map[string]models.MediaAnalysis
 	videoAnalyses map[string]models.VideoAnalysis
 	storyPlans    map[string]models.StoryPlan
+	musicTracks   map[string]models.MusicTrack
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -39,6 +40,7 @@ func NewMemoryStore() *MemoryStore {
 		analyses:      make(map[string]models.MediaAnalysis),
 		videoAnalyses: make(map[string]models.VideoAnalysis),
 		storyPlans:    make(map[string]models.StoryPlan),
+		musicTracks:   make(map[string]models.MusicTrack),
 	}
 }
 
@@ -535,4 +537,77 @@ func (s *MemoryStore) GetStoryPlan(_ context.Context, userID, projectID string) 
 		return models.StoryPlan{}, ErrNotFound
 	}
 	return plan, nil
+}
+
+func (s *MemoryStore) SaveMusicTrack(_ context.Context, track models.MusicTrack) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if strings.TrimSpace(track.ID) == "" {
+		return ErrConflict
+	}
+	s.musicTracks[track.ID] = track
+	return nil
+}
+
+func (s *MemoryStore) GetMusicTrack(_ context.Context, trackID string) (models.MusicTrack, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	track, ok := s.musicTracks[trackID]
+	if !ok {
+		return models.MusicTrack{}, ErrNotFound
+	}
+	return track, nil
+}
+
+func (s *MemoryStore) ListMusicTracks(_ context.Context, filter models.MusicTrackFilter) ([]models.MusicTrack, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	tracks := make([]models.MusicTrack, 0, len(s.musicTracks))
+	for _, track := range s.musicTracks {
+		if !musicTrackMatchesFilter(track, filter) {
+			continue
+		}
+		tracks = append(tracks, track)
+	}
+	slices.SortFunc(tracks, func(left, right models.MusicTrack) int {
+		if left.Title == right.Title {
+			return strings.Compare(left.ID, right.ID)
+		}
+		return strings.Compare(left.Title, right.Title)
+	})
+	return tracks, nil
+}
+
+func musicTrackMatchesFilter(track models.MusicTrack, filter models.MusicTrackFilter) bool {
+	if filter.RequireApproved && track.Status != models.MusicTrackStatusApproved {
+		return false
+	}
+	if !filter.IncludeDrafts && (track.Status == models.MusicTrackStatusDraft || track.Status == models.MusicTrackStatusReview || track.Status == models.MusicTrackStatusDisabled) {
+		return false
+	}
+	if filter.RequireVerifiedLicense && track.LicenseMetadata.LicenseStatus != models.MusicLicenseStatusVerified {
+		return false
+	}
+	if filter.SpeechFriendlyOnly && !track.SpeechFriendly {
+		return false
+	}
+	if filter.MinDurationSeconds > 0 && track.DurationSeconds+0.25 < filter.MinDurationSeconds {
+		return false
+	}
+	if mood := strings.ToLower(strings.TrimSpace(filter.Mood)); mood != "" && !musicTrackHasMood(track, mood) {
+		return false
+	}
+	if genre := strings.ToLower(strings.TrimSpace(filter.Genre)); genre != "" && strings.ToLower(strings.TrimSpace(track.Genre)) != genre {
+		return false
+	}
+	return true
+}
+
+func musicTrackHasMood(track models.MusicTrack, mood string) bool {
+	for _, value := range track.Moods {
+		if strings.ToLower(strings.TrimSpace(value)) == mood {
+			return true
+		}
+	}
+	return false
 }

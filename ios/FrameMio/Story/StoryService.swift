@@ -91,6 +91,8 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
                 addMediaIDs: [],
                 replace: [],
                 musicMood: nil,
+                musicMode: nil,
+                musicTrackId: nil,
                 style: nil,
                 subtitlesEnabled: nil,
                 subtitleStyle: nil,

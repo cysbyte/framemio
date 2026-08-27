@@ -41,4 +41,7 @@ type Store interface {
 	ListProjectAnalyses(ctx context.Context, userID, projectID string) ([]models.MediaAnalysis, []models.VideoAnalysis, error)
 	SaveStoryPlan(ctx context.Context, userID string, plan models.StoryPlan) error
 	GetStoryPlan(ctx context.Context, userID, projectID string) (models.StoryPlan, error)
+	SaveMusicTrack(ctx context.Context, track models.MusicTrack) error
+	GetMusicTrack(ctx context.Context, trackID string) (models.MusicTrack, error)
+	ListMusicTracks(ctx context.Context, filter models.MusicTrackFilter) ([]models.MusicTrack, error)
 }

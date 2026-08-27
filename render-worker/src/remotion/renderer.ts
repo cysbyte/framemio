@@ -114,15 +114,30 @@ function concatFilter(composition: CompositionSpec, captions: CaptionOverlay[] =
   const videoInputs = composition.clips.map((_, index) => `[v${index}]`).join('');
   const filters = [...videoFilters, `${videoInputs}concat=n=${composition.clips.length}:v=1:a=0,format=yuv420p[basev]`];
   filters.push(captionVideoFilter(captions, composition.caption_style));
-  if (!composition.audio.original_audio) {
-    return {filter: filters.join(';'), hasAudio: false};
+
+  const audioOutputs: string[] = [];
+  if (composition.audio.original_audio) {
+    const audioFilters = composition.clips.map((clip, index) => isPhotoTimelineClip(clip)
+      ? silentAudioFilter(clip, index, transitionEffects(composition.clips, index))
+      : sourceAudioFilter(clip, index, composition, transitionEffects(composition.clips, index)));
+    const audioInputs = composition.clips.map((_, index) => `[a${index}]`).join('');
+    filters.push(...audioFilters, `${audioInputs}concat=n=${composition.clips.length}:v=0:a=1[originala]`);
+    audioOutputs.push('[originala]');
   }
 
-  const audioFilters = composition.clips.map((clip, index) => isPhotoTimelineClip(clip)
-    ? silentAudioFilter(clip, index, transitionEffects(composition.clips, index))
-    : sourceAudioFilter(clip, index, composition, transitionEffects(composition.clips, index)));
-  const audioInputs = composition.clips.map((_, index) => `[a${index}]`).join('');
-  filters.push(...audioFilters, `${audioInputs}concat=n=${composition.clips.length}:v=0:a=1[outa]`);
+  if (composition.audio.background_path) {
+    filters.push(backgroundAudioFilter(composition, captions));
+    audioOutputs.push('[bga]');
+  }
+
+  if (audioOutputs.length === 0) {
+    return {filter: filters.join(';'), hasAudio: false};
+  }
+  if (audioOutputs.length === 1) {
+    filters.push(`${audioOutputs[0]}anull[outa]`);
+  } else {
+    filters.push(`${audioOutputs.join('')}amix=inputs=${audioOutputs.length}:duration=first:normalize=0[outa]`);
+  }
   return {filter: filters.join(';'), hasAudio: true};
 }
 
@@ -241,6 +256,58 @@ function sourceAudioFilter(clip: TimelineClip, index: number, composition: Compo
 
 function silentAudioFilter(clip: TimelineClip, index: number, effects: ClipTransitionEffects): string {
   return `anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration=${clipDurationSeconds(clip)},asetpts=PTS-STARTPTS,aformat=sample_fmts=fltp:channel_layouts=stereo${audioFadeFilters(clip, effects)}[a${index}]`;
+}
+
+function backgroundAudioFilter(composition: CompositionSpec, captions: CaptionOverlay[]): string {
+  const inputIndex = composition.clips.length;
+  const storyDurationSeconds = Math.max(0.001, composition.duration_ms / 1000);
+  const volume = ffmpegNumber(composition.audio.background_volume);
+  const filters = [
+    `atrim=start=${ffmpegNumber(composition.audio.start_offset_seconds)}:duration=${ffmpegNumber(storyDurationSeconds)}`,
+    'asetpts=PTS-STARTPTS',
+    'aresample=48000',
+    'aformat=sample_fmts=fltp:channel_layouts=stereo',
+    `volume=${volume}`,
+    ...musicDuckingFilters(composition, captions),
+    ...musicFadeFilters(composition),
+  ];
+  return `[${inputIndex}:a]${filters.join(',')}[bga]`;
+}
+
+function musicFadeFilters(composition: CompositionSpec): string[] {
+  const durationSeconds = Math.max(0.001, composition.duration_ms / 1000);
+  const fadeInSeconds = Math.min(durationSeconds, composition.audio.fade_in_frames / composition.fps);
+  const fadeOutSeconds = Math.min(durationSeconds, composition.audio.fade_out_frames / composition.fps);
+  const filters: string[] = [];
+  if (fadeInSeconds > 0) {
+    filters.push(`afade=t=in:st=0:d=${ffmpegNumber(fadeInSeconds)}`);
+  }
+  if (fadeOutSeconds > 0) {
+    filters.push(`afade=t=out:st=${ffmpegNumber(Math.max(0, durationSeconds - fadeOutSeconds))}:d=${ffmpegNumber(fadeOutSeconds)}`);
+  }
+  return filters;
+}
+
+function musicDuckingFilters(composition: CompositionSpec, captions: CaptionOverlay[]): string[] {
+  if (!composition.audio.ducking || composition.audio.background_volume <= 0 || composition.audio.ducked_volume >= composition.audio.background_volume) {
+    return [];
+  }
+  const ratio = Math.max(0, Math.min(1, composition.audio.ducked_volume / composition.audio.background_volume));
+  const transitionSeconds = 0.25;
+  return captions.map((caption) => {
+    const start = Number.parseFloat(caption.startSeconds);
+    const end = Number.parseFloat(caption.endSeconds);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+      return '';
+    }
+    const rampStart = ffmpegNumber(Math.max(0, start - transitionSeconds));
+    const safeStart = ffmpegNumber(start);
+    const safeEnd = ffmpegNumber(end);
+    const rampEnd = ffmpegNumber(end + transitionSeconds);
+    const safeRatio = ffmpegNumber(ratio);
+    const downDelta = ffmpegNumber(1 - ratio);
+    return `volume='if(lt(t,${rampStart}),1,if(lt(t,${safeStart}),1-${downDelta}*(t-${rampStart})/${ffmpegNumber(transitionSeconds)},if(lt(t,${safeEnd}),${safeRatio},if(lt(t,${rampEnd}),${safeRatio}+${downDelta}*(t-${safeEnd})/${ffmpegNumber(transitionSeconds)},1))))'`;
+  }).filter((filter) => filter.length > 0);
 }
 
 function photoVideoFilter(clip: PhotoTimelineClip, index: number, composition: CompositionSpec, effects: ClipTransitionEffects): string {
@@ -439,6 +506,9 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
         args.push('-loop', '1', '-t', clipDurationSeconds(timelineClip));
       }
       args.push('-i', inputPath);
+    }
+    if (composition.audio.background_path) {
+      args.push('-i', composition.audio.background_path);
     }
     const captions = await this.prepareCaptionOverlays(composition, outputPath);
     console.info(JSON.stringify({level: 'info', msg: 'ffmpeg caption overlays prepared', project_id: composition.project_id, story_plan_id: composition.story_plan_id, input_caption_count: composition.captions.length, overlay_count: captions.length}));

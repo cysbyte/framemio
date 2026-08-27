@@ -948,8 +948,34 @@ private struct EditStorySheet: View {
     }
 
     private var musicSection: some View {
-        optionSection(title: "Music", options: musicOptions, selected: draft.musicMood ?? "Warm") { option in
-            draft.musicMood = option.lowercased()
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            SectionHeader(title: "Music", subtitle: "FrameMio chooses a soundtrack automatically")
+            LazyVGrid(columns: optionGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
+                optionChip(title: "✨ Auto", isSelected: (draft.musicMode ?? "auto") == "auto") {
+                    draft.musicMode = "auto"
+                    draft.musicTrackId = nil
+                }
+                optionChip(title: "None", isSelected: draft.musicMode == "none") {
+                    draft.musicMode = "none"
+                    draft.musicTrackId = nil
+                }
+            }
+
+            if draft.musicMode != "none" {
+                Text("Mood")
+                    .font(FrameMioTypography.caption.weight(.semibold))
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+                LazyVGrid(columns: optionGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
+                    ForEach(musicOptions, id: \.self) { option in
+                        optionChip(title: option, isSelected: option.caseInsensitiveCompare(draft.musicMood ?? "Warm") == .orderedSame) {
+                            draft.musicMood = option.lowercased()
+                            if draft.musicMode == nil {
+                                draft.musicMode = "auto"
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1060,6 +1086,8 @@ private struct EditStoryDraft {
     var addedMediaIDs = Set<String>()
     var replacements: [StoryMomentReplacement] = []
     var musicMood: String?
+    var musicMode: String?
+    var musicTrackId: String?
     var style: String?
     var subtitlesEnabled: Bool?
     var subtitleStyle: String?
@@ -1075,6 +1103,8 @@ private struct EditStoryDraft {
             addMediaIDs: Array(addedMediaIDs).sorted(),
             replace: replacements,
             musicMood: musicMood,
+            musicMode: musicMode,
+            musicTrackId: musicTrackId,
             style: style,
             subtitlesEnabled: subtitlesEnabled,
             subtitleStyle: subtitleStyle,

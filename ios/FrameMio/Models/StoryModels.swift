@@ -111,6 +111,8 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
     let addMediaIDs: [String]
     let replace: [StoryMomentReplacement]
     let musicMood: String?
+    let musicMode: String?
+    let musicTrackId: String?
     let style: String?
     let subtitlesEnabled: Bool?
     let subtitleStyle: String?
@@ -123,6 +125,8 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
         case addMediaIDs = "addMediaIds"
         case replace
         case musicMood
+        case musicMode
+        case musicTrackId
         case style
         case subtitlesEnabled
         case subtitleStyle
@@ -136,6 +140,8 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
             || !addMediaIDs.isEmpty
             || !replace.isEmpty
             || musicMood != nil
+            || musicMode != nil
+            || musicTrackId != nil
             || style != nil
             || subtitlesEnabled != nil
             || subtitleStyle != nil

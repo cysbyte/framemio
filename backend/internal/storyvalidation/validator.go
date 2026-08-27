@@ -345,6 +345,27 @@ func (v *Validator) Validate(ctx context.Context, userID string, plan models.Sto
 		if _, requiresMood := config.AudioSourcesRequiringMood[strings.ToLower(strings.TrimSpace(plan.Audio.Source))]; requiresMood && strings.TrimSpace(plan.Audio.Mood) == "" {
 			problems.Add("audio.mood", "required", "audio mood is required for the selected source")
 		}
+		if plan.Audio.BackgroundVolume < 0 || plan.Audio.BackgroundVolume > 1 {
+			problems.Add("audio.background_volume", "out_of_range", "background volume must be between 0 and 1")
+		}
+		if plan.Audio.OriginalVolume < 0 || plan.Audio.OriginalVolume > 1 {
+			problems.Add("audio.original_volume", "out_of_range", "original volume must be between 0 and 1")
+		}
+		if plan.Audio.DuckedVolume < 0 || plan.Audio.DuckedVolume > 1 {
+			problems.Add("audio.ducked_volume", "out_of_range", "ducked volume must be between 0 and 1")
+		}
+		if plan.Audio.BackgroundVolume > 0 && plan.Audio.DuckedVolume > plan.Audio.BackgroundVolume {
+			problems.Add("audio.ducked_volume", "out_of_range", "ducked volume must not exceed background volume")
+		}
+		if plan.Audio.StartOffsetSeconds < 0 {
+			problems.Add("audio.start_offset_seconds", "out_of_range", "music start offset must not be negative")
+		}
+		if plan.Audio.FadeInMS < 0 || plan.Audio.FadeOutMS < 0 {
+			problems.Add("audio.fade", "out_of_range", "audio fade values must not be negative")
+		}
+		if strings.EqualFold(strings.TrimSpace(plan.Audio.Source), "licensed") && strings.TrimSpace(plan.Audio.TrackID) == "" && strings.TrimSpace(plan.Audio.BackgroundS3Key) == "" {
+			problems.Add("audio.track_id", "required", "licensed music requires a track id or background storage key")
+		}
 	}
 
 	if problems.HasErrors() {

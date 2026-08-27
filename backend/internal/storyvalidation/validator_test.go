@@ -39,6 +39,10 @@ func (s testObjectStorage) ObjectExists(_ context.Context, key string) (bool, er
 	return ok, nil
 }
 
+func (s testObjectStorage) PutObject(context.Context, string, string, []byte) error {
+	return nil
+}
+
 func TestValidateStoryPlanAcceptsValidPlan(t *testing.T) {
 	t.Parallel()
 	validator, plan := validStoryPlanFixture(t)

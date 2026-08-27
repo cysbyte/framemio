@@ -73,6 +73,8 @@ export interface StoryAudio {
   background_volume?: number;
   original_volume?: number;
   ducking?: boolean;
+  ducked_volume?: number;
+  start_offset_seconds?: number;
   fade_in_ms?: number;
   fade_out_ms?: number;
 }
@@ -195,6 +197,8 @@ export interface ResolvedAudio {
   background_volume: number;
   original_volume: number;
   ducking: boolean;
+  ducked_volume: number;
+  start_offset_seconds: number;
   fade_in_frames: number;
   fade_out_frames: number;
 }

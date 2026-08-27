@@ -1221,6 +1221,64 @@ Photo moments must have positive `duration_ms` and no source timestamps. Video m
 
 `caption_style` is optional renderer-safe styling metadata for captions/subtitles. It may include whitelisted presets such as `bold_social`, `cinematic_subtitle`, `clean_minimal`, and `playful_pop`, plus validated fields for font family, font size, text/stroke/background colors, background opacity, position, bottom offset, max lines, and max characters per line. It must not contain raw FFmpeg/Remotion commands, arbitrary font file paths, provider information, or transcript source details.
 
+## 16.2 Background music contract
+
+Background music is catalog-based and optional. Normal story creation never calls ElevenLabs or any other music-generation provider. Story planning produces/updates `StoryPlan.audio`; the deterministic `MusicSelector` resolves `auto`, `selected`, or `none` against approved `MusicTrack` records before validation/rendering.
+
+`StoryPlan.audio` may include:
+
+```text
+source              adaptive | original | licensed | custom | none
+mode                auto | selected | none
+track_id            FrameMio MusicTrack ID
+background_s3_key   private master/preview music object key for renderer access
+original_audio      whether source video audio is preserved
+background_volume   conservative music bed volume, default 0.16
+original_volume     source audio volume, default 1.0
+ducking             whether captions/transcript speech intervals duck music
+ducked_volume       music volume target during speech, default 0.04
+start_offset_seconds deterministic offset into the selected music track
+fade_in_ms
+fade_out_ms
+```
+
+`mode=none` means no background music and preserves original source audio through `source=original`. `licensed` StoryPlans reference FrameMio catalog IDs/S3 keys only; they must not expose Eleven generation IDs, provider API keys, license metadata, or provider-specific API shapes.
+
+---
+
+## 16.3 Music catalog and providers
+
+`MusicTrack` is persisted as a domain record (`kind = music_track`) so no separate migration is required. It stores catalog metadata (`title`, `duration_seconds`, `bpm`, `moods`, `energy`, `genre`, `instrumental`, `speech_friendly`), storage keys, provider metadata, lifecycle status (`draft`, `review`, `approved`, `disabled`), and explicit license metadata (`pending`, `verified`, `restricted`, `unknown`).
+
+Provider generation is server-side/admin-only:
+
+```text
+Admin/internal API
+  -> MusicGenerationService
+  -> MusicProvider
+  -> LocalProvider or ElevenProvider
+  -> private S3 music/{trackId}/master.ext
+  -> MusicTrack review state
+  -> explicit approval/license verification
+```
+
+Public iOS catalog APIs return only approved user-safe fields and optional short-lived preview URLs. They never return provider generation IDs, S3 storage keys, license metadata, or API keys.
+
+Environment variables:
+
+```text
+MUSIC_PROVIDER=local|elevenlabs|eleven
+ELEVENLABS_API_KEY=...
+ELEVENLABS_BASE_URL=https://api.elevenlabs.io
+ELEVEN_MUSIC_MODEL=music_v2
+ELEVEN_MUSIC_OUTPUT_FORMAT=auto
+MUSIC_REQUIRE_VERIFIED_LICENSE=true|false
+MUSIC_BACKGROUND_VOLUME=0.16
+MUSIC_DUCKED_VOLUME=0.04
+```
+
+Use `MUSIC_PROVIDER=local` for deterministic development/test catalog generation. Production should only expose tracks whose rights have been verified when `MUSIC_REQUIRE_VERIFIED_LICENSE=true`.
+
 ---
 
 # 17. StoryPlan Validator
@@ -1333,11 +1391,12 @@ Transitions:
 
 Audio:
 
-- background music
-- volume control
-- ducking
-- fade in/out
-- original audio where appropriate
+- preserves original source audio when requested
+- downloads selected catalog background music from private S3
+- trims music to StoryPlan duration so music never extends the video
+- applies conservative background volume
+- applies fade in/out
+- applies transcript/caption-aware music ducking with short ramps
 
 Text:
 
@@ -1362,7 +1421,7 @@ The render worker currently:
 9. uploads the final MP4 to the configured S3 key
 10. calls `POST /internal/jobs/:id/status` with `COMPLETED` and `artifact_s3_key`
 
-The renderer must not call AI and must not choose or reorder story moments. It executes the StoryPlan.
+The renderer must not call AI, must not call ElevenLabs/music providers, and must not choose or reorder story moments. It executes the StoryPlan.
 
 ## 18.4 Render input resilience
 
@@ -1891,7 +1950,7 @@ TranscriptionProvider
 StoryPlanningProvider
 ```
 
-Provider-specific request/response logic stays inside adapters.
+Provider-specific request/response logic stays inside adapters. Video understanding, transcription, story planning, and music generation use separate replaceable provider interfaces; StoryPlan and render worker contracts reference FrameMio domain IDs and storage keys, not provider response types.
 
 The core domain model must not depend on:
 

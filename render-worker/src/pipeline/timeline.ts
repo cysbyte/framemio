@@ -144,7 +144,7 @@ function speedFor(moment: StoryMoment): number {
 function resolveAudio(storyPlan: StoryPlan, paths: RenderPaths, fps: number): ResolvedAudio {
   const audio = storyPlan.audio;
   if (!audio || audio.source === 'none') {
-    return {source: 'none', original_audio: false, background_volume: 0, original_volume: 0, ducking: false, fade_in_frames: 0, fade_out_frames: 0};
+    return {source: 'none', original_audio: false, background_volume: 0, original_volume: 0, ducking: false, ducked_volume: 0, start_offset_seconds: 0, fade_in_frames: 0, fade_out_frames: 0};
   }
   return {
     source: audio.source,
@@ -154,6 +154,8 @@ function resolveAudio(storyPlan: StoryPlan, paths: RenderPaths, fps: number): Re
     background_volume: clamp(audio.background_volume ?? 0.36, 0, 1),
     original_volume: clamp(audio.original_volume ?? 1, 0, 1),
     ducking: audio.ducking ?? true,
+    ducked_volume: clamp(audio.ducked_volume ?? 0.04, 0, 1),
+    start_offset_seconds: Math.max(0, audio.start_offset_seconds ?? 0),
     fade_in_frames: framesFromMilliseconds(audio.fade_in_ms ?? 800, fps),
     fade_out_frames: framesFromMilliseconds(audio.fade_out_ms ?? 1200, fps),
   };

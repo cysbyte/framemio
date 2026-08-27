@@ -55,6 +55,8 @@ type iosStoryEditRequest struct {
 	AddMediaIDs      []string                `json:"addMediaIds,omitempty"`
 	Replace          []iosStoryMomentReplace `json:"replace,omitempty"`
 	MusicMood        string                  `json:"musicMood,omitempty"`
+	MusicMode        string                  `json:"musicMode,omitempty"`
+	MusicTrackID     string                  `json:"musicTrackId,omitempty"`
 	Style            string                  `json:"style,omitempty"`
 	SubtitlesEnabled *bool                   `json:"subtitlesEnabled,omitempty"`
 	SubtitleStyle    string                  `json:"subtitleStyle,omitempty"`
@@ -162,6 +164,8 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		"add_media_count", len(input.AddMediaIDs),
 		"replacement_count", len(input.Replace),
 		"has_music_mood", strings.TrimSpace(input.MusicMood) != "",
+		"music_mode", valueOrUnset(normalizeIOSMusicMode(input.MusicMode)),
+		"has_music_track", strings.TrimSpace(input.MusicTrackID) != "",
 		"has_visual_style", strings.TrimSpace(input.Style) != "",
 		"subtitles_enabled", boolPointerLogValue(input.SubtitlesEnabled),
 		"subtitle_style", normalizeIOSSubtitleStyle(input.SubtitleStyle),
@@ -195,6 +199,8 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		"excluded_moment_count", configListCount(config["excluded_moment_ids"]),
 		"subtitles_enabled", valueOrUnset(config["subtitles_enabled"]),
 		"caption_style_preset", valueOrUnset(config["caption_style_preset"]),
+		"music_mode", valueOrUnset(config["music_mode"]),
+		"has_music_track", strings.TrimSpace(config["music_track_id"]) != "",
 		"has_user_instructions", strings.TrimSpace(config["user_instructions"]) != "",
 	)
 	if s.Orchestrator == nil {
@@ -323,6 +329,18 @@ func (s *Server) iosStoryEditConfiguration(request *http.Request, userID string,
 	if mood := normalizeIOSMusicMood(input.MusicMood); mood != "" {
 		config["music_mood"] = mood
 	}
+	if mode := normalizeIOSMusicMode(input.MusicMode); mode != "" {
+		config["music_mode"] = mode
+	}
+	if trackID := strings.TrimSpace(input.MusicTrackID); trackID != "" {
+		if normalizeIOSMusicMode(input.MusicMode) != "selected" {
+			return nil, store.ErrConflict
+		}
+		if _, err := s.Store.GetMusicTrack(request.Context(), trackID); err != nil {
+			return nil, err
+		}
+		config["music_track_id"] = trackID
+	}
 	if instruction := strings.TrimSpace(sanitizeIOSStoryText(input.Instruction)); instruction != "" {
 		config["user_instructions"] = truncateIOSConfigValue(instruction, 480)
 	}
@@ -441,6 +459,15 @@ func configListCount(value string) int {
 		}
 	}
 	return count
+}
+
+func normalizeIOSMusicMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "auto", "selected", "none":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return ""
+	}
 }
 
 func normalizeIOSMusicMood(value string) string {
