@@ -14,6 +14,7 @@ final class MediaPickerViewModel: ObservableObject {
     @Published private(set) var assets: [MediaAsset] = []
     @Published private(set) var thumbnails: [String: UIImage] = [:]
     @Published private(set) var isLoading = false
+    @Published private(set) var hasCompletedInitialLoad = false
     @Published private(set) var selectedIDs: Set<String> = []
     @Published private(set) var authorization: PhotoLibraryAuthorization = .notDetermined
     @Published private(set) var filter: PhotoLibraryMediaFilter = .all
@@ -24,6 +25,7 @@ final class MediaPickerViewModel: ObservableObject {
     private let selectionService: MediaSelectionService
     private var allAssets: [MediaAsset] = []
     private var loadTask: Task<Void, Never>?
+    private var loadSequence = 0
     private var thumbnailTasks: [String: Task<Void, Never>] = [:]
     private var cachedAssets: [MediaAsset] = []
 
@@ -78,17 +80,25 @@ final class MediaPickerViewModel: ObservableObject {
     func load(scope: MediaSelectionScope) {
         loadTask?.cancel()
         cancelThumbnailTasks()
+        loadSequence += 1
+        let currentLoadSequence = loadSequence
 
         loadTask = Task { [weak self] in
             guard let self else { return }
             isLoading = true
-            defer { isLoading = false }
+            defer {
+                if currentLoadSequence == loadSequence {
+                    isLoading = false
+                    hasCompletedInitialLoad = true
+                }
+            }
 
             do {
                 var status = await photoLibrary.authorizationStatus()
                 if status == .notDetermined {
                     status = await photoLibrary.requestAuthorization()
                 }
+                guard currentLoadSequence == loadSequence else { return }
                 authorization = status
 
                 guard status == .authorized || status == .limited else {
@@ -99,6 +109,7 @@ final class MediaPickerViewModel: ObservableObject {
 
                 let fetchedAssets = try await selectionService.fetchAssets(in: scope, filter: .all)
                 try Task.checkCancellation()
+                guard currentLoadSequence == loadSequence else { return }
                 allAssets = fetchedAssets
                 let availableIDs = Set(fetchedAssets.map(\.id))
                 selectedIDs = selectedIDs.intersection(availableIDs)
@@ -107,6 +118,7 @@ final class MediaPickerViewModel: ObservableObject {
                 errorMessage = nil
             } catch is CancellationError {
             } catch {
+                guard currentLoadSequence == loadSequence else { return }
                 errorMessage = AppError.from(error).localizedDescription
             }
         }

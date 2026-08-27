@@ -749,11 +749,12 @@ func (s *Server) makeIOSStory(request *http.Request, userID string, project mode
 
 func iosStoryDescription(plan models.StoryPlan) string {
 	parts := make([]string, 0, 3)
-	if text := iosHumanMomentText(plan.UserInstructions); text != "" {
+	captionTexts := iosCaptionTextMatchers(plan.Captions)
+	if text := firstHumanIOSPresentationText(captionTexts, plan.UserInstructions); text != "" {
 		parts = append(parts, text)
 	}
 	for _, moment := range plan.Moments {
-		text := firstHumanIOSText(moment.Narrative, moment.Caption, moment.Reason)
+		text := firstHumanIOSPresentationText(captionTexts, moment.Narrative, moment.Caption, moment.Reason)
 		if text != "" {
 			parts = append(parts, text)
 		}
@@ -769,6 +770,7 @@ func iosStoryDescription(plan models.StoryPlan) string {
 
 func (s *Server) iosStoryMoments(request *http.Request, plan models.StoryPlan, mediaByID map[string]models.MediaAsset) []iosStoryMoment {
 	moments := make([]iosStoryMoment, 0, len(plan.Moments))
+	captionTexts := iosCaptionTextMatchers(plan.Captions)
 	for index, moment := range plan.Moments {
 		mediaID := storyMomentMediaID(moment)
 		if mediaID == "" {
@@ -794,8 +796,8 @@ func (s *Server) iosStoryMoments(request *http.Request, plan models.StoryPlan, m
 			MediaID:      mediaID,
 			Type:         mediaType,
 			ThumbnailURL: thumbnailURL,
-			Title:        iosMomentTitle(moment, mediaType, index),
-			Description:  firstHumanIOSText(moment.Narrative, moment.Caption, moment.Reason),
+			Title:        iosMomentTitleIgnoringSubtitles(moment, mediaType, index, captionTexts),
+			Description:  firstHumanIOSPresentationText(captionTexts, moment.Narrative, moment.Caption, moment.Reason),
 			Selected:     true,
 		})
 	}
@@ -818,12 +820,53 @@ func (s *Server) iosStoryThumbnailURL(request *http.Request, media models.MediaA
 }
 
 func firstHumanIOSText(values ...string) string {
+	return firstHumanIOSPresentationText(nil, values...)
+}
+
+func firstHumanIOSPresentationText(captionTexts []string, values ...string) string {
 	for _, value := range values {
-		if text := iosHumanMomentText(value); text != "" {
+		if text := iosHumanMomentText(value); text != "" && !isIOSSubtitlePresentationText(text, captionTexts) {
 			return text
 		}
 	}
 	return ""
+}
+
+func iosCaptionTextMatchers(captions []models.StoryCaption) []string {
+	texts := make([]string, 0, len(captions))
+	seen := make(map[string]struct{}, len(captions))
+	for _, caption := range captions {
+		text := normalizeIOSSubtitleComparison(caption.Text)
+		if len(text) < 12 {
+			continue
+		}
+		if _, exists := seen[text]; exists {
+			continue
+		}
+		seen[text] = struct{}{}
+		texts = append(texts, text)
+	}
+	return texts
+}
+
+func isIOSSubtitlePresentationText(text string, captionTexts []string) bool {
+	if len(captionTexts) == 0 {
+		return false
+	}
+	normalized := normalizeIOSSubtitleComparison(text)
+	if len(normalized) < 12 {
+		return false
+	}
+	for _, captionText := range captionTexts {
+		if normalized == captionText || strings.Contains(normalized, captionText) || strings.Contains(captionText, normalized) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeIOSSubtitleComparison(value string) string {
+	return strings.Join(strings.Fields(strings.ToLower(strings.Trim(value, " .!?\n\t\r"))), " ")
 }
 
 func (s *Server) iosAvailableMoments(request *http.Request, project models.StoryProject, mediaByID map[string]models.MediaAsset, selected []iosStoryMoment) []iosStoryMoment {
@@ -861,8 +904,12 @@ func storyAssetIDsFromMoments(moments []iosStoryMoment) []string {
 }
 
 func iosMomentTitle(moment models.StoryMoment, mediaType string, index int) string {
+	return iosMomentTitleIgnoringSubtitles(moment, mediaType, index, nil)
+}
+
+func iosMomentTitleIgnoringSubtitles(moment models.StoryMoment, mediaType string, index int, captionTexts []string) string {
 	for _, value := range []string{moment.Caption, moment.Narrative, moment.Reason} {
-		if title := iosHumanMomentTitle(value); title != "" {
+		if title := iosHumanMomentTitle(value); title != "" && !isIOSSubtitlePresentationText(title, captionTexts) {
 			return truncateIOSConfigValue(title, 36)
 		}
 	}

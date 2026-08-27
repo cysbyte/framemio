@@ -5,13 +5,13 @@ import UniformTypeIdentifiers
 
 struct MediaPickerView: View {
     @Environment(\.openURL) private var openURL
-    @ObservedObject private var viewModel: MediaPickerViewModel
+    @StateObject private var viewModel: MediaPickerViewModel
     @State private var captureMode: MomentCaptureMode?
     @State private var captureErrorMessage: String?
     let onContinue: ([MediaAsset]) -> Void
 
     init(viewModel: MediaPickerViewModel, onContinue: @escaping ([MediaAsset]) -> Void) {
-        _viewModel = ObservedObject(wrappedValue: viewModel)
+        _viewModel = StateObject(wrappedValue: viewModel)
         self.onContinue = onContinue
     }
 
@@ -19,7 +19,7 @@ struct MediaPickerView: View {
         Group {
             if viewModel.isAccessBlocked {
                 accessState
-            } else if viewModel.isLoading && viewModel.totalAssetCount == 0 {
+            } else if !viewModel.hasCompletedInitialLoad || (viewModel.isLoading && viewModel.totalAssetCount == 0) {
                 LoadingState(
                     title: "Finding your moments",
                     message: "Looking through the time and place around \(viewModel.context.rawValue.lowercased())."

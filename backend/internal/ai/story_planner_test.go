@@ -218,6 +218,15 @@ func TestPlannerUsesTranscriptTextForVideoCaptions(t *testing.T) {
 	if plan.Captions[0].StartMS != 0 || plan.Captions[0].EndMS != 1200 || plan.Captions[1].StartMS != 1200 || plan.Captions[1].EndMS != 2600 {
 		t.Fatalf("expected transcript captions to follow voice timing, got %+v", plan.Captions)
 	}
+	if len(plan.Moments) != 1 {
+		t.Fatalf("expected one selected moment, got %+v", plan.Moments)
+	}
+	if strings.Contains(strings.ToLower(plan.Moments[0].Caption), "ducks") || strings.Contains(strings.ToLower(plan.Moments[0].Narrative), "favorite part") {
+		t.Fatalf("transcript leaked into story moment prose: %+v", plan.Moments[0])
+	}
+	if plan.Moments[0].Caption != "Family laughing near the lake" || plan.Moments[0].Narrative != "Family laughing near the lake" {
+		t.Fatalf("expected visual story prose to remain separate from subtitles, got %+v", plan.Moments[0])
+	}
 }
 
 func TestPlannerSelectsCaptionStyleFromStoryContext(t *testing.T) {

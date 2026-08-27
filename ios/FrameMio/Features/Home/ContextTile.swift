@@ -18,7 +18,7 @@ struct ContextTile: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+        VStack(alignment: .center, spacing: FrameMioSpacing.md) {
             Image(systemName: systemImage ?? context.icon)
                 .font(FrameMioTypography.headline)
                 .foregroundStyle(FrameMioColors.accent)
@@ -31,9 +31,10 @@ struct ContextTile: View {
             Text(title ?? context.rawValue)
                 .font(FrameMioTypography.callout.weight(.medium))
                 .foregroundStyle(FrameMioColors.ink)
+                .multilineTextAlignment(.center)
                 .lineLimit(2)
         }
-        .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.contextTileHeight, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.contextTileHeight, alignment: .center)
         .padding(FrameMioSpacing.md)
         .background(
             FrameMioColors.surface.opacity(0.84),

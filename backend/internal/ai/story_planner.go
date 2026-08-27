@@ -358,8 +358,7 @@ func buildCandidates(request Request, selected map[string]struct{}, clusters map
 			clusterID := clusterForMedia(clusters, mediaID)
 			score := videoScore(analysis, segment, selected, clusterID)
 			endMicros := selectedVideoEndMicros(segment)
-			transcriptCaption := captionFromTranscript(analysis.Transcript, segment.StartMicros, endMicros)
-			caption := firstNonEmpty(transcriptCaption, captionFromSegment(segment))
+			caption := captionFromSegment(segment)
 			reason := reasonFromSegment(segment)
 			narrative := firstNonEmpty(caption, reason)
 			moment := models.StoryMoment{

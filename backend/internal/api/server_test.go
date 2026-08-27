@@ -1155,6 +1155,23 @@ func TestIOSStoryPresentationSuppressesGenericNames(t *testing.T) {
 	if got := iosStoryDescription(plan); got != "Everyone laughing by the lake" {
 		t.Fatalf("story description = %q", got)
 	}
+	pollutedPlan := models.StoryPlan{
+		Moments: []models.StoryMoment{{
+			Caption:   "Look at the ducks by the lake This is my favorite part",
+			Narrative: "Look at the ducks by the lake This is my favorite part",
+			Reason:    "Family laughing near the lake",
+		}},
+		Captions: []models.StoryCaption{
+			{MomentID: "video-talk", Text: "Look at the ducks by the lake"},
+			{MomentID: "video-talk", Text: "This is my favorite part"},
+		},
+	}
+	if got := iosStoryDescription(pollutedPlan); got != "Family laughing near the lake" {
+		t.Fatalf("subtitle text leaked into story description: %q", got)
+	}
+	if got := iosMomentTitleIgnoringSubtitles(pollutedPlan.Moments[0], string(models.MediaTypeVideo), 0, iosCaptionTextMatchers(pollutedPlan.Captions)); got != "Family laughing near the lake" {
+		t.Fatalf("subtitle text leaked into moment title: %q", got)
+	}
 	longMoment := strings.Repeat("lake picnic with friends ", 16)
 	longPlan := models.StoryPlan{Moments: []models.StoryMoment{{Narrative: longMoment}}}
 	if got := iosStoryDescription(longPlan); len(got) <= 220 || len(got) > 800 {

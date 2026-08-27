@@ -63,6 +63,7 @@ struct AppRootView: View {
                     path.append(.storyCreation(context: context, assets: assets))
                 }
             )
+            .id(context)
         case let .storyCreation(context, assets):
             StoryCreationView(
                 viewModel: StoryCreationViewModel(

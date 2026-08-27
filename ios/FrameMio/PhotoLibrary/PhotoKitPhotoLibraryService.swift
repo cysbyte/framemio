@@ -344,7 +344,19 @@ final class PhotoKitPhotoLibraryService: PhotoLibraryService, MediaSelectionServ
         switch context {
         case .today:
             let start = Calendar.current.startOfDay(for: Date())
-            predicates.append(NSPredicate(format: "creationDate >= %@", start as NSDate))
+            let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? Date.distantFuture
+            predicates.append(
+                NSCompoundPredicate(orPredicateWithSubpredicates: [
+                    NSCompoundPredicate(andPredicateWithSubpredicates: [
+                        NSPredicate(format: "creationDate >= %@", start as NSDate),
+                        NSPredicate(format: "creationDate < %@", end as NSDate)
+                    ]),
+                    NSCompoundPredicate(andPredicateWithSubpredicates: [
+                        NSPredicate(format: "modificationDate >= %@", start as NSDate),
+                        NSPredicate(format: "modificationDate < %@", end as NSDate)
+                    ])
+                ])
+            )
         case .weekend:
             let interval = Calendar.current.dateInterval(of: .weekOfYear, for: Date())
             let start = interval?.start ?? Calendar.current.startOfDay(for: Date())
