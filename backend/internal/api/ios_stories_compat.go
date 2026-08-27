@@ -153,28 +153,61 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		s.mapStoreError(response, err)
 		return
 	}
+	s.Logger.Info("received iOS story revision request",
+		"user_id", user.ID,
+		"project_id", project.ID,
+		"project_status", string(project.Status),
+		"remove_moment_count", len(input.RemoveMomentIDs),
+		"remove_media_count", len(input.RemoveMediaIDs),
+		"add_media_count", len(input.AddMediaIDs),
+		"replacement_count", len(input.Replace),
+		"has_music_mood", strings.TrimSpace(input.MusicMood) != "",
+		"has_visual_style", strings.TrimSpace(input.Style) != "",
+		"subtitles_enabled", boolPointerLogValue(input.SubtitlesEnabled),
+		"subtitle_style", normalizeIOSSubtitleStyle(input.SubtitleStyle),
+		"has_target_duration", input.TargetDuration > 0,
+		"has_instruction", strings.TrimSpace(input.Instruction) != "",
+	)
 	if !s.allowExpensiveOperation(response, user.ID, "edit_ios_story") {
 		return
 	}
 	config, err := s.iosStoryEditConfiguration(request, user.ID, project, input)
 	if err != nil {
 		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
+			s.Logger.Warn("rejected iOS story revision request",
+				"user_id", user.ID,
+				"project_id", project.ID,
+				"reason", "invalid_media_or_moment_reference",
+				"error", err,
+			)
 			s.writeError(response, http.StatusBadRequest, "invalid_story_edit", "edit references media or moments that do not belong to this story")
 			return
 		}
 		s.internalError(response, err, "prepare iOS story edit")
 		return
 	}
+	s.Logger.Info("prepared iOS story revision configuration",
+		"user_id", user.ID,
+		"project_id", project.ID,
+		"story_plan_version", config["story_plan_version"],
+		"selected_media_count", configListCount(config["selected_media_ids"]),
+		"excluded_media_count", configListCount(config["excluded_media_ids"]),
+		"excluded_moment_count", configListCount(config["excluded_moment_ids"]),
+		"subtitles_enabled", valueOrUnset(config["subtitles_enabled"]),
+		"caption_style_preset", valueOrUnset(config["caption_style_preset"]),
+		"has_user_instructions", strings.TrimSpace(config["user_instructions"]) != "",
+	)
 	if s.Orchestrator == nil {
 		s.internalError(response, errors.New("job orchestrator not configured"), "job orchestrator not configured")
 		return
 	}
 	job, err := s.Orchestrator.RequestStoryPlanRevision(request.Context(), user.ID, project.ID, request.Header.Get("Idempotency-Key"), config)
 	if err != nil {
+		s.Logger.Error("queue iOS story revision failed", "user_id", user.ID, "project_id", project.ID, "story_plan_version", config["story_plan_version"], "error", err)
 		s.mapStoreError(response, err)
 		return
 	}
-	s.Logger.Info("queued iOS story revision", "user_id", user.ID, "project_id", project.ID, "job_id", job.ID)
+	s.Logger.Info("queued iOS story revision", "user_id", user.ID, "project_id", project.ID, "job_id", job.ID, "job_status", string(job.Status), "story_plan_version", job.Configuration["story_plan_version"], "subtitles_enabled", valueOrUnset(job.Configuration["subtitles_enabled"]), "caption_style_preset", valueOrUnset(job.Configuration["caption_style_preset"]))
 	updated, err := s.Store.GetProject(request.Context(), user.ID, project.ID)
 	if err != nil {
 		s.mapStoreError(response, err)
@@ -384,6 +417,30 @@ func normalizeIOSSubtitleStyle(value string) string {
 	default:
 		return ""
 	}
+}
+
+func boolPointerLogValue(value *bool) string {
+	if value == nil {
+		return "unset"
+	}
+	return strconv.FormatBool(*value)
+}
+
+func valueOrUnset(value string) string {
+	if trimmed := strings.TrimSpace(value); trimmed != "" {
+		return trimmed
+	}
+	return "unset"
+}
+
+func configListCount(value string) int {
+	count := 0
+	for _, part := range strings.Split(value, ",") {
+		if strings.TrimSpace(part) != "" {
+			count++
+		}
+	}
+	return count
 }
 
 func normalizeIOSMusicMood(value string) string {

@@ -303,9 +303,10 @@ func (c *Coordinator) AdvanceStoryPlanToRender(ctx context.Context, userID, proj
 	}
 	renderJob, err := c.RecordValidationAndQueueRender(ctx, userID, projectID, "", plan.Version, preset)
 	if err != nil {
+		c.Logger.Error("queue render for completed story plan failed", slog.String("project_id", projectID), slog.Int("story_plan_version", plan.Version), slog.String("output_preset", preset), slog.Any("error", err))
 		return err
 	}
-	c.Logger.Info("queued render for completed story plan", slog.String("project_id", projectID), slog.String("job_id", renderJob.ID), slog.Int("story_plan_version", plan.Version), slog.String("output_preset", preset), slog.String("status", string(renderJob.Status)))
+	c.Logger.Info("queued render for completed story plan", slog.String("project_id", projectID), slog.String("job_id", renderJob.ID), slog.Int("story_plan_version", plan.Version), slog.String("output_preset", preset), slog.String("status", string(renderJob.Status)), slog.String("output_s3_key", renderJob.Configuration["output_s3_key"]))
 	if models.IsTerminalJobStatus(renderJob.Status) {
 		return nil
 	}
@@ -388,16 +389,19 @@ func (c *Coordinator) publishJob(ctx context.Context, job models.ProcessingJob) 
 	message := queue.JobMessage{JobID: job.ID, ProjectID: job.ProjectID, MediaID: job.MediaID, JobType: job.Type, Configuration: smallConfiguration(job.Configuration)}
 	c.Logger.Info("publishing job message", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID))
 	if err := c.Publisher.Publish(ctx, message); err != nil {
+		c.Logger.Error("publish job message failed", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID), slog.Any("error", err))
 		return err
 	}
-	c.Logger.Info("published job message", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)))
+	c.Logger.Info("published job message", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID))
 	if c.Activator != nil {
 		c.Logger.Info("activating worker for job", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID))
 		if err := c.Activator.Activate(ctx, message); err != nil {
-			c.Logger.Warn("worker activation failed", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.Any("error", err))
+			c.Logger.Warn("worker activation failed", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID), slog.Any("error", err))
+		} else {
+			c.Logger.Info("worker activation completed", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID))
 		}
 	} else {
-		c.Logger.Info("worker activation skipped", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("reason", "activator_not_configured"))
+		c.Logger.Info("worker activation skipped", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID), slog.String("reason", "activator_not_configured"))
 	}
 	return nil
 }

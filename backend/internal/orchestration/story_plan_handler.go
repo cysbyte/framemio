@@ -52,12 +52,23 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		planner = &ai.Planner{Now: h.Now}
 	}
 	request := h.storyPlanRequest(project, job.Configuration, photoAnalyses, videoAnalyses, mediaClusters(project, mediaByID, photoAnalyses, videoAnalyses))
+	h.logger().Info("story planner request prepared",
+		slog.String("job_id", job.ID),
+		slog.String("project_id", project.ID),
+		slog.Int("story_plan_version", request.Version),
+		slog.Int("selected_media_count", len(request.SelectedMediaIDs)),
+		slog.Int("excluded_media_count", len(request.ExcludedMediaIDs)),
+		slog.Int("excluded_moment_count", len(request.ExcludedMomentIDs)),
+		slog.String("visual_style", string(request.VisualStyle)),
+		slog.String("subtitles_enabled", boolPointerLogValue(request.SubtitlesEnabled)),
+		slog.String("caption_style_preset", valueOrUnset(request.CaptionStylePreset)),
+	)
 	plan, err := planner.Plan(ctx, request)
 	if err != nil {
 		h.logger().Error("story planner failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Any("error", err))
 		return err
 	}
-	h.logger().Info("story planner output ready", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("moment_count", len(plan.Moments)), slog.Int("caption_count", len(plan.Captions)), slog.Int("video_moment_count", videoMomentCount(plan.Moments)))
+	h.logger().Info("story planner output ready", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.Int("moment_count", len(plan.Moments)), slog.Int("caption_count", len(plan.Captions)), slog.Int("video_moment_count", videoMomentCount(plan.Moments)), slog.String("caption_style_preset", storyPlanCaptionStylePreset(plan)))
 	if mood := strings.TrimSpace(job.Configuration["music_mood"]); mood != "" {
 		plan.MusicMood = mood
 		if plan.Audio == nil {
@@ -121,6 +132,27 @@ func boolPointerFromConfig(value string) *bool {
 	default:
 		return nil
 	}
+}
+
+func boolPointerLogValue(value *bool) string {
+	if value == nil {
+		return "unset"
+	}
+	return strconv.FormatBool(*value)
+}
+
+func valueOrUnset(value string) string {
+	if trimmed := strings.TrimSpace(value); trimmed != "" {
+		return trimmed
+	}
+	return "unset"
+}
+
+func storyPlanCaptionStylePreset(plan models.StoryPlan) string {
+	if plan.CaptionStyle == nil {
+		return "unset"
+	}
+	return valueOrUnset(plan.CaptionStyle.Preset)
 }
 
 func splitStoryPlanConfigList(value string) []string {

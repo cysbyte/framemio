@@ -121,12 +121,13 @@ func (a *ECSRunTaskActivator) Activate(ctx context.Context, message queue.JobMes
 	}
 	taskDefinition, containerName, reason, ok := a.workerFor(message.JobType)
 	if !ok {
+		a.logger.Info("worker activation skipped", slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)), slog.String("reason", "unsupported_job_type"))
 		return nil
 	}
 	if taskDefinition == "" {
 		return fmt.Errorf("%s task definition is not configured", reason)
 	}
-	a.logger.Info("starting one-off ECS worker task", slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)), slog.String("reason", reason), slog.String("cluster", a.cluster), slog.String("task_definition", taskDefinition), slog.String("container", containerName))
+	a.logger.Info("starting one-off ECS worker task", slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)), slog.String("reason", reason), slog.String("cluster", a.cluster), slog.String("task_definition", taskDefinition), slog.String("container", containerName), slog.Int("subnet_count", len(a.subnets)), slog.Int("security_group_count", len(a.securityGroups)), slog.String("assign_public_ip", string(a.assignPublicIP)))
 	input := &ecs.RunTaskInput{
 		Cluster:        aws.String(a.cluster),
 		TaskDefinition: aws.String(taskDefinition),
@@ -156,12 +157,20 @@ func (a *ECSRunTaskActivator) Activate(ctx context.Context, message queue.JobMes
 	}
 	output, err := a.client.RunTask(ctx, input)
 	if err != nil {
+		a.logger.Error("one-off ECS worker task start failed", slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)), slog.String("reason", reason), slog.Any("error", err))
 		return fmt.Errorf("run %s task: %w", reason, err)
 	}
 	if len(output.Failures) > 0 {
+		for index, failure := range output.Failures {
+			a.logger.Error("one-off ECS worker task start returned failure", slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)), slog.String("reason", reason), slog.Int("failure_index", index), slog.String("failure_arn", aws.ToString(failure.Arn)), slog.String("failure_reason", aws.ToString(failure.Reason)), slog.String("failure_detail", aws.ToString(failure.Detail)))
+		}
 		return fmt.Errorf("run %s task returned %d failure(s)", reason, len(output.Failures))
 	}
-	a.logger.Info("started one-off ECS worker task", slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)), slog.String("reason", reason), slog.Int("tasks", len(output.Tasks)))
+	taskARNs := make([]string, 0, len(output.Tasks))
+	for _, task := range output.Tasks {
+		taskARNs = append(taskARNs, aws.ToString(task.TaskArn))
+	}
+	a.logger.Info("started one-off ECS worker task", slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)), slog.String("reason", reason), slog.Int("tasks", len(output.Tasks)), slog.Any("task_arns", taskARNs))
 	return nil
 }
 
