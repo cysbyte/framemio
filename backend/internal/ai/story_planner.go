@@ -309,9 +309,9 @@ func buildCandidates(request Request, selected map[string]struct{}, clusters map
 			}
 			if clusterID != "" {
 				if moment.Reason != "" {
-					moment.Reason = moment.Reason + " · cluster:" + clusterID
+					moment.Reason = truncateText(moment.Reason+" · cluster:"+clusterID, 240)
 				} else {
-					moment.Reason = "cluster:" + clusterID
+					moment.Reason = truncateText("cluster:"+clusterID, 240)
 				}
 			}
 			candidates = append(candidates, candidate{

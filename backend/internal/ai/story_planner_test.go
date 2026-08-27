@@ -167,6 +167,7 @@ func TestPlannerTruncatesLongVideoReasonsForValidation(t *testing.T) {
 				Reasons: []string{longReason},
 			}},
 		}},
+		MediaClusters: []models.MediaCluster{{ID: "cluster-with-long-suffix", ProjectID: "project-long-reason", MediaIDs: []string{"video-long-reason"}}},
 	})
 	if err != nil {
 		t.Fatal(err)
