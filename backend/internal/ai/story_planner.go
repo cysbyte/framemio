@@ -344,6 +344,7 @@ func buildCandidates(request Request, selected map[string]struct{}, clusters map
 		if analysis.ProjectID != "" && analysis.ProjectID != request.ProjectID && !hasMedia(selected, mediaID) {
 			continue
 		}
+		mediaBaseTime := mediaBaseTimeMicros(clusters, mediaID)
 		for _, segment := range analysis.Segments {
 			if strings.TrimSpace(segment.SegmentID) == "" || strings.TrimSpace(segment.SceneID) == "" {
 				continue
@@ -376,15 +377,42 @@ func buildCandidates(request Request, selected map[string]struct{}, clusters map
 					moment.Reason = truncateText("cluster:"+clusterID, 240)
 				}
 			}
+			segmentTime := midpoint(segment.StartMicros, segment.EndMicros)
 			candidates = append(candidates, candidate{
 				moment: moment, captionCues: transcriptCaptionCues(analysis.Transcript, segment.StartMicros, endMicros),
-				sourceTime: midpoint(segment.StartMicros, segment.EndMicros), score: score,
-				repetition: repetitionKey(mediaID, clusterID, midpoint(segment.StartMicros, segment.EndMicros), segment.SceneID),
+				sourceTime: sourceTimelineMicros(mediaBaseTime, segmentTime), score: score,
+				repetition: repetitionKey(mediaID, clusterID, segmentTime, segment.SceneID),
 				mediaID:    mediaID, clusterID: clusterID, isVideo: true, isSelected: hasMedia(selected, mediaID),
 			})
 		}
 	}
 	return candidates
+}
+
+func mediaBaseTimeMicros(clusters map[string]models.MediaCluster, mediaID string) int64 {
+	cluster := clusterForMediaValue(clusters, mediaID)
+	if cluster.StartAt != nil {
+		return cluster.StartAt.UTC().UnixMicro()
+	}
+	return 0
+}
+
+func sourceTimelineMicros(baseMicros, offsetMicros int64) int64 {
+	if baseMicros <= 0 {
+		return offsetMicros
+	}
+	return baseMicros + maxInt64(0, offsetMicros)
+}
+
+func clusterForMediaValue(clusters map[string]models.MediaCluster, mediaID string) models.MediaCluster {
+	for _, cluster := range clusters {
+		for _, entry := range cluster.MediaIDs {
+			if entry == mediaID {
+				return cluster
+			}
+		}
+	}
+	return models.MediaCluster{}
 }
 
 func filterExcludedCandidates(candidates []candidate, excludedMedia, excludedMoments map[string]struct{}) []candidate {
@@ -903,7 +931,7 @@ func transitionFor(previous, current candidate, style models.VisualStyle) string
 	if style == models.VisualStyleCalm || style == models.VisualStyleMinimal {
 		return "crossfade"
 	}
-	return "cut"
+	return "fade"
 }
 
 func shouldCaption(entry candidate) bool {

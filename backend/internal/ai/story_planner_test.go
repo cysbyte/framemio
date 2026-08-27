@@ -259,6 +259,69 @@ func TestPlannerSelectsCaptionStyleFromStoryContext(t *testing.T) {
 	}
 }
 
+func TestPlannerOrdersPhotosAndVideosByAbsoluteCaptureTime(t *testing.T) {
+	t.Parallel()
+	photoTime := time.Date(2026, time.August, 25, 10, 0, 0, 0, time.UTC)
+	videoTime := time.Date(2026, time.August, 25, 10, 1, 0, 0, time.UTC)
+	planner := &Planner{Now: func() time.Time { return time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC) }}
+	plan, err := planner.Plan(context.Background(), Request{
+		ProjectID:        "project-absolute-chronology",
+		DesiredDuration:  9 * time.Second,
+		StoryType:        models.StoryTypeCustom,
+		VisualStyle:      models.VisualStyleCinematic,
+		SelectedMediaIDs: []string{"photo-before", "video-after"},
+		PhotoAnalyses: []models.PhotoAnalysis{{
+			ID: "photo-analysis-before", PhotoID: "photo-before", ProjectID: "project-absolute-chronology", AnalysisVersion: "photo-v1", TakenAt: &photoTime,
+			Caption: "The photo came first", MemoryValue: 0.9, EmotionalValue: 0.8, VisualQuality: 0.8, StoryRelevance: 0.9, Selected: true,
+		}},
+		VideoAnalyses: []models.VideoAnalysis{{
+			ID: "video-analysis-after", VideoID: "video-after", ProjectID: "project-absolute-chronology", AnalysisVersion: "video-v1", DurationMicros: 8_000_000,
+			QualitySignals: models.VideoQualitySignals{OverallScore: 0.9},
+			Segments: []models.VideoSegment{{
+				SegmentID: "segment-after", SceneID: "scene-after", StartMicros: 1_000_000, EndMicros: 5_000_000, Description: "The video came later",
+				Importance: 0.9, VisualQuality: 0.8, MemoryValue: 0.9, EmotionalValue: 0.8, StoryRelevance: 0.9, Recommended: true,
+			}},
+		}},
+		MediaClusters: []models.MediaCluster{
+			{ID: "cluster-photo", ProjectID: "project-absolute-chronology", MediaIDs: []string{"photo-before"}, StartAt: &photoTime},
+			{ID: "cluster-video", ProjectID: "project-absolute-chronology", MediaIDs: []string{"video-after"}, StartAt: &videoTime},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Moments) < 2 {
+		t.Fatalf("expected photo and video moments, got %+v", plan.Moments)
+	}
+	if plan.Moments[0].AssetID != "photo-before" || plan.Moments[1].AssetID != "video-after" {
+		t.Fatalf("expected absolute chronology photo then video, got %+v", plan.Moments)
+	}
+}
+
+func TestPlannerUsesFadeBetweenDifferentMedia(t *testing.T) {
+	t.Parallel()
+	planner := &Planner{Now: func() time.Time { return time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC) }}
+	plan, err := planner.Plan(context.Background(), Request{
+		ProjectID:       "project-fade-transition",
+		DesiredDuration: 8 * time.Second,
+		StoryType:       models.StoryTypeCustom,
+		VisualStyle:     models.VisualStyleCinematic,
+		PhotoAnalyses: []models.PhotoAnalysis{
+			{ID: "photo-analysis-1", PhotoID: "photo-1", ProjectID: "project-fade-transition", AnalysisVersion: "photo-v1", TimestampMicros: 1_000_000, Caption: "Opening by the lake", MemoryValue: 0.9, EmotionalValue: 0.8, VisualQuality: 0.8, StoryRelevance: 0.9, Selected: true},
+			{ID: "photo-analysis-2", PhotoID: "photo-2", ProjectID: "project-fade-transition", AnalysisVersion: "photo-v1", TimestampMicros: 2_000_000, Caption: "Friends laughing", MemoryValue: 0.8, EmotionalValue: 0.8, VisualQuality: 0.8, StoryRelevance: 0.8, Selected: true},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Moments) < 2 {
+		t.Fatalf("expected multiple moments, got %+v", plan.Moments)
+	}
+	if plan.Moments[1].Transition != "fade" {
+		t.Fatalf("expected fade between different media, got %+v", plan.Moments)
+	}
+}
+
 func TestPlannerHonorsSubtitleOptions(t *testing.T) {
 	t.Parallel()
 	disabled := false

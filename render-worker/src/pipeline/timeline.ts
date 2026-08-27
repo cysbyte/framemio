@@ -22,7 +22,7 @@ import type {
 import {RENDER_VERSION} from '../types.js';
 import {RenderInputError} from './errors.js';
 
-const SUPPORTED_TRANSITIONS = new Set(['cut', 'fade', 'dissolve']);
+const SUPPORTED_TRANSITIONS = new Set(['cut', 'fade', 'dissolve', 'crossfade']);
 
 export interface TimelineOptions {
   rendererVersion?: string;
@@ -128,6 +128,12 @@ function videoTransform(moment: StoryMoment): VideoTransform {
 
 function transitionFor(moment: StoryMoment): TransitionType {
   const transition = String(moment.transition ?? 'cut').toLowerCase();
+  if (transition === 'soft_cut') {
+    return 'cut';
+  }
+  if (transition === 'fade_in') {
+    return 'fade';
+  }
   return SUPPORTED_TRANSITIONS.has(transition) ? (transition as TransitionType) : 'cut';
 }
 

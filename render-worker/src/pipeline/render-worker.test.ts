@@ -115,6 +115,22 @@ test('normalizes transitions and resolves audio deterministically', () => {
 
   assert.equal(composition.clips[0].transition, 'cut');
   assert.equal(composition.clips[1].transition, 'fade');
+
+  const crossfadePlan = fixtureStoryPlan({
+    moments: [
+      {...fixtureStoryPlan().moments[0], transition: 'fade_in'},
+      {...fixtureStoryPlan().moments[1], transition: 'crossfade'},
+    ],
+  });
+  const crossfadeComposition = buildComposition(crossfadePlan, assets, assetPaths, new Map(), {
+    work_dir: '/work',
+    assets_dir: '/work/assets',
+    clips_dir: '/work/clips',
+    output_file: '/work/story.mp4',
+    composition_file: '/work/composition.json',
+  });
+  assert.equal(crossfadeComposition.clips[0].transition, 'fade');
+  assert.equal(crossfadeComposition.clips[1].transition, 'crossfade');
   assert.equal(composition.audio.background_path, '/work/assets/background-audio');
   assert.equal(composition.audio.fade_in_frames, 18);
   assert.equal(composition.audio.fade_out_frames, 27);
@@ -156,10 +172,13 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
     assert.match(filterComplex, /\[0:v\]/);
     assert.match(filterComplex, /\[1:v\]/);
     assert.match(filterComplex, /zoompan=z=/);
+    assert.match(filterComplex, /fade=t=out:st=2\.5500:d=0\.4500\[v0\]/);
+    assert.match(filterComplex, /fade=t=in:st=0:d=0\.4500\[v1\]/);
     assert.match(filterComplex, /concat=n=2:v=1:a=0,format=yuv420p\[basev\]/);
     assert.match(filterComplex, /drawtext=textfile=.*:enable='between\(t,3\.200,4\.700\)'/);
     assert.match(filterComplex, /anullsrc=channel_layout=stereo:sample_rate=48000/);
-    assert.match(filterComplex, /\[1:a\]atrim=duration=4\.500,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0\.6480\[a1\]/);
+    assert.match(filterComplex, /afade=t=out:st=2\.5500:d=0\.4500\[a0\]/);
+    assert.match(filterComplex, /\[1:a\]atrim=duration=4\.500,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0\.6480,afade=t=in:st=0:d=0\.4500\[a1\]/);
     assert.match(filterComplex, /\[a0\]\[a1\]concat=n=2:v=0:a=1\[outa\]/);
     assert.deepEqual(args.flatMap((arg, index) => arg === '-map' ? [args[index + 1]] : []), ['[outv]', '[outa]']);
     assert.equal(args.includes('-an'), false);

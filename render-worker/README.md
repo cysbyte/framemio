@@ -8,6 +8,7 @@ The worker converts a validated story plan plus source media references into a f
 
 - Download only required source assets from S3/object storage.
 - Preprocess requested video clips with FFmpeg using exact StoryPlan timestamps.
+- Apply renderer-stable scene transition intent, including short fade-out/fade-in effects for `fade`, `crossfade`, and `dissolve`.
 - Build a deterministic composition specification for Remotion, including validated caption style metadata.
 - Render the composition with Remotion.
 - Encode the final MP4 with FFmpeg.

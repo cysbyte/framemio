@@ -2,7 +2,7 @@ export const RENDER_VERSION = 'framemio-renderer-v1';
 
 export type MediaType = 'photo' | 'video' | 'live_photo';
 export type AspectRatio = '9:16' | '1:1' | '16:9';
-export type TransitionType = 'cut' | 'fade' | 'dissolve';
+export type TransitionType = 'cut' | 'fade' | 'dissolve' | 'crossfade';
 export type CropIntent = 'fill' | 'fit' | 'pan' | 'zoom' | string;
 
 export interface StoryPlan {

@@ -1170,6 +1170,8 @@ Never invent an asset or timestamp.
 
 StoryPlan must not contain renderer-specific implementation details unless they are part of a deliberately stable rendering contract.
 
+Scene transitions are renderer-stable intent. `cut` remains an immediate switch, same-source `soft_cut` normalizes to a cut in the renderer, and cross-media `fade` / `crossfade` / `dissolve` produce short fade-out/fade-in transitions without changing selected clip timestamps.
+
 
 ## 16.1 Current StoryPlan schema contract
 
