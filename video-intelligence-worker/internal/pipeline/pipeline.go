@@ -81,6 +81,7 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 	inputVersion := p.inputVersion(message)
 	analysisVersion := p.understandingVersion(message)
 	force := parseBool(message.Configuration["force_reanalyze"])
+	refreshCachedAnalysis := false
 	sourceInfo, err := p.Objects.Head(ctx, jobContext.Media.S3Key)
 	if err != nil {
 		p.logger().Error("head source video failed", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.String("s3_key", jobContext.Media.S3Key), slog.Any("error", err))
@@ -100,12 +101,14 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 			InputVersion: inputVersion, UnderstandingVersion: analysisVersion,
 		})
 		if lookupErr == nil {
-			if err := p.completeJob(ctx, jobContext.Job, cached.Analysis.EvidenceS3Key); err != nil {
-				return Result{}, err
+			if p.cachedAnalysisUsable(ctx, cached.Analysis, jobContext, sourceETag) {
+				if err := p.completeJob(ctx, jobContext.Job, cached.Analysis.EvidenceS3Key); err != nil {
+					return Result{}, err
+				}
+				return Result{Analysis: cached.Analysis, Reused: true}, nil
 			}
-			return Result{Analysis: cached.Analysis, Reused: true}, nil
-		}
-		if !errors.Is(lookupErr, domain.ErrNotFound) {
+			refreshCachedAnalysis = true
+		} else if !errors.Is(lookupErr, domain.ErrNotFound) {
 			return Result{}, lookupErr
 		}
 	}
@@ -130,7 +133,7 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 			InputVersion: inputVersion, UnderstandingVersion: analysisVersion,
 		},
 		ProjectID: jobContext.Project.ID, EvidenceS3Key: artifact.EvidenceS3Key, Evidence: evidence,
-		RunID: jobContext.Job.ID, Force: force,
+		RunID: jobContext.Job.ID, Force: force || refreshCachedAnalysis,
 	})
 	if err != nil {
 		p.logger().Error("video understanding failed", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Any("error", err))
@@ -145,6 +148,70 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 		return Result{}, err
 	}
 	return Result{Analysis: analysis, Reused: understandingResult.Reused}, nil
+}
+
+func (p *Processor) cachedAnalysisUsable(ctx context.Context, analysis domain.VideoAnalysis, jobContext domain.JobContext, sourceETag string) bool {
+	if !p.Config.EnableTranscription || strings.TrimSpace(p.Config.TranscriptionVersion) == "" {
+		return true
+	}
+	if analysis.Transcript.HasSpeech && len(analysis.Transcript.Segments) > 0 {
+		return true
+	}
+	if cached, err := p.Repository.GetTranscript(ctx, jobContext.Job.UserID, jobContext.Media.ID, p.Config.TranscriptionVersion, sourceETag); err == nil {
+		normalized, validationErr := transcription.Validate(cached.Transcript, analysis.DurationMicros)
+		if validationErr != nil {
+			p.logger().Warn("cached video analysis transcript record invalid; refreshing analysis", slog.String("job_id", jobContext.Job.ID), slog.String("project_id", jobContext.Project.ID), slog.String("media_id", jobContext.Media.ID), slog.String("analysis_id", analysis.ID), slog.Any("error", validationErr))
+			return false
+		}
+		if !normalized.HasSpeech || len(normalized.Segments) == 0 {
+			return true
+		}
+		p.logger().Warn("cached video analysis missing existing speech transcript; refreshing analysis", slog.String("job_id", jobContext.Job.ID), slog.String("project_id", jobContext.Project.ID), slog.String("media_id", jobContext.Media.ID), slog.String("analysis_id", analysis.ID), slog.Int("transcript_segment_count", len(normalized.Segments)))
+		return false
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		p.logger().Warn("cached video analysis transcript lookup failed; refreshing analysis", slog.String("job_id", jobContext.Job.ID), slog.String("project_id", jobContext.Project.ID), slog.String("media_id", jobContext.Media.ID), slog.String("analysis_id", analysis.ID), slog.Any("error", err))
+		return false
+	}
+	var evidence domain.VideoEvidence
+	if analysis.EvidenceS3Key != "" {
+		if err := p.Objects.GetJSON(ctx, analysis.EvidenceS3Key, &evidence); err == nil && !evidence.Metadata.HasAudio {
+			p.logger().Info("reusing cached video analysis without transcript for no-audio video", slog.String("job_id", jobContext.Job.ID), slog.String("project_id", jobContext.Project.ID), slog.String("media_id", jobContext.Media.ID), slog.String("analysis_id", analysis.ID))
+			return true
+		}
+	}
+	p.logger().Warn("cached speech-aware video analysis has no transcript record; refreshing analysis", slog.String("job_id", jobContext.Job.ID), slog.String("project_id", jobContext.Project.ID), slog.String("media_id", jobContext.Media.ID), slog.String("analysis_id", analysis.ID), slog.String("transcription_version", p.Config.TranscriptionVersion), slog.Bool("analysis_has_speech", analysis.Transcript.HasSpeech), slog.Int("analysis_transcript_segments", len(analysis.Transcript.Segments)))
+	return false
+}
+
+func (p *Processor) cachedEvidenceUsable(ctx context.Context, evidence domain.VideoEvidence, jobContext domain.JobContext, version, sourceETag string) (domain.VideoEvidence, bool) {
+	if !validCachedEvidence(evidence, jobContext, version, sourceETag) {
+		return domain.VideoEvidence{}, false
+	}
+	if !p.Config.EnableTranscription || strings.TrimSpace(p.Config.TranscriptionVersion) == "" {
+		return evidence, true
+	}
+	if !evidence.Metadata.HasAudio {
+		return evidence, true
+	}
+	if evidence.Transcript.HasSpeech && len(evidence.Transcript.Segments) > 0 {
+		return evidence, true
+	}
+	cached, err := p.Repository.GetTranscript(ctx, jobContext.Job.UserID, jobContext.Media.ID, p.Config.TranscriptionVersion, sourceETag)
+	if err == nil {
+		normalized, validationErr := transcription.Validate(cached.Transcript, evidence.Metadata.DurationMicros)
+		if validationErr != nil {
+			p.logger().Warn("cached preprocessing transcript record invalid; rebuilding", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Any("error", validationErr))
+			return domain.VideoEvidence{}, false
+		}
+		evidence.Transcript = normalized
+		return evidence, true
+	}
+	if !errors.Is(err, domain.ErrNotFound) {
+		p.logger().Warn("cached preprocessing transcript lookup failed; rebuilding", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Any("error", err))
+		return domain.VideoEvidence{}, false
+	}
+	p.logger().Warn("cached speech-aware preprocessing has audio but no transcript record; rebuilding", slog.String("job_id", jobContext.Job.ID), slog.String("project_id", jobContext.Project.ID), slog.String("media_id", jobContext.Media.ID), slog.String("transcription_version", p.Config.TranscriptionVersion))
+	return domain.VideoEvidence{}, false
 }
 
 func (p *Processor) completeJob(ctx context.Context, job domain.ProcessingJob, artifactS3Key string) error {
@@ -178,10 +245,12 @@ func (p *Processor) loadOrPreprocess(ctx context.Context, jobContext domain.JobC
 	artifact, err := p.Repository.GetPreprocessing(ctx, jobContext.Job.UserID, jobContext.Media.ID, version, sourceETag)
 	if err == nil {
 		var evidence domain.VideoEvidence
-		if loadErr := p.Objects.GetJSON(ctx, artifact.EvidenceS3Key, &evidence); loadErr == nil && validCachedEvidence(evidence, jobContext, version, sourceETag) {
-			return evidence, artifact, nil
+		if loadErr := p.Objects.GetJSON(ctx, artifact.EvidenceS3Key, &evidence); loadErr == nil {
+			if usableEvidence, ok := p.cachedEvidenceUsable(ctx, evidence, jobContext, version, sourceETag); ok {
+				return usableEvidence, artifact, nil
+			}
 		}
-		p.logger().Warn("cached preprocessing artifact is unavailable; rebuilding", slog.String("media_id", jobContext.Media.ID), slog.String("evidence_s3_key", artifact.EvidenceS3Key))
+		p.logger().Warn("cached preprocessing artifact is unavailable or stale; rebuilding", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.String("evidence_s3_key", artifact.EvidenceS3Key))
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return domain.VideoEvidence{}, domain.PreprocessingArtifact{}, err
 	}
@@ -393,7 +462,7 @@ func isVideoAnalysisJobType(jobType string) bool {
 }
 
 func validCachedEvidence(evidence domain.VideoEvidence, jobContext domain.JobContext, version, sourceETag string) bool {
-	return evidence.SchemaVersion == 1 && evidence.MediaID == jobContext.Media.ID && evidence.ProjectID == jobContext.Project.ID &&
+	return evidence.SchemaVersion == 1 && evidence.MediaID == jobContext.Media.ID &&
 		evidence.AnalysisVersion == version && evidence.SourceETag == sourceETag && len(evidence.Frames) > 0
 }
 

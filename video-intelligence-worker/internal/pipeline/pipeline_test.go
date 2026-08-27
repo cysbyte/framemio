@@ -161,6 +161,58 @@ func TestProcessorRefreshesVisualOnlyCacheWhenTranscriptionIsEnabled(t *testing.
 	}
 }
 
+func TestProcessorRefreshesSpeechAwareCacheMissingTranscriptRecord(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.August, 27, 10, 0, 0, 0, time.UTC)
+	repository := newMemoryRepository(now)
+	objects := newMemoryObjects()
+	tools := &fakeTools{metadata: domain.VideoMetadata{
+		DurationMicros: 12_000_000, Width: 1920, Height: 1080, FPS: 30,
+		VideoCodec: "hevc", AudioCodec: "aac", BitRate: 8_000_000, FileSizeBytes: 1000, HasAudio: true,
+	}, boundaries: []domain.SceneBoundary{{TimestampMicros: 4_000_000, Score: 0.6}, {TimestampMicros: 8_000_000, Score: 0.7}}}
+	provider := &fakeUnderstandingProvider{}
+	transcriber := &fakeTranscriber{}
+	config := Config{
+		WorkRoot: t.TempDir(), AnalysisVersion: "video-v1", SceneThreshold: 0.32, MaxSceneBoundaries: 100,
+		Planner: PlannerConfig{
+			MinSceneDuration: 750 * time.Millisecond, MaxSegmentDuration: 12 * time.Second,
+			LongVideoThreshold: 5 * time.Minute, MaxFramesShort: 12, MaxFramesLong: 24,
+		},
+		DuplicateHashDistance: 4, StageRetries: 1, EnableTranscription: true,
+		TranscriptionVersion: "transcription-v1", UnderstandingVersion: "video-understanding-v1",
+		EvidenceURLExpiry: time.Hour,
+	}
+	repository.analyses[cacheKey("user-1", "media-1", "analysis-stale-empty-transcript")] = domain.VideoAnalysis{
+		ID: "analysis-stale-empty-transcript", SchemaVersion: domain.VideoAnalysisSchemaV1,
+		UserID: "user-1", ProjectID: "project-older", VideoID: "media-1", AnalysisVersion: "analysis-stale-empty-transcript",
+		InputVersion: "video-v1+speech:transcription-v1", UnderstandingVersion: "video-understanding-v1",
+		Provider: "fake-provider", Model: "fake-model", SourceETag: "etag-1", EvidenceS3Key: "missing/evidence.json",
+		ProcessingStatus: domain.VideoAnalysisStatusCompleted, DurationMicros: 12_000_000,
+		Scenes:         []domain.Scene{{SceneID: "scene-1", StartMicros: 0, EndMicros: 12_000_000}},
+		Segments:       []domain.Segment{{SegmentID: "segment-stale", SceneID: "scene-1", StartMicros: 0, EndMicros: 4_000_000, Description: "stale", Recommended: true}},
+		QualitySignals: domain.QualitySignals{OverallScore: 0.8}, CreatedAt: now.Add(-time.Hour),
+	}
+	processor := &Processor{
+		Config: config, Repository: repository, Objects: objects, Tools: tools, Transcription: transcriber,
+		Understanding: &understanding.Service{Provider: provider, Repository: repository, Artifacts: objects, RetryAttempts: 1, RetryDelay: time.Nanosecond, FrameURLExpiry: time.Hour, Now: func() time.Time { return now }},
+		Completion:    &fakeCompletionReporter{}, Now: func() time.Time { return now },
+	}
+
+	result, err := processor.Process(context.Background(), repository.addJob("job-refresh-stale-speech-cache", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Reused || result.Analysis.ID == "analysis-stale-empty-transcript" {
+		t.Fatalf("expected stale no-transcript cache to be refreshed, got %+v", result)
+	}
+	if tools.audioCalls != 1 || transcriber.calls != 1 || provider.calls != 1 {
+		t.Fatalf("expected transcription and understanding refresh, audio=%d transcription=%d understanding=%d", tools.audioCalls, transcriber.calls, provider.calls)
+	}
+	if !result.Analysis.Transcript.HasSpeech || len(result.Analysis.Transcript.Segments) != 1 {
+		t.Fatalf("expected refreshed analysis to include transcript, got %+v", result.Analysis.Transcript)
+	}
+}
+
 func TestProcessorReusesExistingTranscriptBeforeAudioExtraction(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.August, 19, 10, 0, 0, 0, time.UTC)
