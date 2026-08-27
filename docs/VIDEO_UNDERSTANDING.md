@@ -110,10 +110,15 @@ SQS messages continue to contain only job, project, media, and small version/con
 - `VIDEO_UNDERSTANDING_PROVIDER`
 - `VIDEO_UNDERSTANDING_MODEL`
 - `VIDEO_UNDERSTANDING_VERSION`
+- `VIDEO_UNDERSTANDING_DIRECT`
+- `VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL`
+- `VIDEO_UNDERSTANDING_WIRE_API`
+- `VIDEO_UNDERSTANDING_IMAGE_DETAIL`
+- `VIDEO_UNDERSTANDING_MAX_OUTPUT_TOKENS`
 - `VIDEO_UNDERSTANDING_RETRIES`
 - `VIDEO_UNDERSTANDING_PROVIDER_TIMEOUT`
 - `EVIDENCE_URL_EXPIRY`
 
 Legacy `MULTIMODAL_*` and `PROVIDER_TIMEOUT` variables remain fallback aliases for existing environments.
 
-Production deployments route through an upstream OpenAI-compatible analysis service using `VIDEO_UNDERSTANDING_PROVIDER=openai` and `VIDEO_UNDERSTANDING_MODEL=gpt-5.4-mini`; `local` / `heuristic` remain development fallbacks.
+Production deployments may either route through a FrameMio-compatible adapter using `VIDEO_UNDERSTANDING_API_URL` or call an OpenAI-compatible upstream directly with `VIDEO_UNDERSTANDING_DIRECT=true`, `VIDEO_UNDERSTANDING_PROVIDER=openai-direct`, `VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL=https://api2.65535.space`, `VIDEO_UNDERSTANDING_WIRE_API=chat_completions`, and `VIDEO_UNDERSTANDING_MODEL=gpt-5.4-mini`; `local` / `heuristic` remain development fallbacks.

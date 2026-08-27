@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -24,6 +25,11 @@ type Config struct {
 	UnderstandingVersion              string
 	UnderstandingRetries              int
 	UnderstandingTimeout              time.Duration
+	UnderstandingDirect               bool
+	UnderstandingUpstreamBaseURL      string
+	UnderstandingWireAPI              string
+	UnderstandingImageDetail          string
+	UnderstandingMaxOutputTokens      int
 	TranscriptionURL                  string
 	TranscriptionAPIKey               string
 	TranscriptionProvider             string
@@ -65,12 +71,17 @@ func Load() (Config, error) {
 		WorkRoot:                          workRoot,
 		AnalysisVersion:                   environment("VIDEO_ANALYSIS_VERSION", "video-v2"),
 		UnderstandingURL:                  environmentFirst([]string{"VIDEO_UNDERSTANDING_API_URL", "MULTIMODAL_API_URL"}, ""),
-		UnderstandingAPIKey:               environmentFirst([]string{"VIDEO_UNDERSTANDING_API_KEY", "MULTIMODAL_API_KEY"}, ""),
+		UnderstandingAPIKey:               environmentFirst([]string{"VIDEO_UNDERSTANDING_API_KEY", "MULTIMODAL_API_KEY", "AI_GATEWAY_API_KEY", "OPENAI_API_KEY"}, ""),
 		UnderstandingProvider:             environmentFirst([]string{"VIDEO_UNDERSTANDING_PROVIDER", "MULTIMODAL_PROVIDER"}, "external"),
-		UnderstandingModel:                environmentFirst([]string{"VIDEO_UNDERSTANDING_MODEL", "MULTIMODAL_MODEL"}, "configured-model"),
+		UnderstandingModel:                environmentFirst([]string{"VIDEO_UNDERSTANDING_MODEL", "MULTIMODAL_MODEL", "OPENAI_VISION_MODEL"}, "configured-model"),
 		UnderstandingVersion:              environment("VIDEO_UNDERSTANDING_VERSION", "video-understanding-v1"),
 		UnderstandingRetries:              environmentInt("VIDEO_UNDERSTANDING_RETRIES", 3),
-		UnderstandingTimeout:              environmentDurationFirst([]string{"VIDEO_UNDERSTANDING_PROVIDER_TIMEOUT", "PROVIDER_TIMEOUT"}, 2*time.Minute),
+		UnderstandingTimeout:              environmentDurationFirst([]string{"VIDEO_UNDERSTANDING_PROVIDER_TIMEOUT", "PROVIDER_TIMEOUT", "OPENAI_REQUEST_TIMEOUT_MS"}, 2*time.Minute),
+		UnderstandingDirect:               environmentBool("VIDEO_UNDERSTANDING_DIRECT", false),
+		UnderstandingUpstreamBaseURL:      environmentFirst([]string{"VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL", "AI_GATEWAY_BASE_URL", "OPENAI_BASE_URL", "GATEWAY_UPSTREAM_BASE_URL"}, ""),
+		UnderstandingWireAPI:              environmentFirst([]string{"VIDEO_UNDERSTANDING_WIRE_API", "AI_GATEWAY_WIRE_API", "GATEWAY_UPSTREAM_WIRE_API"}, "chat_completions"),
+		UnderstandingImageDetail:          environment("VIDEO_UNDERSTANDING_IMAGE_DETAIL", "low"),
+		UnderstandingMaxOutputTokens:      environmentInt("VIDEO_UNDERSTANDING_MAX_OUTPUT_TOKENS", 5000),
 		TranscriptionURL:                  environmentFirst([]string{"TRANSCRIPTION_API_URL", "SPEECH_API_URL"}, ""),
 		TranscriptionAPIKey:               environmentFirst([]string{"TRANSCRIPTION_API_KEY", "SPEECH_API_KEY"}, ""),
 		TranscriptionProvider:             environmentFirst([]string{"TRANSCRIPTION_PROVIDER", "SPEECH_PROVIDER"}, "external"),
@@ -102,8 +113,14 @@ func Load() (Config, error) {
 	if configuration.DatabaseURL == "" || configuration.S3Bucket == "" || configuration.QueueURL == "" {
 		return Config{}, errors.New("DATABASE_URL, S3_MEDIA_BUCKET, and SQS_VIDEO_ANALYSIS_QUEUE_URL are required")
 	}
-	if configuration.UnderstandingURL == "" && configuration.UnderstandingProvider != "local" && configuration.UnderstandingProvider != "heuristic" {
+	if !configuration.UsesLocalUnderstanding() && !configuration.UsesDirectUnderstanding() && configuration.UnderstandingURL == "" {
 		return Config{}, errors.New("VIDEO_UNDERSTANDING_API_URL is required")
+	}
+	if configuration.UsesDirectUnderstanding() && configuration.UnderstandingUpstreamBaseURL == "" {
+		return Config{}, errors.New("VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL is required when direct video understanding is enabled")
+	}
+	if configuration.UsesDirectUnderstanding() && configuration.UnderstandingAPIKey == "" {
+		return Config{}, errors.New("VIDEO_UNDERSTANDING_API_KEY is required when direct video understanding is enabled")
 	}
 	if configuration.EnableTranscription && configuration.TranscriptionURL == "" {
 		return Config{}, errors.New("TRANSCRIPTION_API_URL is required when transcription is enabled")
@@ -115,6 +132,27 @@ func Load() (Config, error) {
 		return Config{}, errors.New("frame limits and ANALYSIS_FRAME_WIDTH are invalid")
 	}
 	return configuration, nil
+}
+
+func (c Config) UsesLocalUnderstanding() bool {
+	switch strings.ToLower(strings.TrimSpace(c.UnderstandingProvider)) {
+	case "local", "heuristic":
+		return true
+	default:
+		return false
+	}
+}
+
+func (c Config) UsesDirectUnderstanding() bool {
+	if c.UnderstandingDirect {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(c.UnderstandingProvider)) {
+	case "openai-direct", "gpt-direct":
+		return true
+	default:
+		return false
+	}
 }
 
 func environment(name, fallback string) string {

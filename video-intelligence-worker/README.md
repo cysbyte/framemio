@@ -164,7 +164,7 @@ Required:
 
 AWS credentials use the default AWS SDK credential chain. API keys stay in worker secrets, never in the iOS application or queue messages.
 
-Production deployments should point `VIDEO_UNDERSTANDING_API_URL` and `TRANSCRIPTION_API_URL` at the upstream OpenAI-compatible services, use `VIDEO_UNDERSTANDING_PROVIDER=openai` with `VIDEO_UNDERSTANDING_MODEL=gpt-5.4-mini`, and enable transcription with `TRANSCRIPTION_PROVIDER=openai`, `TRANSCRIPTION_MODEL=gpt-5.4-mini-transcribe`, and `ENABLE_TRANSCRIPTION=true`.
+Production deployments can either point `VIDEO_UNDERSTANDING_API_URL` at a FrameMio-compatible adapter or enable direct OpenAI-compatible video understanding with `VIDEO_UNDERSTANDING_DIRECT=true`, `VIDEO_UNDERSTANDING_PROVIDER=openai-direct`, `VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL=https://api2.65535.space`, `VIDEO_UNDERSTANDING_WIRE_API=chat_completions`, and `VIDEO_UNDERSTANDING_MODEL=gpt-5.4-mini`. Transcription remains behind its provider adapter with `TRANSCRIPTION_PROVIDER=openai`, `TRANSCRIPTION_MODEL=gpt-5.4-mini-transcribe`, and `ENABLE_TRANSCRIPTION=true`.
 
 Optional tuning:
 
@@ -174,6 +174,8 @@ Optional tuning:
 - `VIDEO_UNDERSTANDING_VERSION` (default `video-understanding-v1`)
 - `FFMPEG_PATH`, `FFPROBE_PATH`
 - `VIDEO_UNDERSTANDING_API_KEY`, `VIDEO_UNDERSTANDING_PROVIDER`, `VIDEO_UNDERSTANDING_MODEL`
+- `VIDEO_UNDERSTANDING_DIRECT`, `VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL`, `VIDEO_UNDERSTANDING_WIRE_API`
+- `VIDEO_UNDERSTANDING_IMAGE_DETAIL`, `VIDEO_UNDERSTANDING_MAX_OUTPUT_TOKENS`
 - `VIDEO_UNDERSTANDING_RETRIES`, `VIDEO_UNDERSTANDING_PROVIDER_TIMEOUT`
 - `TRANSCRIPTION_API_KEY`, `TRANSCRIPTION_PROVIDER`, `TRANSCRIPTION_MODEL`
 - `TRANSCRIPTION_VERSION`, `ENABLE_TRANSCRIPTION`

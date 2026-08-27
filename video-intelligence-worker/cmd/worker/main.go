@@ -76,7 +76,14 @@ func main() {
 		ProviderName: configuration.UnderstandingProvider, ModelName: configuration.UnderstandingModel,
 		Client: understandingClient,
 	})
-	if configuration.UnderstandingProvider == "local" || configuration.UnderstandingProvider == "heuristic" {
+	if configuration.UsesDirectUnderstanding() {
+		understandingProvider = providers.OpenAICompatibleVideoUnderstandingProvider{
+			BaseURL: configuration.UnderstandingUpstreamBaseURL, APIKey: configuration.UnderstandingAPIKey,
+			ProviderName: configuration.UnderstandingProvider, ModelName: configuration.UnderstandingModel,
+			WireAPI: configuration.UnderstandingWireAPI, ImageDetail: configuration.UnderstandingImageDetail,
+			MaxOutputTokens: configuration.UnderstandingMaxOutputTokens, Client: understandingClient,
+		}
+	} else if configuration.UsesLocalUnderstanding() {
 		understandingProvider = providers.HeuristicVideoUnderstandingProvider{
 			ProviderName: configuration.UnderstandingProvider,
 			ModelName:    configuration.UnderstandingModel,
