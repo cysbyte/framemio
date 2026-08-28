@@ -22,6 +22,8 @@ require_var IMAGE
 : "${ECS_PRESERVE_DESIRED_COUNT:=false}"
 : "${ECS_MIN_CAPACITY:=$ECS_SERVICE_DESIRED_COUNT}"
 : "${ECS_MAX_CAPACITY:=$ECS_SERVICE_DESIRED_COUNT}"
+: "${RDS_AUTO_START_ENABLED:=false}"
+: "${RDS_CLUSTER_IDENTIFIER:=}"
 
 for numeric_var in ECS_SERVICE_DESIRED_COUNT ECS_MIN_CAPACITY ECS_MAX_CAPACITY; do
   if [[ "${!numeric_var}" =~ ^[0-9]+$ ]]; then
@@ -31,6 +33,54 @@ for numeric_var in ECS_SERVICE_DESIRED_COUNT ECS_MIN_CAPACITY ECS_MAX_CAPACITY; 
     exit 1
   fi
 done
+
+start_rds_cluster_if_needed() {
+  if [[ "$RDS_AUTO_START_ENABLED" != "true" ]]; then
+    return 0
+  fi
+
+  require_var RDS_CLUSTER_IDENTIFIER
+
+  echo "Checking RDS cluster $RDS_CLUSTER_IDENTIFIER"
+  local status
+  status="$(aws rds describe-db-clusters \
+    --region "$AWS_REGION" \
+    --db-cluster-identifier "$RDS_CLUSTER_IDENTIFIER" \
+    --query 'DBClusters[0].Status' \
+    --output text)"
+
+  case "$status" in
+    available)
+      echo "RDS cluster $RDS_CLUSTER_IDENTIFIER is available"
+      ;;
+    stopped)
+      echo "Starting RDS cluster $RDS_CLUSTER_IDENTIFIER"
+      aws rds start-db-cluster \
+        --region "$AWS_REGION" \
+        --db-cluster-identifier "$RDS_CLUSTER_IDENTIFIER" >/dev/null
+      echo "Waiting for RDS cluster $RDS_CLUSTER_IDENTIFIER to become available"
+      aws rds wait db-cluster-available \
+        --region "$AWS_REGION" \
+        --db-cluster-identifier "$RDS_CLUSTER_IDENTIFIER"
+      ;;
+    starting | backing-up | modifying | rebooting | configuring-iam-database-auth | upgrading)
+      echo "RDS cluster $RDS_CLUSTER_IDENTIFIER is $status; waiting for availability"
+      aws rds wait db-cluster-available \
+        --region "$AWS_REGION" \
+        --db-cluster-identifier "$RDS_CLUSTER_IDENTIFIER"
+      ;;
+    stopping)
+      echo "RDS cluster $RDS_CLUSTER_IDENTIFIER is stopping; wait for it to stop before restarting" >&2
+      exit 1
+      ;;
+    *)
+      echo "RDS cluster $RDS_CLUSTER_IDENTIFIER is in unsupported status: $status" >&2
+      exit 1
+      ;;
+  esac
+}
+
+start_rds_cluster_if_needed
 
 echo "Fetching task definition $ECS_TASK_DEFINITION"
 aws ecs describe-task-definition \

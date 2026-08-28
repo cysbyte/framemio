@@ -27,6 +27,8 @@ env:
   ECS_ASSIGN_PUBLIC_IP: ${{ vars.ECS_ASSIGN_PUBLIC_IP || 'ENABLED' }}
   DATABASE_URL: ${{ vars.DATABASE_URL }}
   DATABASE_AUTH_MODE: iam
+  RDS_AUTO_START_ENABLED: ${{ vars.RDS_AUTO_START_ENABLED || 'true' }}
+  RDS_CLUSTER_IDENTIFIER: ${{ vars.RDS_CLUSTER_IDENTIFIER || 'my-db-cluster' }}
   PORT: "8080"
   INTERNAL_API_TOKEN: ${{ secrets.INTERNAL_API_TOKEN }}
   SQS_PROCESSING_QUEUE_URL: ${{ vars.SQS_PROCESSING_QUEUE_URL || 'https://sqs.us-east-1.amazonaws.com/450876624497/framemio-processing' }}
@@ -62,6 +64,9 @@ jobs:
           test -n "$ECR_REPOSITORY" || { echo "Missing repository variable BACKEND_ECR_REPOSITORY"; exit 1; }
           test -n "$ROLE_ARN" || { echo "Missing repository secret AWS_GITHUB_ACTIONS_ROLE_ARN"; exit 1; }
           test -n "$DATABASE_URL" || { echo "Missing repository variable DATABASE_URL"; exit 1; }
+          if [ "$RDS_AUTO_START_ENABLED" = "true" ]; then
+            test -n "$RDS_CLUSTER_IDENTIFIER" || { echo "Missing RDS_CLUSTER_IDENTIFIER while RDS auto-start is enabled"; exit 1; }
+          fi
           test -n "$SQS_PROCESSING_QUEUE_URL" || { echo "Missing repository variable SQS_PROCESSING_QUEUE_URL"; exit 1; }
           test -n "$MEDIA_DOWNLOAD_BASE_URL" || { echo "Missing MEDIA_DOWNLOAD_BASE_URL"; exit 1; }
           test -n "$INTERNAL_API_TOKEN" || { echo "Missing repository secret INTERNAL_API_TOKEN"; exit 1; }
