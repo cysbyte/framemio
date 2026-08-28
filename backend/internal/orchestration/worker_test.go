@@ -107,6 +107,40 @@ func TestWorkerRunOnceProcessesAvailableSameHandlerMessage(t *testing.T) {
 	}
 }
 
+func TestWorkerRunOnceDeletesStaleSameHandlerMessageAndContinuesToTarget(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore, _, coordinator, project, _ := setupProject(t, models.MediaTypePhoto)
+	targetJob, _, err := memoryStore.CreateJob(ctx, models.ProcessingJob{ID: "job-target-after-stale", UserID: project.UserID, ProjectID: project.ID, Type: models.JobTypeStoryPlan, Status: models.JobStatusQueued, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}, "target-after-stale-job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer := &memoryConsumer{received: []queue.ReceivedJobMessage{
+		{Message: queue.JobMessage{JobID: "job-stale-story", ProjectID: project.ID, JobType: models.JobTypeStoryPlan}, ReceiptHandle: "receipt-stale-story"},
+		{Message: queue.JobMessage{JobID: targetJob.ID, ProjectID: project.ID, JobType: targetJob.Type}, ReceiptHandle: "receipt-target-story"},
+	}}
+	worker := Worker{
+		Store:       memoryStore,
+		Consumer:    consumer,
+		Coordinator: coordinator,
+		Handlers:    map[models.JobType]JobHandler{models.JobTypeStoryPlan: noopHandler{}},
+		TargetJobID: targetJob.ID,
+	}
+	if err := worker.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(consumer.deleted) != 2 || consumer.deleted[0] != "receipt-stale-story" || consumer.deleted[1] != "receipt-target-story" {
+		t.Fatalf("stale and target messages were not deleted in order: %+v", consumer.deleted)
+	}
+	targetAfter, err := memoryStore.GetJob(ctx, project.UserID, targetJob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targetAfter.Status != models.JobStatusCompleted {
+		t.Fatalf("target job should complete after stale message: %+v", targetAfter)
+	}
+}
+
 func TestWorkerRunOnceProcessesQueuedTargetWithInflatedReceiveCount(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

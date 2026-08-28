@@ -50,6 +50,7 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 			logger(w).Info("orchestration worker run-once received messages", slog.String("target_job_id", w.TargetJobID), slog.Int("count", len(receivedMessages)))
 		}
 		for _, received := range receivedMessages {
+			logger(w).Info("orchestration worker run-once inspecting message", slog.String("target_job_id", w.TargetJobID), slog.String("job_id", received.Message.JobID), slog.String("job_type", string(received.Message.JobType)), slog.String("project_id", received.Message.ProjectID), slog.String("media_id", received.Message.MediaID), slog.Int("receive_count", received.ApproximateReceiveCount), slog.Bool("is_target", w.TargetJobID != "" && received.Message.JobID == w.TargetJobID))
 			if w.TargetJobID != "" && received.Message.JobID != w.TargetJobID && w.Handlers[received.Message.JobType] == nil {
 				logger(w).Info("orchestration worker run-once releasing unsupported message", slog.String("target_job_id", w.TargetJobID), slog.String("job_id", received.Message.JobID), slog.String("job_type", string(received.Message.JobType)))
 				if err := w.Consumer.ExtendVisibility(ctx, received.ReceiptHandle, 0); err != nil {
@@ -59,7 +60,18 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 			}
 			if received.ApproximateReceiveCount > maxReceiveCount {
 				job, err := w.Store.GetJobByID(ctx, received.Message.JobID)
+				if errors.Is(err, store.ErrNotFound) {
+					logger(w).Warn("orchestration worker deleting stale queue message", slog.String("target_job_id", w.TargetJobID), slog.String("job_id", received.Message.JobID), slog.String("job_type", string(received.Message.JobType)), slog.String("project_id", received.Message.ProjectID), slog.String("media_id", received.Message.MediaID), slog.Int("receive_count", received.ApproximateReceiveCount))
+					if err := w.Consumer.Delete(ctx, received.ReceiptHandle); err != nil {
+						return err
+					}
+					if w.TargetJobID != "" && received.Message.JobID == w.TargetJobID {
+						return store.ErrNotFound
+					}
+					continue
+				}
 				if err != nil {
+					logger(w).Error("orchestration worker failed to load received job", slog.String("target_job_id", w.TargetJobID), slog.String("job_id", received.Message.JobID), slog.String("job_type", string(received.Message.JobType)), slog.String("project_id", received.Message.ProjectID), slog.String("media_id", received.Message.MediaID), slog.Any("error", err))
 					return err
 				}
 				if w.TargetJobID == "" || shouldDeadLetterForReceiveLimit(job) {
@@ -75,10 +87,11 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 			if w.TargetJobID != "" && received.Message.JobID != w.TargetJobID {
 				logger(w).Info("orchestration worker run-once handling available message", slog.String("target_job_id", w.TargetJobID), slog.String("job_id", received.Message.JobID), slog.String("job_type", string(received.Message.JobType)))
 			}
-			if err := w.handleReceived(ctx, received, visibilityTimeout); err != nil {
+			handled, err := w.handleReceived(ctx, received, visibilityTimeout)
+			if err != nil {
 				return err
 			}
-			if w.TargetJobID != "" && received.Message.JobID == w.TargetJobID {
+			if w.TargetJobID != "" && received.Message.JobID == w.TargetJobID && handled {
 				logger(w).Info("orchestration worker run-once target handled", slog.String("target_job_id", w.TargetJobID), slog.String("job_id", received.Message.JobID), slog.String("job_type", string(received.Message.JobType)))
 				return nil
 			}
@@ -96,45 +109,57 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 	}
 }
 
-func (w *Worker) handleReceived(ctx context.Context, received queue.ReceivedJobMessage, visibilityTimeout time.Duration) error {
+func (w *Worker) handleReceived(ctx context.Context, received queue.ReceivedJobMessage, visibilityTimeout time.Duration) (bool, error) {
+	logger(w).Info("orchestration worker loading received job", slog.String("job_id", received.Message.JobID), slog.String("job_type", string(received.Message.JobType)), slog.String("project_id", received.Message.ProjectID), slog.String("media_id", received.Message.MediaID), slog.Int("receive_count", received.ApproximateReceiveCount))
 	job, err := w.Store.GetJobByID(ctx, received.Message.JobID)
+	if errors.Is(err, store.ErrNotFound) {
+		logger(w).Warn("orchestration worker deleting stale queue message", slog.String("job_id", received.Message.JobID), slog.String("job_type", string(received.Message.JobType)), slog.String("project_id", received.Message.ProjectID), slog.String("media_id", received.Message.MediaID), slog.Int("receive_count", received.ApproximateReceiveCount))
+		if err := w.Consumer.Delete(ctx, received.ReceiptHandle); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
 	if err != nil {
-		return err
+		logger(w).Error("orchestration worker failed to load received job", slog.String("job_id", received.Message.JobID), slog.String("job_type", string(received.Message.JobType)), slog.String("project_id", received.Message.ProjectID), slog.String("media_id", received.Message.MediaID), slog.Any("error", err))
+		return false, err
 	}
 	logger(w).Info("orchestration worker handling job", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID), slog.String("status", string(job.Status)), slog.Int("attempt", job.Attempt), slog.Int("receive_count", received.ApproximateReceiveCount))
 	if job.Status == models.JobStatusCompleted || job.Status == models.JobStatusCancelled {
 		logger(w).Info("orchestration worker deleting terminal message", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("status", string(job.Status)))
-		return w.Consumer.Delete(ctx, received.ReceiptHandle)
+		return true, w.Consumer.Delete(ctx, received.ReceiptHandle)
 	}
 	if job.NextRunAt != nil && now(w).Before(*job.NextRunAt) {
 		logger(w).Info("orchestration worker deferring job until next run", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.Time("next_run_at", *job.NextRunAt))
-		return w.Consumer.ExtendVisibility(ctx, received.ReceiptHandle, time.Until(*job.NextRunAt))
+		return true, w.Consumer.ExtendVisibility(ctx, received.ReceiptHandle, time.Until(*job.NextRunAt))
 	}
 	handler := w.Handlers[job.Type]
 	if handler == nil {
 		logger(w).Warn("orchestration worker handler not configured", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)))
 		_, err := w.Coordinator.UpdateJobStatus(ctx, job.ID, models.JobStatusFailed, job.Progress, "handler_not_configured", "no worker handler is configured for this job type", "", "")
-		return err
+		return true, err
 	}
 	if _, err := w.Coordinator.UpdateJobStatus(ctx, job.ID, models.JobStatusRunning, job.Progress, "", "", "", ""); err != nil {
-		return err
+		return true, err
 	}
 	if err := w.Consumer.ExtendVisibility(ctx, received.ReceiptHandle, visibilityTimeout); err != nil {
-		return err
+		return true, err
 	}
 	if err := handler.HandleJob(ctx, job); err != nil {
 		logger(w).Error("orchestration worker handler failed", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.Any("error", err))
 		_, updateErr := w.Coordinator.UpdateJobStatus(ctx, job.ID, models.JobStatusFailed, job.Progress, "handler_failed", err.Error(), "", "")
 		if updateErr != nil {
-			return updateErr
+			return true, updateErr
 		}
-		return nil
+		return true, nil
 	}
 	if _, err := w.Coordinator.UpdateJobStatus(ctx, job.ID, models.JobStatusCompleted, 1, "", "", job.ArtifactS3Key, job.ArtifactType); err != nil {
-		return err
+		return true, err
 	}
 	logger(w).Info("orchestration worker completed job", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID))
-	return w.Consumer.Delete(ctx, received.ReceiptHandle)
+	if err := w.Consumer.Delete(ctx, received.ReceiptHandle); err != nil {
+		return true, err
+	}
+	return true, nil
 }
 
 func logger(w *Worker) *slog.Logger {
