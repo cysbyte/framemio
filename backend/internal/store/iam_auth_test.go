@@ -51,3 +51,10 @@ func TestNonNeonDatabaseKeepsDefaultQueryMode(t *testing.T) {
 		t.Fatalf("DefaultQueryExecMode = %v, want unchanged %v", config.ConnConfig.DefaultQueryExecMode, original)
 	}
 }
+
+func TestJSONBParamUsesTextEncoding(t *testing.T) {
+	value := jsonbParam([]byte(`{"id":"user-1"}`))
+	if value != `{"id":"user-1"}` {
+		t.Fatalf("jsonbParam() = %q", value)
+	}
+}

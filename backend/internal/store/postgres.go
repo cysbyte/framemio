@@ -104,6 +104,10 @@ func videoAnalysisLogicalKey(values ...string) string {
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
+func jsonbParam(data []byte) string {
+	return string(data)
+}
+
 func (s *PostgresStore) put(ctx context.Context, kind, id, userID, projectID, mediaID, logicalKey string, value any) (bool, error) {
 	data, err := json.Marshal(value)
 	if err != nil {
@@ -115,7 +119,7 @@ func (s *PostgresStore) put(ctx context.Context, kind, id, userID, projectID, me
 		(kind, id, user_id, project_id, media_id, logical_key, data, created_at, updated_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8)
 		ON CONFLICT DO NOTHING`,
-		kind, id, userID, projectID, mediaID, logicalKey, data, now)
+		kind, id, userID, projectID, mediaID, logicalKey, jsonbParam(data), now)
 	if err != nil {
 		return false, fmt.Errorf("put %s: %w", kind, err)
 	}
@@ -132,7 +136,7 @@ func (s *PostgresStore) EnsureUser(ctx context.Context, user models.User) (model
 		INSERT INTO framemio_domain_records
 		(kind,id,user_id,logical_key,data,created_at,updated_at)
 		VALUES ('user',$1,$1,$1,$2,$3,$3)
-		ON CONFLICT DO NOTHING`, user.ID, data, now)
+		ON CONFLICT DO NOTHING`, user.ID, jsonbParam(data), now)
 	if err != nil {
 		return models.User{}, fmt.Errorf("ensure user: %w", err)
 	}
@@ -170,7 +174,7 @@ func (s *PostgresStore) CreateMediaUpload(ctx context.Context, media models.Medi
 		INSERT INTO framemio_domain_records
 		(kind,id,user_id,project_id,media_id,logical_key,data,created_at,updated_at)
 		VALUES ('media',$1,$2,'',$1,'',$3,$4,$4)
-		ON CONFLICT DO NOTHING`, media.ID, media.UserID, mediaData, now)
+		ON CONFLICT DO NOTHING`, media.ID, media.UserID, jsonbParam(mediaData), now)
 	if err != nil {
 		return fmt.Errorf("insert media: %w", err)
 	}
@@ -181,7 +185,7 @@ func (s *PostgresStore) CreateMediaUpload(ctx context.Context, media models.Medi
 		INSERT INTO framemio_domain_records
 		(kind,id,user_id,project_id,media_id,logical_key,data,created_at,updated_at)
 		VALUES ('upload',$1,$2,'',$3,$4,$5,$6,$6)
-		ON CONFLICT DO NOTHING`, session.ID, session.UserID, session.MediaID, session.IdempotencyKey, sessionData, now)
+		ON CONFLICT DO NOTHING`, session.ID, session.UserID, session.MediaID, session.IdempotencyKey, jsonbParam(sessionData), now)
 	if err != nil {
 		return fmt.Errorf("insert upload: %w", err)
 	}
@@ -199,7 +203,7 @@ func (s *PostgresStore) UpdateUploadSession(ctx context.Context, session models.
 	if err != nil {
 		return fmt.Errorf("encode upload: %w", err)
 	}
-	result, err := s.pool.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='upload' AND id=$3 AND user_id=$4`, data, time.Now().UTC(), session.ID, session.UserID)
+	result, err := s.pool.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='upload' AND id=$3 AND user_id=$4`, jsonbParam(data), time.Now().UTC(), session.ID, session.UserID)
 	if err != nil {
 		return fmt.Errorf("update upload: %w", err)
 	}
@@ -309,10 +313,10 @@ func (s *PostgresStore) MarkMediaReady(ctx context.Context, userID, mediaID, upl
 	if err != nil {
 		return models.MediaAsset{}, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='media' AND id=$3 AND user_id=$4`, mediaData, now, mediaID, userID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='media' AND id=$3 AND user_id=$4`, jsonbParam(mediaData), now, mediaID, userID); err != nil {
 		return models.MediaAsset{}, fmt.Errorf("mark media ready: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='upload' AND id=$3 AND user_id=$4`, sessionData, now, uploadID, userID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='upload' AND id=$3 AND user_id=$4`, jsonbParam(sessionData), now, uploadID, userID); err != nil {
 		return models.MediaAsset{}, fmt.Errorf("complete upload: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -385,7 +389,7 @@ func (s *PostgresStore) AddProjectMedia(ctx context.Context, userID, projectID s
 	if err != nil {
 		return models.StoryProject{}, err
 	}
-	result, err := s.pool.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='project' AND id=$3 AND user_id=$4`, data, project.UpdatedAt, projectID, userID)
+	result, err := s.pool.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='project' AND id=$3 AND user_id=$4`, jsonbParam(data), project.UpdatedAt, projectID, userID)
 	if err != nil {
 		return models.StoryProject{}, fmt.Errorf("add project media: %w", err)
 	}
@@ -451,7 +455,7 @@ func (s *PostgresStore) SetProjectStatus(ctx context.Context, userID, projectID 
 	if err != nil {
 		return err
 	}
-	result, err := s.pool.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='project' AND id=$3 AND user_id=$4`, data, project.UpdatedAt, projectID, userID)
+	result, err := s.pool.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='project' AND id=$3 AND user_id=$4`, jsonbParam(data), project.UpdatedAt, projectID, userID)
 	if err != nil {
 		return err
 	}
@@ -560,7 +564,7 @@ func (s *PostgresStore) UpdateJob(ctx context.Context, jobID string, status mode
 	if err != nil {
 		return models.ProcessingJob{}, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='job' AND id=$3`, encoded, now, jobID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='job' AND id=$3`, jsonbParam(encoded), now, jobID); err != nil {
 		return models.ProcessingJob{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -600,7 +604,7 @@ func (s *PostgresStore) RetryJob(ctx context.Context, jobID string, nextRunAt ti
 	if err != nil {
 		return models.ProcessingJob{}, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='job' AND id=$3`, encoded, now, jobID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='job' AND id=$3`, jsonbParam(encoded), now, jobID); err != nil {
 		return models.ProcessingJob{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {

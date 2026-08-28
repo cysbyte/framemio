@@ -316,7 +316,7 @@ func (s *Postgres) mutateJob(ctx context.Context, jobID string, mutation func(*d
 	if err != nil {
 		return domain.ProcessingJob{}, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='job' AND id=$3`, encoded, now, jobID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='job' AND id=$3`, jsonbParam(encoded), now, jobID); err != nil {
 		return domain.ProcessingJob{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -336,7 +336,7 @@ func (s *Postgres) SetProjectStatus(ctx context.Context, userID, projectID, stat
 	if err != nil {
 		return err
 	}
-	result, err := s.pool.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='project' AND id=$3 AND user_id=$4`, data, project.UpdatedAt, projectID, userID)
+	result, err := s.pool.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='project' AND id=$3 AND user_id=$4`, jsonbParam(data), project.UpdatedAt, projectID, userID)
 	if err != nil {
 		return err
 	}
@@ -389,7 +389,7 @@ func (s *Postgres) insert(ctx context.Context, kind, id, userID, projectID, medi
 		INSERT INTO framemio_domain_records
 		(kind,id,user_id,project_id,media_id,logical_key,data,created_at,updated_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8)
-		ON CONFLICT DO NOTHING`, kind, id, userID, projectID, mediaID, key, data, now)
+		ON CONFLICT DO NOTHING`, kind, id, userID, projectID, mediaID, key, jsonbParam(data), now)
 	if err != nil {
 		return false, fmt.Errorf("insert %s: %w", kind, err)
 	}
@@ -401,6 +401,10 @@ func decode(kind string, data []byte, destination any) error {
 		return fmt.Errorf("decode %s: %w", kind, err)
 	}
 	return nil
+}
+
+func jsonbParam(data []byte) string {
+	return string(data)
 }
 
 func logicalKey(values ...string) string {
