@@ -348,6 +348,53 @@ func (s *PostgresStore) CreateProject(ctx context.Context, project models.StoryP
 	return project, false, nil
 }
 
+func (s *PostgresStore) AddProjectMedia(ctx context.Context, userID, projectID string, mediaIDs []string) (models.StoryProject, error) {
+	project, err := s.GetProject(ctx, userID, projectID)
+	if err != nil {
+		return models.StoryProject{}, err
+	}
+	existing := make(map[string]struct{}, len(project.MediaIDs))
+	for _, mediaID := range project.MediaIDs {
+		existing[mediaID] = struct{}{}
+	}
+	changed := false
+	for _, mediaID := range mediaIDs {
+		mediaID = strings.TrimSpace(mediaID)
+		if mediaID == "" {
+			continue
+		}
+		media, err := s.GetMedia(ctx, userID, mediaID)
+		if err != nil {
+			return models.StoryProject{}, err
+		}
+		if media.Status != models.MediaStatusReady {
+			return models.StoryProject{}, ErrConflict
+		}
+		if _, ok := existing[mediaID]; ok {
+			continue
+		}
+		project.MediaIDs = append(project.MediaIDs, mediaID)
+		existing[mediaID] = struct{}{}
+		changed = true
+	}
+	if !changed {
+		return project, nil
+	}
+	project.UpdatedAt = time.Now().UTC()
+	data, err := json.Marshal(project)
+	if err != nil {
+		return models.StoryProject{}, err
+	}
+	result, err := s.pool.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='project' AND id=$3 AND user_id=$4`, data, project.UpdatedAt, projectID, userID)
+	if err != nil {
+		return models.StoryProject{}, fmt.Errorf("add project media: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return models.StoryProject{}, ErrNotFound
+	}
+	return project, nil
+}
+
 func (s *PostgresStore) GetProject(ctx context.Context, userID, projectID string) (models.StoryProject, error) {
 	var project models.StoryProject
 	if err := s.get(ctx, "project", userID, projectID, &project); err != nil {
@@ -723,47 +770,4 @@ func (s *PostgresStore) GetStoryPlan(ctx context.Context, userID, projectID stri
 		return models.StoryPlan{}, fmt.Errorf("decode story plan: %w", err)
 	}
 	return plan, nil
-}
-
-func (s *PostgresStore) SaveMusicTrack(ctx context.Context, track models.MusicTrack) error {
-	if strings.TrimSpace(track.ID) == "" {
-		return ErrConflict
-	}
-	_, err := s.put(ctx, "music_track", track.ID, "", "", "", track.ID, track)
-	return err
-}
-
-func (s *PostgresStore) GetMusicTrack(ctx context.Context, trackID string) (models.MusicTrack, error) {
-	var track models.MusicTrack
-	if err := s.get(ctx, "music_track", "", trackID, &track); err != nil {
-		return models.MusicTrack{}, err
-	}
-	return track, nil
-}
-
-func (s *PostgresStore) ListMusicTracks(ctx context.Context, filter models.MusicTrackFilter) ([]models.MusicTrack, error) {
-	rows, err := s.pool.Query(ctx, `SELECT data FROM framemio_domain_records WHERE kind='music_track' ORDER BY data->>'title', id`)
-	if err != nil {
-		return nil, fmt.Errorf("list music tracks: %w", err)
-	}
-	defer rows.Close()
-	tracks := make([]models.MusicTrack, 0)
-	for rows.Next() {
-		var data []byte
-		if err := rows.Scan(&data); err != nil {
-			return nil, fmt.Errorf("scan music track: %w", err)
-		}
-		var track models.MusicTrack
-		if err := json.Unmarshal(data, &track); err != nil {
-			return nil, fmt.Errorf("decode music track: %w", err)
-		}
-		if !musicTrackMatchesFilter(track, filter) {
-			continue
-		}
-		tracks = append(tracks, track)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate music tracks: %w", err)
-	}
-	return tracks, nil
 }

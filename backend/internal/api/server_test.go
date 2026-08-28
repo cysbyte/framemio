@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -158,7 +159,6 @@ func TestMediaProjectAndJobFlowIsIdempotent(t *testing.T) {
 		VisualStyle:         models.VisualStyleCinematic,
 		TitleText:           "Your moments",
 		EndingText:          "A story made from the moments that mattered most.",
-		MusicMood:           "calm and reflective",
 		Moments: []models.StoryMoment{{
 			MomentID:             "moment-1",
 			AssetID:              uploadResponse.Media.ID,
@@ -170,7 +170,6 @@ func TestMediaProjectAndJobFlowIsIdempotent(t *testing.T) {
 			CropIntent:           "fill",
 			Transition:           "cut",
 		}},
-		Audio:           &models.StoryAudio{Source: "adaptive", Mood: "calm and reflective"},
 		Output:          models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 60, Preset: "social"},
 		TotalDurationMS: 3000,
 		CreatedAt:       time.Now().UTC(),
@@ -582,12 +581,10 @@ func TestIOSStoryEditQueuesStoryPlanRevisionWithoutReanalysis(t *testing.T) {
 		VisualStyle:         models.VisualStyleNatural,
 		TitleText:           "Special moments",
 		EndingText:          "The moments that stay with us.",
-		MusicMood:           "warm",
 		Moments: []models.StoryMoment{
 			{MomentID: "breakfast", AssetID: first.MediaID, MediaID: first.MediaID, MediaType: models.MediaTypePhoto, Narrative: "Breakfast", DurationMS: 4000, CropIntent: "fit", Transition: "fade_in"},
 			{MomentID: "lake", AssetID: second.MediaID, MediaID: second.MediaID, MediaType: models.MediaTypePhoto, Narrative: "Lake", DurationMS: 4000, CropIntent: "fit", Transition: "crossfade"},
 		},
-		Audio:           &models.StoryAudio{Source: "adaptive", Mood: "warm"},
 		Output:          models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 8, Preset: "premium-memory"},
 		TotalDurationMS: 8000,
 		CreatedAt:       now,
@@ -598,7 +595,6 @@ func TestIOSStoryEditQueuesStoryPlanRevisionWithoutReanalysis(t *testing.T) {
 	editResponse := performJSON(t, handler, http.MethodPost, "/v1/stories/"+story.ID+"/versions", map[string]any{
 		"removeMomentIds":  []string{"breakfast"},
 		"style":            "cinematic",
-		"musicMood":        "calm",
 		"subtitlesEnabled": false,
 		"subtitleStyle":    "minimal",
 		"targetDuration":   15,
@@ -621,7 +617,7 @@ func TestIOSStoryEditQueuesStoryPlanRevisionWithoutReanalysis(t *testing.T) {
 	if last.JobType != models.JobTypeStoryPlan || last.MediaID != "" {
 		t.Fatalf("edit should queue only a project-level story plan job, got %+v", last)
 	}
-	if last.Configuration["story_plan_version"] != "2" || last.Configuration["visual_style"] != "cinematic" || last.Configuration["music_mood"] != "calm" || last.Configuration["subtitles_enabled"] != "false" || last.Configuration["caption_style_preset"] != "clean_minimal" {
+	if last.Configuration["story_plan_version"] != "2" || last.Configuration["visual_style"] != "cinematic" || last.Configuration["subtitles_enabled"] != "false" || last.Configuration["caption_style_preset"] != "clean_minimal" {
 		t.Fatalf("unexpected edit config: %+v", last.Configuration)
 	}
 	if strings.Contains(last.Configuration["selected_media_ids"], first.MediaID) || !strings.Contains(last.Configuration["selected_media_ids"], second.MediaID) {
@@ -652,6 +648,134 @@ func TestIOSStoryEditRejectsForeignMediaReference(t *testing.T) {
 	}, "edit-key", true, nil)
 	if editResponse.Code != http.StatusBadRequest {
 		t.Fatalf("expected invalid media reference to be rejected, got %d body=%s", editResponse.Code, editResponse.Body.String())
+	}
+}
+
+func TestIOSStoryEditAddsUploadedPhotoOutsideOriginalStory(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	handler := newTestServer(memoryStore, publisher).Handler()
+
+	original := createReadyIOSMedia(t, handler, "asset-edit-original", models.MediaTypePhoto)
+	storyResponse := performJSON(t, handler, http.MethodPost, "/v1/stories", map[string]any{
+		"context": "Special moments",
+		"assets":  []map[string]any{{"id": "asset-edit-original", "kind": "image", "pixelWidth": 3024, "pixelHeight": 4032}},
+	}, "", true, nil)
+	if storyResponse.Code != http.StatusCreated {
+		t.Fatalf("create iOS story status = %d, body = %s", storyResponse.Code, storyResponse.Body.String())
+	}
+	var story iosStory
+	decodeResponse(t, storyResponse, &story)
+
+	newPhoto := createReadyIOSMedia(t, handler, "asset-edit-new-photo", models.MediaTypePhoto)
+	editResponse := performJSON(t, handler, http.MethodPost, "/v1/stories/"+story.ID+"/versions", map[string]any{
+		"addMediaIds": []string{newPhoto.MediaID},
+		"analyses": []map[string]any{{
+			"assetID":     newPhoto.MediaID,
+			"labels":      []string{"sunset", "lake"},
+			"peopleCount": 1,
+			"confidence":  0.88,
+		}},
+	}, "edit-add-photo", true, nil)
+	if editResponse.Code != http.StatusAccepted {
+		t.Fatalf("edit iOS story status = %d, body = %s", editResponse.Code, editResponse.Body.String())
+	}
+	project, err := memoryStore.GetProject(context.Background(), "user-1", story.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(project.MediaIDs, original.MediaID) || !slices.Contains(project.MediaIDs, newPhoto.MediaID) {
+		t.Fatalf("project media was not extended safely: %+v", project.MediaIDs)
+	}
+	messages := publisher.Messages()
+	last := messages[len(messages)-1]
+	if last.JobType != models.JobTypeStoryPlan {
+		t.Fatalf("new analyzed photo should queue story plan revision, got %+v", last)
+	}
+	if !strings.Contains(last.Configuration["selected_media_ids"], original.MediaID) || !strings.Contains(last.Configuration["selected_media_ids"], newPhoto.MediaID) {
+		t.Fatalf("selected media should include original and new photo: %+v", last.Configuration)
+	}
+}
+
+func TestIOSStoryEditDefersStoryPlanUntilNewVideoAnalysis(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	server := newTestServer(memoryStore, publisher)
+	handler := server.Handler()
+
+	createReadyIOSMedia(t, handler, "asset-edit-video-original", models.MediaTypePhoto)
+	storyResponse := performJSON(t, handler, http.MethodPost, "/v1/stories", map[string]any{
+		"context": "Special moments",
+		"assets":  []map[string]any{{"id": "asset-edit-video-original", "kind": "image", "pixelWidth": 3024, "pixelHeight": 4032}},
+	}, "", true, nil)
+	if storyResponse.Code != http.StatusCreated {
+		t.Fatalf("create iOS story status = %d, body = %s", storyResponse.Code, storyResponse.Body.String())
+	}
+	var story iosStory
+	decodeResponse(t, storyResponse, &story)
+
+	newVideo := createReadyIOSMedia(t, handler, "asset-edit-new-video", models.MediaTypeVideo)
+	editResponse := performJSON(t, handler, http.MethodPost, "/v1/stories/"+story.ID+"/versions", map[string]any{
+		"addMediaIds": []string{newVideo.MediaID},
+	}, "edit-add-video", true, nil)
+	if editResponse.Code != http.StatusAccepted {
+		t.Fatalf("edit iOS story status = %d, body = %s", editResponse.Code, editResponse.Body.String())
+	}
+	if last := publisher.Messages()[len(publisher.Messages())-1]; last.JobType != models.JobTypeMediaPreprocess || last.MediaID != newVideo.MediaID {
+		t.Fatalf("new video should queue only missing media analysis first, got %+v", last)
+	}
+	jobs, err := memoryStore.ListProjectJobs(context.Background(), "user-1", story.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countType(jobs, models.JobTypeStoryPlan) != 2 {
+		t.Fatalf("expected initial story plan plus deferred revision job, got %+v", jobs)
+	}
+
+	preprocess := latestPublishedJob(t, publisher, models.JobTypeMediaPreprocess)
+	if _, err := server.Orchestrator.UpdateJobStatus(context.Background(), preprocess.JobID, models.JobStatusCompleted, 1, "", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	transcribe := latestPublishedJob(t, publisher, models.JobTypeTranscribe)
+	if _, err := server.Orchestrator.UpdateJobStatus(context.Background(), transcribe.JobID, models.JobStatusCompleted, 1, "", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, time.August, 19, 10, 0, 0, 0, time.UTC)
+	if err := memoryStore.SaveVideoAnalysis(context.Background(), "user-1", models.VideoAnalysis{
+		ID:                 "video-analysis-edit",
+		VideoID:            newVideo.MediaID,
+		ProjectID:          story.ID,
+		AnalysisVersion:    "test-v1",
+		DurationMicros:     30_000_000,
+		DetectedActivities: []string{"laughing"},
+		QualitySignals:     models.VideoQualitySignals{OverallScore: 0.9},
+		Segments: []models.VideoSegment{{
+			SegmentID:      "segment-edit-laughing",
+			StartMicros:    8_000_000,
+			EndMicros:      12_000_000,
+			Description:    "Family laughing",
+			Importance:     0.9,
+			VisualQuality:  0.9,
+			MemoryValue:    0.9,
+			StoryRelevance: 0.9,
+			Recommended:    true,
+		}},
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	understand := latestPublishedJob(t, publisher, models.JobTypeVideoUnderstand)
+	before := len(publisher.Messages())
+	if _, err := server.Orchestrator.UpdateJobStatus(context.Background(), understand.JobID, models.JobStatusCompleted, 1, "", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	after := publisher.Messages()
+	if len(after) <= before || after[len(after)-1].JobType != models.JobTypeStoryPlan {
+		t.Fatalf("deferred story revision was not published after video analysis: before=%d after=%+v", before, after)
 	}
 }
 
@@ -1207,47 +1331,11 @@ func assertSmallIdentifierOnlyMessage(t *testing.T, message queue.JobMessage) {
 	}
 }
 
-func TestMusicCatalogExposesOnlyApprovedSafeFields(t *testing.T) {
+func TestPublicMusicRoutesAreUnavailableInV1(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
-	memoryStore := store.NewMemoryStore()
-	now := time.Date(2026, time.August, 28, 8, 0, 0, 0, time.UTC)
-	approved := models.MusicTrack{
-		ID:                   "music-approved",
-		Title:                "Golden Summer",
-		Status:               models.MusicTrackStatusApproved,
-		DurationSeconds:      90,
-		BPM:                  84,
-		Moods:                []string{"warm", "nostalgic"},
-		Energy:               0.42,
-		Genre:                "acoustic",
-		Instrumental:         true,
-		SpeechFriendly:       true,
-		StorageKey:           "music/music-approved/master.mp3",
-		PreviewStorageKey:    "music/music-approved/preview.mp3",
-		Provider:             "elevenlabs",
-		ProviderGenerationID: "secret-provider-id",
-		GenerationMetadata:   map[string]interface{}{"model": "music_v2"},
-		LicenseMetadata:      models.MusicLicenseMetadata{LicenseStatus: models.MusicLicenseStatusVerified},
-		CreatedAt:            now,
-		UpdatedAt:            now,
-	}
-	draft := approved
-	draft.ID = "music-draft"
-	draft.Status = models.MusicTrackStatusReview
-	if err := memoryStore.SaveMusicTrack(ctx, approved); err != nil {
-		t.Fatal(err)
-	}
-	if err := memoryStore.SaveMusicTrack(ctx, draft); err != nil {
-		t.Fatal(err)
-	}
-	handler := newTestServer(memoryStore, queue.NewMemoryPublisher()).Handler()
+	handler := newTestServer(store.NewMemoryStore(), queue.NewMemoryPublisher()).Handler()
 	response := performJSON(t, handler, http.MethodGet, "/v1/music", nil, "", true, nil)
-	if response.Code != http.StatusOK {
-		t.Fatalf("music catalog status = %d body = %s", response.Code, response.Body.String())
-	}
-	body := response.Body.String()
-	if !strings.Contains(body, "music-approved") || strings.Contains(body, "music-draft") || strings.Contains(body, "secret-provider-id") || strings.Contains(body, "master.mp3") || strings.Contains(body, "license") {
-		t.Fatalf("public music response leaked internal data or omitted approved track: %s", body)
+	if response.Code != http.StatusNotFound && response.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("V1 should not expose public music APIs, got status=%d body=%s", response.Code, response.Body.String())
 	}
 }

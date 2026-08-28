@@ -653,7 +653,37 @@ GET  /v1/stories/:id
 POST /v1/stories/:id/versions
 ```
 
-`POST /v1/stories/:id/versions` accepts edit preferences such as selected/removed media, music/style changes, `subtitlesEnabled`, and `subtitleStyle`. Subtitle preferences are stored as story-plan revision configuration (`subtitles_enabled` and `caption_style_preset`) and affect only generated `StoryPlan` captions plus renderer-safe `caption_style`; iOS never sends raw renderer commands, font paths, STT provider information, or transcript text.
+`POST /v1/stories/:id/versions` accepts edit preferences such as selected/removed media, style changes, `subtitlesEnabled`, and `subtitleStyle`. Subtitle preferences are stored as story-plan revision configuration (`subtitles_enabled` and `caption_style_preset`) and affect only generated `StoryPlan` captions plus renderer-safe `caption_style`; iOS never sends raw renderer commands, font paths, STT provider information, or transcript text.
+
+## 8.3 Edit Story contract
+
+Edit Story is an intent-based story revision flow. It must preserve this separation:
+
+```text
+Project Media ≠ Story Moments ≠ StoryPlan
+```
+
+The iOS client may request high-level changes such as add media, remove moments, replace moments, style, target duration, subtitle settings, and natural-language revision instructions. The client must not choose final story ordering, raw video trim ranges, renderer commands, internal job stages, provider IDs, or raw `StoryPlan` JSON.
+
+Add media supports both existing Project Media and brand-new Photos selections:
+
+```text
+Photos Picker
+  -> existing upload session flow
+  -> Project Media record
+  -> attach media to existing story project after ownership/status checks
+  -> save local photo analysis when provided by iOS
+  -> queue only missing media analysis for new videos
+  -> publish deferred StoryPlan revision when selected media are analysis-ready
+  -> StoryPlan Validator
+  -> Render Worker
+```
+
+Removing or replacing a moment changes the story revision intent only; it must not delete the underlying Project Media. Existing `VideoAnalysis`, transcript, and photo analysis records are reused. Only newly added media without valid analysis should enter the media-analysis pipeline.
+
+If a selected new video is not analysis-ready, the backend creates a queued but unpublished `STORY_PLAN` revision job marked `deferred_until_analysis=true`, queues the missing media stages through the existing SQS pipeline, and publishes the deferred revision once the selected media are ready. This avoids reanalyzing existing story media and avoids rendering from incomplete evidence.
+
+Background music is intentionally out of scope for V1. Edit Story must not expose music controls, and story revisions must not call music providers, download music files, or attach music to media/moments. Future music should be added as a StoryPlan-level composition component, not as a property of Project Media or Story Moments.
 
 Existing project/media routes:
 
@@ -1152,7 +1182,7 @@ It should specify:
 - order
 - clip duration
 - transitions
-- music configuration
+- future composition extensions
 - text/captions
 - aspect ratio
 - target duration
@@ -1188,7 +1218,6 @@ story_type
 visual_style
 title_text
 ending_text
-music_mood
 user_instructions
 moments
 captions
@@ -1221,63 +1250,31 @@ Photo moments must have positive `duration_ms` and no source timestamps. Video m
 
 `caption_style` is optional renderer-safe styling metadata for captions/subtitles. It may include whitelisted presets such as `bold_social`, `cinematic_subtitle`, `clean_minimal`, and `playful_pop`, plus validated fields for font family, font size, text/stroke/background colors, background opacity, position, bottom offset, max lines, and max characters per line. It must not contain raw FFmpeg/Remotion commands, arbitrary font file paths, provider information, or transcript source details.
 
-## 16.2 Background music contract
+## 16.2 V1 audio and future background music
 
-Background music is catalog-based and optional. Normal story creation never calls ElevenLabs or any other music-generation provider. Story planning produces/updates `StoryPlan.audio`; the deterministic `MusicSelector` resolves `auto`, `selected`, or `none` against approved `MusicTrack` records before validation/rendering.
+FrameMio V1 does not provide background music. Story creation, Edit Story, Story Planner, workers, Remotion, FFmpeg, S3, SQS, and public APIs must not require or call ElevenLabs, a music provider, a music catalog, music generation jobs, music previews, background music downloads, audio ducking, or a music mixer.
 
-`StoryPlan.audio` may include:
-
-```text
-source              adaptive | original | licensed | custom | none
-mode                auto | selected | none
-track_id            FrameMio MusicTrack ID
-background_s3_key   private master/preview music object key for renderer access
-original_audio      whether source video audio is preserved
-background_volume   conservative music bed volume, default 0.16
-original_volume     source audio volume, default 1.0
-ducking             whether captions/transcript speech intervals duck music
-ducked_volume       music volume target during speech, default 0.04
-start_offset_seconds deterministic offset into the selected music track
-fade_in_ms
-fade_out_ms
-```
-
-`mode=none` means no background music and preserves original source audio through `source=original`. `licensed` StoryPlans reference FrameMio catalog IDs/S3 keys only; they must not expose Eleven generation IDs, provider API keys, license metadata, or provider-specific API shapes.
-
----
-
-## 16.3 Music catalog and providers
-
-`MusicTrack` is persisted as a domain record (`kind = music_track`) so no separate migration is required. It stores catalog metadata (`title`, `duration_seconds`, `bpm`, `moods`, `energy`, `genre`, `instrumental`, `speech_friendly`), storage keys, provider metadata, lifecycle status (`draft`, `review`, `approved`, `disabled`), and explicit license metadata (`pending`, `verified`, `restricted`, `unknown`).
-
-Provider generation is server-side/admin-only:
+Original source-video audio remains supported. `StoryPlan.audio` is optional and, in V1, is limited to source-audio intent such as:
 
 ```text
-Admin/internal API
-  -> MusicGenerationService
-  -> MusicProvider
-  -> LocalProvider or ElevenProvider
-  -> private S3 music/{trackId}/master.ext
-  -> MusicTrack review state
-  -> explicit approval/license verification
+source            original | none
+original_audio    whether source video audio is preserved
+original_volume   source audio volume, default 1.0
 ```
 
-Public iOS catalog APIs return only approved user-safe fields and optional short-lived preview URLs. They never return provider generation IDs, S3 storage keys, license metadata, or API keys.
+If `audio` is omitted, the renderer should preserve original video audio by default. `source=none` or `original_audio=false` may be used only when the story intentionally disables all source audio.
 
-Environment variables:
+Future background music should be introduced as an optional StoryPlan-level composition feature:
 
 ```text
-MUSIC_PROVIDER=local|elevenlabs|eleven
-ELEVENLABS_API_KEY=...
-ELEVENLABS_BASE_URL=https://api.elevenlabs.io
-ELEVEN_MUSIC_MODEL=music_v2
-ELEVEN_MUSIC_OUTPUT_FORMAT=auto
-MUSIC_REQUIRE_VERIFIED_LICENSE=true|false
-MUSIC_BACKGROUND_VOLUME=0.16
-MUSIC_DUCKED_VOLUME=0.04
+StoryPlan
+  + future music section
+  -> Render Worker
+  -> Audio Mixer
+  -> Remotion / FFmpeg
 ```
 
-Use `MUSIC_PROVIDER=local` for deterministic development/test catalog generation. Production should only expose tracks whose rights have been verified when `MUSIC_REQUIRE_VERIFIED_LICENSE=true`.
+Future music must belong to the overall Story composition, not to Media, Moment, Photo, or VideoSegment records. Adding future music must not require redesigning Story, StoryVersion, Moment, Media, Add Media, Edit Story, VideoAnalysis, or Transcript relationships.
 
 ---
 
@@ -1391,12 +1388,9 @@ Transitions:
 
 Audio:
 
-- preserves original source audio when requested
-- downloads selected catalog background music from private S3
-- trims music to StoryPlan duration so music never extends the video
-- applies conservative background volume
-- applies fade in/out
-- applies transcript/caption-aware music ducking with short ramps
+- preserves original source video audio by default
+- does not download or mix background music in V1
+- does not apply music ducking in V1
 
 Text:
 
@@ -1678,7 +1672,6 @@ A typical project should follow:
     - replace moment
     - make shorter
     - make longer
-    - change music
     - share
 ```
 
@@ -1950,7 +1943,7 @@ TranscriptionProvider
 StoryPlanningProvider
 ```
 
-Provider-specific request/response logic stays inside adapters. Video understanding, transcription, story planning, and music generation use separate replaceable provider interfaces; StoryPlan and render worker contracts reference FrameMio domain IDs and storage keys, not provider response types.
+Provider-specific request/response logic stays inside adapters. Video understanding, transcription, and story planning use separate replaceable provider interfaces; StoryPlan and render worker contracts reference FrameMio domain IDs and storage keys, not provider response types. Background music is a future StoryPlan-level composition extension and is not active in V1.
 
 The core domain model must not depend on:
 

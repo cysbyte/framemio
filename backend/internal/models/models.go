@@ -19,63 +19,6 @@ const (
 	MediaTypeLivePhoto MediaType = "live_photo"
 )
 
-type MusicTrackStatus string
-
-const (
-	MusicTrackStatusDraft    MusicTrackStatus = "draft"
-	MusicTrackStatusReview   MusicTrackStatus = "review"
-	MusicTrackStatusApproved MusicTrackStatus = "approved"
-	MusicTrackStatusDisabled MusicTrackStatus = "disabled"
-)
-
-type MusicLicenseStatus string
-
-const (
-	MusicLicenseStatusPending    MusicLicenseStatus = "pending"
-	MusicLicenseStatusVerified   MusicLicenseStatus = "verified"
-	MusicLicenseStatusRestricted MusicLicenseStatus = "restricted"
-	MusicLicenseStatusUnknown    MusicLicenseStatus = "unknown"
-)
-
-type MusicTrack struct {
-	ID                   string                 `json:"id"`
-	Title                string                 `json:"title"`
-	Status               MusicTrackStatus       `json:"status"`
-	DurationSeconds      float64                `json:"duration_seconds"`
-	BPM                  int                    `json:"bpm,omitempty"`
-	Moods                []string               `json:"moods,omitempty"`
-	Energy               float64                `json:"energy,omitempty"`
-	Genre                string                 `json:"genre,omitempty"`
-	Instrumental         bool                   `json:"instrumental"`
-	SpeechFriendly       bool                   `json:"speech_friendly"`
-	StorageKey           string                 `json:"storage_key"`
-	PreviewStorageKey    string                 `json:"preview_storage_key,omitempty"`
-	Provider             string                 `json:"provider"`
-	ProviderGenerationID string                 `json:"provider_generation_id,omitempty"`
-	GenerationMetadata   map[string]interface{} `json:"generation_metadata,omitempty"`
-	LicenseMetadata      MusicLicenseMetadata   `json:"license_metadata"`
-	CreatedAt            time.Time              `json:"created_at"`
-	UpdatedAt            time.Time              `json:"updated_at"`
-}
-
-type MusicLicenseMetadata struct {
-	Provider      string             `json:"provider"`
-	LicenseStatus MusicLicenseStatus `json:"license_status"`
-	TermsVersion  string             `json:"terms_version,omitempty"`
-	VerifiedAt    *time.Time         `json:"verified_at,omitempty"`
-	Notes         string             `json:"notes,omitempty"`
-}
-
-type MusicTrackFilter struct {
-	IncludeDrafts          bool
-	RequireApproved        bool
-	RequireVerifiedLicense bool
-	Mood                   string
-	Genre                  string
-	SpeechFriendlyOnly     bool
-	MinDurationSeconds     float64
-}
-
 type MediaStatus string
 
 const (
@@ -290,7 +233,6 @@ type StoryPlan struct {
 	VisualStyle         VisualStyle    `json:"visual_style,omitempty"`
 	TitleText           string         `json:"title_text,omitempty"`
 	EndingText          string         `json:"ending_text,omitempty"`
-	MusicMood           string         `json:"music_mood,omitempty"`
 	UserInstructions    string         `json:"user_instructions,omitempty"`
 	Moments             []StoryMoment  `json:"moments"`
 	Captions            []StoryCaption `json:"captions,omitempty"`
@@ -319,19 +261,9 @@ type StoryMoment struct {
 }
 
 type StoryAudio struct {
-	Source             string  `json:"source"`
-	Mood               string  `json:"mood,omitempty"`
-	Mode               string  `json:"mode,omitempty"`
-	TrackID            string  `json:"track_id,omitempty"`
-	BackgroundS3Key    string  `json:"background_s3_key,omitempty"`
-	OriginalAudio      *bool   `json:"original_audio,omitempty"`
-	BackgroundVolume   float64 `json:"background_volume,omitempty"`
-	OriginalVolume     float64 `json:"original_volume,omitempty"`
-	Ducking            *bool   `json:"ducking,omitempty"`
-	DuckedVolume       float64 `json:"ducked_volume,omitempty"`
-	StartOffsetSeconds float64 `json:"start_offset_seconds,omitempty"`
-	FadeInMS           int     `json:"fade_in_ms,omitempty"`
-	FadeOutMS          int     `json:"fade_out_ms,omitempty"`
+	Source         string  `json:"source,omitempty"`
+	OriginalAudio  *bool   `json:"original_audio,omitempty"`
+	OriginalVolume float64 `json:"original_volume,omitempty"`
 }
 
 type StoryOutput struct {

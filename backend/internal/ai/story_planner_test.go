@@ -20,7 +20,7 @@ func TestPlannerBuildsChronologicalCoherentStoryPlan(t *testing.T) {
 	if err := ValidateStoryPlan(plan); err != nil {
 		t.Fatal(err)
 	}
-	if plan.TitleText == "" || plan.EndingText == "" || plan.MusicMood == "" || plan.TotalDurationMS <= 0 {
+	if plan.TitleText == "" || plan.EndingText == "" || plan.TotalDurationMS <= 0 {
 		t.Fatalf("plan is missing story metadata: %+v", plan)
 	}
 	if len(plan.Moments) < 3 {
@@ -40,8 +40,8 @@ func TestPlannerBuildsChronologicalCoherentStoryPlan(t *testing.T) {
 			t.Fatal("photo moment should preserve useful captioning")
 		}
 	}
-	if !strings.Contains(strings.ToLower(plan.TitleText), "trip") || !strings.Contains(strings.ToLower(plan.MusicMood), "uplifting") {
-		t.Fatalf("unexpected metadata: title=%q mood=%q", plan.TitleText, plan.MusicMood)
+	if !strings.Contains(strings.ToLower(plan.TitleText), "trip") {
+		t.Fatalf("unexpected title metadata: title=%q", plan.TitleText)
 	}
 	if len(plan.Captions) == 0 {
 		t.Fatal("expected captions for useful moments")
@@ -467,7 +467,7 @@ func TestValidateStoryPlanRejectsBrokenReferences(t *testing.T) {
 	t.Parallel()
 	plan := models.StoryPlan{
 		ID: "plan_1", ProjectID: "project-1", Version: 1, StoryType: models.StoryTypeToday, VisualStyle: models.VisualStyleCinematic,
-		TitleText: "Your day in moments", EndingText: "A story made from the moments that mattered most.", MusicMood: "calm and reflective",
+		TitleText: "Your day in moments", EndingText: "A story made from the moments that mattered most.",
 		Moments: []models.StoryMoment{{
 			MomentID: "moment-1", AssetID: "media-1", MediaType: models.MediaTypeVideo, VideoAnalysisVersion: "video-analysis-v1",
 			StartMicros: 0, EndMicros: 4_000_000, DurationMS: 4000, CropIntent: "fill", Transition: "cut",

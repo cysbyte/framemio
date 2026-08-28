@@ -1,8 +1,16 @@
 import Combine
 import Foundation
 import Photos
+import PhotosUI
 import SwiftUI
 import UIKit
+
+
+struct ImportedStoryMedia: Hashable, Sendable {
+    let mediaID: String
+    let sourceAsset: MediaAsset
+    let analysis: MediaAnalysis?
+}
 
 @MainActor
 final class StoryPreviewViewModel: ObservableObject {
@@ -24,6 +32,8 @@ final class StoryPreviewViewModel: ObservableObject {
     private let storyService: StoryService
     private let photoLibrary: PhotoLibraryService
     private let mediaUploadStore: MediaUploadStore
+    private let mediaUploadService: MediaUploadService
+    private let analysisService: MediaAnalysisService
     private var loadTask: Task<Void, Never>?
     private var actionTask: Task<Void, Never>?
     private var thumbnailTasks: [String: Task<Void, Never>] = [:]
@@ -33,7 +43,9 @@ final class StoryPreviewViewModel: ObservableObject {
         story: Story,
         storyService: StoryService,
         photoLibrary: PhotoLibraryService,
-        mediaUploadStore: MediaUploadStore
+        mediaUploadStore: MediaUploadStore,
+        mediaUploadService: MediaUploadService,
+        analysisService: MediaAnalysisService
     ) {
         self.story = story
         storyID = story.id
@@ -44,13 +56,17 @@ final class StoryPreviewViewModel: ObservableObject {
         self.storyService = storyService
         self.photoLibrary = photoLibrary
         self.mediaUploadStore = mediaUploadStore
+        self.mediaUploadService = mediaUploadService
+        self.analysisService = analysisService
     }
 
     init(
         storyID: String,
         storyService: StoryService,
         photoLibrary: PhotoLibraryService,
-        mediaUploadStore: MediaUploadStore
+        mediaUploadStore: MediaUploadStore,
+        mediaUploadService: MediaUploadService,
+        analysisService: MediaAnalysisService
     ) {
         self.storyID = storyID
         launchContext = nil
@@ -60,6 +76,8 @@ final class StoryPreviewViewModel: ObservableObject {
         self.storyService = storyService
         self.photoLibrary = photoLibrary
         self.mediaUploadStore = mediaUploadStore
+        self.mediaUploadService = mediaUploadService
+        self.analysisService = analysisService
     }
 
     init(
@@ -69,7 +87,9 @@ final class StoryPreviewViewModel: ObservableObject {
         storyLaunchCoordinator: StoryLaunchCoordinator,
         storyService: StoryService,
         photoLibrary: PhotoLibraryService,
-        mediaUploadStore: MediaUploadStore
+        mediaUploadStore: MediaUploadStore,
+        mediaUploadService: MediaUploadService,
+        analysisService: MediaAnalysisService
     ) {
         storyID = nil
         launchContext = context
@@ -79,6 +99,8 @@ final class StoryPreviewViewModel: ObservableObject {
         self.storyService = storyService
         self.photoLibrary = photoLibrary
         self.mediaUploadStore = mediaUploadStore
+        self.mediaUploadService = mediaUploadService
+        self.analysisService = analysisService
         launchCancellable = storyLaunchCoordinator.objectWillChange.sink { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.objectWillChange.send()
@@ -302,6 +324,54 @@ final class StoryPreviewViewModel: ObservableObject {
         }
     }
 
+    func importMediaForEdit(_ items: [PhotosPickerItem]) async throws -> [ImportedStoryMedia] {
+        let identifiers = items.compactMap(\.itemIdentifier)
+        guard !identifiers.isEmpty else { return [] }
+        let assets = try await photoLibrary.resolveAssets(localIdentifiers: identifiers)
+        guard !assets.isEmpty else {
+            throw AppError.message("We couldn't read those Photos items. Try selecting them again.")
+        }
+        let selection = MediaSelection(explicitlySelectedAssetIDs: assets.map(\.id))
+        let uploads = try await mediaUploadService.upload(
+            selection: selection,
+            assets: assets,
+            options: MediaUploadOptions(),
+            progress: { _ in }
+        )
+        var uploadsByAssetID: [String: MediaUpload] = [:]
+        for upload in uploads where upload.status == .completed && upload.mediaID != nil {
+            uploadsByAssetID[upload.assetID] = upload
+        }
+        var imported: [ImportedStoryMedia] = []
+        for asset in assets {
+            guard let upload = uploadsByAssetID[asset.id], let mediaID = upload.mediaID else { continue }
+            let storyAsset = MediaAsset(
+                id: mediaID,
+                localIdentifier: asset.localIdentifier,
+                kind: asset.kind,
+                creationDate: asset.creationDate,
+                duration: asset.duration,
+                pixelWidth: asset.pixelWidth,
+                pixelHeight: asset.pixelHeight
+            )
+            momentAssets[mediaID] = storyAsset
+            let analysis: MediaAnalysis?
+            if asset.isVideo {
+                analysis = nil
+            } else {
+                let localAnalysis = try await analysisService.analyze(asset: asset)
+                analysis = MediaAnalysis(
+                    assetID: mediaID,
+                    labels: localAnalysis.labels,
+                    peopleCount: localAnalysis.peopleCount,
+                    confidence: localAnalysis.confidence
+                )
+            }
+            imported.append(ImportedStoryMedia(mediaID: mediaID, sourceAsset: storyAsset, analysis: analysis))
+        }
+        return imported
+    }
+
     func saveStoryEdits(_ request: StoryEditRequest) {
         guard let storyID, request.hasChanges, story?.status.shouldPoll != true else { return }
         perform(.editStory) { [storyService] in
@@ -339,9 +409,6 @@ final class StoryPreviewViewModel: ObservableObject {
                 removeMediaIDs: [],
                 addMediaIDs: [assetID],
                 replace: [],
-                musicMood: nil,
-                musicMode: nil,
-                musicTrackId: nil,
                 style: nil,
                 subtitlesEnabled: nil,
                 subtitleStyle: nil,
@@ -360,9 +427,6 @@ final class StoryPreviewViewModel: ObservableObject {
                 removeMediaIDs: [assetID],
                 addMediaIDs: [],
                 replace: [],
-                musicMood: nil,
-                musicMode: nil,
-                musicTrackId: nil,
                 style: nil,
                 subtitlesEnabled: nil,
                 subtitleStyle: nil,

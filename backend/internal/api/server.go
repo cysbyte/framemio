@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/framemio/backend/internal/models"
-	"github.com/framemio/backend/internal/music"
 	"github.com/framemio/backend/internal/orchestration"
 	"github.com/framemio/backend/internal/queue"
 	"github.com/framemio/backend/internal/storage"
@@ -25,19 +24,17 @@ import (
 const maxJSONBodyBytes = 1 << 20
 
 type Server struct {
-	Store                       store.Store
-	ObjectStorage               storage.ObjectStorage
-	StoryPlanValidator          storyvalidation.Service
-	Publisher                   queue.Publisher
-	Activator                   workeractivation.Activator
-	Orchestrator                *orchestration.Coordinator
-	Authenticator               Authenticator
-	Logger                      *slog.Logger
-	Now                         func() time.Time
-	InternalToken               string
-	ExpensiveLimiter            ExpensiveOperationLimiter
-	MusicGenerator              *music.GenerationService
-	RequireVerifiedMusicLicense bool
+	Store              store.Store
+	ObjectStorage      storage.ObjectStorage
+	StoryPlanValidator storyvalidation.Service
+	Publisher          queue.Publisher
+	Activator          workeractivation.Activator
+	Orchestrator       *orchestration.Coordinator
+	Authenticator      Authenticator
+	Logger             *slog.Logger
+	Now                func() time.Time
+	InternalToken      string
+	ExpensiveLimiter   ExpensiveOperationLimiter
 }
 
 func NewServer(dependencies Server) *Server {
@@ -78,10 +75,6 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 	}
 	if request.URL.Path == "/v1/auth/refresh" {
 		s.refreshAnonymousToken(response, request)
-		return
-	}
-	if strings.HasPrefix(request.URL.Path, "/internal/music") {
-		s.dispatchInternalMusic(response, request)
 		return
 	}
 	if strings.HasPrefix(request.URL.Path, "/internal/jobs/") {
@@ -146,10 +139,6 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 			return
 		}
 		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
-		return
-	}
-	if request.URL.Path == "/v1/music" || strings.HasPrefix(request.URL.Path, "/v1/music/") {
-		s.dispatchMusic(response, request)
 		return
 	}
 	if request.URL.Path == "/v1/stories" {

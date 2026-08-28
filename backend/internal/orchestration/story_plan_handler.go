@@ -12,16 +12,14 @@ import (
 
 	"github.com/framemio/backend/internal/ai"
 	"github.com/framemio/backend/internal/models"
-	"github.com/framemio/backend/internal/music"
 	"github.com/framemio/backend/internal/store"
 )
 
 type StoryPlanHandler struct {
-	Store         store.Store
-	Planner       *ai.Planner
-	MusicSelector *music.Selector
-	Now           func() time.Time
-	Logger        *slog.Logger
+	Store   store.Store
+	Planner *ai.Planner
+	Now     func() time.Time
+	Logger  *slog.Logger
 }
 
 func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJob) error {
@@ -71,55 +69,12 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		return err
 	}
 	h.logger().Info("story planner output ready", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.Int("moment_count", len(plan.Moments)), slog.Int("caption_count", len(plan.Captions)), slog.Int("video_moment_count", videoMomentCount(plan.Moments)), slog.String("caption_style_preset", storyPlanCaptionStylePreset(plan)))
-	if mood := strings.TrimSpace(job.Configuration["music_mood"]); mood != "" {
-		plan.MusicMood = mood
-		if plan.Audio == nil {
-			plan.Audio = &models.StoryAudio{Source: "adaptive"}
-		}
-		plan.Audio.Mood = mood
-	}
-	h.applyMusicSelection(ctx, job, project, request, videoAnalyses, &plan)
 	if err := h.Store.SaveStoryPlan(ctx, job.UserID, plan); err != nil {
 		h.logger().Error("save story plan failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("caption_count", len(plan.Captions)), slog.Any("error", err))
 		return err
 	}
 	h.logger().Info("story plan saved", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("caption_count", len(plan.Captions)))
 	return nil
-}
-
-func (h StoryPlanHandler) applyMusicSelection(ctx context.Context, job models.ProcessingJob, project models.StoryProject, request ai.Request, videoAnalyses []models.VideoAnalysis, plan *models.StoryPlan) {
-	if plan == nil || h.MusicSelector == nil {
-		return
-	}
-	mode := strings.TrimSpace(job.Configuration["music_mode"])
-	selectedTrackID := strings.TrimSpace(job.Configuration["music_track_id"])
-	if mode == "" {
-		mode = "auto"
-	}
-	storyDuration := float64(plan.TotalDurationMS) / 1000
-	if storyDuration <= 0 {
-		storyDuration = request.DesiredDuration.Seconds()
-	}
-	audio, err := h.MusicSelector.Select(ctx, music.SelectionRequest{
-		ProjectID:       project.ID,
-		StoryPlanID:     plan.ID,
-		Mood:            firstNonEmpty(plan.MusicMood, job.Configuration["music_mood"]),
-		VisualStyle:     request.VisualStyle,
-		DurationSeconds: storyDuration,
-		HasSpeech:       totalTranscriptSegments(videoAnalyses) > 0,
-		Mode:            mode,
-		SelectedTrackID: selectedTrackID,
-	})
-	if err != nil {
-		h.logger().Warn("music selection failed; keeping planner audio", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("music_mode", mode), slog.Any("error", err))
-		return
-	}
-	if audio == nil {
-		h.logger().Info("music selection skipped; no approved track available", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("music_mode", mode))
-		return
-	}
-	plan.Audio = audio
-	h.logger().Info("music selection applied", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("music_mode", audio.Mode), slog.String("track_id", valueOrUnset(audio.TrackID)), slog.Bool("ducking", audio.Ducking != nil && *audio.Ducking))
 }
 
 func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configuration map[string]string, photoAnalyses []models.PhotoAnalysis, videoAnalyses []models.VideoAnalysis, clusters []models.MediaCluster) ai.Request {

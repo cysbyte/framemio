@@ -135,7 +135,6 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 	visualStyle := normalizeVisualStyle(request.VisualStyle)
 	titleText := titleFor(storyType, request, moments)
 	endingText := endingFor(storyType, request, moments)
-	musicMood := musicMoodFor(storyType, request, moments)
 	captionStyle := captionStyleFor(storyType, visualStyle)
 	if preset := strings.TrimSpace(request.CaptionStylePreset); preset != "" {
 		captionStyle = captionStylePreset(preset, storyType, visualStyle)
@@ -150,12 +149,10 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 		VisualStyle:         visualStyle,
 		TitleText:           titleText,
 		EndingText:          endingText,
-		MusicMood:           musicMood,
 		UserInstructions:    strings.TrimSpace(request.UserInstructions),
 		Moments:             moments,
 		Captions:            captions,
 		CaptionStyle:        captionStyle,
-		Audio:               &models.StoryAudio{Source: "adaptive", Mood: musicMood},
 		Output: models.StoryOutput{
 			AspectRatio:  "9:16",
 			MaxDurationS: max(1, int(math.Ceil(request.DesiredDuration.Seconds()))),
@@ -235,8 +232,8 @@ func ValidateStoryPlan(plan models.StoryPlan) error {
 	if !validVisualStyle(plan.VisualStyle) {
 		return fmt.Errorf("invalid visual style %q", plan.VisualStyle)
 	}
-	if strings.TrimSpace(plan.TitleText) == "" || strings.TrimSpace(plan.EndingText) == "" || strings.TrimSpace(plan.MusicMood) == "" {
-		return errors.New("story plan requires title, ending, and music mood")
+	if strings.TrimSpace(plan.TitleText) == "" || strings.TrimSpace(plan.EndingText) == "" {
+		return errors.New("story plan requires title and ending")
 	}
 	if strings.TrimSpace(plan.Output.AspectRatio) == "" || strings.TrimSpace(plan.Output.Preset) == "" || plan.Output.MaxDurationS <= 0 {
 		return errors.New("story plan output is incomplete")
@@ -660,24 +657,6 @@ func endingFor(storyType models.StoryType, request Request, moments []models.Sto
 			return "A story made from the moments that mattered most."
 		}
 		return ""
-	}
-}
-
-func musicMoodFor(storyType models.StoryType, request Request, moments []models.StoryMoment) string {
-	switch storyType {
-	case models.StoryTypeBirthday, models.StoryTypeFriends, models.StoryTypePet:
-		return "warm and joyful"
-	case models.StoryTypeTrip, models.StoryTypeEvent:
-		return "cinematic and uplifting"
-	case models.StoryTypeFamily:
-		return "heartfelt and gentle"
-	case models.StoryTypeToday, models.StoryTypeWeekend:
-		return "calm and reflective"
-	default:
-		if strings.Contains(strings.ToLower(request.UserInstructions), "upbeat") {
-			return "uplifting"
-		}
-		return "cinematic and calm"
 	}
 }
 

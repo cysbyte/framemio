@@ -4,6 +4,7 @@ protocol PhotoLibraryService: Sendable {
     func authorizationStatus() async -> PhotoLibraryAuthorization
     func requestAuthorization() async -> PhotoLibraryAuthorization
     func fetchAssets(for context: MomentContext, filter: PhotoLibraryMediaFilter) async throws -> [MediaAsset]
+    func resolveAssets(localIdentifiers: [String]) async throws -> [MediaAsset]
     func requestThumbnail(for asset: MediaAsset, targetSize: CGSize) async throws -> Data
     func startCachingThumbnails(for assets: [MediaAsset], targetSize: CGSize)
     func stopCachingThumbnails(for assets: [MediaAsset], targetSize: CGSize)

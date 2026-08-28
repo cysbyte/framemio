@@ -27,6 +27,17 @@ final class PhotoKitPhotoLibraryService: PhotoLibraryService, MediaSelectionServ
         try await fetchAssets(in: .context(context), filter: filter)
     }
 
+    func resolveAssets(localIdentifiers: [String]) async throws -> [MediaAsset] {
+        let identifiers = localIdentifiers.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard !identifiers.isEmpty else { return [] }
+        let result = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
+        var assetsByIdentifier: [String: MediaAsset] = [:]
+        result.enumerateObjects { asset, _, _ in
+            assetsByIdentifier[asset.localIdentifier] = Self.makeMediaAsset(from: asset)
+        }
+        return identifiers.compactMap { assetsByIdentifier[$0] }
+    }
+
     func fetchAssets(
         in scope: MediaSelectionScope,
         filter: PhotoLibraryMediaFilter
@@ -559,6 +570,15 @@ final class MockPhotoLibraryService: PhotoLibraryService, MediaSelectionService,
             return assets.filter { !$0.isVideo }
         case .videos:
             return assets.filter(\.isVideo)
+        }
+    }
+
+    func resolveAssets(localIdentifiers: [String]) async throws -> [MediaAsset] {
+        try Task.checkCancellation()
+        let requested = Set(localIdentifiers)
+        return assets.filter { asset in
+            guard let localIdentifier = asset.localIdentifier else { return requested.contains(asset.id) }
+            return requested.contains(localIdentifier) || requested.contains(asset.id)
         }
     }
 

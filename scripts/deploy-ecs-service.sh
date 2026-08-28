@@ -39,7 +39,7 @@ aws ecs describe-task-definition \
   --query 'taskDefinition' \
   --output json > task-definition.json
 
-IMAGE="$IMAGE" ECS_CONTAINER_NAME="$ECS_CONTAINER_NAME" ECS_TASK_CPU="${ECS_TASK_CPU:-}" ECS_TASK_MEMORY="${ECS_TASK_MEMORY:-}" ECS_TASK_ROLE_ARN="${ECS_TASK_ROLE_ARN:-}" ECS_EXECUTION_ROLE_ARN="${ECS_EXECUTION_ROLE_ARN:-}" ECS_SET_ENV_VARS="${ECS_SET_ENV_VARS:-}" node --input-type=module -e '
+IMAGE="$IMAGE" ECS_CONTAINER_NAME="$ECS_CONTAINER_NAME" ECS_TASK_CPU="${ECS_TASK_CPU:-}" ECS_TASK_MEMORY="${ECS_TASK_MEMORY:-}" ECS_TASK_ROLE_ARN="${ECS_TASK_ROLE_ARN:-}" ECS_EXECUTION_ROLE_ARN="${ECS_EXECUTION_ROLE_ARN:-}" ECS_SET_ENV_VARS="${ECS_SET_ENV_VARS:-}" ECS_SET_OPTIONAL_ENV_VARS="${ECS_SET_OPTIONAL_ENV_VARS:-}" node --input-type=module -e '
   import { readFileSync, writeFileSync } from "node:fs";
 
   const taskDefinition = JSON.parse(readFileSync("task-definition.json", "utf8"));
@@ -83,6 +83,13 @@ IMAGE="$IMAGE" ECS_CONTAINER_NAME="$ECS_CONTAINER_NAME" ECS_TASK_CPU="${ECS_TASK
       throw new Error(`ECS_SET_ENV_VARS includes ${name}, but ${name} is not set.`);
     }
     setEnvironmentVariable(name, value);
+  }
+
+  for (const name of (process.env.ECS_SET_OPTIONAL_ENV_VARS || "").split(/[\n,]/).map((item) => item.trim()).filter(Boolean)) {
+    const value = process.env[name];
+    if (value !== undefined && value !== "") {
+      setEnvironmentVariable(name, value);
+    }
   }
   container.environment = environment;
 

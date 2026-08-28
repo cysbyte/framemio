@@ -169,8 +169,8 @@ func (c *Coordinator) RecordValidationAndQueueRender(ctx context.Context, userID
 }
 
 // RequestStoryPlanRevision queues a new StoryPlan job for high-level story edit
-// intent. It reuses existing media analyses and never restarts media
-// preprocessing, transcription, or video understanding.
+// intent. It reuses completed media analyses and only queues missing media
+// stages for newly added project media before publishing the revision.
 func (c *Coordinator) RequestStoryPlanRevision(ctx context.Context, userID, projectID, idempotencyKey string, configuration map[string]string) (models.ProcessingJob, error) {
 	project, err := c.Store.GetProject(ctx, userID, projectID)
 	if err != nil {
@@ -198,6 +198,33 @@ func (c *Coordinator) RequestStoryPlanRevision(ctx context.Context, userID, proj
 		key = stableStoryRevisionKey(projectID, version)
 	} else {
 		key = projectID + ":story_revision:" + key
+	}
+	ready, err := c.revisionMediaReady(ctx, userID, project, config)
+	if err != nil {
+		return models.ProcessingJob{}, err
+	}
+	if !ready {
+		config["deferred_until_analysis"] = "true"
+		job, err := c.createStageJob(ctx, userID, projectID, "", models.JobTypeStoryPlan, config, key, false)
+		if err != nil {
+			return models.ProcessingJob{}, err
+		}
+		if err := c.ensureRevisionMediaStages(ctx, userID, project, config); err != nil {
+			return models.ProcessingJob{}, err
+		}
+		readyAfterEnsure, err := c.revisionMediaReady(ctx, userID, project, config)
+		if err != nil {
+			return models.ProcessingJob{}, err
+		}
+		if readyAfterEnsure {
+			if err := c.publishJob(ctx, job); err != nil {
+				return models.ProcessingJob{}, err
+			}
+		}
+		if err := c.Store.SetProjectStatus(ctx, userID, projectID, models.ProjectStatusAnalyzing); err != nil {
+			return models.ProcessingJob{}, err
+		}
+		return job, nil
 	}
 	job, err := c.createStageJob(ctx, userID, projectID, "", models.JobTypeStoryPlan, config, key, true)
 	if err != nil {
@@ -322,6 +349,18 @@ func (c *Coordinator) enqueueStoryPlanIfReady(ctx context.Context, userID, proje
 	if err != nil {
 		return err
 	}
+	if deferred := deferredStoryPlanJob(jobs); deferred != nil {
+		ready, err := c.revisionMediaReady(ctx, userID, project, deferred.Configuration)
+		if err != nil {
+			return err
+		}
+		if !ready {
+			c.Logger.Info("deferred story revision waiting for media analysis", slog.String("project_id", projectID), slog.String("job_id", deferred.ID))
+			return nil
+		}
+		c.Logger.Info("publishing deferred story revision", slog.String("project_id", projectID), slog.String("job_id", deferred.ID), slog.String("story_plan_version", deferred.Configuration["story_plan_version"]))
+		return c.publishJob(ctx, *deferred)
+	}
 	if hasCompletedStage(jobs, "", models.JobTypeStoryPlan) || hasActiveStage(jobs, "", models.JobTypeStoryPlan) {
 		c.Logger.Info("story plan enqueue skipped", slog.String("project_id", projectID), slog.String("reason", "story_plan_already_exists_or_active"))
 		return nil
@@ -404,6 +443,125 @@ func (c *Coordinator) publishJob(ctx context.Context, job models.ProcessingJob) 
 		c.Logger.Info("worker activation skipped", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID), slog.String("reason", "activator_not_configured"))
 	}
 	return nil
+}
+
+func (c *Coordinator) revisionMediaReady(ctx context.Context, userID string, project models.StoryProject, configuration map[string]string) (bool, error) {
+	selected := splitConfigList(configuration["selected_media_ids"])
+	if len(selected) == 0 {
+		selected = append([]string(nil), project.MediaIDs...)
+	}
+	photoAnalyses, videoAnalyses, err := c.Store.ListProjectAnalyses(ctx, userID, project.ID)
+	if err != nil {
+		return false, err
+	}
+	photoReady := make(map[string]struct{}, len(photoAnalyses))
+	for _, analysis := range photoAnalyses {
+		photoReady[analysis.MediaID] = struct{}{}
+	}
+	videoReady := make(map[string]struct{}, len(videoAnalyses))
+	for _, analysis := range videoAnalyses {
+		videoReady[analysis.VideoID] = struct{}{}
+	}
+	jobs, err := c.Store.ListProjectJobs(ctx, userID, project.ID)
+	if err != nil {
+		return false, err
+	}
+	for _, mediaID := range selected {
+		media, err := c.Store.GetMedia(ctx, userID, mediaID)
+		if err != nil {
+			return false, err
+		}
+		if media.Type == models.MediaTypeVideo {
+			if _, ok := videoReady[mediaID]; ok || hasCompletedStage(jobs, mediaID, models.JobTypeVideoUnderstand) {
+				continue
+			}
+			return false, nil
+		}
+		if _, ok := photoReady[mediaID]; ok || hasCompletedStage(jobs, mediaID, models.JobTypeMediaPreprocess) {
+			continue
+		}
+		return false, nil
+	}
+	return true, nil
+}
+
+func (c *Coordinator) ensureRevisionMediaStages(ctx context.Context, userID string, project models.StoryProject, configuration map[string]string) error {
+	selected := splitConfigList(configuration["selected_media_ids"])
+	if len(selected) == 0 {
+		selected = append([]string(nil), project.MediaIDs...)
+	}
+	jobs, err := c.Store.ListProjectJobs(ctx, userID, project.ID)
+	if err != nil {
+		return err
+	}
+	photoAnalyses, videoAnalyses, err := c.Store.ListProjectAnalyses(ctx, userID, project.ID)
+	if err != nil {
+		return err
+	}
+	photoReady := make(map[string]struct{}, len(photoAnalyses))
+	for _, analysis := range photoAnalyses {
+		photoReady[analysis.MediaID] = struct{}{}
+	}
+	videoReady := make(map[string]struct{}, len(videoAnalyses))
+	for _, analysis := range videoAnalyses {
+		videoReady[analysis.VideoID] = struct{}{}
+	}
+	for _, mediaID := range selected {
+		media, err := c.Store.GetMedia(ctx, userID, mediaID)
+		if err != nil {
+			return err
+		}
+		if media.Type == models.MediaTypeVideo {
+			if _, ok := videoReady[mediaID]; ok || hasCompletedStage(jobs, mediaID, models.JobTypeVideoUnderstand) || hasActiveStage(jobs, mediaID, models.JobTypeMediaPreprocess) || hasActiveStage(jobs, mediaID, models.JobTypeTranscribe) || hasActiveStage(jobs, mediaID, models.JobTypeVideoUnderstand) {
+				continue
+			}
+			if _, err := c.createStageJob(ctx, userID, project.ID, mediaID, models.JobTypeMediaPreprocess, map[string]string{"pipeline_version": PipelineVersion}, stableStageKey(project.ID, mediaID, models.JobTypeMediaPreprocess), true); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, ok := photoReady[mediaID]; ok || hasCompletedStage(jobs, mediaID, models.JobTypeMediaPreprocess) {
+			continue
+		}
+		job, err := c.createStageJob(ctx, userID, project.ID, mediaID, models.JobTypeMediaPreprocess, map[string]string{"pipeline_version": PipelineVersion}, stableStageKey(project.ID, mediaID, models.JobTypeMediaPreprocess), false)
+		if err != nil {
+			return err
+		}
+		if !models.IsTerminalJobStatus(job.Status) {
+			if _, err := c.Store.UpdateJob(ctx, job.ID, models.JobStatusCompleted, 1, "", "", "", ""); err != nil && !errors.Is(err, store.ErrConflict) {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func deferredStoryPlanJob(jobs []models.ProcessingJob) *models.ProcessingJob {
+	for i := range jobs {
+		job := jobs[i]
+		if job.Type == models.JobTypeStoryPlan && job.Status == models.JobStatusQueued && strings.EqualFold(strings.TrimSpace(job.Configuration["deferred_until_analysis"]), "true") {
+			return &job
+		}
+	}
+	return nil
+}
+
+func splitConfigList(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if _, ok := seen[part]; ok {
+			continue
+		}
+		seen[part] = struct{}{}
+		result = append(result, part)
+	}
+	return result
 }
 
 func shouldRetry(job models.ProcessingJob) bool {

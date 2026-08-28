@@ -90,7 +90,9 @@ struct AppRootView: View {
                     storyLaunchCoordinator: storyLaunchCoordinator,
                     storyService: dependencies.storyService,
                     photoLibrary: dependencies.photoLibrary,
-                    mediaUploadStore: dependencies.mediaUploadStore
+                    mediaUploadStore: dependencies.mediaUploadStore,
+                    mediaUploadService: dependencies.mediaUploadService,
+                    analysisService: dependencies.mediaAnalysis
                 )
             )
         case let .storyPreview(story):
@@ -99,7 +101,9 @@ struct AppRootView: View {
                     story: story,
                     storyService: dependencies.storyService,
                     photoLibrary: dependencies.photoLibrary,
-                    mediaUploadStore: dependencies.mediaUploadStore
+                    mediaUploadStore: dependencies.mediaUploadStore,
+                    mediaUploadService: dependencies.mediaUploadService,
+                    analysisService: dependencies.mediaAnalysis
                 )
             )
         case .settings:

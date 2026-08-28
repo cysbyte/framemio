@@ -182,9 +182,9 @@ func TestValidateStoryPlanRejectsInvalidInputs(t *testing.T) {
 			code:  "too_long",
 		},
 		{
-			name: "invalid audio source",
+			name: "background music audio source not supported in V1",
 			mutate: func(plan *models.StoryPlan) {
-				plan.Audio.Source = "unsupported"
+				plan.Audio = &models.StoryAudio{Source: "licensed"}
 			},
 			field: "audio.source",
 			code:  "unsupported_audio_source",
@@ -307,7 +307,6 @@ func validStoryPlanFixture(t *testing.T) (*Validator, models.StoryPlan) {
 		VisualStyle:         models.VisualStyleCinematic,
 		TitleText:           "Your moments",
 		EndingText:          "A story made from the moments that mattered most.",
-		MusicMood:           "calm and reflective",
 		Moments: []models.StoryMoment{{
 			MomentID:             "moment-1",
 			AssetID:              video.ID,
@@ -321,7 +320,6 @@ func validStoryPlanFixture(t *testing.T) (*Validator, models.StoryPlan) {
 			Narrative:            "Friends laughing by the water",
 			Reason:               "warm laughter",
 		}},
-		Audio:           &models.StoryAudio{Source: "adaptive", Mood: "calm"},
 		Output:          models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 60, Preset: "premium-memory"},
 		TotalDurationMS: 3000,
 		CreatedAt:       now,

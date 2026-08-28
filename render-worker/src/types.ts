@@ -13,7 +13,6 @@ export interface StoryPlan {
   requested_duration_ms?: number;
   title_text?: string;
   ending_text?: string;
-  music_mood?: string;
   moments: StoryMoment[];
   captions?: StoryCaption[];
   caption_style?: CaptionStyle;
@@ -66,17 +65,9 @@ export interface CaptionStyle {
 }
 
 export interface StoryAudio {
-  source: 'adaptive' | 'none' | 'licensed' | 'custom' | 'original' | string;
-  mood?: string;
-  background_s3_key?: string;
+  source?: 'none' | 'original' | string;
   original_audio?: boolean;
-  background_volume?: number;
   original_volume?: number;
-  ducking?: boolean;
-  ducked_volume?: number;
-  start_offset_seconds?: number;
-  fade_in_ms?: number;
-  fade_out_ms?: number;
 }
 
 export interface StoryOutput {
@@ -191,16 +182,8 @@ export interface CompositionSpec {
 
 export interface ResolvedAudio {
   source: string;
-  mood?: string;
-  background_path?: string;
   original_audio: boolean;
-  background_volume: number;
   original_volume: number;
-  ducking: boolean;
-  ducked_volume: number;
-  start_offset_seconds: number;
-  fade_in_frames: number;
-  fade_out_frames: number;
 }
 
 export interface RenderResult {

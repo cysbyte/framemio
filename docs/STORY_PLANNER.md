@@ -7,7 +7,7 @@ The Story Planner combines `PhotoAnalysis`, `VideoAnalysis`, `MediaClusters`, ti
 - It never analyzes raw videos.
 - It primarily uses `VideoAnalysis` for moment selection.
 - It removes repetitive moments and keeps the story chronological where appropriate.
-- It assigns title text, ending text, captions when useful, caption style, music mood, clip durations, and transitions.
+- It assigns title text, ending text, captions when useful, caption style, clip durations, and transitions.
 - It honors story edit subtitle preferences by clearing captions when subtitles are disabled and by selecting only approved caption style presets.
 - It returns strict JSON-serializable `StoryPlan` data with valid media references.
 

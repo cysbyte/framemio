@@ -5,14 +5,11 @@ import "github.com/framemio/backend/internal/models"
 type Config struct {
 	SchemaVersion             string
 	SupportedAspectRatios     map[string]struct{}
-	AllowedAudioSources       map[string]struct{}
-	AudioSourcesRequiringMood map[string]struct{}
 	AllowedCaptionPresets     map[string]struct{}
 	AllowedCaptionFonts       map[string]struct{}
 	AllowedCaptionPositions   map[string]struct{}
 	MaxTitleLength            int
 	MaxEndingLength           int
-	MaxMusicMoodLength        int
 	MaxUserInstructionsLength int
 	MaxCaptionLength          int
 	MaxNarrativeLength        int
@@ -37,18 +34,6 @@ func DefaultConfig() Config {
 			"1:1":  {},
 			"4:5":  {},
 		},
-		AllowedAudioSources: map[string]struct{}{
-			"adaptive": {},
-			"none":     {},
-			"original": {},
-			"licensed": {},
-			"custom":   {},
-		},
-		AudioSourcesRequiringMood: map[string]struct{}{
-			"adaptive": {},
-			"licensed": {},
-			"custom":   {},
-		},
 		AllowedCaptionPresets: map[string]struct{}{
 			"bold_social":        {},
 			"cinematic_subtitle": {},
@@ -70,7 +55,6 @@ func DefaultConfig() Config {
 		},
 		MaxTitleLength:            120,
 		MaxEndingLength:           180,
-		MaxMusicMoodLength:        80,
 		MaxUserInstructionsLength: 500,
 		MaxCaptionLength:          220,
 		MaxNarrativeLength:        240,

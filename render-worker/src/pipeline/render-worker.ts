@@ -85,13 +85,6 @@ export class DeterministicRenderWorker {
       await this.dependencies.objectStore.downloadObject(asset.s3_key, destination);
       downloaded.set(asset.id, destination);
     }
-    const backgroundKey = input.story_plan.audio?.background_s3_key;
-    if (backgroundKey) {
-      if (!(await this.dependencies.objectStore.objectExists(backgroundKey))) {
-        throw new RenderAssetError(`required background audio is missing from S3: ${backgroundKey}`);
-      }
-      await this.dependencies.objectStore.downloadObject(backgroundKey, path.join(assetsDir, 'background-audio'));
-    }
     return downloaded;
   }
 

@@ -110,23 +110,43 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
     let removeMediaIDs: [String]
     let addMediaIDs: [String]
     let replace: [StoryMomentReplacement]
-    let musicMood: String?
-    let musicMode: String?
-    let musicTrackId: String?
+    let analyses: [MediaAnalysis]
     let style: String?
     let subtitlesEnabled: Bool?
     let subtitleStyle: String?
     let targetDuration: TimeInterval?
     let instruction: String?
 
+    init(
+        removeMomentIDs: [String],
+        removeMediaIDs: [String],
+        addMediaIDs: [String],
+        replace: [StoryMomentReplacement],
+        analyses: [MediaAnalysis] = [],
+        style: String? = nil,
+        subtitlesEnabled: Bool? = nil,
+        subtitleStyle: String? = nil,
+        targetDuration: TimeInterval? = nil,
+        instruction: String? = nil
+    ) {
+        self.removeMomentIDs = removeMomentIDs
+        self.removeMediaIDs = removeMediaIDs
+        self.addMediaIDs = addMediaIDs
+        self.replace = replace
+        self.analyses = analyses
+        self.style = style
+        self.subtitlesEnabled = subtitlesEnabled
+        self.subtitleStyle = subtitleStyle
+        self.targetDuration = targetDuration
+        self.instruction = instruction
+    }
+
     enum CodingKeys: String, CodingKey {
         case removeMomentIDs = "removeMomentIds"
         case removeMediaIDs = "removeMediaIds"
         case addMediaIDs = "addMediaIds"
         case replace
-        case musicMood
-        case musicMode
-        case musicTrackId
+        case analyses
         case style
         case subtitlesEnabled
         case subtitleStyle
@@ -139,9 +159,6 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
             || !removeMediaIDs.isEmpty
             || !addMediaIDs.isEmpty
             || !replace.isEmpty
-            || musicMood != nil
-            || musicMode != nil
-            || musicTrackId != nil
             || style != nil
             || subtitlesEnabled != nil
             || subtitleStyle != nil

@@ -54,9 +54,7 @@ type iosStoryEditRequest struct {
 	RemoveMediaIDs   []string                `json:"removeMediaIds,omitempty"`
 	AddMediaIDs      []string                `json:"addMediaIds,omitempty"`
 	Replace          []iosStoryMomentReplace `json:"replace,omitempty"`
-	MusicMood        string                  `json:"musicMood,omitempty"`
-	MusicMode        string                  `json:"musicMode,omitempty"`
-	MusicTrackID     string                  `json:"musicTrackId,omitempty"`
+	Analyses         []iosStoryAnalysis      `json:"analyses,omitempty"`
 	Style            string                  `json:"style,omitempty"`
 	SubtitlesEnabled *bool                   `json:"subtitlesEnabled,omitempty"`
 	SubtitleStyle    string                  `json:"subtitleStyle,omitempty"`
@@ -155,6 +153,24 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		s.mapStoreError(response, err)
 		return
 	}
+	newMediaIDs := s.newIOSStoryEditMediaIDs(project, input)
+	if len(newMediaIDs) > 0 {
+		project, err = s.Store.AddProjectMedia(request.Context(), user.ID, project.ID, newMediaIDs)
+		if err != nil {
+			s.Logger.Warn("attach iOS story edit media failed", "user_id", user.ID, "project_id", project.ID, "new_media_count", len(newMediaIDs), "error", err)
+			if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrInvalidOwner) {
+				s.writeError(response, http.StatusBadRequest, "invalid_story_edit", "edit references media that is not ready or does not belong to this story")
+				return
+			}
+			s.internalError(response, err, "attach iOS story edit media")
+			return
+		}
+	}
+	if err := s.saveIOSStoryEditAnalyses(request, user.ID, project.ID, input); err != nil {
+		s.Logger.Error("save iOS story edit analyses failed", "user_id", user.ID, "project_id", project.ID, "analysis_count", len(input.Analyses), "error", err)
+		s.mapStoreError(response, err)
+		return
+	}
 	s.Logger.Info("received iOS story revision request",
 		"user_id", user.ID,
 		"project_id", project.ID,
@@ -162,10 +178,9 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		"remove_moment_count", len(input.RemoveMomentIDs),
 		"remove_media_count", len(input.RemoveMediaIDs),
 		"add_media_count", len(input.AddMediaIDs),
+		"new_project_media_count", len(newMediaIDs),
 		"replacement_count", len(input.Replace),
-		"has_music_mood", strings.TrimSpace(input.MusicMood) != "",
-		"music_mode", valueOrUnset(normalizeIOSMusicMode(input.MusicMode)),
-		"has_music_track", strings.TrimSpace(input.MusicTrackID) != "",
+		"analysis_count", len(input.Analyses),
 		"has_visual_style", strings.TrimSpace(input.Style) != "",
 		"subtitles_enabled", boolPointerLogValue(input.SubtitlesEnabled),
 		"subtitle_style", normalizeIOSSubtitleStyle(input.SubtitleStyle),
@@ -199,8 +214,6 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		"excluded_moment_count", configListCount(config["excluded_moment_ids"]),
 		"subtitles_enabled", valueOrUnset(config["subtitles_enabled"]),
 		"caption_style_preset", valueOrUnset(config["caption_style_preset"]),
-		"music_mode", valueOrUnset(config["music_mode"]),
-		"has_music_track", strings.TrimSpace(config["music_track_id"]) != "",
 		"has_user_instructions", strings.TrimSpace(config["user_instructions"]) != "",
 	)
 	if s.Orchestrator == nil {
@@ -220,6 +233,68 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		return
 	}
 	s.writeJSON(response, http.StatusAccepted, s.makeIOSStory(request, user.ID, updated))
+}
+
+func (s *Server) newIOSStoryEditMediaIDs(project models.StoryProject, input iosStoryEditRequest) []string {
+	projectMedia := make(map[string]struct{}, len(project.MediaIDs))
+	for _, mediaID := range project.MediaIDs {
+		projectMedia[mediaID] = struct{}{}
+	}
+	candidates := cleanStringList(input.AddMediaIDs)
+	for _, replacement := range input.Replace {
+		if toMediaID := strings.TrimSpace(replacement.ToMediaID); toMediaID != "" {
+			candidates = append(candidates, toMediaID)
+		}
+	}
+	seen := make(map[string]struct{}, len(candidates))
+	newMediaIDs := make([]string, 0, len(candidates))
+	for _, mediaID := range candidates {
+		mediaID = strings.TrimSpace(mediaID)
+		if mediaID == "" {
+			continue
+		}
+		if _, exists := projectMedia[mediaID]; exists {
+			continue
+		}
+		if _, duplicate := seen[mediaID]; duplicate {
+			continue
+		}
+		seen[mediaID] = struct{}{}
+		newMediaIDs = append(newMediaIDs, mediaID)
+	}
+	return newMediaIDs
+}
+
+func (s *Server) saveIOSStoryEditAnalyses(request *http.Request, userID, projectID string, input iosStoryEditRequest) error {
+	if len(input.Analyses) == 0 {
+		return nil
+	}
+	referenced := make(map[string]struct{})
+	for _, mediaID := range cleanStringList(input.AddMediaIDs) {
+		referenced[mediaID] = struct{}{}
+	}
+	for _, replacement := range input.Replace {
+		if toMediaID := strings.TrimSpace(replacement.ToMediaID); toMediaID != "" {
+			referenced[toMediaID] = struct{}{}
+		}
+	}
+	mediaIDs := make([]string, 0, len(referenced))
+	assetIDsByMediaID := make(map[string]string, len(referenced))
+	for mediaID := range referenced {
+		media, err := s.Store.GetMedia(request.Context(), userID, mediaID)
+		if err != nil {
+			return err
+		}
+		if media.Type == models.MediaTypeVideo {
+			continue
+		}
+		mediaIDs = append(mediaIDs, mediaID)
+		assetIDsByMediaID[mediaID] = mediaID
+	}
+	if len(mediaIDs) == 0 {
+		return nil
+	}
+	return s.saveIOSAnalyses(request, userID, projectID, mediaIDs, assetIDsByMediaID, input.Analyses)
 }
 
 func (s *Server) iosStoryEditConfiguration(request *http.Request, userID string, project models.StoryProject, input iosStoryEditRequest) (map[string]string, error) {
@@ -325,21 +400,6 @@ func (s *Server) iosStoryEditConfiguration(request *http.Request, userID string,
 	}
 	if subtitleStyle := normalizeIOSSubtitleStyle(input.SubtitleStyle); subtitleStyle != "" {
 		config["caption_style_preset"] = subtitleStyle
-	}
-	if mood := normalizeIOSMusicMood(input.MusicMood); mood != "" {
-		config["music_mood"] = mood
-	}
-	if mode := normalizeIOSMusicMode(input.MusicMode); mode != "" {
-		config["music_mode"] = mode
-	}
-	if trackID := strings.TrimSpace(input.MusicTrackID); trackID != "" {
-		if normalizeIOSMusicMode(input.MusicMode) != "selected" {
-			return nil, store.ErrConflict
-		}
-		if _, err := s.Store.GetMusicTrack(request.Context(), trackID); err != nil {
-			return nil, err
-		}
-		config["music_track_id"] = trackID
 	}
 	if instruction := strings.TrimSpace(sanitizeIOSStoryText(input.Instruction)); instruction != "" {
 		config["user_instructions"] = truncateIOSConfigValue(instruction, 480)
@@ -459,24 +519,6 @@ func configListCount(value string) int {
 		}
 	}
 	return count
-}
-
-func normalizeIOSMusicMode(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "auto", "selected", "none":
-		return strings.ToLower(strings.TrimSpace(value))
-	default:
-		return ""
-	}
-}
-
-func normalizeIOSMusicMood(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "warm", "cinematic", "playful", "calm", "energetic", "natural":
-		return strings.ToLower(strings.TrimSpace(value))
-	default:
-		return ""
-	}
 }
 
 func truncateIOSConfigValue(value string, maxLength int) string {

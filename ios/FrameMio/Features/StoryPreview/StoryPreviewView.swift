@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 struct StoryPreviewView: View {
@@ -77,6 +78,9 @@ struct StoryPreviewView: View {
                             forStoryAssetID: assetID,
                             targetSize: CGSize(width: 220, height: 220)
                         )
+                    },
+                    onImportPhotos: { items in
+                        try await viewModel.importMediaForEdit(items)
                     },
                     onSave: { request in
                         viewModel.saveStoryEdits(request)
@@ -618,6 +622,17 @@ private struct StoryMomentPresentation: Identifiable, Hashable {
                 "livephoto"
             }
         }
+
+        var importedSubtitle: String {
+            switch self {
+            case .photo:
+                "Photo"
+            case .video:
+                "Video"
+            case .livePhoto:
+                "Live Photo"
+            }
+        }
     }
 
     let id: String
@@ -627,6 +642,37 @@ private struct StoryMomentPresentation: Identifiable, Hashable {
     let description: String?
     let kind: Kind
     let duration: TimeInterval?
+
+    init(id: String, assetID: String, title: String, subtitle: String, description: String?, kind: Kind, duration: TimeInterval?) {
+        self.id = id
+        self.assetID = assetID
+        self.title = title
+        self.subtitle = subtitle
+        self.description = description
+        self.kind = kind
+        self.duration = duration
+    }
+
+    init(imported: ImportedStoryMedia, index: Int) {
+        let kind: Kind = imported.sourceAsset.isVideo ? .video : (imported.sourceAsset.isLivePhoto ? .livePhoto : .photo)
+        self.init(
+            id: imported.mediaID,
+            assetID: imported.mediaID,
+            title: Self.importedTitle(kind: kind, index: index),
+            subtitle: kind == .video && imported.sourceAsset.duration > 0 ? "Video · \(Int(imported.sourceAsset.duration.rounded())) sec" : kind.importedSubtitle,
+            description: "New from Photos. FrameMio will decide where it belongs.",
+            kind: kind,
+            duration: kind == .video ? imported.sourceAsset.duration : nil
+        )
+    }
+
+    private static func importedTitle(kind: Kind, index: Int) -> String {
+        switch kind {
+        case .photo: "New photo"
+        case .video: "New video"
+        case .livePhoto: "New Live Photo"
+        }
+    }
 }
 
 private struct StoryPillActionLabel: View {
@@ -773,6 +819,7 @@ private struct EditStorySheet: View {
     let isPerformingAction: Bool
     let imageProvider: (String) -> Image?
     let onAppearMoment: (String) -> Void
+    let onImportPhotos: ([PhotosPickerItem]) async throws -> [ImportedStoryMedia]
     let onSave: (StoryEditRequest) -> Void
     let onRetry: () -> Void
 
@@ -780,8 +827,8 @@ private struct EditStorySheet: View {
     @State private var selectedMoment: StoryMomentPresentation?
     @State private var replacingMoment: StoryMomentPresentation?
     @State private var isShowingAddMoment = false
+    @State private var importedMoments: [StoryMomentPresentation] = []
 
-    private let musicOptions = ["Warm", "Cinematic", "Playful", "Calm", "Energetic"]
     private let styleOptions = ["Natural", "Cinematic", "Warm", "Playful"]
     private let subtitleStyleOptions = ["Bold", "Cinematic", "Minimal", "Playful"]
 
@@ -794,13 +841,14 @@ private struct EditStorySheet: View {
         let replacementSources = Set(draft.replacements.compactMap { $0.fromMomentID } + draft.replacements.compactMap { $0.fromMediaID })
         let base = moments.filter { !removed.contains($0.id) && !removed.contains($0.assetID) && !replacementSources.contains($0.id) && !replacementSources.contains($0.assetID) }
         let existingIDs = Set(base.map(\.assetID))
-        let added = availableMoments.filter { draft.addedMediaIDs.contains($0.assetID) && !existingIDs.contains($0.assetID) }
+        let addableMoments = availableMoments + importedMoments
+        let added = addableMoments.filter { draft.addedMediaIDs.contains($0.assetID) && !existingIDs.contains($0.assetID) }
         return base + added
     }
 
     private var selectableMoments: [StoryMomentPresentation] {
         let visibleIDs = Set(displayedMoments.map(\.assetID))
-        return availableMoments.filter { !visibleIDs.contains($0.assetID) }
+        return (availableMoments + importedMoments).filter { !visibleIDs.contains($0.assetID) }
     }
 
     var body: some View {
@@ -814,7 +862,6 @@ private struct EditStorySheet: View {
                     }
                     momentsSection
                     addMomentButton
-                    musicSection
                     styleSection
                     subtitleSection
                     lengthSection
@@ -860,6 +907,13 @@ private struct EditStorySheet: View {
                     moments: selectableMoments,
                     imageProvider: imageProvider,
                     onAppearMoment: onAppearMoment,
+                    onImportPhotos: { items in
+                        let imported = try await onImportPhotos(items)
+                        let presentations = imported.map { StoryMomentPresentation(imported: $0, index: importedMoments.count) }
+                        importedMoments.append(contentsOf: presentations)
+                        draft.addAnalysis(imported)
+                        return presentations
+                    },
                     onAdd: { selectedMoments in
                         selectedMoments.forEach { draft.add($0) }
                         isShowingAddMoment = false
@@ -870,18 +924,28 @@ private struct EditStorySheet: View {
                 .presentationDragIndicator(.visible)
             }
             .sheet(item: $replacingMoment) { source in
-                MomentSelectionSheet(
+                AddMomentSelectionSheet(
                     title: "Replace Moment",
                     moments: selectableMoments,
+                    allowsMultipleSelection: false,
                     imageProvider: imageProvider,
                     onAppearMoment: onAppearMoment,
-                    onSelect: { replacement in
-                        draft.replace(source, with: replacement)
+                    onImportPhotos: { items in
+                        let imported = try await onImportPhotos(items)
+                        let presentations = imported.map { StoryMomentPresentation(imported: $0, index: importedMoments.count) }
+                        importedMoments.append(contentsOf: presentations)
+                        draft.addAnalysis(imported)
+                        return presentations
+                    },
+                    onAdd: { selectedMoments in
+                        if let replacement = selectedMoments.first {
+                            draft.replace(source, with: replacement)
+                        }
                         replacingMoment = nil
                     },
                     onCancel: { replacingMoment = nil }
                 )
-                .presentationDetents([.medium, .large])
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
         }
@@ -945,38 +1009,6 @@ private struct EditStorySheet: View {
         }
         .disabled(isPerformingAction)
         .accessibilityLabel("Add moment")
-    }
-
-    private var musicSection: some View {
-        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            SectionHeader(title: "Music", subtitle: "FrameMio chooses a soundtrack automatically")
-            LazyVGrid(columns: optionGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
-                optionChip(title: "✨ Auto", isSelected: (draft.musicMode ?? "auto") == "auto") {
-                    draft.musicMode = "auto"
-                    draft.musicTrackId = nil
-                }
-                optionChip(title: "None", isSelected: draft.musicMode == "none") {
-                    draft.musicMode = "none"
-                    draft.musicTrackId = nil
-                }
-            }
-
-            if draft.musicMode != "none" {
-                Text("Mood")
-                    .font(FrameMioTypography.caption.weight(.semibold))
-                    .foregroundStyle(FrameMioColors.secondaryInk)
-                LazyVGrid(columns: optionGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
-                    ForEach(musicOptions, id: \.self) { option in
-                        optionChip(title: option, isSelected: option.caseInsensitiveCompare(draft.musicMood ?? "Warm") == .orderedSame) {
-                            draft.musicMood = option.lowercased()
-                            if draft.musicMode == nil {
-                                draft.musicMode = "auto"
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 
     private var styleSection: some View {
@@ -1085,9 +1117,7 @@ private struct EditStoryDraft {
     var removedMediaIDs = Set<String>()
     var addedMediaIDs = Set<String>()
     var replacements: [StoryMomentReplacement] = []
-    var musicMood: String?
-    var musicMode: String?
-    var musicTrackId: String?
+    var analysesByMediaID: [String: MediaAnalysis] = [:]
     var style: String?
     var subtitlesEnabled: Bool?
     var subtitleStyle: String?
@@ -1102,9 +1132,7 @@ private struct EditStoryDraft {
             removeMediaIDs: Array(removedMediaIDs).sorted(),
             addMediaIDs: Array(addedMediaIDs).sorted(),
             replace: replacements,
-            musicMood: musicMood,
-            musicMode: musicMode,
-            musicTrackId: musicTrackId,
+            analyses: Array(analysesByMediaID.values).sorted { $0.assetID < $1.assetID },
             style: style,
             subtitlesEnabled: subtitlesEnabled,
             subtitleStyle: subtitleStyle,
@@ -1123,10 +1151,28 @@ private struct EditStoryDraft {
         removedMediaIDs.remove(moment.assetID)
     }
 
+    mutating func add(_ imported: [ImportedStoryMedia]) {
+        for item in imported {
+            addedMediaIDs.insert(item.mediaID)
+            removedMediaIDs.remove(item.mediaID)
+            if let analysis = item.analysis {
+                analysesByMediaID[item.mediaID] = analysis
+            }
+        }
+    }
+
     mutating func replace(_ source: StoryMomentPresentation, with replacement: StoryMomentPresentation) {
         remove(source)
         addedMediaIDs.insert(replacement.assetID)
         replacements.append(StoryMomentReplacement(fromMomentID: source.id, fromMediaID: source.assetID, toMediaID: replacement.assetID))
+    }
+
+    mutating func addAnalysis(_ imported: [ImportedStoryMedia]) {
+        for item in imported {
+            if let analysis = item.analysis {
+                analysesByMediaID[item.mediaID] = analysis
+            }
+        }
     }
 }
 
@@ -1244,28 +1290,60 @@ private struct EditMomentSheet: View {
 }
 
 private struct AddMomentSelectionSheet: View {
+    let title: String
     let moments: [StoryMomentPresentation]
+    let allowsMultipleSelection: Bool
     let imageProvider: (String) -> Image?
     let onAppearMoment: (String) -> Void
+    let onImportPhotos: ([PhotosPickerItem]) async throws -> [StoryMomentPresentation]
     let onAdd: ([StoryMomentPresentation]) -> Void
     let onCancel: () -> Void
 
+    init(
+        title: String = "Add to Story",
+        moments: [StoryMomentPresentation],
+        allowsMultipleSelection: Bool = true,
+        imageProvider: @escaping (String) -> Image?,
+        onAppearMoment: @escaping (String) -> Void,
+        onImportPhotos: @escaping ([PhotosPickerItem]) async throws -> [StoryMomentPresentation],
+        onAdd: @escaping ([StoryMomentPresentation]) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.title = title
+        self.moments = moments
+        self.allowsMultipleSelection = allowsMultipleSelection
+        self.imageProvider = imageProvider
+        self.onAppearMoment = onAppearMoment
+        self.onImportPhotos = onImportPhotos
+        self.onAdd = onAdd
+        self.onCancel = onCancel
+    }
+
     @State private var selectedAssetIDs = Set<String>()
+    @State private var importedMoments: [StoryMomentPresentation] = []
+    @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var filter = PhotoLibraryMediaFilter.all
+    @State private var isImportingPhotos = false
+    @State private var importErrorMessage: String?
+
+    private var allMoments: [StoryMomentPresentation] {
+        var seen = Set<String>()
+        return (moments + importedMoments).filter { seen.insert($0.assetID).inserted }
+    }
 
     private var displayedMoments: [StoryMomentPresentation] {
         switch filter {
         case .all:
-            return moments
+            return allMoments
         case .photos:
-            return moments.filter { $0.kind == .photo || $0.kind == .livePhoto }
+            return allMoments.filter { $0.kind == .photo || $0.kind == .livePhoto }
         case .videos:
-            return moments.filter { $0.kind == .video }
+            return allMoments.filter { $0.kind == .video }
         }
     }
 
     private var selectedMoments: [StoryMomentPresentation] {
-        moments.filter { selectedAssetIDs.contains($0.assetID) }
+        allMoments.filter { selectedAssetIDs.contains($0.assetID) }
     }
 
     private var selectedCount: Int {
@@ -1274,50 +1352,52 @@ private struct AddMomentSelectionSheet: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if moments.isEmpty {
-                    EmptyState(
-                        systemImage: "photo.on.rectangle.angled",
-                        title: "All source media is already in this story",
-                        message: "Add Moment shows photos and videos from the original story selection that are not currently used. Remove a moment or create a new story to choose different source media.",
-                        actionTitle: nil,
-                        action: nil
-                    )
-                    .padding(FrameMioSpacing.lg)
-                } else {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
-                            intro
-                            filterPicker
-
-                            if displayedMoments.isEmpty {
-                                EmptyState(
-                                    systemImage: filter == .videos ? "video.slash" : "photo.on.rectangle.angled",
-                                    title: "Nothing in this filter",
-                                    message: "Try another media filter to keep exploring available moments."
-                                )
-                                .frame(maxWidth: .infinity)
-                            } else {
-                                LazyVGrid(columns: gridColumns, spacing: FrameMioSpacing.xxs) {
-                                    ForEach(displayedMoments) { moment in
-                                        mediaCell(for: moment)
-                                    }
-                                }
-                            }
-                        }
-                        .padding(FrameMioSpacing.lg)
-                    }
-                    .safeAreaInset(edge: .bottom) {
-                        addAction
-                    }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
+                    intro
+                    filterPicker
+                    sourceMediaGrid
+                    photosImportSection
                 }
+                .padding(FrameMioSpacing.lg)
+            }
+            .safeAreaInset(edge: .bottom) {
+                addAction
             }
             .background(FrameMioColors.canvas.ignoresSafeArea())
-            .navigationTitle("Add to Story")
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: onCancel)
+                }
+            }
+            .onChange(of: selectedPhotoItems) { _, items in
+                importPhotos(items)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var sourceMediaGrid: some View {
+        if allMoments.isEmpty {
+            EmptyState(
+                systemImage: "photo.on.rectangle.angled",
+                title: "No unused project media yet",
+                message: "Choose Add from Photos to import new photos or videos into this story."
+            )
+            .frame(maxWidth: .infinity)
+        } else if displayedMoments.isEmpty {
+            EmptyState(
+                systemImage: filter == .videos ? "video.slash" : "photo.on.rectangle.angled",
+                title: "Nothing in this filter",
+                message: "Try another media filter or import from Photos."
+            )
+            .frame(maxWidth: .infinity)
+        } else {
+            LazyVGrid(columns: gridColumns, spacing: FrameMioSpacing.xxs) {
+                ForEach(displayedMoments) { moment in
+                    mediaCell(for: moment)
                 }
             }
         }
@@ -1325,10 +1405,10 @@ private struct AddMomentSelectionSheet: View {
 
     private var intro: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
-            Text("Choose more source media")
+            Text(title == "Replace Moment" ? "Choose a replacement" : "Choose more source media")
                 .font(FrameMioTypography.title)
                 .foregroundStyle(FrameMioColors.ink)
-            Text("Select photos or videos that were part of this story’s original source media but are not currently in the film. FrameMio will decide the best placement and pacing.")
+            Text("Select unused project media or import new photos and videos. FrameMio will decide the best placement and pacing.")
                 .font(FrameMioTypography.body)
                 .foregroundStyle(FrameMioColors.secondaryInk)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1355,6 +1435,36 @@ private struct AddMomentSelectionSheet: View {
         .accessibilityLabel("Filter media")
     }
 
+    private var photosImportSection: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
+            Divider().overlay(FrameMioColors.divider.opacity(0.5))
+            PhotosPicker(
+                selection: $selectedPhotoItems,
+                maxSelectionCount: allowsMultipleSelection ? 20 : 1,
+                matching: .any(of: [.images, .videos]),
+                preferredItemEncoding: .current
+            ) {
+                Label("Add from Photos", systemImage: "plus.circle.fill")
+                    .font(FrameMioTypography.headline)
+                    .foregroundStyle(FrameMioColors.accent)
+                    .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.compactButtonHeight, alignment: .leading)
+            }
+            .disabled(isImportingPhotos)
+
+            if isImportingPhotos {
+                Label("Uploading and preparing new media…", systemImage: "arrow.up.circle")
+                    .font(FrameMioTypography.footnote)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+            }
+            if let importErrorMessage {
+                Text(importErrorMessage)
+                    .font(FrameMioTypography.footnote)
+                    .foregroundStyle(.red)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
     private func mediaCell(for moment: StoryMomentPresentation) -> some View {
         MediaThumbnail(
             image: imageProvider(moment.assetID),
@@ -1378,7 +1488,7 @@ private struct AddMomentSelectionSheet: View {
             PrimaryButton(title: addButtonTitle, systemImage: "checkmark") {
                 onAdd(selectedMoments)
             }
-            .disabled(selectedAssetIDs.isEmpty)
+            .disabled(selectedAssetIDs.isEmpty || isImportingPhotos)
         }
         .padding(.horizontal, FrameMioSpacing.lg)
         .padding(.top, FrameMioSpacing.md)
@@ -1393,17 +1503,18 @@ private struct AddMomentSelectionSheet: View {
 
     private var selectionSummary: String {
         switch selectedCount {
-        case 0: "Select unused photos or videos"
-        case 1: "1 moment selected"
+        case 0: allowsMultipleSelection ? "Select project media or import from Photos" : "Select a replacement"
+        case 1: allowsMultipleSelection ? "1 moment selected" : "Replacement selected"
         default: "\(selectedCount) moments selected"
         }
     }
 
     private var addButtonTitle: String {
+        if !allowsMultipleSelection { return "Replace Moment" }
         switch selectedCount {
-        case 0: "Add Moments"
-        case 1: "Add 1 Moment"
-        default: "Add \(selectedCount) Moments"
+        case 0: return "Add Moments"
+        case 1: return "Add 1 Moment"
+        default: return "Add \(selectedCount) Moments"
         }
     }
 
@@ -1418,55 +1529,38 @@ private struct AddMomentSelectionSheet: View {
         if selectedAssetIDs.contains(moment.assetID) {
             selectedAssetIDs.remove(moment.assetID)
         } else {
+            if !allowsMultipleSelection {
+                selectedAssetIDs.removeAll()
+            }
             selectedAssetIDs.insert(moment.assetID)
         }
         FrameMioHaptics.selection()
     }
-}
 
-private struct MomentSelectionSheet: View {
-    let title: String
-    let moments: [StoryMomentPresentation]
-    let imageProvider: (String) -> Image?
-    let onAppearMoment: (String) -> Void
-    let onSelect: (StoryMomentPresentation) -> Void
-    let onCancel: () -> Void
-
-    var body: some View {
-        NavigationStack {
-            Group {
-                if moments.isEmpty {
-                    EmptyState(
-                        systemImage: "sparkles",
-                        title: title == "Add to Story" ? "All available moments are already in this story" : "No more moments yet",
-                        message: title == "Add to Story"
-                            ? "Add Moment shows photos and videos from this story’s source media that are not currently used. Choosing brand-new iPhone media will need a separate import step."
-                            : "Upload more photos or videos to add them to this story.",
-                        actionTitle: nil,
-                        action: nil
-                    )
-                    .padding(FrameMioSpacing.lg)
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: FrameMioSpacing.sm) {
-                            ForEach(moments) { moment in
-                                StoryMomentRow(moment: moment, image: imageProvider(moment.assetID)) {
-                                    onSelect(moment)
-                                }
-                                .onAppear { onAppearMoment(moment.assetID) }
-                            }
-                        }
-                        .padding(FrameMioSpacing.lg)
-                    }
+    private func importPhotos(_ items: [PhotosPickerItem]) {
+        guard !items.isEmpty, !isImportingPhotos else { return }
+        isImportingPhotos = true
+        importErrorMessage = nil
+        Task {
+            do {
+                let imported = try await onImportPhotos(items)
+                importedMoments.append(contentsOf: imported)
+                if !allowsMultipleSelection {
+                    selectedAssetIDs.removeAll()
                 }
-            }
-            .background(FrameMioColors.canvas.ignoresSafeArea())
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", action: onCancel)
+                for moment in imported {
+                    selectedAssetIDs.insert(moment.assetID)
+                    onAppearMoment(moment.assetID)
                 }
+                selectedPhotoItems = []
+                isImportingPhotos = false
+            } catch is CancellationError {
+                selectedPhotoItems = []
+                isImportingPhotos = false
+            } catch {
+                selectedPhotoItems = []
+                importErrorMessage = AppError.from(error).localizedDescription
+                isImportingPhotos = false
             }
         }
     }

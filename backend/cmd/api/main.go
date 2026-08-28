@@ -14,7 +14,6 @@ import (
 
 	"github.com/framemio/backend/internal/api"
 	"github.com/framemio/backend/internal/models"
-	"github.com/framemio/backend/internal/music"
 	"github.com/framemio/backend/internal/orchestration"
 	"github.com/framemio/backend/internal/queue"
 	"github.com/framemio/backend/internal/storage"
@@ -71,7 +70,6 @@ func main() {
 	}
 
 	storyPlanValidator := storyvalidation.New(database, objects, storyvalidation.DefaultConfig())
-	musicGenerator := musicGenerationService(database, objects, configuration)
 	coordinator := orchestration.New(orchestration.Coordinator{Store: database, Publisher: publisher, Activator: activator, Validator: storyPlanValidator, Logger: logger})
 	if configuration.WorkerRunOnce {
 		if err := runWorkerOnce(ctx, database, coordinator, configuration, logger); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
@@ -82,17 +80,15 @@ func main() {
 	}
 
 	application := api.NewServer(api.Server{
-		Store:                       database,
-		ObjectStorage:               objects,
-		Publisher:                   publisher,
-		Activator:                   activator,
-		Orchestrator:                coordinator,
-		StoryPlanValidator:          storyPlanValidator,
-		MusicGenerator:              musicGenerator,
-		RequireVerifiedMusicLicense: configuration.MusicRequireVerifiedLicense,
-		Authenticator:               api.HMACTokenAuthenticator{Secret: []byte(configuration.AuthHMACSecret)},
-		InternalToken:               configuration.InternalAPIToken,
-		Logger:                      logger,
+		Store:              database,
+		ObjectStorage:      objects,
+		Publisher:          publisher,
+		Activator:          activator,
+		Orchestrator:       coordinator,
+		StoryPlanValidator: storyPlanValidator,
+		Authenticator:      api.HMACTokenAuthenticator{Secret: []byte(configuration.AuthHMACSecret)},
+		InternalToken:      configuration.InternalAPIToken,
+		Logger:             logger,
 	})
 	httpServer := &http.Server{
 		Addr:              ":" + configuration.Port,
@@ -121,52 +117,36 @@ func main() {
 }
 
 type configuration struct {
-	Port                        string
-	DatabaseURL                 string
-	S3Bucket                    string
-	MediaDownloadBaseURL        string
-	SQSQueueURL                 string
-	AuthHMACSecret              string
-	InternalAPIToken            string
-	PartSizeBytes               int64
-	MultipartThresholdBytes     int64
-	DeadLetterQueueURL          string
-	WorkerRunOnce               bool
-	WorkerJobID                 string
-	WorkerWaitTimeout           time.Duration
-	MusicProvider               string
-	ElevenLabsAPIKey            string
-	ElevenLabsBaseURL           string
-	ElevenMusicModel            string
-	ElevenMusicOutputFormat     string
-	MusicRequireVerifiedLicense bool
-	MusicBackgroundVolume       float64
-	MusicDuckedVolume           float64
+	Port                    string
+	DatabaseURL             string
+	S3Bucket                string
+	MediaDownloadBaseURL    string
+	SQSQueueURL             string
+	AuthHMACSecret          string
+	InternalAPIToken        string
+	PartSizeBytes           int64
+	MultipartThresholdBytes int64
+	DeadLetterQueueURL      string
+	WorkerRunOnce           bool
+	WorkerJobID             string
+	WorkerWaitTimeout       time.Duration
 }
 
 func loadConfiguration() (configuration, error) {
 	result := configuration{
-		Port:                        environment("PORT", "8080"),
-		DatabaseURL:                 os.Getenv("DATABASE_URL"),
-		S3Bucket:                    os.Getenv("S3_MEDIA_BUCKET"),
-		MediaDownloadBaseURL:        environment("MEDIA_DOWNLOAD_BASE_URL", os.Getenv("MEDIA_CDN_BASE_URL")),
-		SQSQueueURL:                 os.Getenv("SQS_PROCESSING_QUEUE_URL"),
-		AuthHMACSecret:              os.Getenv("AUTH_HMAC_SECRET"),
-		InternalAPIToken:            os.Getenv("INTERNAL_API_TOKEN"),
-		PartSizeBytes:               environmentInt64("UPLOAD_PART_SIZE_BYTES", 8*1024*1024),
-		MultipartThresholdBytes:     environmentInt64("UPLOAD_MULTIPART_THRESHOLD_BYTES", 16*1024*1024),
-		DeadLetterQueueURL:          os.Getenv("SQS_DEAD_LETTER_QUEUE_URL"),
-		WorkerRunOnce:               environmentBool("WORKER_RUN_ONCE", false),
-		WorkerJobID:                 os.Getenv("JOB_ID"),
-		WorkerWaitTimeout:           environmentDuration("WORKER_RUN_ONCE_WAIT_TIMEOUT", 2*time.Minute),
-		MusicProvider:               strings.ToLower(strings.TrimSpace(environment("MUSIC_PROVIDER", music.ProviderLocal))),
-		ElevenLabsAPIKey:            os.Getenv("ELEVENLABS_API_KEY"),
-		ElevenLabsBaseURL:           os.Getenv("ELEVENLABS_BASE_URL"),
-		ElevenMusicModel:            environment("ELEVEN_MUSIC_MODEL", music.DefaultElevenModel),
-		ElevenMusicOutputFormat:     environment("ELEVEN_MUSIC_OUTPUT_FORMAT", music.DefaultElevenOutputFormat),
-		MusicRequireVerifiedLicense: environmentBool("MUSIC_REQUIRE_VERIFIED_LICENSE", environmentBool("REQUIRE_VERIFIED_MUSIC_LICENSE", false)),
-		MusicBackgroundVolume:       environmentFloat("MUSIC_BACKGROUND_VOLUME", 0.16),
-		MusicDuckedVolume:           environmentFloat("MUSIC_DUCKED_VOLUME", 0.04),
+		Port:                    environment("PORT", "8080"),
+		DatabaseURL:             os.Getenv("DATABASE_URL"),
+		S3Bucket:                os.Getenv("S3_MEDIA_BUCKET"),
+		MediaDownloadBaseURL:    environment("MEDIA_DOWNLOAD_BASE_URL", os.Getenv("MEDIA_CDN_BASE_URL")),
+		SQSQueueURL:             os.Getenv("SQS_PROCESSING_QUEUE_URL"),
+		AuthHMACSecret:          os.Getenv("AUTH_HMAC_SECRET"),
+		InternalAPIToken:        os.Getenv("INTERNAL_API_TOKEN"),
+		PartSizeBytes:           environmentInt64("UPLOAD_PART_SIZE_BYTES", 8*1024*1024),
+		MultipartThresholdBytes: environmentInt64("UPLOAD_MULTIPART_THRESHOLD_BYTES", 16*1024*1024),
+		DeadLetterQueueURL:      os.Getenv("SQS_DEAD_LETTER_QUEUE_URL"),
+		WorkerRunOnce:           environmentBool("WORKER_RUN_ONCE", false),
+		WorkerJobID:             os.Getenv("JOB_ID"),
+		WorkerWaitTimeout:       environmentDuration("WORKER_RUN_ONCE_WAIT_TIMEOUT", 2*time.Minute),
 	}
 	if result.DatabaseURL == "" || result.S3Bucket == "" || result.SQSQueueURL == "" {
 		return configuration{}, errors.New("DATABASE_URL, S3_MEDIA_BUCKET, and SQS_PROCESSING_QUEUE_URL are required")
@@ -199,31 +179,6 @@ func environmentInt64(name string, fallback int64) int64 {
 	return parsed
 }
 
-func musicGenerationService(database store.Store, objects storage.ObjectStorage, configuration configuration) *music.GenerationService {
-	var provider music.Provider
-	switch strings.ToLower(strings.TrimSpace(configuration.MusicProvider)) {
-	case "", music.ProviderLocal:
-		provider = music.LocalProvider{}
-	case music.ProviderElevenLabs, "eleven":
-		provider = music.ElevenProvider{APIKey: configuration.ElevenLabsAPIKey, BaseURL: configuration.ElevenLabsBaseURL, Model: configuration.ElevenMusicModel, OutputFormat: configuration.ElevenMusicOutputFormat}
-	default:
-		provider = music.LocalProvider{}
-	}
-	return &music.GenerationService{Store: database, ObjectStorage: objects, Provider: provider}
-}
-
-func environmentFloat(name string, fallback float64) float64 {
-	value := strings.TrimSpace(os.Getenv(name))
-	if value == "" {
-		return fallback
-	}
-	parsed, err := strconv.ParseFloat(value, 64)
-	if err != nil || parsed < 0 {
-		return fallback
-	}
-	return parsed
-}
-
 func runWorkerOnce(ctx context.Context, database store.Store, coordinator *orchestration.Coordinator, configuration configuration, logger *slog.Logger) error {
 	consumer, err := queue.NewSQSConsumer(ctx, configuration.SQSQueueURL, configuration.DeadLetterQueueURL)
 	if err != nil {
@@ -235,12 +190,11 @@ func runWorkerOnce(ctx context.Context, database store.Store, coordinator *orche
 		workerContext, cancel = context.WithTimeout(ctx, configuration.WorkerWaitTimeout)
 		defer cancel()
 	}
-	musicSelector := &music.Selector{Store: database, RequireVerifiedLicense: configuration.MusicRequireVerifiedLicense, DefaultVolume: configuration.MusicBackgroundVolume, DuckedVolume: configuration.MusicDuckedVolume}
 	worker := orchestration.Worker{
 		Store:             database,
 		Consumer:          consumer,
 		Coordinator:       coordinator,
-		Handlers:          map[models.JobType]orchestration.JobHandler{models.JobTypeStoryPlan: orchestration.StoryPlanHandler{Store: database, MusicSelector: musicSelector, Logger: logger}},
+		Handlers:          map[models.JobType]orchestration.JobHandler{models.JobTypeStoryPlan: orchestration.StoryPlanHandler{Store: database, Logger: logger}},
 		Logger:            logger,
 		TargetJobID:       configuration.WorkerJobID,
 		VisibilityTimeout: 2 * time.Minute,

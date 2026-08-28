@@ -25,6 +25,7 @@ type Store interface {
 	GetUploadSession(ctx context.Context, userID, uploadID string) (models.UploadSession, error)
 	MarkMediaReady(ctx context.Context, userID, mediaID, uploadID, s3Key, etag string) (models.MediaAsset, error)
 	CreateProject(ctx context.Context, project models.StoryProject, idempotencyKey string) (models.StoryProject, bool, error)
+	AddProjectMedia(ctx context.Context, userID, projectID string, mediaIDs []string) (models.StoryProject, error)
 	GetProject(ctx context.Context, userID, projectID string) (models.StoryProject, error)
 	ListProjects(ctx context.Context, userID string) ([]models.StoryProject, error)
 	DeleteProject(ctx context.Context, userID, projectID string) error
@@ -41,7 +42,4 @@ type Store interface {
 	ListProjectAnalyses(ctx context.Context, userID, projectID string) ([]models.MediaAnalysis, []models.VideoAnalysis, error)
 	SaveStoryPlan(ctx context.Context, userID string, plan models.StoryPlan) error
 	GetStoryPlan(ctx context.Context, userID, projectID string) (models.StoryPlan, error)
-	SaveMusicTrack(ctx context.Context, track models.MusicTrack) error
-	GetMusicTrack(ctx context.Context, trackID string) (models.MusicTrack, error)
-	ListMusicTracks(ctx context.Context, filter models.MusicTrackFilter) ([]models.MusicTrack, error)
 }

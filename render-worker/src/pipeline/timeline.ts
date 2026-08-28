@@ -141,23 +141,15 @@ function speedFor(moment: StoryMoment): number {
   return clamp(moment.speed ?? 1, 0.25, 4);
 }
 
-function resolveAudio(storyPlan: StoryPlan, paths: RenderPaths, fps: number): ResolvedAudio {
+function resolveAudio(storyPlan: StoryPlan, _paths: RenderPaths, _fps: number): ResolvedAudio {
   const audio = storyPlan.audio;
-  if (!audio || audio.source === 'none') {
-    return {source: 'none', original_audio: false, background_volume: 0, original_volume: 0, ducking: false, ducked_volume: 0, start_offset_seconds: 0, fade_in_frames: 0, fade_out_frames: 0};
+  if (audio?.source === 'none' || audio?.original_audio === false) {
+    return {source: 'none', original_audio: false, original_volume: 0};
   }
   return {
-    source: audio.source,
-    mood: audio.mood,
-    background_path: audio.background_s3_key ? path.join(paths.assets_dir, 'background-audio') : undefined,
-    original_audio: audio.original_audio ?? true,
-    background_volume: clamp(audio.background_volume ?? 0.36, 0, 1),
-    original_volume: clamp(audio.original_volume ?? 1, 0, 1),
-    ducking: audio.ducking ?? true,
-    ducked_volume: clamp(audio.ducked_volume ?? 0.04, 0, 1),
-    start_offset_seconds: Math.max(0, audio.start_offset_seconds ?? 0),
-    fade_in_frames: framesFromMilliseconds(audio.fade_in_ms ?? 800, fps),
-    fade_out_frames: framesFromMilliseconds(audio.fade_out_ms ?? 1200, fps),
+    source: audio?.source ?? 'original',
+    original_audio: true,
+    original_volume: clamp(audio?.original_volume ?? 1, 0, 1),
   };
 }
 

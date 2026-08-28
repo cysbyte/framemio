@@ -30,12 +30,6 @@ func New(store store.Store, objectStorage storage.ObjectStorage, config Config) 
 	if config.SupportedAspectRatios == nil {
 		config.SupportedAspectRatios = DefaultConfig().SupportedAspectRatios
 	}
-	if config.AllowedAudioSources == nil {
-		config.AllowedAudioSources = DefaultConfig().AllowedAudioSources
-	}
-	if config.AudioSourcesRequiringMood == nil {
-		config.AudioSourcesRequiringMood = DefaultConfig().AudioSourcesRequiringMood
-	}
 	if config.AllowedCaptionPresets == nil {
 		config.AllowedCaptionPresets = DefaultConfig().AllowedCaptionPresets
 	}
@@ -50,9 +44,6 @@ func New(store store.Store, objectStorage storage.ObjectStorage, config Config) 
 	}
 	if config.MaxEndingLength == 0 {
 		config.MaxEndingLength = DefaultConfig().MaxEndingLength
-	}
-	if config.MaxMusicMoodLength == 0 {
-		config.MaxMusicMoodLength = DefaultConfig().MaxMusicMoodLength
 	}
 	if config.MaxUserInstructionsLength == 0 {
 		config.MaxUserInstructionsLength = DefaultConfig().MaxUserInstructionsLength
@@ -127,11 +118,6 @@ func (v *Validator) Validate(ctx context.Context, userID string, plan models.Sto
 		problems.Add("ending_text", "required", "ending text is required")
 	} else if len(plan.EndingText) > config.MaxEndingLength {
 		problems.Add("ending_text", "too_long", fmt.Sprintf("ending text must be at most %d characters", config.MaxEndingLength))
-	}
-	if strings.TrimSpace(plan.MusicMood) == "" {
-		problems.Add("music_mood", "required", "music mood is required")
-	} else if len(plan.MusicMood) > config.MaxMusicMoodLength {
-		problems.Add("music_mood", "too_long", fmt.Sprintf("music mood must be at most %d characters", config.MaxMusicMoodLength))
 	}
 	if len(plan.UserInstructions) > config.MaxUserInstructionsLength {
 		problems.Add("user_instructions", "too_long", fmt.Sprintf("user instructions must be at most %d characters", config.MaxUserInstructionsLength))
@@ -332,39 +318,11 @@ func (v *Validator) Validate(ctx context.Context, userID string, plan models.Sto
 	}
 
 	if plan.Audio != nil {
-		if strings.TrimSpace(plan.Audio.Source) == "" {
-			problems.Add("audio.source", "required", "audio source is required")
-		} else if len(plan.Audio.Source) > config.MaxAudioSourceLength {
-			problems.Add("audio.source", "too_long", fmt.Sprintf("audio source must be at most %d characters", config.MaxAudioSourceLength))
-		} else if !v.allowedAudioSource(plan.Audio.Source) {
-			problems.Add("audio.source", "unsupported_audio_source", "audio source is unsupported")
-		}
-		if strings.TrimSpace(plan.Audio.Mood) != "" && len(plan.Audio.Mood) > config.MaxMusicMoodLength {
-			problems.Add("audio.mood", "too_long", fmt.Sprintf("audio mood must be at most %d characters", config.MaxMusicMoodLength))
-		}
-		if _, requiresMood := config.AudioSourcesRequiringMood[strings.ToLower(strings.TrimSpace(plan.Audio.Source))]; requiresMood && strings.TrimSpace(plan.Audio.Mood) == "" {
-			problems.Add("audio.mood", "required", "audio mood is required for the selected source")
-		}
-		if plan.Audio.BackgroundVolume < 0 || plan.Audio.BackgroundVolume > 1 {
-			problems.Add("audio.background_volume", "out_of_range", "background volume must be between 0 and 1")
+		if source := strings.TrimSpace(plan.Audio.Source); source != "" && !strings.EqualFold(source, "original") && !strings.EqualFold(source, "none") {
+			problems.Add("audio.source", "unsupported_audio_source", "audio source is unsupported in V1")
 		}
 		if plan.Audio.OriginalVolume < 0 || plan.Audio.OriginalVolume > 1 {
 			problems.Add("audio.original_volume", "out_of_range", "original volume must be between 0 and 1")
-		}
-		if plan.Audio.DuckedVolume < 0 || plan.Audio.DuckedVolume > 1 {
-			problems.Add("audio.ducked_volume", "out_of_range", "ducked volume must be between 0 and 1")
-		}
-		if plan.Audio.BackgroundVolume > 0 && plan.Audio.DuckedVolume > plan.Audio.BackgroundVolume {
-			problems.Add("audio.ducked_volume", "out_of_range", "ducked volume must not exceed background volume")
-		}
-		if plan.Audio.StartOffsetSeconds < 0 {
-			problems.Add("audio.start_offset_seconds", "out_of_range", "music start offset must not be negative")
-		}
-		if plan.Audio.FadeInMS < 0 || plan.Audio.FadeOutMS < 0 {
-			problems.Add("audio.fade", "out_of_range", "audio fade values must not be negative")
-		}
-		if strings.EqualFold(strings.TrimSpace(plan.Audio.Source), "licensed") && strings.TrimSpace(plan.Audio.TrackID) == "" && strings.TrimSpace(plan.Audio.BackgroundS3Key) == "" {
-			problems.Add("audio.track_id", "required", "licensed music requires a track id or background storage key")
 		}
 	}
 
@@ -386,12 +344,6 @@ func (v *Validator) config() Config {
 	if config.SupportedAspectRatios == nil {
 		config.SupportedAspectRatios = defaults.SupportedAspectRatios
 	}
-	if config.AllowedAudioSources == nil {
-		config.AllowedAudioSources = defaults.AllowedAudioSources
-	}
-	if config.AudioSourcesRequiringMood == nil {
-		config.AudioSourcesRequiringMood = defaults.AudioSourcesRequiringMood
-	}
 	if config.AllowedCaptionPresets == nil {
 		config.AllowedCaptionPresets = defaults.AllowedCaptionPresets
 	}
@@ -406,9 +358,6 @@ func (v *Validator) config() Config {
 	}
 	if config.MaxEndingLength == 0 {
 		config.MaxEndingLength = defaults.MaxEndingLength
-	}
-	if config.MaxMusicMoodLength == 0 {
-		config.MaxMusicMoodLength = defaults.MaxMusicMoodLength
 	}
 	if config.MaxUserInstructionsLength == 0 {
 		config.MaxUserInstructionsLength = defaults.MaxUserInstructionsLength
@@ -454,11 +403,6 @@ func (v *Validator) config() Config {
 
 func (v *Validator) supportedAspectRatio(aspectRatio string) bool {
 	_, ok := v.config().SupportedAspectRatios[strings.TrimSpace(aspectRatio)]
-	return ok
-}
-
-func (v *Validator) allowedAudioSource(source string) bool {
-	_, ok := v.config().AllowedAudioSources[strings.ToLower(strings.TrimSpace(source))]
 	return ok
 }
 
