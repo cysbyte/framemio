@@ -41,8 +41,10 @@ struct LoadingState: View {
     }
 }
 
-#Preview {
-    LoadingState(message: "Finding the moments that belong together.")
-        .padding()
-        .background(FrameMioColors.canvas)
+struct LoadingState_Previews: PreviewProvider {
+    static var previews: some View {
+        LoadingState(message: "Finding the moments that belong together.")
+            .padding()
+            .background(FrameMioColors.canvas)
+    }
 }

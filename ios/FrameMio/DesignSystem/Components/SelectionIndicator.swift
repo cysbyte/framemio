@@ -34,11 +34,13 @@ struct SelectionIndicator: View {
     }
 }
 
-#Preview {
-    HStack {
-        SelectionIndicator(isSelected: false)
-        SelectionIndicator(isSelected: true)
+struct SelectionIndicator_Previews: PreviewProvider {
+    static var previews: some View {
+        HStack {
+            SelectionIndicator(isSelected: false)
+            SelectionIndicator(isSelected: true)
+        }
+        .padding()
+        .background(FrameMioColors.canvas)
     }
-    .padding()
-    .background(FrameMioColors.canvas)
 }

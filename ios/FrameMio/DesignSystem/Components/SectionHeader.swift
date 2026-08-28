@@ -48,8 +48,10 @@ struct SectionHeader: View {
     }
 }
 
-#Preview {
-    SectionHeader(title: "Your stories", subtitle: "Made from your moments", actionTitle: "See all") {}
-        .padding()
-        .background(FrameMioColors.canvas)
+struct SectionHeader_Previews: PreviewProvider {
+    static var previews: some View {
+        SectionHeader(title: "Your stories", subtitle: "Made from your moments", actionTitle: "See all") {}
+            .padding()
+            .background(FrameMioColors.canvas)
+    }
 }

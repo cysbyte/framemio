@@ -23,8 +23,10 @@ struct VideoDurationBadge: View {
     }
 }
 
-#Preview {
-    VideoDurationBadge(duration: 93)
-        .padding()
-        .background(FrameMioColors.canvas)
+struct VideoDurationBadge_Previews: PreviewProvider {
+    static var previews: some View {
+        VideoDurationBadge(duration: 93)
+            .padding()
+            .background(FrameMioColors.canvas)
+    }
 }

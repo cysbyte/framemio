@@ -80,8 +80,10 @@ struct StoryCard: View {
     }
 }
 
-#Preview {
-    StoryCard(title: "A slow Sunday", subtitle: "12 moments", duration: 58)
-        .padding()
-        .background(FrameMioColors.canvas)
+struct StoryCard_Previews: PreviewProvider {
+    static var previews: some View {
+        StoryCard(title: "A slow Sunday", subtitle: "12 moments", duration: 58)
+            .padding()
+            .background(FrameMioColors.canvas)
+    }
 }

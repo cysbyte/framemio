@@ -47,7 +47,9 @@ struct SecondaryButton: View {
     }
 }
 
-#Preview {
-    SecondaryButton(title: "Preview", systemImage: "play.fill") {}
-        .padding()
+struct SecondaryButton_Previews: PreviewProvider {
+    static var previews: some View {
+        SecondaryButton(title: "Preview", systemImage: "play.fill") {}
+            .padding()
+    }
 }

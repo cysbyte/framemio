@@ -391,11 +391,11 @@ private struct ShapeSample: View {
     }
 }
 
-#Preview {
-    DesignPlaygroundView()
-}
-
-#Preview("Dark Appearance") {
-    DesignPlaygroundView()
-        .preferredColorScheme(.dark)
+struct DesignPlaygroundView_Previews: PreviewProvider {
+    static var previews: some View {
+        DesignPlaygroundView()
+        DesignPlaygroundView()
+            .preferredColorScheme(.dark)
+            .previewDisplayName("Dark Appearance")
+    }
 }

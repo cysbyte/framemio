@@ -67,7 +67,9 @@ struct FrameMioPressButtonStyle: ButtonStyle {
     }
 }
 
-#Preview {
-    PrimaryButton(title: "Create Memory", systemImage: "plus") {}
-        .padding()
+struct PrimaryButton_Previews: PreviewProvider {
+    static var previews: some View {
+        PrimaryButton(title: "Create Memory", systemImage: "plus") {}
+            .padding()
+    }
 }

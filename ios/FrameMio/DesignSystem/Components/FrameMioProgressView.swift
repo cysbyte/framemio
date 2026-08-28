@@ -35,9 +35,10 @@ struct FrameMioProgressView: View {
     }
 }
 
-#Preview {
-    FrameMioProgressView(value: 0.62, title: "Creating your story")
-        .padding()
-        .background(FrameMioColors.canvas)
+struct FrameMioProgressView_Previews: PreviewProvider {
+    static var previews: some View {
+        FrameMioProgressView(value: 0.62, title: "Creating your story")
+            .padding()
+            .background(FrameMioColors.canvas)
+    }
 }
-

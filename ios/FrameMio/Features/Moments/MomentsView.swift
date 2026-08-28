@@ -23,6 +23,8 @@ struct MomentsView: View {
     }
 }
 
-#Preview {
-    MomentsView()
+struct MomentsView_Previews: PreviewProvider {
+    static var previews: some View {
+        MomentsView()
+    }
 }

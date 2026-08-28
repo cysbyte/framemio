@@ -28,8 +28,10 @@ struct Tag: View {
     }
 }
 
-#Preview {
-    Tag("Weekend", systemImage: "calendar")
-        .padding()
-        .background(FrameMioColors.canvas)
+struct Tag_Previews: PreviewProvider {
+    static var previews: some View {
+        Tag("Weekend", systemImage: "calendar")
+            .padding()
+            .background(FrameMioColors.canvas)
+    }
 }

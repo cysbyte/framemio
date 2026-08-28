@@ -32,10 +32,12 @@ struct EmptyStoryCard: View {
     }
 }
 
-#Preview {
-    EmptyStoryCard(
-        title: "Your first story is waiting",
-        message: "Choose a few moments from your Camera Roll and FrameMio will bring them together."
-    )
-    .padding()
+struct EmptyStoryCard_Previews: PreviewProvider {
+    static var previews: some View {
+        EmptyStoryCard(
+            title: "Your first story is waiting",
+            message: "Choose a few moments from your Camera Roll and FrameMio will bring them together."
+        )
+        .padding()
+    }
 }

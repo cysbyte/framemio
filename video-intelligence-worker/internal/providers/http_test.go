@@ -219,6 +219,13 @@ func TestOpenAICompatibleTranscriptionProviderSendsMultipartAudio(t *testing.T) 
 	}
 }
 
+func TestOpenAIDirectPromptRequestsPersonalMemoryLanguage(t *testing.T) {
+	t.Parallel()
+	if !strings.Contains(directVideoUnderstandingPrompt, "personal memory app") || !strings.Contains(directVideoUnderstandingPrompt, "Avoid detached surveillance-style wording") {
+		t.Fatalf("direct video understanding prompt should request memory-centered wording: %s", directVideoUnderstandingPrompt)
+	}
+}
+
 func TestOpenAICompatibleVideoUnderstandingProviderSendsChatCompletionsRequest(t *testing.T) {
 	t.Parallel()
 	responseBody, err := json.Marshal(providerUnderstandingResponse())

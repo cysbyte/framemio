@@ -112,6 +112,8 @@ struct AppRootView: View {
     }
 }
 
-#Preview {
-    AppRootView(dependencies: .preview(), homeMockState: .populated)
+struct AppRootView_Previews: PreviewProvider {
+    static var previews: some View {
+        AppRootView(dependencies: .preview(), homeMockState: .populated)
+    }
 }

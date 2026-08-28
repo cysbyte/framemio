@@ -16,6 +16,8 @@ struct StoryView: View {
     }
 }
 
-#Preview {
-    StoryView()
+struct StoryView_Previews: PreviewProvider {
+    static var previews: some View {
+        StoryView()
+    }
 }

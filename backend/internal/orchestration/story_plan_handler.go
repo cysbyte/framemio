@@ -57,6 +57,7 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		slog.String("project_id", project.ID),
 		slog.Int("story_plan_version", request.Version),
 		slog.Int("selected_media_count", len(request.SelectedMediaIDs)),
+		slog.Int("preferred_media_order_count", len(request.PreferredMediaOrder)),
 		slog.Int("excluded_media_count", len(request.ExcludedMediaIDs)),
 		slog.Int("excluded_moment_count", len(request.ExcludedMomentIDs)),
 		slog.String("visual_style", string(request.VisualStyle)),
@@ -97,20 +98,21 @@ func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configur
 	}
 	subtitlesEnabled := boolPointerFromConfig(configuration["subtitles_enabled"])
 	return ai.Request{
-		ProjectID:          project.ID,
-		Version:            version,
-		DesiredDuration:    duration,
-		StoryType:          storyTypeFromContext(project.Context),
-		VisualStyle:        style,
-		UserInstructions:   instructions,
-		SelectedMediaIDs:   selectedMediaIDs,
-		ExcludedMediaIDs:   splitStoryPlanConfigList(configuration["excluded_media_ids"]),
-		ExcludedMomentIDs:  splitStoryPlanConfigList(configuration["excluded_moment_ids"]),
-		SubtitlesEnabled:   subtitlesEnabled,
-		CaptionStylePreset: strings.TrimSpace(configuration["caption_style_preset"]),
-		PhotoAnalyses:      photoAnalyses,
-		VideoAnalyses:      videoAnalyses,
-		MediaClusters:      clusters,
+		ProjectID:           project.ID,
+		Version:             version,
+		DesiredDuration:     duration,
+		StoryType:           storyTypeFromContext(project.Context),
+		VisualStyle:         style,
+		UserInstructions:    instructions,
+		SelectedMediaIDs:    selectedMediaIDs,
+		PreferredMediaOrder: splitStoryPlanConfigList(configuration["preferred_media_order"]),
+		ExcludedMediaIDs:    splitStoryPlanConfigList(configuration["excluded_media_ids"]),
+		ExcludedMomentIDs:   splitStoryPlanConfigList(configuration["excluded_moment_ids"]),
+		SubtitlesEnabled:    subtitlesEnabled,
+		CaptionStylePreset:  strings.TrimSpace(configuration["caption_style_preset"]),
+		PhotoAnalyses:       photoAnalyses,
+		VideoAnalyses:       videoAnalyses,
+		MediaClusters:       clusters,
 	}
 }
 

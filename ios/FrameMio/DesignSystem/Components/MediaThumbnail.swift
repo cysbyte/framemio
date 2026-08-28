@@ -165,8 +165,10 @@ struct MediaThumbnail: View {
     }
 }
 
-#Preview {
-    MediaThumbnail(duration: 42, isSelected: true)
-        .padding()
-        .background(FrameMioColors.canvas)
+struct MediaThumbnail_Previews: PreviewProvider {
+    static var previews: some View {
+        MediaThumbnail(duration: 42, isSelected: true)
+            .padding()
+            .background(FrameMioColors.canvas)
+    }
 }

@@ -1,9 +1,63 @@
+import AVFoundation
 import Combine
+import CoreTransferable
 import Foundation
 import Photos
 import PhotosUI
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
+
+private func storyPreviewDebugLog(_ message: @autoclosure () -> String) {
+#if DEBUG
+    print("[FrameMio][StoryPreview] \(message())")
+#endif
+}
+
+
+private struct StagedStoryImport: Sendable {
+    let asset: MediaAsset
+    let file: OriginalMediaFile?
+    let thumbnail: UIImage?
+    let fallbackAnalysis: MediaAnalysis?
+}
+
+private struct PickedStoryMovie: Transferable, Sendable {
+    let url: URL
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(contentType: .movie) { movie in
+            SentTransferredFile(movie.url)
+        } importing: { received in
+            PickedStoryMovie(url: try PickerImportStager.copyTransferredFile(received.file, fallbackExtension: "mov"))
+        }
+    }
+}
+
+private enum PickerImportStager {
+    static func directory() throws -> URL {
+        let fileManager = FileManager.default
+        let directory = (fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fileManager.temporaryDirectory)
+            .appendingPathComponent("FrameMio", isDirectory: true)
+            .appendingPathComponent("PickerImports", isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    static func writeData(_ data: Data, fileExtension: String) throws -> URL {
+        let url = try directory().appendingPathComponent("picker-\(UUID().uuidString).\(fileExtension)")
+        try data.write(to: url, options: .atomic)
+        return url
+    }
+
+    static func copyTransferredFile(_ sourceURL: URL, fallbackExtension: String) throws -> URL {
+        let fileExtension = sourceURL.pathExtension.isEmpty ? fallbackExtension : sourceURL.pathExtension
+        let destinationURL = try directory().appendingPathComponent("picker-\(UUID().uuidString).\(fileExtension)")
+        try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+        return destinationURL
+    }
+}
 
 
 struct ImportedStoryMedia: Hashable, Sendable {
@@ -325,52 +379,264 @@ final class StoryPreviewViewModel: ObservableObject {
     }
 
     func importMediaForEdit(_ items: [PhotosPickerItem]) async throws -> [ImportedStoryMedia] {
-        let identifiers = items.compactMap(\.itemIdentifier)
-        guard !identifiers.isEmpty else { return [] }
-        let assets = try await photoLibrary.resolveAssets(localIdentifiers: identifiers)
-        guard !assets.isEmpty else {
-            throw AppError.message("We couldn't read those Photos items. Try selecting them again.")
-        }
-        let selection = MediaSelection(explicitlySelectedAssetIDs: assets.map(\.id))
-        let uploads = try await mediaUploadService.upload(
-            selection: selection,
-            assets: assets,
-            options: MediaUploadOptions(),
-            progress: { _ in }
-        )
-        var uploadsByAssetID: [String: MediaUpload] = [:]
-        for upload in uploads where upload.status == .completed && upload.mediaID != nil {
-            uploadsByAssetID[upload.assetID] = upload
-        }
-        var imported: [ImportedStoryMedia] = []
-        for asset in assets {
-            guard let upload = uploadsByAssetID[asset.id], let mediaID = upload.mediaID else { continue }
-            let storyAsset = MediaAsset(
-                id: mediaID,
-                localIdentifier: asset.localIdentifier,
-                kind: asset.kind,
-                creationDate: asset.creationDate,
-                duration: asset.duration,
-                pixelWidth: asset.pixelWidth,
-                pixelHeight: asset.pixelHeight
-            )
-            momentAssets[mediaID] = storyAsset
-            let analysis: MediaAnalysis?
-            if asset.isVideo {
-                analysis = nil
-            } else {
-                let localAnalysis = try await analysisService.analyze(asset: asset)
-                analysis = MediaAnalysis(
-                    assetID: mediaID,
-                    labels: localAnalysis.labels,
-                    peopleCount: localAnalysis.peopleCount,
-                    confidence: localAnalysis.confidence
-                )
+        let contentTypeSummary = items
+            .map { $0.supportedContentTypes.map(\.identifier).joined(separator: "|") }
+            .joined(separator: ",")
+        storyPreviewDebugLog("edit import start picker_items=\(items.count) content_types=\(contentTypeSummary)")
+        do {
+            let assets = try await assetsForPickedItems(items)
+            storyPreviewDebugLog("edit import assets ready count=\(assets.count) photos=\(assets.filter { !$0.asset.isVideo }.count) videos=\(assets.filter(\.asset.isVideo).count) staged=\(assets.filter { $0.file != nil }.count)")
+            guard !assets.isEmpty else {
+                storyPreviewDebugLog("edit import stopped no_assets")
+                return []
             }
-            imported.append(ImportedStoryMedia(mediaID: mediaID, sourceAsset: storyAsset, analysis: analysis))
+
+            for asset in assets {
+                if let file = asset.file {
+                    try await mediaUploadStore.save(makeStagedUploadRecord(asset: asset.asset, file: file))
+                    storyPreviewDebugLog("edit import staged picker asset=\(asset.asset.id) file=\(file.fileName) bytes=\(file.fileSizeBytes) content_type=\(file.contentType)")
+                }
+            }
+
+            let sourceAssets = assets.map(\.asset)
+            let selection = MediaSelection(explicitlySelectedAssetIDs: sourceAssets.map(\.id))
+            storyPreviewDebugLog("edit import upload start eligible_assets=\(selection.uploadEligibleAssetIDs.count)")
+            let uploads = try await mediaUploadService.upload(
+                selection: selection,
+                assets: sourceAssets,
+                options: MediaUploadOptions(),
+                progress: { progress in
+                    storyPreviewDebugLog("edit import upload progress upload=\(progress.uploadID) asset=\(progress.assetID) bytes=\(progress.uploadedBytes)/\(progress.totalBytes) completed=\(progress.completedUploads)/\(progress.totalUploads)")
+                }
+            )
+            storyPreviewDebugLog("edit import upload finished uploads=\(uploads.count) completed=\(uploads.filter { $0.status == .completed }.count) with_media_id=\(uploads.filter { $0.mediaID != nil }.count)")
+
+            var uploadsByAssetID: [String: MediaUpload] = [:]
+            for upload in uploads where upload.status == .completed && upload.mediaID != nil {
+                uploadsByAssetID[upload.assetID] = upload
+            }
+            var imported: [ImportedStoryMedia] = []
+            for asset in assets {
+                guard let upload = uploadsByAssetID[asset.asset.id], let mediaID = upload.mediaID else {
+                    storyPreviewDebugLog("edit import skipping asset=\(asset.asset.id) missing_completed_upload")
+                    continue
+                }
+                let storyAsset = MediaAsset(
+                    id: mediaID,
+                    localIdentifier: asset.asset.localIdentifier,
+                    kind: asset.asset.kind,
+                    creationDate: asset.asset.creationDate,
+                    duration: asset.asset.duration,
+                    pixelWidth: asset.asset.pixelWidth,
+                    pixelHeight: asset.asset.pixelHeight
+                )
+                momentAssets[mediaID] = storyAsset
+                if let thumbnail = asset.thumbnail {
+                    momentThumbnails[mediaID] = thumbnail
+                }
+
+                let analysis: MediaAnalysis?
+                if let fallbackAnalysis = asset.fallbackAnalysis {
+                    analysis = MediaAnalysis(
+                        assetID: mediaID,
+                        labels: fallbackAnalysis.labels,
+                        peopleCount: fallbackAnalysis.peopleCount,
+                        confidence: fallbackAnalysis.confidence
+                    )
+                    storyPreviewDebugLog("edit import fallback analysis ready media=\(mediaID) labels=\(fallbackAnalysis.labels.count)")
+                } else if asset.asset.isVideo {
+                    storyPreviewDebugLog("edit import media ready media=\(mediaID) kind=video analysis=deferred_to_backend")
+                    analysis = nil
+                } else {
+                    storyPreviewDebugLog("edit import analyzing photo asset=\(asset.asset.id) media=\(mediaID)")
+                    let localAnalysis = try await analysisService.analyze(asset: asset.asset)
+                    analysis = MediaAnalysis(
+                        assetID: mediaID,
+                        labels: localAnalysis.labels,
+                        peopleCount: localAnalysis.peopleCount,
+                        confidence: localAnalysis.confidence
+                    )
+                    storyPreviewDebugLog("edit import photo analysis ready media=\(mediaID) labels=\(localAnalysis.labels.count) people=\(localAnalysis.peopleCount)")
+                }
+                imported.append(ImportedStoryMedia(mediaID: mediaID, sourceAsset: storyAsset, analysis: analysis))
+            }
+            storyPreviewDebugLog("edit import complete imported=\(imported.count)")
+            return imported
+        } catch is CancellationError {
+            storyPreviewDebugLog("edit import cancelled")
+            throw CancellationError()
+        } catch {
+            storyPreviewDebugLog("edit import failed error=\(error.localizedDescription)")
+            throw error
         }
-        return imported
     }
+
+    private func assetsForPickedItems(_ items: [PhotosPickerItem]) async throws -> [StagedStoryImport] {
+        let identifiers = items.compactMap(\.itemIdentifier)
+        storyPreviewDebugLog("edit import identifiers item_count=\(items.count) identifier_count=\(identifiers.count) nil_identifiers=\(items.count - identifiers.count)")
+        if identifiers.count == items.count {
+            let resolved = try await photoLibrary.resolveAssets(localIdentifiers: identifiers)
+            storyPreviewDebugLog("edit import resolved identifiers=\(identifiers.count) assets=\(resolved.count) photos=\(resolved.filter { !$0.isVideo }.count) videos=\(resolved.filter(\.isVideo).count)")
+            if resolved.count == items.count {
+                return resolved.map { StagedStoryImport(asset: $0, file: nil, thumbnail: nil, fallbackAnalysis: nil) }
+            }
+            storyPreviewDebugLog("edit import falling back to transferable loading resolved=\(resolved.count) expected=\(items.count)")
+        } else if !identifiers.isEmpty {
+            storyPreviewDebugLog("edit import falling back to transferable loading due_to_missing_identifiers")
+        } else {
+            storyPreviewDebugLog("edit import using transferable loading no_photo_identifiers")
+        }
+
+        var staged: [StagedStoryImport] = []
+        staged.reserveCapacity(items.count)
+        for item in items {
+            try Task.checkCancellation()
+            staged.append(try await stagedImport(from: item))
+        }
+        return staged
+    }
+
+    private func stagedImport(from item: PhotosPickerItem) async throws -> StagedStoryImport {
+        if item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) || $0.conforms(to: .video) }) {
+            return try await stagedVideoImport(from: item)
+        }
+        if item.supportedContentTypes.contains(where: { $0.conforms(to: .image) }) {
+            return try await stagedPhotoImport(from: item)
+        }
+        throw AppError.unsupportedMedia
+    }
+
+    private func stagedPhotoImport(from item: PhotosPickerItem) async throws -> StagedStoryImport {
+        guard let data = try await item.loadTransferable(type: Data.self),
+              let image = UIImage(data: data),
+              let jpegData = image.jpegData(compressionQuality: 0.92) else {
+            throw AppError.message("We couldn't read that photo. Try selecting it again.")
+        }
+        let fileURL = try PickerImportStager.writeData(jpegData, fileExtension: "jpg")
+        let file = OriginalMediaFile(
+            url: fileURL,
+            fileName: fileURL.lastPathComponent,
+            contentType: "image/jpeg",
+            fileSizeBytes: Int64(jpegData.count)
+        )
+        let assetID = "picker-\(UUID().uuidString)"
+        let asset = MediaAsset(
+            id: assetID,
+            localIdentifier: nil,
+            kind: .image,
+            creationDate: Date(),
+            duration: 0,
+            pixelWidth: Int(image.size.width.rounded()),
+            pixelHeight: Int(image.size.height.rounded())
+        )
+        let analysis = MediaAnalysis(assetID: assetID, labels: ["photo", "memory"], peopleCount: 0, confidence: 0.5)
+        storyPreviewDebugLog("edit import staged photo asset=\(asset.id) pixels=\(asset.pixelWidth)x\(asset.pixelHeight) bytes=\(file.fileSizeBytes)")
+        return StagedStoryImport(asset: asset, file: file, thumbnail: image, fallbackAnalysis: analysis)
+    }
+
+    private func stagedVideoImport(from item: PhotosPickerItem) async throws -> StagedStoryImport {
+        let url: URL
+        if let movie = try await item.loadTransferable(type: PickedStoryMovie.self) {
+            url = movie.url
+        } else if let transferredURL = try await item.loadTransferable(type: URL.self) {
+            url = try PickerImportStager.copyTransferredFile(transferredURL, fallbackExtension: "mov")
+        } else {
+            throw AppError.message("We couldn't read that video. Try selecting it again.")
+        }
+
+        let metadata = try await videoMetadata(for: url)
+        let fileSizeBytes = Int64((try url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        guard fileSizeBytes > 0 else {
+            throw AppError.unsupportedMedia
+        }
+        let contentType = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "video/quicktime"
+        let file = OriginalMediaFile(
+            url: url,
+            fileName: url.lastPathComponent,
+            contentType: contentType,
+            fileSizeBytes: fileSizeBytes
+        )
+        let asset = MediaAsset(
+            id: "picker-\(UUID().uuidString)",
+            localIdentifier: nil,
+            kind: .video,
+            creationDate: Date(),
+            duration: metadata.duration,
+            pixelWidth: metadata.pixelWidth,
+            pixelHeight: metadata.pixelHeight
+        )
+        let thumbnail = await videoThumbnail(for: url)
+        storyPreviewDebugLog("edit import staged video asset=\(asset.id) duration=\(asset.duration) pixels=\(asset.pixelWidth)x\(asset.pixelHeight) bytes=\(file.fileSizeBytes) content_type=\(contentType)")
+        return StagedStoryImport(asset: asset, file: file, thumbnail: thumbnail, fallbackAnalysis: nil)
+    }
+
+    private func videoMetadata(for url: URL) async throws -> VideoMetadata {
+        let asset = AVURLAsset(url: url)
+        let duration = try await asset.load(.duration)
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        guard let videoTrack = videoTracks.first else {
+            throw AppError.unsupportedMedia
+        }
+        let naturalSize = try await videoTrack.load(.naturalSize)
+        let preferredTransform = try await videoTrack.load(.preferredTransform)
+        let displaySize = naturalSize.applying(preferredTransform)
+        return VideoMetadata(
+            assetID: nil,
+            creationDate: nil,
+            location: nil,
+            duration: duration.seconds.isFinite ? max(0, duration.seconds) : 0,
+            pixelWidth: Int(abs(displaySize.width).rounded()),
+            pixelHeight: Int(abs(displaySize.height).rounded()),
+            orientation: .from(pixelWidth: Int(abs(displaySize.width).rounded()), pixelHeight: Int(abs(displaySize.height).rounded())),
+            framesPerSecond: nil,
+            fileSizeBytes: nil,
+            hasAudio: nil,
+            fileType: nil,
+            quality: nil
+        )
+    }
+
+    private func videoThumbnail(for url: URL) async -> UIImage? {
+        await Task.detached(priority: .userInitiated) {
+            let asset = AVURLAsset(url: url)
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            do {
+                let cgImage = try generator.copyCGImage(at: CMTime(seconds: 0.2, preferredTimescale: 600), actualTime: nil)
+                return UIImage(cgImage: cgImage)
+            } catch {
+                return nil
+            }
+        }.value
+    }
+
+    private func makeStagedUploadRecord(asset: MediaAsset, file: OriginalMediaFile) -> MediaUpload {
+        let uploadID = MediaUpload.makeID(for: asset.id, optimization: .original)
+        return MediaUpload(
+            id: uploadID,
+            assetID: asset.id,
+            localIdentifier: nil,
+            mediaID: nil,
+            mediaType: asset.isVideo ? .video : .photo,
+            fileName: file.fileName,
+            contentType: file.contentType,
+            fileSizeBytes: file.fileSizeBytes,
+            duration: asset.isVideo ? asset.duration : nil,
+            creationDate: asset.creationDate,
+            pixelWidth: asset.pixelWidth,
+            pixelHeight: asset.pixelHeight,
+            orientation: .from(pixelWidth: asset.pixelWidth, pixelHeight: asset.pixelHeight),
+            optimization: .original,
+            status: .queued,
+            uploadedBytes: 0,
+            authorizationIdempotencyKey: MediaUpload.makeAuthorizationID(for: uploadID, fileSizeBytes: file.fileSizeBytes),
+            session: nil,
+            stagedFileURL: file.url,
+            lastError: nil,
+            updatedAt: Date()
+        )
+    }
+
 
     func saveStoryEdits(_ request: StoryEditRequest) {
         guard let storyID, request.hasChanges, story?.status.shouldPoll != true else { return }
@@ -438,7 +704,7 @@ final class StoryPreviewViewModel: ObservableObject {
     }
 
     func deleteStory() {
-        guard let storyID, activeAction == nil, story?.status.shouldPoll != true else { return }
+        guard let storyID, activeAction == nil else { return }
         actionTask?.cancel()
         actionTask = Task { [weak self] in
             guard let self else { return }

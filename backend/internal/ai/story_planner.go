@@ -15,22 +15,23 @@ import (
 )
 
 type Request struct {
-	ProjectID          string
-	Version            int
-	DesiredDuration    time.Duration
-	StoryType          models.StoryType
-	VisualStyle        models.VisualStyle
-	UserInstructions   string
-	SelectedMediaIDs   []string
-	ExcludedMediaIDs   []string
-	ExcludedMomentIDs  []string
-	SubtitlesEnabled   *bool
-	CaptionStylePreset string
-	Timestamps         []time.Time
-	Locations          []string
-	PhotoAnalyses      []models.PhotoAnalysis
-	VideoAnalyses      []models.VideoAnalysis
-	MediaClusters      []models.MediaCluster
+	ProjectID           string
+	Version             int
+	DesiredDuration     time.Duration
+	StoryType           models.StoryType
+	VisualStyle         models.VisualStyle
+	UserInstructions    string
+	SelectedMediaIDs    []string
+	PreferredMediaOrder []string
+	ExcludedMediaIDs    []string
+	ExcludedMomentIDs   []string
+	SubtitlesEnabled    *bool
+	CaptionStylePreset  string
+	Timestamps          []time.Time
+	Locations           []string
+	PhotoAnalyses       []models.PhotoAnalysis
+	VideoAnalyses       []models.VideoAnalysis
+	MediaClusters       []models.MediaCluster
 }
 
 type Planner struct {
@@ -91,12 +92,7 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 	if len(chosen) == 0 {
 		return models.StoryPlan{}, errors.New("story planner could not assemble a coherent story")
 	}
-	sort.Slice(chosen, func(left, right int) bool {
-		if chosen[left].sourceTime == chosen[right].sourceTime {
-			return chosen[left].score > chosen[right].score
-		}
-		return chosen[left].sourceTime < chosen[right].sourceTime
-	})
+	sortCandidatesForStory(chosen, request.PreferredMediaOrder)
 	moments := make([]models.StoryMoment, 0, len(chosen))
 	captions := make([]models.StoryCaption, 0, len(chosen))
 	totalDuration := 0
@@ -426,6 +422,35 @@ func filterExcludedCandidates(candidates []candidate, excludedMedia, excludedMom
 		filtered = append(filtered, candidate)
 	}
 	return filtered
+}
+
+func sortCandidatesForStory(candidates []candidate, preferredMediaOrder []string) {
+	order := make(map[string]int, len(preferredMediaOrder))
+	for index, mediaID := range preferredMediaOrder {
+		mediaID = strings.TrimSpace(mediaID)
+		if mediaID == "" {
+			continue
+		}
+		if _, exists := order[mediaID]; !exists {
+			order[mediaID] = index
+		}
+	}
+	sort.SliceStable(candidates, func(left, right int) bool {
+		leftOrder, leftPreferred := order[candidates[left].mediaID]
+		rightOrder, rightPreferred := order[candidates[right].mediaID]
+		if leftPreferred || rightPreferred {
+			if leftPreferred != rightPreferred {
+				return leftPreferred
+			}
+			if leftOrder != rightOrder {
+				return leftOrder < rightOrder
+			}
+		}
+		if candidates[left].sourceTime == candidates[right].sourceTime {
+			return candidates[left].score > candidates[right].score
+		}
+		return candidates[left].sourceTime < candidates[right].sourceTime
+	})
 }
 
 func selectCandidates(candidates []candidate, desired time.Duration) []candidate {

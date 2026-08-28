@@ -33,14 +33,15 @@ type iosStory struct {
 }
 
 type iosStoryMoment struct {
-	ID           string  `json:"id"`
-	MomentID     string  `json:"momentId,omitempty"`
-	MediaID      string  `json:"mediaId"`
-	Type         string  `json:"type,omitempty"`
-	ThumbnailURL *string `json:"thumbnailUrl,omitempty"`
-	Title        string  `json:"title,omitempty"`
-	Description  string  `json:"description,omitempty"`
-	Selected     bool    `json:"selected"`
+	ID           string     `json:"id"`
+	MomentID     string     `json:"momentId,omitempty"`
+	MediaID      string     `json:"mediaId"`
+	Type         string     `json:"type,omitempty"`
+	ThumbnailURL *string    `json:"thumbnailUrl,omitempty"`
+	Title        string     `json:"title,omitempty"`
+	Description  string     `json:"description,omitempty"`
+	CreationDate *time.Time `json:"creationDate,omitempty"`
+	Selected     bool       `json:"selected"`
 }
 
 type iosCreateStoryRequest struct {
@@ -53,6 +54,7 @@ type iosStoryEditRequest struct {
 	RemoveMomentIDs  []string                `json:"removeMomentIds,omitempty"`
 	RemoveMediaIDs   []string                `json:"removeMediaIds,omitempty"`
 	AddMediaIDs      []string                `json:"addMediaIds,omitempty"`
+	OrderedMediaIDs  []string                `json:"orderedMediaIds,omitempty"`
 	Replace          []iosStoryMomentReplace `json:"replace,omitempty"`
 	Analyses         []iosStoryAnalysis      `json:"analyses,omitempty"`
 	Style            string                  `json:"style,omitempty"`
@@ -178,6 +180,7 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		"remove_moment_count", len(input.RemoveMomentIDs),
 		"remove_media_count", len(input.RemoveMediaIDs),
 		"add_media_count", len(input.AddMediaIDs),
+		"ordered_media_count", len(input.OrderedMediaIDs),
 		"new_project_media_count", len(newMediaIDs),
 		"replacement_count", len(input.Replace),
 		"analysis_count", len(input.Analyses),
@@ -210,6 +213,7 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		"project_id", project.ID,
 		"story_plan_version", config["story_plan_version"],
 		"selected_media_count", configListCount(config["selected_media_ids"]),
+		"preferred_media_order_count", configListCount(config["preferred_media_order"]),
 		"excluded_media_count", configListCount(config["excluded_media_ids"]),
 		"excluded_moment_count", configListCount(config["excluded_moment_ids"]),
 		"subtitles_enabled", valueOrUnset(config["subtitles_enabled"]),
@@ -376,9 +380,17 @@ func (s *Server) iosStoryEditConfiguration(request *http.Request, userID string,
 	if version <= 1 {
 		version = 1
 	}
+	selectedMediaIDs := sortedKeys(selected)
+	preferredMediaOrder, err := preferredIOSStoryMediaOrder(input.OrderedMediaIDs, selected, projectMedia)
+	if err != nil {
+		return nil, err
+	}
 	config := map[string]string{
 		"story_plan_version": strconv.Itoa(version),
-		"selected_media_ids": strings.Join(sortedKeys(selected), ","),
+		"selected_media_ids": strings.Join(selectedMediaIDs, ","),
+	}
+	if len(preferredMediaOrder) > 0 {
+		config["preferred_media_order"] = strings.Join(preferredMediaOrder, ",")
 	}
 	if len(excludedMedia) > 0 {
 		config["excluded_media_ids"] = strings.Join(sortedKeys(excludedMedia), ",")
@@ -459,6 +471,32 @@ func sortedKeys(values map[string]struct{}) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func preferredIOSStoryMediaOrder(input []string, selected, projectMedia map[string]struct{}) ([]string, error) {
+	ordered := cleanStringList(input)
+	if len(ordered) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]struct{}, len(selected))
+	result := make([]string, 0, len(selected))
+	for _, mediaID := range ordered {
+		if _, ok := projectMedia[mediaID]; !ok {
+			return nil, store.ErrConflict
+		}
+		if _, ok := selected[mediaID]; !ok {
+			return nil, store.ErrConflict
+		}
+		seen[mediaID] = struct{}{}
+		result = append(result, mediaID)
+	}
+	for _, mediaID := range sortedKeys(selected) {
+		if _, ok := seen[mediaID]; ok {
+			continue
+		}
+		result = append(result, mediaID)
+	}
+	return result, nil
 }
 
 func normalizeIOSStoryEditStyle(value string) string {
@@ -859,6 +897,10 @@ func (s *Server) iosStoryMoments(request *http.Request, plan models.StoryPlan, m
 		if media, ok := mediaByID[mediaID]; ok {
 			thumbnailURL = s.iosStoryThumbnailURL(request, media)
 		}
+		var creationDate *time.Time
+		if media, ok := mediaByID[mediaID]; ok {
+			creationDate = media.CreationDate
+		}
 		moments = append(moments, iosStoryMoment{
 			ID:           momentID,
 			MomentID:     momentID,
@@ -867,6 +909,7 @@ func (s *Server) iosStoryMoments(request *http.Request, plan models.StoryPlan, m
 			ThumbnailURL: thumbnailURL,
 			Title:        iosMomentTitleIgnoringSubtitles(moment, mediaType, index, captionTexts),
 			Description:  firstHumanIOSPresentationText(captionTexts, moment.Narrative, moment.Caption, moment.Reason),
+			CreationDate: creationDate,
 			Selected:     true,
 		})
 	}
@@ -956,6 +999,7 @@ func (s *Server) iosAvailableMoments(request *http.Request, project models.Story
 			Type:         string(media.Type),
 			ThumbnailURL: s.iosStoryThumbnailURL(request, media),
 			Title:        fallbackIOSMomentTitle(string(media.Type), index),
+			CreationDate: media.CreationDate,
 			Selected:     isSelected,
 		})
 	}
@@ -999,7 +1043,89 @@ func iosHumanMomentText(value string) string {
 	if trimmed == "" || isGenericIOSMomentText(trimmed) {
 		return ""
 	}
-	return trimmed
+	return iosPersonalMemoryText(trimmed)
+}
+
+func iosPersonalMemoryText(value string) string {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	if lower == "" {
+		return ""
+	}
+	if containsAnyIOSPhrase(lower, "woman", "man", "adult", "person", "people", "mother", "father", "parent") &&
+		containsAnyIOSPhrase(lower, "child", "kid", "baby", "toddler", "children") {
+		return iosFamilyMemorySummary(lower)
+	}
+	if strings.HasPrefix(lower, "a woman ") || strings.HasPrefix(lower, "the woman ") || strings.HasPrefix(lower, "a man ") || strings.HasPrefix(lower, "the man ") || strings.HasPrefix(lower, "a person ") || strings.HasPrefix(lower, "the person ") {
+		return iosEverydayMemorySummary(lower)
+	}
+	if strings.HasPrefix(lower, "people ") || strings.HasPrefix(lower, "a group of people ") || strings.HasPrefix(lower, "three people ") || strings.HasPrefix(lower, "two people ") {
+		return iosEverydayMemorySummary(lower)
+	}
+	return value
+}
+
+func iosFamilyMemorySummary(lower string) string {
+	setting := iosMemorySetting(lower)
+	action := "spending time together"
+	switch {
+	case strings.Contains(lower, "duck"):
+		action = "watching ducks together"
+	case strings.Contains(lower, "picnic"):
+		action = "sharing a relaxed picnic"
+	case strings.Contains(lower, "laugh") || strings.Contains(lower, "smil"):
+		action = "sharing a happy moment"
+	case strings.Contains(lower, "breakfast") || strings.Contains(lower, "kitchen") || strings.Contains(lower, "table"):
+		action = "sharing an everyday moment"
+	}
+	if setting != "" {
+		return "A warm family memory " + setting + ", " + action
+	}
+	return "A warm family memory, " + action
+}
+
+func iosEverydayMemorySummary(lower string) string {
+	setting := iosMemorySetting(lower)
+	action := "spending time together"
+	switch {
+	case strings.Contains(lower, "laugh") || strings.Contains(lower, "smil"):
+		action = "sharing a happy moment"
+	case strings.Contains(lower, "picnic"):
+		action = "sharing a relaxed picnic"
+	case strings.Contains(lower, "breakfast") || strings.Contains(lower, "kitchen") || strings.Contains(lower, "table"):
+		action = "sharing an everyday moment"
+	}
+	if setting != "" {
+		return "A personal memory " + setting + ", " + action
+	}
+	return "A personal memory, " + action
+}
+
+func iosMemorySetting(lower string) string {
+	switch {
+	case strings.Contains(lower, "lake"):
+		return "by the lake"
+	case strings.Contains(lower, "beach") || strings.Contains(lower, "ocean") || strings.Contains(lower, "waves"):
+		return "by the water"
+	case strings.Contains(lower, "park"):
+		return "at the park"
+	case strings.Contains(lower, "kitchen"):
+		return "in the kitchen"
+	case strings.Contains(lower, "table") || strings.Contains(lower, "breakfast"):
+		return "around the table"
+	case strings.Contains(lower, "home") || strings.Contains(lower, "living room"):
+		return "at home"
+	default:
+		return ""
+	}
+}
+
+func containsAnyIOSPhrase(value string, phrases ...string) bool {
+	for _, phrase := range phrases {
+		if strings.Contains(value, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 func isGenericIOSMomentText(value string) bool {
@@ -1010,7 +1136,9 @@ func isGenericIOSMomentText(value string) bool {
 	}
 	if strings.Contains(normalized, "external ai understanding is disabled") ||
 		strings.Contains(normalized, "selected from available frame evidence") ||
-		strings.Contains(normalized, "video moment selected from visual evidence") {
+		strings.Contains(normalized, "video moment selected from visual evidence") ||
+		strings.Contains(normalized, "the transcript mentions") ||
+		strings.Contains(normalized, "transcript mentions") {
 		return true
 	}
 	switch normalized {

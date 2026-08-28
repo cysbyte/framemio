@@ -139,20 +139,22 @@ struct StoryWaitingAnimation: View {
     }
 }
 
-#Preview("Waiting") {
-    VStack(spacing: FrameMioSpacing.lg) {
-        StoryWaitingAnimation()
-        FrameMioProgressView(value: 0.58, title: "Finding meaningful moments")
-    }
-    .padding(FrameMioSpacing.xl)
-    .background(FrameMioColors.canvas)
-}
+struct StoryWaitingAnimation_Previews: PreviewProvider {
+    static var previews: some View {
+        VStack(spacing: FrameMioSpacing.lg) {
+            StoryWaitingAnimation()
+            FrameMioProgressView(value: 0.58, title: "Finding meaningful moments")
+        }
+        .padding(FrameMioSpacing.xl)
+        .background(FrameMioColors.canvas)
+        .previewDisplayName("Waiting")
 
-#Preview("Reduce Motion") {
-    VStack(spacing: FrameMioSpacing.lg) {
-        StoryWaitingAnimation(forcesStillPresentation: true)
-        FrameMioProgressView(value: 0.58, title: "Finding meaningful moments")
+        VStack(spacing: FrameMioSpacing.lg) {
+            StoryWaitingAnimation(forcesStillPresentation: true)
+            FrameMioProgressView(value: 0.58, title: "Finding meaningful moments")
+        }
+        .padding(FrameMioSpacing.xl)
+        .background(FrameMioColors.canvas)
+        .previewDisplayName("Reduce Motion")
     }
-    .padding(FrameMioSpacing.xl)
-    .background(FrameMioColors.canvas)
 }

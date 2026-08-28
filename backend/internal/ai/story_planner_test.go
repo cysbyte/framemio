@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -419,6 +420,28 @@ func TestPlannerBuildsPhotoOnlyStory(t *testing.T) {
 		if moment.MediaType != models.MediaTypePhoto {
 			t.Fatalf("photo-only story included non-photo moment: %+v", plan.Moments)
 		}
+	}
+}
+
+func TestPlannerUsesPreferredMediaOrderForEditStory(t *testing.T) {
+	t.Parallel()
+	request := storyPlannerRequest()
+	request.VideoAnalyses = nil
+	request.SelectedMediaIDs = []string{"photo-1", "photo-2", "photo-3"}
+	request.PreferredMediaOrder = []string{"photo-3", "photo-1", "photo-2"}
+	request.DesiredDuration = 15 * time.Second
+
+	plan, err := (&Planner{}).Plan(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Moments) < 3 {
+		t.Fatalf("expected all selected photos to be represented, got %+v", plan.Moments)
+	}
+	got := []string{plan.Moments[0].MediaID, plan.Moments[1].MediaID, plan.Moments[2].MediaID}
+	want := []string{"photo-3", "photo-1", "photo-2"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("preferred order not applied: got %+v want %+v moments=%+v", got, want, plan.Moments)
 	}
 }
 

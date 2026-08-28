@@ -1,5 +1,12 @@
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
+
+private func storyPreviewUIDebugLog(_ message: @autoclosure () -> String) {
+#if DEBUG
+    print("[FrameMio][StoryPreviewUI] \(message())")
+#endif
+}
 
 struct StoryPreviewView: View {
     @Environment(\.dismiss) private var dismiss
@@ -369,7 +376,6 @@ struct StoryPreviewView: View {
 
     private func removeStoryButton(_ story: Story) -> some View {
         Button(role: .destructive) {
-            guard !story.status.shouldPoll else { return }
             FrameMioHaptics.secondaryAction()
             isShowingDeleteConfirmation = true
         } label: {
@@ -391,9 +397,9 @@ struct StoryPreviewView: View {
             .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.compactButtonHeight)
         }
         .buttonStyle(FrameMioPressButtonStyle())
-        .disabled(viewModel.isPerformingAction || story.status.shouldPoll)
+        .disabled(viewModel.activeAction == .deleteStory)
         .accessibilityLabel("Remove story")
-        .accessibilityHint(story.status.shouldPoll ? "Removing is unavailable while FrameMio is creating this story." : "Removes this story from FrameMio.")
+        .accessibilityHint("Removes this story from FrameMio.")
     }
 
     private var processingSteps: some View {
@@ -423,7 +429,8 @@ struct StoryPreviewView: View {
                     subtitle: momentSubtitle(kind: kind, asset: asset),
                     description: nonEmpty(metadata.description),
                     kind: kind,
-                    duration: kind == .video ? asset?.duration : nil
+                    duration: kind == .video ? asset?.duration : nil,
+                    captureDate: metadata.creationDate ?? asset?.creationDate
                 )
             }
         }
@@ -441,7 +448,8 @@ struct StoryPreviewView: View {
                 subtitle: subtitle,
                 description: nonEmpty(metadata?.description),
                 kind: kind,
-                duration: kind == .video ? asset?.duration : nil
+                duration: kind == .video ? asset?.duration : nil,
+                captureDate: metadata?.creationDate ?? asset?.creationDate
             )
         }
     }
@@ -458,7 +466,8 @@ struct StoryPreviewView: View {
                     subtitle: momentSubtitle(kind: kind, asset: asset),
                     description: nonEmpty(metadata.description),
                     kind: kind,
-                    duration: kind == .video ? asset?.duration : nil
+                    duration: kind == .video ? asset?.duration : nil,
+                    captureDate: metadata.creationDate ?? asset?.creationDate
                 )
             }
         }
@@ -474,7 +483,8 @@ struct StoryPreviewView: View {
                 subtitle: momentSubtitle(kind: kind, asset: asset),
                 description: nonEmpty(metadata?.description),
                 kind: kind,
-                duration: kind == .video ? asset?.duration : nil
+                duration: kind == .video ? asset?.duration : nil,
+                captureDate: metadata?.creationDate ?? asset?.creationDate
             )
         }
     }
@@ -642,8 +652,20 @@ private struct StoryMomentPresentation: Identifiable, Hashable {
     let description: String?
     let kind: Kind
     let duration: TimeInterval?
+    let captureDate: Date?
+    let isImportedFromPhotos: Bool
 
-    init(id: String, assetID: String, title: String, subtitle: String, description: String?, kind: Kind, duration: TimeInterval?) {
+    init(
+        id: String,
+        assetID: String,
+        title: String,
+        subtitle: String,
+        description: String?,
+        kind: Kind,
+        duration: TimeInterval?,
+        captureDate: Date? = nil,
+        isImportedFromPhotos: Bool = false
+    ) {
         self.id = id
         self.assetID = assetID
         self.title = title
@@ -651,6 +673,8 @@ private struct StoryMomentPresentation: Identifiable, Hashable {
         self.description = description
         self.kind = kind
         self.duration = duration
+        self.captureDate = captureDate
+        self.isImportedFromPhotos = isImportedFromPhotos
     }
 
     init(imported: ImportedStoryMedia, index: Int) {
@@ -662,7 +686,9 @@ private struct StoryMomentPresentation: Identifiable, Hashable {
             subtitle: kind == .video && imported.sourceAsset.duration > 0 ? "Video · \(Int(imported.sourceAsset.duration.rounded())) sec" : kind.importedSubtitle,
             description: "New from Photos. FrameMio will decide where it belongs.",
             kind: kind,
-            duration: kind == .video ? imported.sourceAsset.duration : nil
+            duration: kind == .video ? imported.sourceAsset.duration : nil,
+            captureDate: imported.sourceAsset.creationDate,
+            isImportedFromPhotos: true
         )
     }
 
@@ -828,6 +854,7 @@ private struct EditStorySheet: View {
     @State private var replacingMoment: StoryMomentPresentation?
     @State private var isShowingAddMoment = false
     @State private var importedMoments: [StoryMomentPresentation] = []
+    @State private var draggedMomentAssetID: String?
 
     private let styleOptions = ["Natural", "Cinematic", "Warm", "Playful"]
     private let subtitleStyleOptions = ["Bold", "Cinematic", "Minimal", "Playful"]
@@ -843,12 +870,45 @@ private struct EditStorySheet: View {
         let existingIDs = Set(base.map(\.assetID))
         let addableMoments = availableMoments + importedMoments
         let added = addableMoments.filter { draft.addedMediaIDs.contains($0.assetID) && !existingIDs.contains($0.assetID) }
-        return base + added
+        guard !draft.orderedMediaIDs.isEmpty else {
+            return momentsWithChronologicalAdditions(base: base, added: added)
+        }
+        return draft.ordered(base + added)
     }
 
     private var selectableMoments: [StoryMomentPresentation] {
         let visibleIDs = Set(displayedMoments.map(\.assetID))
         return (availableMoments + importedMoments).filter { !visibleIDs.contains($0.assetID) }
+    }
+
+    private func momentsWithChronologicalAdditions(base: [StoryMomentPresentation], added: [StoryMomentPresentation]) -> [StoryMomentPresentation] {
+        guard !added.isEmpty else { return base }
+        var result = base
+        for moment in added.sorted(by: momentTimestampPrecedes) {
+            guard let captureDate = moment.captureDate else {
+                result.append(moment)
+                continue
+            }
+            let insertionIndex = result.firstIndex { existing in
+                guard let existingDate = existing.captureDate else { return false }
+                return existingDate > captureDate
+            } ?? result.count
+            result.insert(moment, at: insertionIndex)
+        }
+        return result
+    }
+
+    private func momentTimestampPrecedes(_ left: StoryMomentPresentation, _ right: StoryMomentPresentation) -> Bool {
+        switch (left.captureDate, right.captureDate) {
+        case let (.some(leftDate), .some(rightDate)) where leftDate != rightDate:
+            return leftDate < rightDate
+        case (.some, .none):
+            return true
+        case (.none, .some):
+            return false
+        default:
+            return left.assetID < right.assetID
+        }
     }
 
     var body: some View {
@@ -914,8 +974,12 @@ private struct EditStorySheet: View {
                         draft.addAnalysis(imported)
                         return presentations
                     },
+                    onRemoveImported: { moment in
+                        importedMoments.removeAll { $0.assetID == moment.assetID }
+                        draft.removeImported(moment)
+                    },
                     onAdd: { selectedMoments in
-                        selectedMoments.forEach { draft.add($0) }
+                        draft.add(selectedMoments, currentMoments: displayedMoments)
                         isShowingAddMoment = false
                     },
                     onCancel: { isShowingAddMoment = false }
@@ -937,9 +1001,13 @@ private struct EditStorySheet: View {
                         draft.addAnalysis(imported)
                         return presentations
                     },
+                    onRemoveImported: { moment in
+                        importedMoments.removeAll { $0.assetID == moment.assetID }
+                        draft.removeImported(moment)
+                    },
                     onAdd: { selectedMoments in
                         if let replacement = selectedMoments.first {
-                            draft.replace(source, with: replacement)
+                            draft.replace(source, with: replacement, currentMoments: displayedMoments)
                         }
                         replacingMoment = nil
                     },
@@ -980,7 +1048,7 @@ private struct EditStorySheet: View {
 
     private var momentsSection: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            SectionHeader(title: "Moments", subtitle: draft.hasChanges ? "Unsaved changes" : "In this story")
+            SectionHeader(title: "Moments", subtitle: draft.hasChanges ? "Unsaved changes" : "Drag to reorder")
             if displayedMoments.isEmpty {
                 Text("Choose a few moments and FrameMio will shape them into a new version.")
                     .font(FrameMioTypography.body)
@@ -988,27 +1056,57 @@ private struct EditStorySheet: View {
             } else {
                 LazyVStack(spacing: FrameMioSpacing.sm) {
                     ForEach(displayedMoments) { moment in
-                        StoryMomentRow(moment: moment, image: imageProvider(moment.assetID)) {
+                        StoryMomentRow(moment: moment, image: imageProvider(moment.assetID), showsReorderHandle: displayedMoments.count > 1) {
                             selectedMoment = moment
                         }
                         .onAppear { onAppearMoment(moment.assetID) }
+                        .onDrag {
+                            draggedMomentAssetID = moment.assetID
+                            FrameMioHaptics.selection()
+                            return NSItemProvider(object: moment.assetID as NSString)
+                        }
+                        .onDrop(
+                            of: [UTType.text],
+                            delegate: StoryMomentDropDelegate(
+                                target: moment,
+                                draft: $draft,
+                                displayedMoments: displayedMoments,
+                                draggedMomentAssetID: $draggedMomentAssetID
+                            )
+                        )
                     }
                 }
+                Text("Drag moments to suggest the story order. FrameMio still handles pacing and transitions.")
+                    .font(FrameMioTypography.caption)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
             }
         }
     }
 
     private var addMomentButton: some View {
-        Button {
-            FrameMioHaptics.secondaryAction()
-            isShowingAddMoment = true
-        } label: {
-            Label("Add moment", systemImage: "plus.circle.fill")
-                .font(FrameMioTypography.headline)
-                .foregroundStyle(FrameMioColors.accent)
+        HStack {
+            Spacer(minLength: 0)
+            Button {
+                FrameMioHaptics.secondaryAction()
+                isShowingAddMoment = true
+            } label: {
+                Label("Add moment", systemImage: "plus.circle.fill")
+                    .font(FrameMioTypography.headline)
+                    .foregroundStyle(FrameMioColors.accent)
+                    .padding(.horizontal, FrameMioSpacing.lg)
+                    .frame(minHeight: FrameMioMetrics.compactButtonHeight)
+                    .background(FrameMioColors.surface.opacity(0.72), in: Capsule())
+                    .overlay {
+                        Capsule()
+                            .stroke(FrameMioColors.accent.opacity(0.42), lineWidth: FrameMioMetrics.borderWidth)
+                    }
+            }
+            .buttonStyle(FrameMioPressButtonStyle())
+            .disabled(isPerformingAction)
+            .accessibilityLabel("Add moment")
+            Spacer(minLength: 0)
         }
-        .disabled(isPerformingAction)
-        .accessibilityLabel("Add moment")
+        .frame(maxWidth: .infinity)
     }
 
     private var styleSection: some View {
@@ -1116,6 +1214,7 @@ private struct EditStoryDraft {
     var removedMomentIDs = Set<String>()
     var removedMediaIDs = Set<String>()
     var addedMediaIDs = Set<String>()
+    var orderedMediaIDs: [String] = []
     var replacements: [StoryMomentReplacement] = []
     var analysesByMediaID: [String: MediaAnalysis] = [:]
     var style: String?
@@ -1131,6 +1230,7 @@ private struct EditStoryDraft {
             removeMomentIDs: Array(removedMomentIDs).sorted(),
             removeMediaIDs: Array(removedMediaIDs).sorted(),
             addMediaIDs: Array(addedMediaIDs).sorted(),
+            orderedMediaIDs: orderedMediaIDs,
             replace: replacements,
             analyses: Array(analysesByMediaID.values).sorted { $0.assetID < $1.assetID },
             style: style,
@@ -1144,26 +1244,46 @@ private struct EditStoryDraft {
     mutating func remove(_ moment: StoryMomentPresentation) {
         removedMomentIDs.insert(moment.id)
         addedMediaIDs.remove(moment.assetID)
+        orderedMediaIDs.removeAll { $0 == moment.assetID }
     }
 
-    mutating func add(_ moment: StoryMomentPresentation) {
-        addedMediaIDs.insert(moment.assetID)
-        removedMediaIDs.remove(moment.assetID)
+    mutating func add(_ moments: [StoryMomentPresentation], currentMoments: [StoryMomentPresentation]) {
+        guard !moments.isEmpty else { return }
+        var nextMoments = orderedMediaIDs.isEmpty ? currentMoments : ordered(currentMoments)
+        for moment in moments {
+            addedMediaIDs.insert(moment.assetID)
+            removedMediaIDs.remove(moment.assetID)
+            if !nextMoments.contains(where: { $0.assetID == moment.assetID }) {
+                insertMomentByTimestamp(moment, into: &nextMoments)
+            }
+        }
+        orderedMediaIDs = nextMoments.map(\.assetID)
     }
 
     mutating func add(_ imported: [ImportedStoryMedia]) {
         for item in imported {
             addedMediaIDs.insert(item.mediaID)
             removedMediaIDs.remove(item.mediaID)
+            appendToCustomOrderIfNeeded(item.mediaID)
             if let analysis = item.analysis {
                 analysesByMediaID[item.mediaID] = analysis
             }
         }
     }
 
-    mutating func replace(_ source: StoryMomentPresentation, with replacement: StoryMomentPresentation) {
+    mutating func replace(_ source: StoryMomentPresentation, with replacement: StoryMomentPresentation, currentMoments: [StoryMomentPresentation]) {
+        if orderedMediaIDs.isEmpty {
+            orderedMediaIDs = currentMoments.map(\.assetID)
+        }
+        let sourceOrderIndex = orderedMediaIDs.firstIndex(of: source.assetID)
         remove(source)
         addedMediaIDs.insert(replacement.assetID)
+        removedMediaIDs.remove(replacement.assetID)
+        if let sourceOrderIndex, !orderedMediaIDs.contains(replacement.assetID) {
+            orderedMediaIDs.insert(replacement.assetID, at: min(sourceOrderIndex, orderedMediaIDs.count))
+        } else {
+            appendToCustomOrderIfNeeded(replacement.assetID)
+        }
         replacements.append(StoryMomentReplacement(fromMomentID: source.id, fromMediaID: source.assetID, toMediaID: replacement.assetID))
     }
 
@@ -1174,11 +1294,89 @@ private struct EditStoryDraft {
             }
         }
     }
+
+    mutating func removeImported(_ moment: StoryMomentPresentation) {
+        addedMediaIDs.remove(moment.assetID)
+        analysesByMediaID.removeValue(forKey: moment.assetID)
+        replacements.removeAll { $0.toMediaID == moment.assetID }
+        orderedMediaIDs.removeAll { $0 == moment.assetID }
+    }
+
+    func ordered(_ moments: [StoryMomentPresentation]) -> [StoryMomentPresentation] {
+        guard !orderedMediaIDs.isEmpty else { return moments }
+        let order = Dictionary(uniqueKeysWithValues: orderedMediaIDs.enumerated().map { ($0.element, $0.offset) })
+        return moments.enumerated().sorted { left, right in
+            let leftOrder = order[left.element.assetID]
+            let rightOrder = order[right.element.assetID]
+            switch (leftOrder, rightOrder) {
+            case let (.some(leftIndex), .some(rightIndex)):
+                return leftIndex < rightIndex
+            case (.some, .none):
+                return true
+            case (.none, .some):
+                return false
+            case (.none, .none):
+                return left.offset < right.offset
+            }
+        }.map(\.element)
+    }
+
+    mutating func moveMoment(draggedAssetID: String, before targetAssetID: String, currentMoments: [StoryMomentPresentation]) {
+        guard draggedAssetID != targetAssetID else { return }
+        var assetIDs = currentMoments.map(\.assetID)
+        guard let sourceIndex = assetIDs.firstIndex(of: draggedAssetID), let targetIndex = assetIDs.firstIndex(of: targetAssetID) else { return }
+        let moved = assetIDs.remove(at: sourceIndex)
+        assetIDs.insert(moved, at: targetIndex)
+        orderedMediaIDs = assetIDs
+    }
+
+    private mutating func appendToCustomOrderIfNeeded(_ mediaID: String) {
+        guard !orderedMediaIDs.isEmpty, !orderedMediaIDs.contains(mediaID) else { return }
+        orderedMediaIDs.append(mediaID)
+    }
+
+    private func insertMomentByTimestamp(_ moment: StoryMomentPresentation, into moments: inout [StoryMomentPresentation]) {
+        guard let captureDate = moment.captureDate else {
+            moments.append(moment)
+            return
+        }
+        let insertionIndex = moments.firstIndex { existing in
+            guard let existingDate = existing.captureDate else { return false }
+            return existingDate > captureDate
+        } ?? moments.count
+        moments.insert(moment, at: insertionIndex)
+    }
+}
+
+private struct StoryMomentDropDelegate: DropDelegate {
+    let target: StoryMomentPresentation
+    @Binding var draft: EditStoryDraft
+    let displayedMoments: [StoryMomentPresentation]
+    @Binding var draggedMomentAssetID: String?
+
+    func validateDrop(info: DropInfo) -> Bool {
+        draggedMomentAssetID != nil
+    }
+
+    func dropEntered(info: DropInfo) {
+        guard let draggedMomentAssetID else { return }
+        draft.moveMoment(draggedAssetID: draggedMomentAssetID, before: target.assetID, currentMoments: displayedMoments)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggedMomentAssetID = nil
+        return true
+    }
 }
 
 private struct StoryMomentRow: View {
     let moment: StoryMomentPresentation
     let image: Image?
+    var showsReorderHandle = false
     let action: () -> Void
 
     var body: some View {
@@ -1187,6 +1385,13 @@ private struct StoryMomentRow: View {
             action()
         } label: {
             HStack(spacing: FrameMioSpacing.md) {
+                if showsReorderHandle {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(FrameMioColors.tertiaryInk)
+                        .accessibilityHidden(true)
+                }
+
                 MediaThumbnail(
                     image: image,
                     duration: moment.duration,
@@ -1234,6 +1439,7 @@ private struct StoryMomentRow: View {
         }
         .buttonStyle(FrameMioPressButtonStyle())
         .accessibilityLabel(moment.title)
+        .accessibilityHint(showsReorderHandle ? "Double tap to edit. Drag to suggest where this moment belongs." : "Double tap to edit this moment.")
     }
 }
 
@@ -1296,6 +1502,7 @@ private struct AddMomentSelectionSheet: View {
     let imageProvider: (String) -> Image?
     let onAppearMoment: (String) -> Void
     let onImportPhotos: ([PhotosPickerItem]) async throws -> [StoryMomentPresentation]
+    let onRemoveImported: (StoryMomentPresentation) -> Void
     let onAdd: ([StoryMomentPresentation]) -> Void
     let onCancel: () -> Void
 
@@ -1306,6 +1513,7 @@ private struct AddMomentSelectionSheet: View {
         imageProvider: @escaping (String) -> Image?,
         onAppearMoment: @escaping (String) -> Void,
         onImportPhotos: @escaping ([PhotosPickerItem]) async throws -> [StoryMomentPresentation],
+        onRemoveImported: @escaping (StoryMomentPresentation) -> Void,
         onAdd: @escaping ([StoryMomentPresentation]) -> Void,
         onCancel: @escaping () -> Void
     ) {
@@ -1315,6 +1523,7 @@ private struct AddMomentSelectionSheet: View {
         self.imageProvider = imageProvider
         self.onAppearMoment = onAppearMoment
         self.onImportPhotos = onImportPhotos
+        self.onRemoveImported = onRemoveImported
         self.onAdd = onAdd
         self.onCancel = onCancel
     }
@@ -1444,17 +1653,32 @@ private struct AddMomentSelectionSheet: View {
                 matching: .any(of: [.images, .videos]),
                 preferredItemEncoding: .current
             ) {
-                Label("Add from Photos", systemImage: "plus.circle.fill")
-                    .font(FrameMioTypography.headline)
-                    .foregroundStyle(FrameMioColors.accent)
-                    .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.compactButtonHeight, alignment: .leading)
+                HStack(spacing: FrameMioSpacing.sm) {
+                    if isImportingPhotos {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(FrameMioColors.accent)
+                    } else {
+                        Image(systemName: "plus.circle.fill")
+                    }
+                    Text(isImportingPhotos ? "Adding from Photos…" : "Add from Photos")
+                }
+                .font(FrameMioTypography.headline)
+                .foregroundStyle(FrameMioColors.accent)
+                .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.compactButtonHeight, alignment: .leading)
             }
             .disabled(isImportingPhotos)
+            .accessibilityLabel(isImportingPhotos ? "Adding from Photos" : "Add from Photos")
 
             if isImportingPhotos {
-                Label("Uploading and preparing new media…", systemImage: "arrow.up.circle")
-                    .font(FrameMioTypography.footnote)
-                    .foregroundStyle(FrameMioColors.secondaryInk)
+                HStack(spacing: FrameMioSpacing.xs) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Uploading and preparing new media…")
+                }
+                .font(FrameMioTypography.footnote)
+                .foregroundStyle(FrameMioColors.secondaryInk)
+                .accessibilityElement(children: .combine)
             }
             if let importErrorMessage {
                 Text(importErrorMessage)
@@ -1466,16 +1690,38 @@ private struct AddMomentSelectionSheet: View {
     }
 
     private func mediaCell(for moment: StoryMomentPresentation) -> some View {
-        MediaThumbnail(
-            image: imageProvider(moment.assetID),
-            duration: moment.kind == .video ? moment.duration : nil,
-            isLivePhoto: moment.kind == .livePhoto,
-            isSelected: selectedAssetIDs.contains(moment.assetID),
-            aspectRatio: FrameMioMetrics.thumbnailAspectRatio,
-            placeholderSystemImage: moment.kind.placeholderName,
-            accessibilityTitle: moment.title,
-            action: { toggle(moment) }
-        )
+        ZStack(alignment: .topTrailing) {
+            MediaThumbnail(
+                image: imageProvider(moment.assetID),
+                duration: moment.kind == .video ? moment.duration : nil,
+                isLivePhoto: moment.kind == .livePhoto,
+                isSelected: selectedAssetIDs.contains(moment.assetID),
+                aspectRatio: FrameMioMetrics.thumbnailAspectRatio,
+                placeholderSystemImage: moment.kind.placeholderName,
+                accessibilityTitle: moment.title,
+                action: { toggle(moment) }
+            )
+
+            if moment.isImportedFromPhotos {
+                Button {
+                    removeImported(moment)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(FrameMioColors.inverseInk)
+                        .frame(width: 26, height: 26)
+                        .background(FrameMioColors.mediaScrim, in: Circle())
+                        .overlay {
+                            Circle().stroke(.white.opacity(0.24), lineWidth: FrameMioMetrics.borderWidth)
+                        }
+                        .shadow(color: .black.opacity(0.18), radius: 4, y: 2)
+                }
+                .buttonStyle(FrameMioPressButtonStyle())
+                .padding(FrameMioSpacing.xs)
+                .accessibilityLabel("Remove \(moment.title)")
+                .accessibilityHint("Removes this imported media from the Add to Story selection.")
+            }
+        }
         .onAppear { onAppearMoment(moment.assetID) }
     }
 
@@ -1537,13 +1783,27 @@ private struct AddMomentSelectionSheet: View {
         FrameMioHaptics.selection()
     }
 
+    private func removeImported(_ moment: StoryMomentPresentation) {
+        importedMoments.removeAll { $0.assetID == moment.assetID }
+        selectedAssetIDs.remove(moment.assetID)
+        selectedPhotoItems.removeAll()
+        onRemoveImported(moment)
+        FrameMioHaptics.secondaryAction()
+        storyPreviewUIDebugLog("add sheet removed imported media=\(moment.assetID) imported_total=\(importedMoments.count) selected=\(selectedAssetIDs.count)")
+    }
+
     private func importPhotos(_ items: [PhotosPickerItem]) {
-        guard !items.isEmpty, !isImportingPhotos else { return }
+        storyPreviewUIDebugLog("add sheet picker changed items=\(items.count) importing=\(isImportingPhotos) current_imported=\(importedMoments.count) selected=\(selectedAssetIDs.count)")
+        guard !items.isEmpty, !isImportingPhotos else {
+            storyPreviewUIDebugLog("add sheet picker ignored empty=\(items.isEmpty) importing=\(isImportingPhotos)")
+            return
+        }
         isImportingPhotos = true
         importErrorMessage = nil
         Task {
             do {
                 let imported = try await onImportPhotos(items)
+                storyPreviewUIDebugLog("add sheet import returned count=\(imported.count) ids=\(imported.map(\.assetID).joined(separator: ","))")
                 importedMoments.append(contentsOf: imported)
                 if !allowsMultipleSelection {
                     selectedAssetIDs.removeAll()
@@ -1554,13 +1814,16 @@ private struct AddMomentSelectionSheet: View {
                 }
                 selectedPhotoItems = []
                 isImportingPhotos = false
+                storyPreviewUIDebugLog("add sheet import applied imported_total=\(importedMoments.count) selected=\(selectedAssetIDs.count)")
             } catch is CancellationError {
                 selectedPhotoItems = []
                 isImportingPhotos = false
+                storyPreviewUIDebugLog("add sheet import cancelled")
             } catch {
                 selectedPhotoItems = []
                 importErrorMessage = AppError.from(error).localizedDescription
                 isImportingPhotos = false
+                storyPreviewUIDebugLog("add sheet import failed error=\(importErrorMessage ?? error.localizedDescription)")
             }
         }
     }

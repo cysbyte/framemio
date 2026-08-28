@@ -37,7 +37,8 @@ Return only strict JSON matching this schema:
     }
   ]
 }
-Return exactly one candidate for every input segment. Do not invent segment IDs, scene IDs, timestamps, frame IDs, or transcript indexes. Ground visual claims in frame_ids and speech/audio claims in transcript_segment_indexes.`
+Return exactly one candidate for every input segment. Do not invent segment IDs, scene IDs, timestamps, frame IDs, or transcript indexes. Ground visual claims in frame_ids and speech/audio claims in transcript_segment_indexes.
+Write descriptions and reasons for a personal memory app: warm, concise, and user-centered. Avoid detached surveillance-style wording like "a woman", "a man", "a child", or "people visible" when a memory-oriented phrase such as "a family moment", "a lakeside picnic", or "a happy everyday moment" is more appropriate. Do not claim identity or say "you" unless the evidence explicitly supports it.`
 
 type OpenAICompatibleVideoUnderstandingProvider struct {
 	BaseURL         string

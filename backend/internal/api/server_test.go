@@ -625,6 +625,66 @@ func TestIOSStoryEditQueuesStoryPlanRevisionWithoutReanalysis(t *testing.T) {
 	}
 }
 
+func TestIOSStoryEditQueuesPreferredMediaOrder(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	handler := newTestServer(memoryStore, publisher).Handler()
+
+	first := createReadyIOSMedia(t, handler, "asset-order-photo-1", models.MediaTypePhoto)
+	second := createReadyIOSMedia(t, handler, "asset-order-photo-2", models.MediaTypePhoto)
+	storyResponse := performJSON(t, handler, http.MethodPost, "/v1/stories", map[string]any{
+		"context": "Special moments",
+		"assets": []map[string]any{
+			{"id": "asset-order-photo-1", "kind": "image", "pixelWidth": 3024, "pixelHeight": 4032},
+			{"id": "asset-order-photo-2", "kind": "image", "pixelWidth": 3024, "pixelHeight": 4032},
+		},
+	}, "", true, nil)
+	if storyResponse.Code != http.StatusCreated {
+		t.Fatalf("create iOS story status = %d, body = %s", storyResponse.Code, storyResponse.Body.String())
+	}
+	var story iosStory
+	decodeResponse(t, storyResponse, &story)
+
+	if err := memoryStore.SaveStoryPlan(context.Background(), "user-1", models.StoryPlan{
+		SchemaVersion:       models.StoryPlanSchemaVersionV1,
+		ID:                  "plan-order-existing",
+		ProjectID:           story.ID,
+		Version:             1,
+		RequestedDurationMS: 8000,
+		StoryType:           models.StoryTypeCustom,
+		VisualStyle:         models.VisualStyleNatural,
+		TitleText:           "Special moments",
+		EndingText:          "The moments that stay with us.",
+		Moments: []models.StoryMoment{
+			{MomentID: "first", AssetID: first.MediaID, MediaID: first.MediaID, MediaType: models.MediaTypePhoto, Narrative: "First", DurationMS: 4000, CropIntent: "fit", Transition: "fade_in"},
+			{MomentID: "second", AssetID: second.MediaID, MediaID: second.MediaID, MediaType: models.MediaTypePhoto, Narrative: "Second", DurationMS: 4000, CropIntent: "fit", Transition: "crossfade"},
+		},
+		Output:          models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 8, Preset: "premium-memory"},
+		TotalDurationMS: 8000,
+		CreatedAt:       time.Date(2026, time.August, 29, 10, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	editResponse := performJSON(t, handler, http.MethodPost, "/v1/stories/"+story.ID+"/versions", map[string]any{
+		"orderedMediaIds": []string{second.MediaID, first.MediaID},
+	}, "edit-order-key", true, nil)
+	if editResponse.Code != http.StatusAccepted {
+		t.Fatalf("edit iOS story status = %d, body = %s", editResponse.Code, editResponse.Body.String())
+	}
+
+	messages := publisher.Messages()
+	last := messages[len(messages)-1]
+	if last.JobType != models.JobTypeStoryPlan {
+		t.Fatalf("reorder should queue a story plan revision, got %+v", last)
+	}
+	if got, want := last.Configuration["preferred_media_order"], second.MediaID+","+first.MediaID; got != want {
+		t.Fatalf("preferred media order not preserved: got %q want %q config=%+v", got, want, last.Configuration)
+	}
+}
+
 func TestIOSStoryEditRejectsForeignMediaReference(t *testing.T) {
 	t.Parallel()
 
@@ -1303,6 +1363,16 @@ func TestIOSStoryPresentationSuppressesGenericNames(t *testing.T) {
 	}
 	if got := iosMomentTitleIgnoringSubtitles(pollutedPlan.Moments[0], string(models.MediaTypeVideo), 0, iosCaptionTextMatchers(pollutedPlan.Captions)); got != "Family laughing near the lake" {
 		t.Fatalf("subtitle text leaked into moment title: %q", got)
+	}
+	observationalPlan := models.StoryPlan{Moments: []models.StoryMoment{{
+		Narrative: "A woman and a young child sit on a red checkered picnic blanket by a lake, watching ducks on the water.",
+	}}}
+	observationalDescription := iosStoryDescription(observationalPlan)
+	if strings.Contains(strings.ToLower(observationalDescription), "a woman") || strings.Contains(strings.ToLower(observationalDescription), "young child") {
+		t.Fatalf("observational people labels leaked into user-facing description: %q", observationalDescription)
+	}
+	if !strings.Contains(observationalDescription, "A warm family memory by the lake") || !strings.Contains(observationalDescription, "watching ducks together") {
+		t.Fatalf("description should be memory-centered, got %q", observationalDescription)
 	}
 	longMoment := strings.Repeat("lake picnic with friends ", 16)
 	longPlan := models.StoryPlan{Moments: []models.StoryMoment{{Narrative: longMoment}}}

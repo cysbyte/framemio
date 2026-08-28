@@ -63,13 +63,15 @@ struct EmptyState: View {
     }
 }
 
-#Preview {
-    EmptyState(
-        systemImage: "photo.stack",
-        title: "Your first story is waiting",
-        message: "Choose a few moments and let FrameMio bring them together.",
-        actionTitle: "Create Story"
-    ) {}
-    .padding()
-    .background(FrameMioColors.canvas)
+struct EmptyState_Previews: PreviewProvider {
+    static var previews: some View {
+        EmptyState(
+            systemImage: "photo.stack",
+            title: "Your first story is waiting",
+            message: "Choose a few moments and let FrameMio bring them together.",
+            actionTitle: "Create Story"
+        ) {}
+        .padding()
+        .background(FrameMioColors.canvas)
+    }
 }

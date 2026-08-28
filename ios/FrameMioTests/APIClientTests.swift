@@ -201,6 +201,7 @@ final class StoryModelTests: XCTestCase {
             removeMomentIDs: ["moment-walking"],
             removeMediaIDs: [],
             addMediaIDs: ["media-sunset"],
+            orderedMediaIDs: ["media-sunset", "media-lake"],
             replace: [StoryMomentReplacement(fromMomentID: "moment-lake", fromMediaID: "media-lake", toMediaID: "media-sunset")],
             style: "cinematic",
             targetDuration: 15,
@@ -212,6 +213,7 @@ final class StoryModelTests: XCTestCase {
 
         XCTAssertEqual(object["removeMomentIds"] as? [String], ["moment-walking"])
         XCTAssertEqual(object["addMediaIds"] as? [String], ["media-sunset"])
+        XCTAssertEqual(object["orderedMediaIds"] as? [String], ["media-sunset", "media-lake"])
         XCTAssertEqual(object["style"] as? String, "cinematic")
         XCTAssertEqual(object["targetDuration"] as? Double, 15)
         XCTAssertEqual(object["instruction"] as? String, "Make it feel like summer vacation.")

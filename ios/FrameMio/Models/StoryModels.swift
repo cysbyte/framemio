@@ -21,6 +21,7 @@ struct StoryMoment: Identifiable, Codable, Hashable, Sendable {
     let thumbnailURL: URL?
     let title: String?
     let description: String?
+    let creationDate: Date?
     let isSelected: Bool?
 
     enum CodingKeys: String, CodingKey {
@@ -31,6 +32,7 @@ struct StoryMoment: Identifiable, Codable, Hashable, Sendable {
         case thumbnailURL = "thumbnailUrl"
         case title
         case description
+        case creationDate
         case isSelected = "selected"
     }
 
@@ -41,6 +43,7 @@ struct StoryMoment: Identifiable, Codable, Hashable, Sendable {
         thumbnailURL: URL? = nil,
         title: String? = nil,
         description: String? = nil,
+        creationDate: Date? = nil,
         isSelected: Bool? = nil
     ) {
         self.id = id
@@ -49,6 +52,7 @@ struct StoryMoment: Identifiable, Codable, Hashable, Sendable {
         self.thumbnailURL = thumbnailURL
         self.title = title
         self.description = description
+        self.creationDate = creationDate
         self.isSelected = isSelected
     }
 
@@ -64,6 +68,7 @@ struct StoryMoment: Identifiable, Codable, Hashable, Sendable {
         thumbnailURL = try container.decodeIfPresent(URL.self, forKey: .thumbnailURL)
         title = try container.decodeIfPresent(String.self, forKey: .title)
         description = try container.decodeIfPresent(String.self, forKey: .description)
+        creationDate = try container.decodeIfPresent(Date.self, forKey: .creationDate)
         isSelected = try container.decodeIfPresent(Bool.self, forKey: .isSelected)
     }
 
@@ -75,6 +80,7 @@ struct StoryMoment: Identifiable, Codable, Hashable, Sendable {
         try container.encodeIfPresent(thumbnailURL, forKey: .thumbnailURL)
         try container.encodeIfPresent(title, forKey: .title)
         try container.encodeIfPresent(description, forKey: .description)
+        try container.encodeIfPresent(creationDate, forKey: .creationDate)
         try container.encodeIfPresent(isSelected, forKey: .isSelected)
     }
 }
@@ -109,6 +115,7 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
     let removeMomentIDs: [String]
     let removeMediaIDs: [String]
     let addMediaIDs: [String]
+    let orderedMediaIDs: [String]
     let replace: [StoryMomentReplacement]
     let analyses: [MediaAnalysis]
     let style: String?
@@ -121,6 +128,7 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
         removeMomentIDs: [String],
         removeMediaIDs: [String],
         addMediaIDs: [String],
+        orderedMediaIDs: [String] = [],
         replace: [StoryMomentReplacement],
         analyses: [MediaAnalysis] = [],
         style: String? = nil,
@@ -132,6 +140,7 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
         self.removeMomentIDs = removeMomentIDs
         self.removeMediaIDs = removeMediaIDs
         self.addMediaIDs = addMediaIDs
+        self.orderedMediaIDs = orderedMediaIDs
         self.replace = replace
         self.analyses = analyses
         self.style = style
@@ -145,6 +154,7 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
         case removeMomentIDs = "removeMomentIds"
         case removeMediaIDs = "removeMediaIds"
         case addMediaIDs = "addMediaIds"
+        case orderedMediaIDs = "orderedMediaIds"
         case replace
         case analyses
         case style
@@ -158,6 +168,7 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
         !removeMomentIDs.isEmpty
             || !removeMediaIDs.isEmpty
             || !addMediaIDs.isEmpty
+            || !orderedMediaIDs.isEmpty
             || !replace.isEmpty
             || style != nil
             || subtitlesEnabled != nil
