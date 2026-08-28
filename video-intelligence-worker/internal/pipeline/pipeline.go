@@ -242,7 +242,7 @@ func (p *Processor) MarkFailed(ctx context.Context, message domain.JobMessage, e
 }
 
 func (p *Processor) loadOrPreprocess(ctx context.Context, jobContext domain.JobContext, version, sourceETag string) (domain.VideoEvidence, domain.PreprocessingArtifact, error) {
-	artifact, err := p.Repository.GetPreprocessing(ctx, jobContext.Job.UserID, jobContext.Media.ID, version, sourceETag)
+	artifact, err := p.Repository.GetPreprocessing(ctx, jobContext.Job.UserID, jobContext.Project.ID, jobContext.Media.ID, version, sourceETag)
 	if err == nil {
 		var evidence domain.VideoEvidence
 		if loadErr := p.Objects.GetJSON(ctx, artifact.EvidenceS3Key, &evidence); loadErr == nil {
@@ -312,7 +312,7 @@ func (p *Processor) loadOrPreprocess(ctx context.Context, jobContext domain.JobC
 	if len(selectedFrames) == 0 {
 		return domain.VideoEvidence{}, domain.PreprocessingArtifact{}, domain.Permanent(fmt.Errorf("no usable representative frames were extracted"))
 	}
-	prefix := artifactPrefix(jobContext.Job.UserID, jobContext.Media.ID, version, sourceETag)
+	prefix := artifactPrefix(jobContext.Job.UserID, jobContext.Project.ID, jobContext.Media.ID, version, sourceETag)
 	p.logger().Info("selected representative frames", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Int("selected_frame_count", len(selectedFrames)))
 	for index := range selectedFrames {
 		key := fmt.Sprintf("%s/frames/%s.jpg", prefix, selectedFrames[index].ID)
@@ -462,7 +462,7 @@ func isVideoAnalysisJobType(jobType string) bool {
 }
 
 func validCachedEvidence(evidence domain.VideoEvidence, jobContext domain.JobContext, version, sourceETag string) bool {
-	return evidence.SchemaVersion == 1 && evidence.MediaID == jobContext.Media.ID &&
+	return evidence.SchemaVersion == 1 && evidence.ProjectID == jobContext.Project.ID && evidence.MediaID == jobContext.Media.ID &&
 		evidence.AnalysisVersion == version && evidence.SourceETag == sourceETag && len(evidence.Frames) > 0
 }
 
@@ -494,9 +494,9 @@ func retry(ctx context.Context, attempts int, operation func() error) error {
 	return lastError
 }
 
-func artifactPrefix(userID, mediaID, version, sourceETag string) string {
+func artifactPrefix(userID, projectID, mediaID, version, sourceETag string) string {
 	hash := sha256.Sum256([]byte(sourceETag))
-	return fmt.Sprintf("users/%s/video-analysis/%s/%s/%s", safeComponent(userID), safeComponent(mediaID), safeComponent(version), hex.EncodeToString(hash[:8]))
+	return fmt.Sprintf("users/%s/projects/%s/video-analysis/%s/%s/%s", safeComponent(userID), safeComponent(projectID), safeComponent(mediaID), safeComponent(version), hex.EncodeToString(hash[:8]))
 }
 
 func safeComponent(value string) string {

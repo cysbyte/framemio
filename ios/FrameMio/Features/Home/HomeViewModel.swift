@@ -15,6 +15,7 @@ final class HomeViewModel: ObservableObject {
     @Published private(set) var stories: [Story] = []
     @Published private(set) var allStories: [Story] = []
     @Published private(set) var covers: [String: UIImage] = [:]
+    @Published private(set) var loadingCoverIDs: Set<String> = []
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
 
@@ -63,6 +64,10 @@ final class HomeViewModel: ObservableObject {
         return Image(uiImage: image)
     }
 
+    func isCoverLoading(for story: Story) -> Bool {
+        loadingCoverIDs.contains(story.id)
+    }
+
     func loadCovers(for stories: [Story]) {
         loadGeneratedVideoCovers(for: stories)
     }
@@ -84,10 +89,12 @@ final class HomeViewModel: ObservableObject {
     private func loadGeneratedVideoCovers(for stories: [Story]) {
         let storyIDs = Set(allStories.map(\.id))
         covers = covers.filter { storyIDs.isEmpty || storyIDs.contains($0.key) }
+        loadingCoverIDs = loadingCoverIDs.filter { storyIDs.isEmpty || storyIDs.contains($0) }
         let staleCoverTaskIDs = coverTasks.keys.filter { !storyIDs.isEmpty && !storyIDs.contains($0) }
         for storyID in staleCoverTaskIDs {
             coverTasks[storyID]?.cancel()
             coverTasks[storyID] = nil
+            loadingCoverIDs.remove(storyID)
         }
         if !storyIDs.isEmpty {
             Self.removeCachedCovers(excludingStoryIDs: storyIDs)
@@ -99,9 +106,11 @@ final class HomeViewModel: ObservableObject {
 
             if let cachedImage = Self.cachedVideoCover(storyID: storyID, videoURL: videoURL) {
                 covers[storyID] = cachedImage
+                loadingCoverIDs.remove(storyID)
                 continue
             }
 
+            loadingCoverIDs.insert(storyID)
             coverTasks[storyID] = Task { [weak self] in
                 let image = await Self.generateVideoCover(from: videoURL)
                 guard !Task.isCancelled else { return }
@@ -112,6 +121,7 @@ final class HomeViewModel: ObservableObject {
 
     private func finishGeneratedVideoCover(storyID: String, videoURL: URL, image: UIImage?) {
         coverTasks[storyID] = nil
+        loadingCoverIDs.remove(storyID)
         guard allStories.contains(where: { $0.id == storyID }) else { return }
         if let image {
             covers[storyID] = image

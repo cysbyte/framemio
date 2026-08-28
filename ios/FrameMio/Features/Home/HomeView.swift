@@ -241,6 +241,7 @@ struct HomeView: View {
                             title: story.title,
                             subtitle: storySubtitle(for: story),
                             image: viewModel.coverImage(for: story),
+                            isImageLoading: viewModel.isCoverLoading(for: story),
                             duration: story.duration,
                             action: { onOpenStory(story) }
                         )
@@ -293,6 +294,7 @@ struct AllStoriesView: View {
                             title: story.title,
                             subtitle: storySubtitle(for: story),
                             image: viewModel.coverImage(for: story),
+                            isImageLoading: viewModel.isCoverLoading(for: story),
                             duration: story.duration,
                             action: { onOpenStory(story) }
                         )

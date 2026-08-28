@@ -4,6 +4,7 @@ struct StoryCard: View {
     let title: String
     let subtitle: String?
     let image: Image?
+    let isImageLoading: Bool
     let duration: TimeInterval?
     let action: (() -> Void)?
 
@@ -11,12 +12,14 @@ struct StoryCard: View {
         title: String,
         subtitle: String? = nil,
         image: Image? = nil,
+        isImageLoading: Bool = false,
         duration: TimeInterval? = nil,
         action: (() -> Void)? = nil
     ) {
         self.title = title
         self.subtitle = subtitle
         self.image = image
+        self.isImageLoading = isImageLoading
         self.duration = duration
         self.action = action
     }
@@ -43,6 +46,7 @@ struct StoryCard: View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
             MediaThumbnail(
                 image: image,
+                isLoading: isImageLoading,
                 duration: duration,
                 aspectRatio: FrameMioMetrics.storyAspectRatio,
                 placeholderSystemImage: "mountain.2.fill",

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MediaThumbnail: View {
     let image: Image?
+    let isLoading: Bool
     let duration: TimeInterval?
     let isLivePhoto: Bool
     let isSelected: Bool
@@ -12,6 +13,7 @@ struct MediaThumbnail: View {
 
     init(
         image: Image? = nil,
+        isLoading: Bool = false,
         duration: TimeInterval? = nil,
         isSelected: Bool = false,
         aspectRatio: CGFloat = FrameMioMetrics.thumbnailAspectRatio,
@@ -20,6 +22,7 @@ struct MediaThumbnail: View {
         action: (() -> Void)? = nil
     ) {
         self.image = image
+        self.isLoading = isLoading
         self.duration = duration
         self.isLivePhoto = false
         self.isSelected = isSelected
@@ -31,6 +34,7 @@ struct MediaThumbnail: View {
 
     init(
         image: Image? = nil,
+        isLoading: Bool = false,
         duration: TimeInterval? = nil,
         isLivePhoto: Bool,
         isSelected: Bool = false,
@@ -40,6 +44,7 @@ struct MediaThumbnail: View {
         action: (() -> Void)? = nil
     ) {
         self.image = image
+        self.isLoading = isLoading
         self.duration = duration
         self.isLivePhoto = isLivePhoto
         self.isSelected = isSelected
@@ -90,6 +95,16 @@ struct MediaThumbnail: View {
                 }
                 .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.media, style: .continuous))
 
+            if image == nil && isLoading {
+                ProgressView()
+                    .controlSize(.regular)
+                    .tint(FrameMioColors.onMedia)
+                    .padding(FrameMioSpacing.md)
+                    .background(FrameMioColors.mediaScrim, in: Circle())
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .accessibilityLabel("Loading thumbnail")
+            }
+
             if duration != nil {
                 LinearGradient(
                     colors: [.clear, FrameMioColors.mediaScrim],
@@ -135,6 +150,9 @@ struct MediaThumbnail: View {
 
     private var accessibilityValue: String {
         var values = [isSelected ? "Selected" : "Not selected"]
+        if isLoading {
+            values.append("Loading thumbnail")
+        }
         if let duration {
             values.append("Video")
             values.append("\(Int(duration.rounded())) seconds")

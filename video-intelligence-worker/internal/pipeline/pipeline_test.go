@@ -10,6 +10,7 @@ import (
 	"image/jpeg"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -92,6 +93,65 @@ func TestProcessorCachesPreprocessingAndAnalysis(t *testing.T) {
 	}
 	if provider.calls != 3 {
 		t.Fatalf("understanding calls = %d, want 3", provider.calls)
+	}
+}
+
+func TestProcessorRejectsCrossProjectPreprocessingCache(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.August, 29, 10, 0, 0, 0, time.UTC)
+	repository := newMemoryRepository(now)
+	objects := newMemoryObjects()
+	tools := &fakeTools{metadata: domain.VideoMetadata{
+		DurationMicros: 12_000_000, Width: 1920, Height: 1080, FPS: 30,
+		VideoCodec: "hevc", AudioCodec: "aac", BitRate: 8_000_000, FileSizeBytes: 1000, HasAudio: false,
+	}, boundaries: []domain.SceneBoundary{{TimestampMicros: 4_000_000, Score: 0.6}, {TimestampMicros: 8_000_000, Score: 0.7}}}
+	provider := &fakeUnderstandingProvider{}
+	processor := &Processor{
+		Config: Config{
+			WorkRoot: t.TempDir(), AnalysisVersion: "video-v1", SceneThreshold: 0.32, MaxSceneBoundaries: 100,
+			Planner: PlannerConfig{
+				MinSceneDuration: 750 * time.Millisecond, MaxSegmentDuration: 12 * time.Second,
+				LongVideoThreshold: 5 * time.Minute, MaxFramesShort: 12, MaxFramesLong: 24,
+			},
+			DuplicateHashDistance: 4, StageRetries: 1, EnableTranscription: false,
+			UnderstandingVersion: "video-understanding-v1", EvidenceURLExpiry: time.Hour,
+		},
+		Repository: repository, Objects: objects, Tools: tools,
+		Understanding: &understanding.Service{Provider: provider, Repository: repository, Artifacts: objects, RetryAttempts: 1, RetryDelay: time.Nanosecond, FrameURLExpiry: time.Hour, Now: func() time.Time { return now }},
+		Completion:    &fakeCompletionReporter{},
+		Now:           func() time.Time { return now },
+	}
+
+	staleEvidence := domain.VideoEvidence{
+		SchemaVersion: 1, AnalysisVersion: "video-v1", MediaID: "media-1", ProjectID: "project-old",
+		SourceS3Key: "users/user-1/media/media-1/source.mov", SourceETag: "etag-1",
+		Metadata: domain.VideoMetadata{DurationMicros: 12_000_000, HasAudio: false},
+		Frames:   []domain.SelectedFrame{{ID: "frame-1", MediaID: "media-1", SegmentID: "segment-1", SceneID: "scene-1", TimestampMicros: 1_000_000, S3Key: "old/frame.jpg"}},
+	}
+	staleKey := "users/user-1/video-analysis/media-1/video-v1/old/evidence.json"
+	if err := objects.PutJSON(context.Background(), staleKey, staleEvidence); err != nil {
+		t.Fatal(err)
+	}
+	repository.preprocessing[cacheKey("user-1", "project-old", "media-1", "video-v1", "etag-1")] = domain.PreprocessingArtifact{
+		ID: "preprocessing-old", UserID: "user-1", ProjectID: "project-old", MediaID: "media-1",
+		AnalysisVersion: "video-v1", SourceETag: "etag-1", EvidenceS3Key: staleKey, FrameCount: 1, CreatedAt: now.Add(-time.Hour),
+	}
+
+	result, err := processor.Process(context.Background(), repository.addJob("job-project-1", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Reused {
+		t.Fatal("analysis should be newly created when only a cross-project preprocessing artifact exists")
+	}
+	if tools.frameCalls == 0 {
+		t.Fatal("cross-project preprocessing cache was reused")
+	}
+	if result.Analysis.ProjectID != "project-1" {
+		t.Fatalf("analysis project = %q, want project-1", result.Analysis.ProjectID)
+	}
+	if !strings.Contains(result.Analysis.EvidenceS3Key, "/projects/project-1/video-analysis/") {
+		t.Fatalf("evidence key is not project-scoped: %s", result.Analysis.EvidenceS3Key)
 	}
 }
 
@@ -418,10 +478,10 @@ func (r *memoryRepository) SaveTranscript(_ context.Context, transcript domain.T
 	return transcript, nil
 }
 
-func (r *memoryRepository) GetPreprocessing(_ context.Context, userID, mediaID, version, sourceETag string) (domain.PreprocessingArtifact, error) {
+func (r *memoryRepository) GetPreprocessing(_ context.Context, userID, projectID, mediaID, version, sourceETag string) (domain.PreprocessingArtifact, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	value, ok := r.preprocessing[cacheKey(userID, mediaID, version, sourceETag)]
+	value, ok := r.preprocessing[cacheKey(userID, projectID, mediaID, version, sourceETag)]
 	if !ok {
 		return domain.PreprocessingArtifact{}, domain.ErrNotFound
 	}
@@ -431,7 +491,7 @@ func (r *memoryRepository) GetPreprocessing(_ context.Context, userID, mediaID, 
 func (r *memoryRepository) SavePreprocessing(_ context.Context, artifact domain.PreprocessingArtifact) (domain.PreprocessingArtifact, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	key := cacheKey(artifact.UserID, artifact.MediaID, artifact.AnalysisVersion, artifact.SourceETag)
+	key := cacheKey(artifact.UserID, artifact.ProjectID, artifact.MediaID, artifact.AnalysisVersion, artifact.SourceETag)
 	if existing, ok := r.preprocessing[key]; ok {
 		return existing, nil
 	}

@@ -22,7 +22,7 @@ type Repository interface {
 	SaveVideoAnalysis(ctx context.Context, analysis domain.VideoAnalysis) (domain.VideoAnalysis, error)
 	GetTranscript(ctx context.Context, userID, mediaID, version, sourceETag string) (domain.TranscriptionRecord, error)
 	SaveTranscript(ctx context.Context, transcript domain.TranscriptionRecord) (domain.TranscriptionRecord, error)
-	GetPreprocessing(ctx context.Context, userID, mediaID, version, sourceETag string) (domain.PreprocessingArtifact, error)
+	GetPreprocessing(ctx context.Context, userID, projectID, mediaID, version, sourceETag string) (domain.PreprocessingArtifact, error)
 	SavePreprocessing(ctx context.Context, artifact domain.PreprocessingArtifact) (domain.PreprocessingArtifact, error)
 	StartJobAttempt(ctx context.Context, jobID string) (domain.ProcessingJob, error)
 	UpdateJob(ctx context.Context, jobID, status string, progress float64, errorCode, errorMessage, artifactS3Key string) (domain.ProcessingJob, error)
@@ -229,16 +229,16 @@ func decodeVideoAnalysis(data []byte) (domain.VideoAnalysis, error) {
 	return analysis, nil
 }
 
-func (s *Postgres) GetPreprocessing(ctx context.Context, userID, mediaID, version, sourceETag string) (domain.PreprocessingArtifact, error) {
+func (s *Postgres) GetPreprocessing(ctx context.Context, userID, projectID, mediaID, version, sourceETag string) (domain.PreprocessingArtifact, error) {
 	var artifact domain.PreprocessingArtifact
-	if err := s.getLogical(ctx, "video_preprocessing", userID, logicalKey(mediaID, version, sourceETag), &artifact); err != nil {
+	if err := s.getLogical(ctx, "video_preprocessing", userID, logicalKey(projectID, mediaID, version, sourceETag), &artifact); err != nil {
 		return domain.PreprocessingArtifact{}, err
 	}
 	return artifact, nil
 }
 
 func (s *Postgres) SavePreprocessing(ctx context.Context, artifact domain.PreprocessingArtifact) (domain.PreprocessingArtifact, error) {
-	key := logicalKey(artifact.MediaID, artifact.AnalysisVersion, artifact.SourceETag)
+	key := logicalKey(artifact.ProjectID, artifact.MediaID, artifact.AnalysisVersion, artifact.SourceETag)
 	inserted, err := s.insert(ctx, "video_preprocessing", artifact.ID, artifact.UserID, artifact.ProjectID, artifact.MediaID, key, artifact)
 	if err != nil {
 		return domain.PreprocessingArtifact{}, err
@@ -246,7 +246,7 @@ func (s *Postgres) SavePreprocessing(ctx context.Context, artifact domain.Prepro
 	if inserted {
 		return artifact, nil
 	}
-	return s.GetPreprocessing(ctx, artifact.UserID, artifact.MediaID, artifact.AnalysisVersion, artifact.SourceETag)
+	return s.GetPreprocessing(ctx, artifact.UserID, artifact.ProjectID, artifact.MediaID, artifact.AnalysisVersion, artifact.SourceETag)
 }
 
 func (s *Postgres) StartJobAttempt(ctx context.Context, jobID string) (domain.ProcessingJob, error) {
