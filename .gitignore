@@ -16,3 +16,9 @@ xcuserdata/
 sample-media/
 __pycache__/
 *.pyc
+
+# Local environment files may contain database/API credentials.
+.env
+.env.local
+backend/.env
+video-intelligence-worker/.env

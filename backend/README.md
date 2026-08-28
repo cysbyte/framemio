@@ -141,6 +141,8 @@ DATABASE_PROVIDER                     # deployment hint: rds or neon
 
 Production RDS uses IAM database authentication with `DATABASE_AUTH_MODE=iam` and a no-password `DATABASE_URL`. Neon uses `DATABASE_AUTH_MODE=password` with a password-bearing Postgres URL, preferably injected into ECS via `DATABASE_URL_SECRET_ARN`. The ECS and GitHub Actions deployment runbook is maintained in `../docs/DB_ECS_DEPLOYMENT_SCALING.md`.
 
+Use `backend/scripts/neon-psql.sh` for local Neon `psql` access, and `backend/scripts/setup-neon-database.sh` for a fresh Neon schema setup that clears demo/test data without migrating old RDS records.
+
 ## Run Locally
 
 PostgreSQL, AWS credentials, the S3 bucket, and the SQS queue must already exist.

@@ -43,6 +43,16 @@ DATABASE_URL_SECRET_ARN=<aws-secrets-manager-or-ssm-parameter-arn-containing-neo
 
 Use a Neon connection string with `sslmode=require`. Because the Neon URL contains a database password, prefer `DATABASE_URL_SECRET_ARN` and inject it into ECS as a task secret. Do not store a password-bearing Neon URL in a public repository variable or plaintext ECS task-definition environment entry.
 
+For a fresh Neon cutover without migrating old RDS data, export `NEON_DATABASE_URL` locally and run `backend/scripts/setup-neon-database.sh`. The script creates or updates the AWS secret, configures GitHub repository variables for Neon, creates the FrameMio schema, drops the Neon demo table `playing_with_neon`, and truncates `framemio_domain_records` so test data is cleared.
+
+To open an interactive Neon `psql` session, use `backend/scripts/neon-psql.sh`. It accepts `NEON_DATABASE_URL`, `DATABASE_PROVIDER=neon DATABASE_URL=...`, or `DATABASE_URL_SECRET_ARN`, parses the URL into `PG*` environment variables, and avoids passing the password-bearing URL as a `psql` process argument.
+
+```bash
+read -rs NEON_DATABASE_URL
+export NEON_DATABASE_URL
+backend/scripts/neon-psql.sh
+```
+
 Do not paste a generated RDS IAM authentication token into `.env`, ECS, or GitHub variables. The token is short-lived, and the Go code generates it at connection time when `DATABASE_AUTH_MODE=iam` is set.
 
 ### Database Access Rules
