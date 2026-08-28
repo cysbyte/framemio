@@ -24,6 +24,7 @@ require_var IMAGE
 : "${ECS_MAX_CAPACITY:=$ECS_SERVICE_DESIRED_COUNT}"
 : "${RDS_AUTO_START_ENABLED:=false}"
 : "${RDS_CLUSTER_IDENTIFIER:=}"
+: "${DATABASE_PROVIDER:=rds}"
 
 for numeric_var in ECS_SERVICE_DESIRED_COUNT ECS_MIN_CAPACITY ECS_MAX_CAPACITY; do
   if [[ "${!numeric_var}" =~ ^[0-9]+$ ]]; then
@@ -35,6 +36,14 @@ for numeric_var in ECS_SERVICE_DESIRED_COUNT ECS_MIN_CAPACITY ECS_MAX_CAPACITY; 
 done
 
 start_rds_cluster_if_needed() {
+  local database_provider
+  database_provider="$(printf '%s' "$DATABASE_PROVIDER" | tr '[:upper:]' '[:lower:]')"
+
+  if [[ "$database_provider" != "rds" && "$database_provider" != "aurora" && "$database_provider" != "aws-rds" ]]; then
+    echo "Skipping RDS cluster preflight for DATABASE_PROVIDER=$DATABASE_PROVIDER"
+    return 0
+  fi
+
   if [[ "$RDS_AUTO_START_ENABLED" != "true" ]]; then
     return 0
   fi
@@ -89,7 +98,7 @@ aws ecs describe-task-definition \
   --query 'taskDefinition' \
   --output json > task-definition.json
 
-IMAGE="$IMAGE" ECS_CONTAINER_NAME="$ECS_CONTAINER_NAME" ECS_TASK_CPU="${ECS_TASK_CPU:-}" ECS_TASK_MEMORY="${ECS_TASK_MEMORY:-}" ECS_TASK_ROLE_ARN="${ECS_TASK_ROLE_ARN:-}" ECS_EXECUTION_ROLE_ARN="${ECS_EXECUTION_ROLE_ARN:-}" ECS_SET_ENV_VARS="${ECS_SET_ENV_VARS:-}" ECS_SET_OPTIONAL_ENV_VARS="${ECS_SET_OPTIONAL_ENV_VARS:-}" node --input-type=module -e '
+IMAGE="$IMAGE" ECS_CONTAINER_NAME="$ECS_CONTAINER_NAME" ECS_TASK_CPU="${ECS_TASK_CPU:-}" ECS_TASK_MEMORY="${ECS_TASK_MEMORY:-}" ECS_TASK_ROLE_ARN="${ECS_TASK_ROLE_ARN:-}" ECS_EXECUTION_ROLE_ARN="${ECS_EXECUTION_ROLE_ARN:-}" ECS_SET_ENV_VARS="${ECS_SET_ENV_VARS:-}" ECS_SET_OPTIONAL_ENV_VARS="${ECS_SET_OPTIONAL_ENV_VARS:-}" ECS_SET_SECRET_ENV_VARS="${ECS_SET_SECRET_ENV_VARS:-}" node --input-type=module -e '
   import { readFileSync, writeFileSync } from "node:fs";
 
   const taskDefinition = JSON.parse(readFileSync("task-definition.json", "utf8"));
@@ -118,7 +127,18 @@ IMAGE="$IMAGE" ECS_CONTAINER_NAME="$ECS_CONTAINER_NAME" ECS_TASK_CPU="${ECS_TASK
   }
 
   const environment = Array.isArray(container.environment) ? container.environment : [];
+  const secrets = Array.isArray(container.secrets) ? container.secrets : [];
+  const list = (value) => (value || "").split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
+  const secretNames = new Set(list(process.env.ECS_SET_SECRET_ENV_VARS));
+  const secretValueFrom = (name) => process.env[`${name}_SECRET_ARN`] || process.env[`${name}_SECRET_VALUE_FROM`] || "";
+  const removeByName = (entries, name) => {
+    const index = entries.findIndex((entry) => entry.name === name);
+    if (index >= 0) {
+      entries.splice(index, 1);
+    }
+  };
   const setEnvironmentVariable = (name, value) => {
+    removeByName(secrets, name);
     const existing = environment.find((entry) => entry.name === name);
     if (existing) {
       existing.value = value;
@@ -126,8 +146,28 @@ IMAGE="$IMAGE" ECS_CONTAINER_NAME="$ECS_CONTAINER_NAME" ECS_TASK_CPU="${ECS_TASK
       environment.push({ name, value });
     }
   };
+  const setSecretEnvironmentVariable = (name, valueFrom) => {
+    removeByName(environment, name);
+    const existing = secrets.find((entry) => entry.name === name);
+    if (existing) {
+      existing.valueFrom = valueFrom;
+    } else {
+      secrets.push({ name, valueFrom });
+    }
+  };
 
-  for (const name of (process.env.ECS_SET_ENV_VARS || "").split(/[\n,]/).map((item) => item.trim()).filter(Boolean)) {
+  for (const name of secretNames) {
+    const valueFrom = secretValueFrom(name);
+    if (!valueFrom) {
+      throw new Error(`ECS_SET_SECRET_ENV_VARS includes ${name}, but ${name}_SECRET_ARN or ${name}_SECRET_VALUE_FROM is not set.`);
+    }
+    setSecretEnvironmentVariable(name, valueFrom);
+  }
+
+  for (const name of list(process.env.ECS_SET_ENV_VARS)) {
+    if (secretNames.has(name)) {
+      continue;
+    }
     const value = process.env[name];
     if (value === undefined || value === "") {
       throw new Error(`ECS_SET_ENV_VARS includes ${name}, but ${name} is not set.`);
@@ -135,13 +175,17 @@ IMAGE="$IMAGE" ECS_CONTAINER_NAME="$ECS_CONTAINER_NAME" ECS_TASK_CPU="${ECS_TASK
     setEnvironmentVariable(name, value);
   }
 
-  for (const name of (process.env.ECS_SET_OPTIONAL_ENV_VARS || "").split(/[\n,]/).map((item) => item.trim()).filter(Boolean)) {
+  for (const name of list(process.env.ECS_SET_OPTIONAL_ENV_VARS)) {
+    if (secretNames.has(name)) {
+      continue;
+    }
     const value = process.env[name];
     if (value !== undefined && value !== "") {
       setEnvironmentVariable(name, value);
     }
   }
   container.environment = environment;
+  container.secrets = secrets;
 
   for (const field of [
     "taskDefinitionArn",

@@ -15,25 +15,31 @@ import (
 )
 
 func newPostgresPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
-	if !useIAMDatabaseAuth() {
-		return pgxpool.New(ctx, databaseURL)
-	}
-
 	poolConfig, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, err
 	}
+	if useIAMDatabaseAuth() {
+		if err := configureRDSIAMAuth(ctx, poolConfig); err != nil {
+			return nil, err
+		}
+	} else {
+		configureStaticPasswordAuth(poolConfig)
+	}
+	return pgxpool.NewWithConfig(ctx, poolConfig)
+}
 
+func configureRDSIAMAuth(ctx context.Context, poolConfig *pgxpool.Config) error {
 	awsConfig, err := awscfg.LoadDefaultConfig(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("load aws config for rds iam auth: %w", err)
+		return fmt.Errorf("load aws config for rds iam auth: %w", err)
 	}
 	region := awsConfig.Region
 	if value := strings.TrimSpace(os.Getenv("AWS_REGION")); value != "" {
 		region = value
 	}
 	if region == "" {
-		return nil, fmt.Errorf("AWS_REGION is required for rds iam auth")
+		return fmt.Errorf("AWS_REGION is required for rds iam auth")
 	}
 
 	buildAuthToken := func(ctx context.Context, connConfig *pgx.ConnConfig) (string, error) {
@@ -51,7 +57,7 @@ func newPostgresPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, er
 
 	poolConfig.ConnConfig.Password, err = buildAuthToken(ctx, poolConfig.ConnConfig)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	poolConfig.BeforeConnect = func(ctx context.Context, connConfig *pgx.ConnConfig) error {
@@ -62,8 +68,13 @@ func newPostgresPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, er
 		connConfig.Password = token
 		return nil
 	}
+	return nil
+}
 
-	return pgxpool.NewWithConfig(ctx, poolConfig)
+func configureStaticPasswordAuth(poolConfig *pgxpool.Config) {
+	if usesNeonDatabase() {
+		poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
+	}
 }
 
 func normalizeRDSAuthToken(token string) string {
@@ -83,4 +94,12 @@ func useIAMDatabaseAuth() bool {
 	}
 	value := strings.ToLower(strings.TrimSpace(os.Getenv("DATABASE_IAM_AUTH")))
 	return value == "1" || value == "true" || value == "yes"
+}
+
+func usesNeonDatabase() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DATABASE_PROVIDER"))) {
+	case "neon", "neon-postgres", "neonpostgres":
+		return true
+	}
+	return false
 }

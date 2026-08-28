@@ -135,10 +135,11 @@ UPLOAD_MULTIPART_THRESHOLD_BYTES      # default: 16 MiB
 MEDIA_DOWNLOAD_BASE_URL               # optional CDN base for generated video/photo download URLs, e.g. https://d3j31q5bw6z6w5.cloudfront.net
 MEDIA_CDN_BASE_URL                    # backwards-compatible alias if MEDIA_DOWNLOAD_BASE_URL is unset
 AWS_REGION / standard AWS credentials # consumed by AWS SDK default configuration
-DATABASE_AUTH_MODE                    # set to iam for production RDS
+DATABASE_AUTH_MODE                    # iam for production RDS, password for Neon/static-password Postgres
+DATABASE_PROVIDER                     # deployment hint: rds or neon
 ```
 
-Production RDS uses IAM database authentication. The ECS and GitHub Actions deployment runbook is maintained in `../docs/DB_ECS_DEPLOYMENT_SCALING.md`; use `DATABASE_AUTH_MODE=iam` with a no-password `DATABASE_URL` and do not paste generated IAM tokens into env files.
+Production RDS uses IAM database authentication with `DATABASE_AUTH_MODE=iam` and a no-password `DATABASE_URL`. Neon uses `DATABASE_AUTH_MODE=password` with a password-bearing Postgres URL, preferably injected into ECS via `DATABASE_URL_SECRET_ARN`. The ECS and GitHub Actions deployment runbook is maintained in `../docs/DB_ECS_DEPLOYMENT_SCALING.md`.
 
 ## Run Locally
 

@@ -25,9 +25,11 @@ env:
   ECS_SUBNETS: ${{ vars.ECS_SUBNETS || 'subnet-00d486ccc47c106c3,subnet-049030ce471097336,subnet-09957911ba06c489f,subnet-0207cfb1b59d111c0,subnet-059002c34faa60a13,subnet-0b38a6af4a720b169' }}
   ECS_SECURITY_GROUPS: ${{ vars.ECS_SECURITY_GROUPS || 'sg-0621dd1b1173bd1c0' }}
   ECS_ASSIGN_PUBLIC_IP: ${{ vars.ECS_ASSIGN_PUBLIC_IP || 'ENABLED' }}
+  DATABASE_PROVIDER: ${{ vars.DATABASE_PROVIDER || 'rds' }}
   DATABASE_URL: ${{ vars.DATABASE_URL }}
-  DATABASE_AUTH_MODE: iam
-  RDS_AUTO_START_ENABLED: ${{ vars.RDS_AUTO_START_ENABLED || 'true' }}
+  DATABASE_URL_SECRET_ARN: ${{ vars.DATABASE_URL_SECRET_ARN || vars.NEON_DATABASE_URL_SECRET_ARN }}
+  DATABASE_AUTH_MODE: ${{ vars.DATABASE_AUTH_MODE }}
+  RDS_AUTO_START_ENABLED: ${{ vars.RDS_AUTO_START_ENABLED }}
   RDS_CLUSTER_IDENTIFIER: ${{ vars.RDS_CLUSTER_IDENTIFIER || 'my-db-cluster' }}
   PORT: "8080"
   INTERNAL_API_TOKEN: ${{ secrets.INTERNAL_API_TOKEN }}
@@ -44,7 +46,7 @@ env:
   RENDER_WORKER_CONTAINER_NAME: Main
   BACKEND_WORKER_TASK_DEFINITION: framemio-backend
   BACKEND_WORKER_CONTAINER_NAME: Main
-  ECS_SET_ENV_VARS: DATABASE_URL,DATABASE_AUTH_MODE,AWS_REGION,PORT,INTERNAL_API_TOKEN,SQS_PROCESSING_QUEUE_URL,MEDIA_DOWNLOAD_BASE_URL,ECS_WORKER_RUN_TASK_ENABLED,ECS_WORKER_CLUSTER,ECS_WORKER_SUBNETS,ECS_WORKER_SECURITY_GROUPS,ECS_WORKER_ASSIGN_PUBLIC_IP,VIDEO_WORKER_TASK_DEFINITION,VIDEO_WORKER_CONTAINER_NAME,RENDER_WORKER_TASK_DEFINITION,RENDER_WORKER_CONTAINER_NAME,BACKEND_WORKER_TASK_DEFINITION,BACKEND_WORKER_CONTAINER_NAME
+  ECS_SET_ENV_VARS: DATABASE_PROVIDER,DATABASE_URL,DATABASE_AUTH_MODE,AWS_REGION,PORT,INTERNAL_API_TOKEN,SQS_PROCESSING_QUEUE_URL,MEDIA_DOWNLOAD_BASE_URL,ECS_WORKER_RUN_TASK_ENABLED,ECS_WORKER_CLUSTER,ECS_WORKER_SUBNETS,ECS_WORKER_SECURITY_GROUPS,ECS_WORKER_ASSIGN_PUBLIC_IP,VIDEO_WORKER_TASK_DEFINITION,VIDEO_WORKER_CONTAINER_NAME,RENDER_WORKER_TASK_DEFINITION,RENDER_WORKER_CONTAINER_NAME,BACKEND_WORKER_TASK_DEFINITION,BACKEND_WORKER_CONTAINER_NAME
 
 jobs:
   build-and-push:
@@ -56,6 +58,27 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Resolve database deployment config
+        run: |
+          if [ -n "$DATABASE_URL_SECRET_ARN" ]; then
+            echo "ECS_SET_SECRET_ENV_VARS=DATABASE_URL" >> "$GITHUB_ENV"
+          fi
+
+          case "$DATABASE_PROVIDER" in
+            rds|aurora|aws-rds)
+              echo "DATABASE_AUTH_MODE=${DATABASE_AUTH_MODE:-iam}" >> "$GITHUB_ENV"
+              echo "RDS_AUTO_START_ENABLED=${RDS_AUTO_START_ENABLED:-true}" >> "$GITHUB_ENV"
+              ;;
+            neon)
+              echo "DATABASE_AUTH_MODE=${DATABASE_AUTH_MODE:-password}" >> "$GITHUB_ENV"
+              echo "RDS_AUTO_START_ENABLED=${RDS_AUTO_START_ENABLED:-false}" >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "Unsupported DATABASE_PROVIDER: $DATABASE_PROVIDER" >&2
+              exit 1
+              ;;
+          esac
+
       - name: Validate deployment variables
         env:
           ROLE_ARN: ${{ secrets.AWS_GITHUB_ACTIONS_ROLE_ARN }}
@@ -63,7 +86,12 @@ jobs:
           test -n "$AWS_REGION" || { echo "Missing repository variable AWS_REGION"; exit 1; }
           test -n "$ECR_REPOSITORY" || { echo "Missing repository variable BACKEND_ECR_REPOSITORY"; exit 1; }
           test -n "$ROLE_ARN" || { echo "Missing repository secret AWS_GITHUB_ACTIONS_ROLE_ARN"; exit 1; }
-          test -n "$DATABASE_URL" || { echo "Missing repository variable DATABASE_URL"; exit 1; }
+          test -n "$DATABASE_PROVIDER" || { echo "Missing DATABASE_PROVIDER"; exit 1; }
+          if [ -z "$DATABASE_URL" ] && [ -z "$DATABASE_URL_SECRET_ARN" ]; then
+            echo "Missing DATABASE_URL repository variable or DATABASE_URL_SECRET_ARN repository variable" >&2
+            exit 1
+          fi
+          test -n "$DATABASE_AUTH_MODE" || { echo "Missing DATABASE_AUTH_MODE"; exit 1; }
           if [ "$RDS_AUTO_START_ENABLED" = "true" ]; then
             test -n "$RDS_CLUSTER_IDENTIFIER" || { echo "Missing RDS_CLUSTER_IDENTIFIER while RDS auto-start is enabled"; exit 1; }
           fi

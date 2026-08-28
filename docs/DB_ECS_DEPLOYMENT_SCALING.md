@@ -19,23 +19,40 @@ Last verified: 2026-08-23 in `us-east-1`.
 
 ## Database Connection
 
-Backend and video intelligence worker connect to the same RDS PostgreSQL database using IAM database authentication.
+Backend and video intelligence worker connect to the same PostgreSQL database. AWS RDS/Aurora remains supported through IAM authentication, and Neon is supported through normal password authentication.
+
+RDS/Aurora configuration:
 
 ```text
+DATABASE_PROVIDER=rds
 DATABASE_URL=postgres://framemio_app@framemio.c4j042eqkxdd.us-east-1.rds.amazonaws.com:5432/postgres?sslmode=require
 DATABASE_AUTH_MODE=iam
 AWS_REGION=us-east-1
+RDS_AUTO_START_ENABLED=true
+RDS_CLUSTER_IDENTIFIER=my-db-cluster
 ```
 
-Do not paste a generated IAM authentication token into `.env`, ECS, or GitHub variables. The token is short-lived, and the Go code generates it at connection time when `DATABASE_AUTH_MODE=iam` is set.
+Neon configuration:
+
+```text
+DATABASE_PROVIDER=neon
+DATABASE_AUTH_MODE=password
+RDS_AUTO_START_ENABLED=false
+DATABASE_URL_SECRET_ARN=<aws-secrets-manager-or-ssm-parameter-arn-containing-neon-postgres-url>
+```
+
+Use a Neon connection string with `sslmode=require`. Because the Neon URL contains a database password, prefer `DATABASE_URL_SECRET_ARN` and inject it into ECS as a task secret. Do not store a password-bearing Neon URL in a public repository variable or plaintext ECS task-definition environment entry.
+
+Do not paste a generated RDS IAM authentication token into `.env`, ECS, or GitHub variables. The token is short-lived, and the Go code generates it at connection time when `DATABASE_AUTH_MODE=iam` is set.
 
 ### Database Access Rules
 
 - Backend uses `DATABASE_URL` and runs its idempotent domain-record migration on startup.
 - Video intelligence worker uses `DATABASE_URL` and runs its idempotent video-analysis indexes/migration on startup.
 - Render worker currently does not connect to PostgreSQL; it exports the deterministic rendering pipeline and still needs a queue/callback runner before full render jobs are end-to-end.
-- `DATABASE_URL` in GitHub repository variables must be the no-password DSN above.
-- Local `.env` files may contain the same no-password DSN, but should not contain static IAM tokens or master-user passwords.
+- RDS deployments may keep a no-password `DATABASE_URL` in GitHub repository variables because `DATABASE_AUTH_MODE=iam` generates the token at runtime.
+- Neon deployments should store the password-bearing connection URL in AWS Secrets Manager or SSM Parameter Store and set `DATABASE_URL_SECRET_ARN` in GitHub repository variables.
+- Local `.env` files may contain development DSNs, but should not contain static RDS IAM tokens or production database passwords.
 
 ### Required RDS IAM Setup
 
@@ -112,14 +129,26 @@ Three workflows build Docker images, push them to ECR, register a new task defin
 
 ### Required GitHub Settings
 
-Repository variables:
+Repository variables for RDS/Aurora:
 
 ```text
 AWS_REGION=us-east-1
 BACKEND_ECR_REPOSITORY=framemio-backend
 VIDEO_INTELLIGENCE_WORKER_ECR_REPOSITORY=framemio-video-intelligence-worker
 RENDER_WORKER_ECR_REPOSITORY=framemio-render-worker
+DATABASE_PROVIDER=rds
 DATABASE_URL=postgres://framemio_app@framemio.c4j042eqkxdd.us-east-1.rds.amazonaws.com:5432/postgres?sslmode=require
+```
+
+Repository variables for Neon:
+
+```text
+AWS_REGION=us-east-1
+BACKEND_ECR_REPOSITORY=framemio-backend
+VIDEO_INTELLIGENCE_WORKER_ECR_REPOSITORY=framemio-video-intelligence-worker
+RENDER_WORKER_ECR_REPOSITORY=framemio-render-worker
+DATABASE_PROVIDER=neon
+DATABASE_URL_SECRET_ARN=<aws-secrets-manager-or-ssm-parameter-arn-containing-neon-postgres-url>
 ```
 
 Optional repository variables override the workflow defaults:
@@ -128,6 +157,9 @@ Optional repository variables override the workflow defaults:
 ECS_SUBNETS=<comma-separated subnet IDs>
 ECS_SECURITY_GROUPS=<comma-separated security group IDs>
 ECS_ASSIGN_PUBLIC_IP=ENABLED
+DATABASE_AUTH_MODE=<optional override; defaults to iam for RDS and password for Neon>
+RDS_AUTO_START_ENABLED=<optional override; defaults to true for backend RDS deploys and false for Neon>
+RDS_CLUSTER_IDENTIFIER=<RDS/Aurora cluster identifier; default my-db-cluster>
 ```
 
 Repository secret:
@@ -144,8 +176,10 @@ The GitHub Actions role needs permissions to:
 - Describe, register, create, update, and wait for ECS services/task definitions.
 - Pass `arn:aws:iam::450876624497:role/ecsTaskExecutionRole` and `arn:aws:iam::450876624497:role/FramemioECSTaskRole` to ECS.
 - Register ECS Application Auto Scaling scalable targets for worker services and keep worker services at `desiredCount=0` after deploys.
+- For RDS/Aurora deployments with auto-start enabled, describe and start the configured DB cluster.
 
-The scalable-target permission is required because worker workflows run this on every worker deploy, while also setting the worker ECS service desired count to `0`:
+The scalable-target permission is required because worker workflows run this on every worker deploy, while also setting the worker ECS service desired count to `0`. Neon deployments also require the ECS task execution role to read the secret or parameter referenced by `DATABASE_URL_SECRET_ARN`.
+
 
 ```bash
 aws application-autoscaling register-scalable-target \

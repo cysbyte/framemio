@@ -197,7 +197,7 @@ The previous `SPEECH_*` and `ENABLE_SPEECH_TO_TEXT` variables remain supported a
 
 The previous `MULTIMODAL_*` and `PROVIDER_TIMEOUT` variables remain supported as compatibility fallbacks, but new deployments should use the `VIDEO_UNDERSTANDING_*` names.
 
-For local development, copy the values into `video-intelligence-worker/.env` and load them with your shell or container runtime. This worker connects to PostgreSQL for durable records and reads the same RDS database as the backend API.
+For local development, copy the values into `video-intelligence-worker/.env` and load them with your shell or container runtime. This worker connects to PostgreSQL for durable records and should use the same database provider as the backend API: RDS with `DATABASE_AUTH_MODE=iam`, or Neon/static-password Postgres with `DATABASE_AUTH_MODE=password`.
 
 ## Local Validation
 
