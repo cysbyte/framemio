@@ -60,6 +60,11 @@ struct StoryPreviewView: View {
                 dismiss()
             }
         }
+        .onChange(of: viewModel.insufficientCredits) { _, issue in
+            guard issue != nil else { return }
+            viewModel.insufficientCredits = nil
+            onOpenPricing(.insufficientCredits)
+        }
         .fullScreenCover(item: $fullScreenVideo) { video in
             FullScreenStoryVideoPlayer(url: video.url)
         }
@@ -96,8 +101,12 @@ struct StoryPreviewView: View {
                     onImportPhotos: { items, progress in
                         try await viewModel.importMediaForEdit(items, progress: progress)
                     },
-                    onRegenerate: {
-                        viewModel.regenerateStory()
+                    onRegenerate: { request in
+                        if request.hasChanges {
+                            viewModel.saveStoryEdits(request)
+                        } else {
+                            viewModel.regenerateStory()
+                        }
                         isShowingEditStory = false
                     },
                     onRetry: {
@@ -111,19 +120,6 @@ struct StoryPreviewView: View {
             Button("Dismiss", role: .cancel) { viewModel.errorMessage = nil }
         } message: {
             Text(viewModel.errorMessage ?? "")
-        }
-        .alert("Not enough credits", isPresented: creditIssueBinding) {
-            Button("Get FrameMio Pro") {
-                viewModel.insufficientCredits = nil
-                onOpenPricing(.insufficientCredits)
-            }
-            Button("Not now", role: .cancel) {
-                viewModel.insufficientCredits = nil
-            }
-        } message: {
-            if let issue = viewModel.insufficientCredits {
-                Text("You need \(issue.required) credits. You have \(issue.available) credits.")
-            }
         }
         .alert("Saved", isPresented: confirmationBinding) {
             Button("OK", role: .cancel) { viewModel.confirmationMessage = nil }
@@ -617,13 +613,6 @@ struct StoryPreviewView: View {
     }
 
 
-    private var creditIssueBinding: Binding<Bool> {
-        Binding(
-            get: { viewModel.insufficientCredits != nil },
-            set: { if !$0 { viewModel.insufficientCredits = nil } }
-        )
-    }
-
     private var errorBinding: Binding<Bool> {
         Binding(
             get: { viewModel.errorMessage != nil },
@@ -883,7 +872,7 @@ private struct EditStorySheet: View {
     let imageProvider: (String) -> Image?
     let onAppearMoment: (String) -> Void
     let onImportPhotos: ([PhotosPickerItem], StoryImportProgressHandler?) async throws -> [ImportedStoryMedia]
-    let onRegenerate: () -> Void
+    let onRegenerate: (StoryEditRequest) -> Void
     let onRetry: () -> Void
 
     @State private var draft = EditStoryDraft()
@@ -1217,7 +1206,7 @@ private struct EditStorySheet: View {
             .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
             .accessibilityLabel("Tell FrameMio what you want")
             PrimaryButton(title: "Regenerate Story — \(CreditPricing.regenerateStory)", systemImage: "sparkles") {
-                onRegenerate()
+                onRegenerate(draft.request)
             }
             .disabled(isPerformingAction)
         }

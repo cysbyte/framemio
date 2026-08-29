@@ -23,9 +23,11 @@ type Limits struct {
 }
 
 type Policy struct {
-	Prices       map[models.CreditAction]int
-	Limits       Limits
-	InitialGrant int
+	Prices                          map[models.CreditAction]int
+	Limits                          Limits
+	InitialGrant                    int
+	MonthlySubscriptionCycleCredits int
+	YearlySubscriptionCycleCredits  int
 }
 
 func DefaultPolicy() Policy {
@@ -53,7 +55,9 @@ func DefaultPolicy() Policy {
 			AIEditMaxMedia:                20,
 			AIEditMaxDurationSec:          30,
 		},
-		InitialGrant: 200,
+		InitialGrant:                    100,
+		MonthlySubscriptionCycleCredits: 300,
+		YearlySubscriptionCycleCredits:  360,
 	}
 }
 
@@ -76,6 +80,12 @@ func LoadPolicyFromEnv() Policy {
 	}
 	if value, ok := readIntEnv("CREDIT_INITIAL_GRANT"); ok {
 		policy.InitialGrant = value
+	}
+	if value, ok := readIntEnv("CREDIT_SUBSCRIPTION_MONTHLY_CYCLE_CREDITS"); ok {
+		policy.MonthlySubscriptionCycleCredits = value
+	}
+	if value, ok := readIntEnv("CREDIT_SUBSCRIPTION_YEARLY_CYCLE_CREDITS"); ok {
+		policy.YearlySubscriptionCycleCredits = value
 	}
 	policy.Limits.CreateStoryMaxPhotos = readIntEnvOrDefault("CREDIT_CREATE_STORY_MAX_PHOTOS", policy.Limits.CreateStoryMaxPhotos)
 	policy.Limits.CreateStoryMaxVideoSeconds = readIntEnvOrDefault("CREDIT_CREATE_STORY_MAX_VIDEO_SECONDS", policy.Limits.CreateStoryMaxVideoSeconds)

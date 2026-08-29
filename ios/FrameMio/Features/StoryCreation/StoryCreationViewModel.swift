@@ -104,7 +104,7 @@ final class StoryCreationViewModel: ObservableObject {
             storyCreationDebugLog("ignored duplicate create request while already creating")
             return
         }
-        storyCreationDebugLog("createStory requested assets=\(assets.count) videos=\(assets.filter(\.isVideo).count)")
+        storyCreationDebugLog("createStory requested assets=\(assets.count) videos=\(assets.filter(\.isVideo).count) credit_cost=\(createStoryCreditCost) balance=\(creditBalance.map(String.init) ?? "nil")")
         creationTask?.cancel()
         creationTask = Task { [weak self] in
             guard let self else { return }
@@ -167,6 +167,7 @@ final class StoryCreationViewModel: ObservableObject {
                 storyCreationDebugLog("phase=failed progress=\(progress) error=\(appError.localizedDescription) raw=\(error.localizedDescription)")
                 switch appError {
                 case let .insufficientCredits(required, available):
+                    storyCreationDebugLog("createStory insufficient_credits required=\(required) available=\(available)")
                     insufficientCredits = CreditIssue(action: .createStory, required: required, available: available)
                     errorMessage = nil
                     phaseTitle = "Not enough credits"

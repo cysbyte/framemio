@@ -123,7 +123,7 @@ struct ProfileView: View {
                             .font(FrameMioTypography.footnote)
                             .foregroundStyle(FrameMioColors.secondaryInk)
                     } else {
-                        Text("FrameMio Pro includes 1,200 credits every month.")
+                        Text("FrameMio Pro includes \(FrameMioProCatalog.monthlyCredits.formatted())–\(FrameMioProCatalog.yearlyCredits.formatted()) credits every month.")
                             .font(FrameMioTypography.footnote)
                             .foregroundStyle(FrameMioColors.secondaryInk)
                     }

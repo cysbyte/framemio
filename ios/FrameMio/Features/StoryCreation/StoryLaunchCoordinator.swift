@@ -73,6 +73,7 @@ final class StoryLaunchCoordinator: ObservableObject {
     @Published private(set) var isPreparing = false
     /// Set once the server accepts the story; the view then polls it.
     @Published private(set) var storyID: String?
+    @Published var insufficientCredits: CreditIssue?
     @Published var errorMessage: String?
 
     private let analysisService: MediaAnalysisService
@@ -107,6 +108,7 @@ final class StoryLaunchCoordinator: ObservableObject {
         isPreparing = true
         progress = 0
         storyID = nil
+        insufficientCredits = nil
         errorMessage = nil
         phaseTitle = "Preparing your memories..."
         launchTask = Task { [weak self] in
@@ -161,8 +163,15 @@ final class StoryLaunchCoordinator: ObservableObject {
             } catch {
                 let appError = AppError.from(error)
                 storyLaunchDebugLog("phase=failed progress=\(progress) error=\(appError.localizedDescription) raw=\(error.localizedDescription)")
-                errorMessage = appError.localizedDescription
-                phaseTitle = "Something went wrong"
+                if case let .insufficientCredits(required, available) = appError {
+                    insufficientCredits = CreditIssue(action: .createStory, required: required, available: available)
+                    errorMessage = nil
+                    phaseTitle = "Not enough credits"
+                    storyLaunchDebugLog("phase=insufficient_credits required=\(required) available=\(available)")
+                } else {
+                    errorMessage = appError.localizedDescription
+                    phaseTitle = "Something went wrong"
+                }
             }
         }
     }

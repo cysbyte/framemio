@@ -315,7 +315,7 @@ final class RemoteCreditService: CreditService, @unchecked Sendable {
 final class MockCreditService: CreditService, @unchecked Sendable {
     private let balanceValue: CreditBalance
 
-    init(balance: CreditBalance = CreditBalance(available: 200, reserved: 0)) {
+    init(balance: CreditBalance = CreditBalance(available: AppConfiguration.initialCreditGrant, reserved: 0)) {
         balanceValue = balance
     }
 

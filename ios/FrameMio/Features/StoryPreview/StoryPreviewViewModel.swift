@@ -320,6 +320,7 @@ final class StoryPreviewViewModel: ObservableObject {
 
     private func loadStoryOrLaunch() async {
         if let launchContext, let launchID, let storyLaunchCoordinator {
+            storyPreviewDebugLog("launch_bridge_start launch_id=\(launchID) assets=\(launchAssets.count) story_id=\(storyID ?? "nil")")
             storyLaunchCoordinator.start(context: launchContext, assets: launchAssets, launchID: launchID)
             await waitForLaunchedStoryID(from: storyLaunchCoordinator)
         }
@@ -334,11 +335,19 @@ final class StoryPreviewViewModel: ObservableObject {
 
         while !Task.isCancelled {
             if let launchedStoryID = storyLaunchCoordinator.storyID {
+                storyPreviewDebugLog("launch_bridge_story_ready story_id=\(launchedStoryID)")
                 storyID = launchedStoryID
                 return
             }
 
+            if let issue = storyLaunchCoordinator.insufficientCredits {
+                storyPreviewDebugLog("launch_bridge_insufficient_credits required=\(issue.required) available=\(issue.available)")
+                insufficientCredits = issue
+                return
+            }
+
             if let launchErrorMessage = storyLaunchCoordinator.errorMessage {
+                storyPreviewDebugLog("launch_bridge_error message=\(launchErrorMessage)")
                 errorMessage = launchErrorMessage
                 return
             }

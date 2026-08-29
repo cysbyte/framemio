@@ -1,5 +1,11 @@
 import SwiftUI
 
+private func storyCreationViewDebugLog(_ message: @autoclosure () -> String) {
+#if DEBUG
+    print("[FrameMio][StoryCreationView] \(message())")
+#endif
+}
+
 struct StoryCreationView: View {
     @ObservedObject private var viewModel: StoryCreationViewModel
     let onCreate: () -> Void
@@ -119,26 +125,12 @@ struct StoryCreationView: View {
                 }
             }
         }
-        .alert("Not enough credits", isPresented: creditIssueBinding) {
-            Button("Get FrameMio Pro") {
-                viewModel.insufficientCredits = nil
-                onOpenPricing(.insufficientCredits)
-            }
-            Button("Not now", role: .cancel) {
-                viewModel.insufficientCredits = nil
-            }
-        } message: {
-            if let issue = viewModel.insufficientCredits {
-                Text("You need \(issue.required) credits. You have \(issue.available) credits.")
-            }
+        .onChange(of: viewModel.insufficientCredits) { _, issue in
+            guard issue != nil else { return }
+            storyCreationViewDebugLog("ui_redirect_to_pricing required=\(issue?.required ?? 0) available=\(issue?.available ?? 0)")
+            viewModel.insufficientCredits = nil
+            onOpenPricing(.insufficientCredits)
         }
-    }
-
-    private var creditIssueBinding: Binding<Bool> {
-        Binding(
-            get: { viewModel.insufficientCredits != nil },
-            set: { if !$0 { viewModel.insufficientCredits = nil } }
-        )
     }
 
     private func processingStartedCard(_ story: Story) -> some View {

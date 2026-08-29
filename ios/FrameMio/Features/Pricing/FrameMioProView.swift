@@ -46,7 +46,9 @@ enum FrameMioProPlanKind: String, CaseIterable, Identifiable, Sendable {
 
     var creditsPerCycle: Int {
         switch self {
-        case .yearly, .monthly:
+        case .yearly:
+            FrameMioProCatalog.yearlyCredits
+        case .monthly:
             FrameMioProCatalog.monthlyCredits
         }
     }
