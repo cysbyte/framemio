@@ -86,8 +86,8 @@ struct StoryPreviewView: View {
                             targetSize: CGSize(width: 220, height: 220)
                         )
                     },
-                    onImportPhotos: { items in
-                        try await viewModel.importMediaForEdit(items)
+                    onImportPhotos: { items, progress in
+                        try await viewModel.importMediaForEdit(items, progress: progress)
                     },
                     onSave: { request in
                         viewModel.saveStoryEdits(request)
@@ -845,7 +845,7 @@ private struct EditStorySheet: View {
     let isPerformingAction: Bool
     let imageProvider: (String) -> Image?
     let onAppearMoment: (String) -> Void
-    let onImportPhotos: ([PhotosPickerItem]) async throws -> [ImportedStoryMedia]
+    let onImportPhotos: ([PhotosPickerItem], StoryImportProgressHandler?) async throws -> [ImportedStoryMedia]
     let onSave: (StoryEditRequest) -> Void
     let onRetry: () -> Void
 
@@ -967,8 +967,8 @@ private struct EditStorySheet: View {
                     moments: selectableMoments,
                     imageProvider: imageProvider,
                     onAppearMoment: onAppearMoment,
-                    onImportPhotos: { items in
-                        let imported = try await onImportPhotos(items)
+                    onImportPhotos: { items, progress in
+                        let imported = try await onImportPhotos(items, progress)
                         let presentations = imported.map { StoryMomentPresentation(imported: $0, index: importedMoments.count) }
                         importedMoments.append(contentsOf: presentations)
                         draft.addAnalysis(imported)
@@ -994,8 +994,8 @@ private struct EditStorySheet: View {
                     allowsMultipleSelection: false,
                     imageProvider: imageProvider,
                     onAppearMoment: onAppearMoment,
-                    onImportPhotos: { items in
-                        let imported = try await onImportPhotos(items)
+                    onImportPhotos: { items, progress in
+                        let imported = try await onImportPhotos(items, progress)
                         let presentations = imported.map { StoryMomentPresentation(imported: $0, index: importedMoments.count) }
                         importedMoments.append(contentsOf: presentations)
                         draft.addAnalysis(imported)
@@ -1501,7 +1501,7 @@ private struct AddMomentSelectionSheet: View {
     let allowsMultipleSelection: Bool
     let imageProvider: (String) -> Image?
     let onAppearMoment: (String) -> Void
-    let onImportPhotos: ([PhotosPickerItem]) async throws -> [StoryMomentPresentation]
+    let onImportPhotos: ([PhotosPickerItem], StoryImportProgressHandler?) async throws -> [StoryMomentPresentation]
     let onRemoveImported: (StoryMomentPresentation) -> Void
     let onAdd: ([StoryMomentPresentation]) -> Void
     let onCancel: () -> Void
@@ -1512,7 +1512,7 @@ private struct AddMomentSelectionSheet: View {
         allowsMultipleSelection: Bool = true,
         imageProvider: @escaping (String) -> Image?,
         onAppearMoment: @escaping (String) -> Void,
-        onImportPhotos: @escaping ([PhotosPickerItem]) async throws -> [StoryMomentPresentation],
+        onImportPhotos: @escaping ([PhotosPickerItem], StoryImportProgressHandler?) async throws -> [StoryMomentPresentation],
         onRemoveImported: @escaping (StoryMomentPresentation) -> Void,
         onAdd: @escaping ([StoryMomentPresentation]) -> Void,
         onCancel: @escaping () -> Void
@@ -1533,11 +1533,14 @@ private struct AddMomentSelectionSheet: View {
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var filter = PhotoLibraryMediaFilter.all
     @State private var isImportingPhotos = false
+    @State private var importProgress: Double?
+    @State private var importStatusMessage = "Preparing media…"
     @State private var importErrorMessage: String?
 
     private var allMoments: [StoryMomentPresentation] {
         var seen = Set<String>()
-        return (moments + importedMoments).filter { seen.insert($0.assetID).inserted }
+        let merged = (moments + importedMoments).filter { seen.insert($0.assetID).inserted }
+        return merged.sorted(by: momentPrecedes)
     }
 
     private var displayedMoments: [StoryMomentPresentation] {
@@ -1553,6 +1556,19 @@ private struct AddMomentSelectionSheet: View {
 
     private var selectedMoments: [StoryMomentPresentation] {
         allMoments.filter { selectedAssetIDs.contains($0.assetID) }
+    }
+
+    private func momentPrecedes(_ left: StoryMomentPresentation, _ right: StoryMomentPresentation) -> Bool {
+        switch (left.captureDate, right.captureDate) {
+        case let (.some(leftDate), .some(rightDate)) where leftDate != rightDate:
+            return leftDate < rightDate
+        case (.some, .none):
+            return true
+        case (.none, .some):
+            return false
+        default:
+            return left.assetID < right.assetID
+        }
     }
 
     private var selectedCount: Int {
@@ -1647,39 +1663,26 @@ private struct AddMomentSelectionSheet: View {
     private var photosImportSection: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
             Divider().overlay(FrameMioColors.divider.opacity(0.5))
-            PhotosPicker(
-                selection: $selectedPhotoItems,
-                maxSelectionCount: allowsMultipleSelection ? 20 : 1,
-                matching: .any(of: [.images, .videos]),
-                preferredItemEncoding: .current
-            ) {
-                HStack(spacing: FrameMioSpacing.sm) {
-                    if isImportingPhotos {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(FrameMioColors.accent)
-                    } else {
-                        Image(systemName: "plus.circle.fill")
-                    }
-                    Text(isImportingPhotos ? "Adding from Photos…" : "Add from Photos")
-                }
-                .font(FrameMioTypography.headline)
-                .foregroundStyle(FrameMioColors.accent)
-                .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.compactButtonHeight, alignment: .leading)
-            }
-            .disabled(isImportingPhotos)
-            .accessibilityLabel(isImportingPhotos ? "Adding from Photos" : "Add from Photos")
-
             if isImportingPhotos {
-                HStack(spacing: FrameMioSpacing.xs) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Uploading and preparing new media…")
+                importProgressView
+            } else {
+                PhotosPicker(
+                    selection: $selectedPhotoItems,
+                    maxSelectionCount: allowsMultipleSelection ? 20 : 1,
+                    matching: .any(of: [.images, .videos]),
+                    preferredItemEncoding: .current
+                ) {
+                    HStack(spacing: FrameMioSpacing.sm) {
+                        Image(systemName: "plus.circle.fill")
+                        Text("Add from Photos")
+                    }
+                    .font(FrameMioTypography.headline)
+                    .foregroundStyle(FrameMioColors.accent)
+                    .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.compactButtonHeight, alignment: .leading)
                 }
-                .font(FrameMioTypography.footnote)
-                .foregroundStyle(FrameMioColors.secondaryInk)
-                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Add from Photos")
             }
+
             if let importErrorMessage {
                 Text(importErrorMessage)
                     .font(FrameMioTypography.footnote)
@@ -1687,6 +1690,38 @@ private struct AddMomentSelectionSheet: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    private var importProgressView: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.xs) {
+            HStack(spacing: FrameMioSpacing.xs) {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(FrameMioColors.accent)
+                Text(importStatusMessage)
+                    .font(FrameMioTypography.footnote)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+                Spacer()
+                if let importProgress {
+                    Text(importProgress, format: .percent.precision(.fractionLength(0)))
+                        .font(FrameMioTypography.caption)
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                }
+            }
+
+            if let importProgress {
+                ProgressView(value: importProgress)
+                    .tint(FrameMioColors.accent)
+                    .accessibilityValue(importProgress.formatted(.percent.precision(.fractionLength(0))))
+            } else {
+                ProgressView()
+                    .tint(FrameMioColors.accent)
+            }
+        }
+        .padding(FrameMioSpacing.sm)
+        .background(FrameMioColors.surface.opacity(0.72), in: RoundedRectangle(cornerRadius: FrameMioRadius.medium, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Adding from Photos")
     }
 
     private func mediaCell(for moment: StoryMomentPresentation) -> some View {
@@ -1702,25 +1737,6 @@ private struct AddMomentSelectionSheet: View {
                 action: { toggle(moment) }
             )
 
-            if moment.isImportedFromPhotos {
-                Button {
-                    removeImported(moment)
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(FrameMioColors.inverseInk)
-                        .frame(width: 26, height: 26)
-                        .background(FrameMioColors.mediaScrim, in: Circle())
-                        .overlay {
-                            Circle().stroke(.white.opacity(0.24), lineWidth: FrameMioMetrics.borderWidth)
-                        }
-                        .shadow(color: .black.opacity(0.18), radius: 4, y: 2)
-                }
-                .buttonStyle(FrameMioPressButtonStyle())
-                .padding(FrameMioSpacing.xs)
-                .accessibilityLabel("Remove \(moment.title)")
-                .accessibilityHint("Removes this imported media from the Add to Story selection.")
-            }
         }
         .onAppear { onAppearMoment(moment.assetID) }
     }
@@ -1799,10 +1815,15 @@ private struct AddMomentSelectionSheet: View {
             return
         }
         isImportingPhotos = true
+        importProgress = 0.04
+        importStatusMessage = "Reading your selection…"
         importErrorMessage = nil
         Task {
             do {
-                let imported = try await onImportPhotos(items)
+                let imported = try await onImportPhotos(items) { value, message in
+                    importProgress = value
+                    importStatusMessage = message
+                }
                 storyPreviewUIDebugLog("add sheet import returned count=\(imported.count) ids=\(imported.map(\.assetID).joined(separator: ","))")
                 importedMoments.append(contentsOf: imported)
                 if !allowsMultipleSelection {
@@ -1813,14 +1834,20 @@ private struct AddMomentSelectionSheet: View {
                     onAppearMoment(moment.assetID)
                 }
                 selectedPhotoItems = []
+                importProgress = nil
+                importStatusMessage = "Preparing media…"
                 isImportingPhotos = false
                 storyPreviewUIDebugLog("add sheet import applied imported_total=\(importedMoments.count) selected=\(selectedAssetIDs.count)")
             } catch is CancellationError {
                 selectedPhotoItems = []
+                importProgress = nil
+                importStatusMessage = "Preparing media…"
                 isImportingPhotos = false
                 storyPreviewUIDebugLog("add sheet import cancelled")
             } catch {
                 selectedPhotoItems = []
+                importProgress = nil
+                importStatusMessage = "Preparing media…"
                 importErrorMessage = AppError.from(error).localizedDescription
                 isImportingPhotos = false
                 storyPreviewUIDebugLog("add sheet import failed error=\(importErrorMessage ?? error.localizedDescription)")

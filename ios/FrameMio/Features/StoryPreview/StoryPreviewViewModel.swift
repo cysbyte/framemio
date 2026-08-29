@@ -14,6 +14,8 @@ private func storyPreviewDebugLog(_ message: @autoclosure () -> String) {
 #endif
 }
 
+typealias StoryImportProgressHandler = @MainActor @Sendable (Double?, String) -> Void
+
 
 private struct StagedStoryImport: Sendable {
     let asset: MediaAsset
@@ -378,13 +380,18 @@ final class StoryPreviewViewModel: ObservableObject {
         }
     }
 
-    func importMediaForEdit(_ items: [PhotosPickerItem]) async throws -> [ImportedStoryMedia] {
+    func importMediaForEdit(
+        _ items: [PhotosPickerItem],
+        progress: StoryImportProgressHandler? = nil
+    ) async throws -> [ImportedStoryMedia] {
         let contentTypeSummary = items
             .map { $0.supportedContentTypes.map(\.identifier).joined(separator: "|") }
             .joined(separator: ",")
+        progress?(0.04, "Reading your selection…")
         storyPreviewDebugLog("edit import start picker_items=\(items.count) content_types=\(contentTypeSummary)")
         do {
             let assets = try await assetsForPickedItems(items)
+            progress?(0.16, "Preparing media…")
             storyPreviewDebugLog("edit import assets ready count=\(assets.count) photos=\(assets.filter { !$0.asset.isVideo }.count) videos=\(assets.filter(\.asset.isVideo).count) staged=\(assets.filter { $0.file != nil }.count)")
             guard !assets.isEmpty else {
                 storyPreviewDebugLog("edit import stopped no_assets")
@@ -393,6 +400,7 @@ final class StoryPreviewViewModel: ObservableObject {
 
             for asset in assets {
                 if let file = asset.file {
+                    progress?(0.22, "Preparing upload…")
                     try await mediaUploadStore.save(makeStagedUploadRecord(asset: asset.asset, file: file))
                     storyPreviewDebugLog("edit import staged picker asset=\(asset.asset.id) file=\(file.fileName) bytes=\(file.fileSizeBytes) content_type=\(file.contentType)")
                 }
@@ -400,15 +408,23 @@ final class StoryPreviewViewModel: ObservableObject {
 
             let sourceAssets = assets.map(\.asset)
             let selection = MediaSelection(explicitlySelectedAssetIDs: sourceAssets.map(\.id))
+            progress?(0.28, "Uploading to FrameMio…")
             storyPreviewDebugLog("edit import upload start eligible_assets=\(selection.uploadEligibleAssetIDs.count)")
             let uploads = try await mediaUploadService.upload(
                 selection: selection,
                 assets: sourceAssets,
                 options: MediaUploadOptions(),
-                progress: { progress in
-                    storyPreviewDebugLog("edit import upload progress upload=\(progress.uploadID) asset=\(progress.assetID) bytes=\(progress.uploadedBytes)/\(progress.totalBytes) completed=\(progress.completedUploads)/\(progress.totalUploads)")
+                progress: { uploadProgress in
+                    if let progress {
+                        let value = Self.importProgressValue(for: uploadProgress)
+                        Task { @MainActor in
+                            progress(value, "Uploading to FrameMio…")
+                        }
+                    }
+                    storyPreviewDebugLog("edit import upload progress upload=\(uploadProgress.uploadID) asset=\(uploadProgress.assetID) bytes=\(uploadProgress.uploadedBytes)/\(uploadProgress.totalBytes) completed=\(uploadProgress.completedUploads)/\(uploadProgress.totalUploads)")
                 }
             )
+            progress?(0.86, "Preparing new moments…")
             storyPreviewDebugLog("edit import upload finished uploads=\(uploads.count) completed=\(uploads.filter { $0.status == .completed }.count) with_media_id=\(uploads.filter { $0.mediaID != nil }.count)")
 
             var uploadsByAssetID: [String: MediaUpload] = [:]
@@ -448,6 +464,7 @@ final class StoryPreviewViewModel: ObservableObject {
                     storyPreviewDebugLog("edit import media ready media=\(mediaID) kind=video analysis=deferred_to_backend")
                     analysis = nil
                 } else {
+                    progress?(0.92, "Understanding new photos…")
                     storyPreviewDebugLog("edit import analyzing photo asset=\(asset.asset.id) media=\(mediaID)")
                     let localAnalysis = try await analysisService.analyze(asset: asset.asset)
                     analysis = MediaAnalysis(
@@ -460,6 +477,7 @@ final class StoryPreviewViewModel: ObservableObject {
                 }
                 imported.append(ImportedStoryMedia(mediaID: mediaID, sourceAsset: storyAsset, analysis: analysis))
             }
+            progress?(1.0, "Added to your story")
             storyPreviewDebugLog("edit import complete imported=\(imported.count)")
             return imported
         } catch is CancellationError {
@@ -471,18 +489,33 @@ final class StoryPreviewViewModel: ObservableObject {
         }
     }
 
+    nonisolated private static func importProgressValue(for progress: MediaUploadProgress) -> Double {
+        guard progress.totalUploads > 0 else { return 0.42 }
+        let currentUploadFraction: Double
+        if progress.totalBytes > 0 {
+            currentUploadFraction = min(1, max(0, Double(progress.uploadedBytes) / Double(progress.totalBytes)))
+        } else {
+            currentUploadFraction = 0
+        }
+        let completedUploads = max(0, progress.completedUploads - (currentUploadFraction >= 1 ? 1 : 0))
+        let uploadFraction = min(1, max(0, (Double(completedUploads) + currentUploadFraction) / Double(progress.totalUploads)))
+        return 0.28 + uploadFraction * 0.56
+    }
+
     private func assetsForPickedItems(_ items: [PhotosPickerItem]) async throws -> [StagedStoryImport] {
         let identifiers = items.compactMap(\.itemIdentifier)
         storyPreviewDebugLog("edit import identifiers item_count=\(items.count) identifier_count=\(identifiers.count) nil_identifiers=\(items.count - identifiers.count)")
-        if identifiers.count == items.count {
+        var resolvedByIdentifier: [String: MediaAsset] = [:]
+        if !identifiers.isEmpty {
             let resolved = try await photoLibrary.resolveAssets(localIdentifiers: identifiers)
             storyPreviewDebugLog("edit import resolved identifiers=\(identifiers.count) assets=\(resolved.count) photos=\(resolved.filter { !$0.isVideo }.count) videos=\(resolved.filter(\.isVideo).count)")
-            if resolved.count == items.count {
-                return resolved.map { StagedStoryImport(asset: $0, file: nil, thumbnail: nil, fallbackAnalysis: nil) }
+            resolvedByIdentifier = Dictionary(uniqueKeysWithValues: resolved.compactMap { asset in
+                guard let localIdentifier = asset.localIdentifier else { return nil }
+                return (localIdentifier, asset)
+            })
+            if resolved.count != identifiers.count {
+                storyPreviewDebugLog("edit import partial identifier resolution resolved=\(resolved.count) expected=\(identifiers.count)")
             }
-            storyPreviewDebugLog("edit import falling back to transferable loading resolved=\(resolved.count) expected=\(items.count)")
-        } else if !identifiers.isEmpty {
-            storyPreviewDebugLog("edit import falling back to transferable loading due_to_missing_identifiers")
         } else {
             storyPreviewDebugLog("edit import using transferable loading no_photo_identifiers")
         }
@@ -491,6 +524,12 @@ final class StoryPreviewViewModel: ObservableObject {
         staged.reserveCapacity(items.count)
         for item in items {
             try Task.checkCancellation()
+            if let identifier = item.itemIdentifier, let asset = resolvedByIdentifier[identifier] {
+                let created = asset.creationDate?.description ?? "nil"
+                storyPreviewDebugLog("edit import using resolved photo asset=\(asset.id) kind=\(asset.kind.rawValue) created=\(created)")
+                staged.append(StagedStoryImport(asset: asset, file: nil, thumbnail: nil, fallbackAnalysis: nil))
+                continue
+            }
             staged.append(try await stagedImport(from: item))
         }
         return staged
@@ -524,7 +563,7 @@ final class StoryPreviewViewModel: ObservableObject {
             id: assetID,
             localIdentifier: nil,
             kind: .image,
-            creationDate: Date(),
+            creationDate: nil,
             duration: 0,
             pixelWidth: Int(image.size.width.rounded()),
             pixelHeight: Int(image.size.height.rounded())
@@ -545,6 +584,7 @@ final class StoryPreviewViewModel: ObservableObject {
         }
 
         let metadata = try await videoMetadata(for: url)
+        let creationDate = try await videoCreationDate(for: url)
         let fileSizeBytes = Int64((try url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
         guard fileSizeBytes > 0 else {
             throw AppError.unsupportedMedia
@@ -560,7 +600,7 @@ final class StoryPreviewViewModel: ObservableObject {
             id: "picker-\(UUID().uuidString)",
             localIdentifier: nil,
             kind: .video,
-            creationDate: Date(),
+            creationDate: creationDate,
             duration: metadata.duration,
             pixelWidth: metadata.pixelWidth,
             pixelHeight: metadata.pixelHeight
@@ -594,6 +634,12 @@ final class StoryPreviewViewModel: ObservableObject {
             fileType: nil,
             quality: nil
         )
+    }
+
+    private func videoCreationDate(for url: URL) async throws -> Date? {
+        let asset = AVURLAsset(url: url)
+        let metadataItem = try await asset.load(.creationDate)
+        return try await metadataItem?.load(.dateValue)
     }
 
     private func videoThumbnail(for url: URL) async -> UIImage? {
