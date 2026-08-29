@@ -216,7 +216,7 @@ final class StoryLaunchCoordinator: ObservableObject {
         if case let AppError.server(statusCode) = AppError.from(error), statusCode == 409 {
             return true
         }
-        if case let APIClientError.server(statusCode) = error, statusCode == 409 {
+        if case let APIClientError.server(statusCode, _) = error, statusCode == 409 {
             return true
         }
         return false

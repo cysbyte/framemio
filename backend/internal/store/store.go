@@ -9,10 +9,11 @@ import (
 )
 
 var (
-	ErrNotFound     = errors.New("record not found")
-	ErrConflict     = errors.New("record conflict")
-	ErrAlreadyReady = errors.New("media is already ready")
-	ErrInvalidOwner = errors.New("record does not belong to user")
+	ErrNotFound            = errors.New("record not found")
+	ErrConflict            = errors.New("record conflict")
+	ErrInsufficientCredits = errors.New("insufficient credits")
+	ErrAlreadyReady        = errors.New("media is already ready")
+	ErrInvalidOwner        = errors.New("record does not belong to user")
 )
 
 type Store interface {
@@ -30,6 +31,7 @@ type Store interface {
 	ListProjects(ctx context.Context, userID string) ([]models.StoryProject, error)
 	DeleteProject(ctx context.Context, userID, projectID string) error
 	SetProjectStatus(ctx context.Context, userID, projectID string, status models.ProjectStatus) error
+	SetProjectCreditOperationKey(ctx context.Context, userID, projectID, creditOperationKey string) error
 	CreateJob(ctx context.Context, job models.ProcessingJob, idempotencyKey string) (models.ProcessingJob, bool, error)
 	GetJob(ctx context.Context, userID, jobID string) (models.ProcessingJob, error)
 	GetJobByID(ctx context.Context, jobID string) (models.ProcessingJob, error)
@@ -42,4 +44,12 @@ type Store interface {
 	ListProjectAnalyses(ctx context.Context, userID, projectID string) ([]models.MediaAnalysis, []models.VideoAnalysis, error)
 	SaveStoryPlan(ctx context.Context, userID string, plan models.StoryPlan) error
 	GetStoryPlan(ctx context.Context, userID, projectID string) (models.StoryPlan, error)
+	EnsureCreditGrant(ctx context.Context, grant models.CreditGrant) (models.CreditGrant, bool, error)
+	GetCreditBalance(ctx context.Context, userID string) (models.CreditBalance, error)
+	ReserveCredits(ctx context.Context, reservation models.CreditReservation) (models.CreditReservation, bool, error)
+	GetCreditReservation(ctx context.Context, userID, reservationID string) (models.CreditReservation, error)
+	GetCreditReservationByReference(ctx context.Context, userID string, action models.CreditAction, referenceType, referenceID string) (models.CreditReservation, error)
+	CommitCreditReservation(ctx context.Context, userID, reservationID string) (models.CreditReservation, error)
+	ReleaseCreditReservation(ctx context.Context, userID, reservationID string) (models.CreditReservation, error)
+	ListCreditLedger(ctx context.Context, userID string) ([]models.CreditLedgerEntry, error)
 }

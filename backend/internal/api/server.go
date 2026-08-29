@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/framemio/backend/internal/credits"
 	"github.com/framemio/backend/internal/models"
 	"github.com/framemio/backend/internal/orchestration"
 	"github.com/framemio/backend/internal/queue"
@@ -25,6 +26,7 @@ const maxJSONBodyBytes = 1 << 20
 
 type Server struct {
 	Store              store.Store
+	Credits            *credits.Service
 	ObjectStorage      storage.ObjectStorage
 	StoryPlanValidator storyvalidation.Service
 	Publisher          queue.Publisher
@@ -47,8 +49,11 @@ func NewServer(dependencies Server) *Server {
 	if dependencies.StoryPlanValidator == nil && dependencies.Store != nil && dependencies.ObjectStorage != nil {
 		dependencies.StoryPlanValidator = storyvalidation.New(dependencies.Store, dependencies.ObjectStorage, storyvalidation.DefaultConfig())
 	}
+	if dependencies.Credits == nil && dependencies.Store != nil {
+		dependencies.Credits = credits.New(dependencies.Store, credits.LoadPolicyFromEnv(), dependencies.Now)
+	}
 	if dependencies.Orchestrator == nil && dependencies.Store != nil && dependencies.Publisher != nil {
-		dependencies.Orchestrator = orchestration.New(orchestration.Coordinator{Store: dependencies.Store, Publisher: dependencies.Publisher, Activator: dependencies.Activator, Logger: dependencies.Logger, Now: dependencies.Now})
+		dependencies.Orchestrator = orchestration.New(orchestration.Coordinator{Store: dependencies.Store, Publisher: dependencies.Publisher, Activator: dependencies.Activator, Logger: dependencies.Logger, Now: dependencies.Now, Credits: dependencies.Credits})
 	}
 	if dependencies.ExpensiveLimiter == nil {
 		dependencies.ExpensiveLimiter = NewInMemoryExpensiveOperationLimiter(ExpensiveOperationLimits{})
@@ -141,6 +146,30 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
+	if request.URL.Path == "/v1/me/credits" {
+		if request.Method == http.MethodGet {
+			s.getMeCredits(response, request)
+			return
+		}
+		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if request.URL.Path == "/v1/me/credits/history" {
+		if request.Method == http.MethodGet {
+			s.getMeCreditHistory(response, request)
+			return
+		}
+		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if request.URL.Path == "/v1/credit-quote" {
+		if request.Method == http.MethodPost {
+			s.quoteCreditAction(response, request)
+			return
+		}
+		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
 	if request.URL.Path == "/v1/stories" {
 		switch request.Method {
 		case http.MethodGet:
@@ -168,6 +197,10 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 		}
 		if len(parts) == 4 && parts[3] == "versions" && request.Method == http.MethodPost {
 			s.createIOSStoryVersion(response, request, parts[2])
+			return
+		}
+		if len(parts) == 4 && parts[3] == "regenerate" && request.Method == http.MethodPost {
+			s.regenerateIOSStory(response, request, parts[2])
 			return
 		}
 		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
@@ -489,6 +522,73 @@ func (s *Server) getProjectStory(response http.ResponseWriter, request *http.Req
 
 type renderProjectRequest struct {
 	OutputPreset string `json:"output_preset,omitempty"`
+}
+
+func (s *Server) getMeCredits(response http.ResponseWriter, request *http.Request) {
+	user, ok := s.authenticate(response, request)
+	if !ok {
+		return
+	}
+	if s.Credits == nil {
+		s.internalError(response, errors.New("credit service not configured"), "credit service not configured")
+		return
+	}
+	balance, err := s.Credits.GetBalance(request.Context(), user.ID)
+	if err != nil {
+		s.internalError(response, err, "get credit balance")
+		return
+	}
+	s.writeJSON(response, http.StatusOK, balance)
+}
+
+func (s *Server) getMeCreditHistory(response http.ResponseWriter, request *http.Request) {
+	user, ok := s.authenticate(response, request)
+	if !ok {
+		return
+	}
+	if s.Credits == nil {
+		s.internalError(response, errors.New("credit service not configured"), "credit service not configured")
+		return
+	}
+	history, err := s.Credits.GetHistory(request.Context(), user.ID)
+	if err != nil {
+		s.internalError(response, err, "get credit history")
+		return
+	}
+	s.writeJSON(response, http.StatusOK, history)
+}
+
+type creditQuoteRequest struct {
+	Action    string `json:"action"`
+	ProjectID string `json:"projectId,omitempty"`
+	StoryID   string `json:"storyId,omitempty"`
+	Stats     credits.StoryMediaStats `json:"stats,omitempty"`
+}
+
+func (s *Server) quoteCreditAction(response http.ResponseWriter, request *http.Request) {
+	user, ok := s.authenticate(response, request)
+	if !ok {
+		return
+	}
+	if s.Credits == nil {
+		s.internalError(response, errors.New("credit service not configured"), "credit service not configured")
+		return
+	}
+	var input creditQuoteRequest
+	if !s.decodeJSON(response, request, &input) {
+		return
+	}
+	action, ok := models.NormalizeCreditAction(input.Action)
+	if !ok {
+		s.writeError(response, http.StatusBadRequest, "invalid_credit_action", "action is invalid")
+		return
+	}
+	quote, err := s.Credits.Quote(request.Context(), user.ID, action, input.Stats)
+	if err != nil {
+		s.internalError(response, err, "quote credit action")
+		return
+	}
+	s.writeJSON(response, http.StatusOK, quote)
 }
 
 func (s *Server) renderProject(response http.ResponseWriter, request *http.Request, projectID string) {
@@ -868,6 +968,12 @@ func (s *Server) authenticate(response http.ResponseWriter, request *http.Reques
 		user, err = s.Store.EnsureUser(request.Context(), user)
 		if err != nil {
 			s.internalError(response, err, "ensure user")
+			return models.User{}, false
+		}
+	}
+	if s.Credits != nil {
+		if _, _, err := s.Credits.EnsureInitialGrant(request.Context(), user.ID); err != nil {
+			s.internalError(response, err, "ensure initial credit grant")
 			return models.User{}, false
 		}
 	}

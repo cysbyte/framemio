@@ -465,6 +465,27 @@ func (s *PostgresStore) SetProjectStatus(ctx context.Context, userID, projectID 
 	return nil
 }
 
+func (s *PostgresStore) SetProjectCreditOperationKey(ctx context.Context, userID, projectID, creditOperationKey string) error {
+	var project models.StoryProject
+	if err := s.get(ctx, "project", userID, projectID, &project); err != nil {
+		return err
+	}
+	project.CreditOperationKey = creditOperationKey
+	project.UpdatedAt = time.Now().UTC()
+	data, err := json.Marshal(project)
+	if err != nil {
+		return err
+	}
+	result, err := s.pool.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='project' AND id=$3 AND user_id=$4`, jsonbParam(data), project.UpdatedAt, projectID, userID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *PostgresStore) CreateJob(ctx context.Context, job models.ProcessingJob, idempotencyKey string) (models.ProcessingJob, bool, error) {
 	if idempotencyKey != "" {
 		var existing models.ProcessingJob

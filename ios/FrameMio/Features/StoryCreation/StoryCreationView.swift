@@ -4,15 +4,18 @@ struct StoryCreationView: View {
     @ObservedObject private var viewModel: StoryCreationViewModel
     let onCreate: () -> Void
     let onCreated: (Story) -> Void
+    let onOpenPricing: (PricingEntryPoint) -> Void
 
     init(
         viewModel: StoryCreationViewModel,
         onCreate: @escaping () -> Void,
-        onCreated: @escaping (Story) -> Void
+        onCreated: @escaping (Story) -> Void,
+        onOpenPricing: @escaping (PricingEntryPoint) -> Void
     ) {
         _viewModel = ObservedObject(wrappedValue: viewModel)
         self.onCreate = onCreate
         self.onCreated = onCreated
+        self.onOpenPricing = onOpenPricing
     }
 
     var body: some View {
@@ -28,6 +31,14 @@ struct StoryCreationView: View {
                         .font(FrameMioTypography.body)
                         .foregroundStyle(FrameMioColors.secondaryInk)
                         .fixedSize(horizontal: false, vertical: true)
+                    Text("This will use \(viewModel.createStoryCreditCost) credits.")
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                    if let balance = viewModel.creditBalance {
+                        Text("You have \(balance) credits. After generating: \(max(0, balance - viewModel.createStoryCreditCost)).")
+                            .font(FrameMioTypography.footnote)
+                            .foregroundStyle(FrameMioColors.secondaryInk)
+                    }
                 }
                 .padding(FrameMioSpacing.xl)
                 .background(
@@ -74,7 +85,7 @@ struct StoryCreationView: View {
                 } else if let story = viewModel.story {
                     processingStartedCard(story)
                 } else {
-                    PrimaryButton(title: "Create Story", systemImage: "sparkles") {
+                    PrimaryButton(title: "Create Story — \(viewModel.createStoryCreditCost)", systemImage: "sparkles") {
                         onCreate()
                     }
                 }
@@ -99,6 +110,7 @@ struct StoryCreationView: View {
             .ignoresSafeArea()
         }
         .navigationTitle("Create Story")
+        .task { viewModel.refreshCreditBalance() }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if viewModel.isCreating {
@@ -107,6 +119,26 @@ struct StoryCreationView: View {
                 }
             }
         }
+        .alert("Not enough credits", isPresented: creditIssueBinding) {
+            Button("Get FrameMio Pro") {
+                viewModel.insufficientCredits = nil
+                onOpenPricing(.insufficientCredits)
+            }
+            Button("Not now", role: .cancel) {
+                viewModel.insufficientCredits = nil
+            }
+        } message: {
+            if let issue = viewModel.insufficientCredits {
+                Text("You need \(issue.required) credits. You have \(issue.available) credits.")
+            }
+        }
+    }
+
+    private var creditIssueBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.insufficientCredits != nil },
+            set: { if !$0 { viewModel.insufficientCredits = nil } }
+        )
     }
 
     private func processingStartedCard(_ story: Story) -> some View {

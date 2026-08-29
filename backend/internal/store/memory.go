@@ -12,18 +12,24 @@ import (
 )
 
 type MemoryStore struct {
-	mu            sync.RWMutex
-	users         map[string]models.User
-	media         map[string]models.MediaAsset
-	uploads       map[string]models.UploadSession
-	uploadByIdem  map[string]string
-	projects      map[string]models.StoryProject
-	projectByIdem map[string]string
-	jobs          map[string]models.ProcessingJob
-	jobByIdem     map[string]string
-	analyses      map[string]models.MediaAnalysis
-	videoAnalyses map[string]models.VideoAnalysis
-	storyPlans    map[string]models.StoryPlan
+	mu                           sync.RWMutex
+	users                        map[string]models.User
+	media                        map[string]models.MediaAsset
+	uploads                      map[string]models.UploadSession
+	uploadByIdem                 map[string]string
+	projects                     map[string]models.StoryProject
+	projectByIdem                map[string]string
+	jobs                         map[string]models.ProcessingJob
+	jobByIdem                    map[string]string
+	analyses                     map[string]models.MediaAnalysis
+	videoAnalyses                map[string]models.VideoAnalysis
+	storyPlans                   map[string]models.StoryPlan
+	creditAccounts               map[string]models.CreditBalance
+	creditGrants                 map[string]models.CreditGrant
+	creditReservations           map[string]models.CreditReservation
+	creditLedger                 map[string][]models.CreditLedgerEntry
+	creditGrantByReference       map[string]string
+	creditReservationByReference map[string]string
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -333,6 +339,22 @@ func (s *MemoryStore) SetProjectStatus(_ context.Context, userID, projectID stri
 		return ErrInvalidOwner
 	}
 	project.Status = status
+	project.UpdatedAt = time.Now().UTC()
+	s.projects[projectID] = project
+	return nil
+}
+
+func (s *MemoryStore) SetProjectCreditOperationKey(_ context.Context, userID, projectID, creditOperationKey string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	project, ok := s.projects[projectID]
+	if !ok {
+		return ErrNotFound
+	}
+	if project.UserID != userID {
+		return ErrInvalidOwner
+	}
+	project.CreditOperationKey = creditOperationKey
 	project.UpdatedAt = time.Now().UTC()
 	s.projects[projectID] = project
 	return nil

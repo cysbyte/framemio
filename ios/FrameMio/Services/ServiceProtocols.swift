@@ -160,6 +160,89 @@ protocol APIClient: Sendable {
     func data(for request: APIRequest) async throws -> Data
 }
 
+enum CreditAction: String, Codable, Hashable, Sendable {
+    case createStory = "CREATE_STORY"
+    case regenerateStory = "REGENERATE_STORY"
+    case addMoment = "ADD_MOMENT"
+    case aiEditStory = "AI_EDIT_STORY"
+    case changeMusic = "CHANGE_MUSIC"
+    case changeCaption = "CHANGE_CAPTION"
+    case reorderMoment = "REORDER_MOMENT"
+    case removeMoment = "REMOVE_MOMENT"
+    case preview = "PREVIEW"
+}
+
+struct CreditBalance: Codable, Hashable, Sendable {
+    let available: Int
+    let reserved: Int
+}
+
+enum PricingEntryPoint: String, Codable, Hashable, Identifiable, Sendable {
+    case homeCreditButton
+    case insufficientCredits
+    case settings
+
+    var id: String { rawValue }
+}
+
+struct CreditIssue: Identifiable, Hashable, Sendable {
+    let id = UUID().uuidString
+    let action: CreditAction
+    let required: Int
+    let available: Int
+}
+
+struct FrameMioProCatalog {
+    static let monthlyProductID = "com.framemio.pro.monthly"
+    static let yearlyProductID = "com.framemio.pro.yearly"
+    static let monthlyFallbackDisplayPrice = "$9.99"
+    static let yearlyFallbackDisplayPrice = "$79.99"
+    static let monthlyCredits = 1200
+    static let yearlyCredits = 1200
+
+    static let productIDs = [monthlyProductID, yearlyProductID]
+}
+
+struct CreditPricing {
+    static let createStory = 40
+    static let regenerateStory = 40
+    static let addMoment = 20
+    static let aiEditStory = 20
+    static let changeMusic = 0
+    static let changeCaption = 0
+    static let reorderMoment = 0
+    static let removeMoment = 0
+    static let preview = 0
+    static let lowBalanceThreshold = 25
+
+    static func price(for action: CreditAction) -> Int {
+        switch action {
+        case .createStory:
+            return createStory
+        case .regenerateStory:
+            return regenerateStory
+        case .addMoment:
+            return addMoment
+        case .aiEditStory:
+            return aiEditStory
+        case .changeMusic:
+            return changeMusic
+        case .changeCaption:
+            return changeCaption
+        case .reorderMoment:
+            return reorderMoment
+        case .removeMoment:
+            return removeMoment
+        case .preview:
+            return preview
+        }
+    }
+}
+
+protocol CreditService: Sendable {
+    func balance() async throws -> CreditBalance
+}
+
 protocol StoryService: Sendable {
     func cachedStories() async throws -> [Story]
     func listStories() async throws -> [Story]

@@ -17,9 +17,11 @@ struct StoryPreviewView: View {
     @State private var isShowingDeleteConfirmation = false
 
     private let generatedVideoAspectRatio: CGFloat = 9.0 / 16.0
+    private let onOpenPricing: (PricingEntryPoint) -> Void
 
-    init(viewModel: StoryPreviewViewModel) {
+    init(viewModel: StoryPreviewViewModel, onOpenPricing: @escaping (PricingEntryPoint) -> Void) {
         _viewModel = StateObject(wrappedValue: viewModel)
+        self.onOpenPricing = onOpenPricing
     }
 
     var body: some View {
@@ -48,7 +50,10 @@ struct StoryPreviewView: View {
         .background(FrameMioColors.canvas.ignoresSafeArea())
         .navigationTitle("My Story")
         .navigationBarTitleDisplayMode(.inline)
-        .task { viewModel.load() }
+        .task {
+            viewModel.load()
+            viewModel.refreshCreditBalance()
+        }
         .onChange(of: viewModel.didDeleteStory) { _, didDelete in
             if didDelete {
                 dismiss()
@@ -79,6 +84,7 @@ struct StoryPreviewView: View {
                     availableMoments: availableMomentPresentations(for: story),
                     activeAction: viewModel.activeAction,
                     isPerformingAction: viewModel.isPerformingAction,
+                    creditBalance: viewModel.creditBalance,
                     imageProvider: { viewModel.image(forStoryAssetID: $0) },
                     onAppearMoment: { assetID in
                         viewModel.loadThumbnail(
@@ -91,6 +97,10 @@ struct StoryPreviewView: View {
                     },
                     onSave: { request in
                         viewModel.saveStoryEdits(request)
+                        isShowingEditStory = false
+                    },
+                    onRegenerate: {
+                        viewModel.regenerateStory()
                         isShowingEditStory = false
                     },
                     onRetry: {
@@ -106,6 +116,19 @@ struct StoryPreviewView: View {
             Button("Dismiss", role: .cancel) { viewModel.errorMessage = nil }
         } message: {
             Text(viewModel.errorMessage ?? "")
+        }
+        .alert("Not enough credits", isPresented: creditIssueBinding) {
+            Button("Get FrameMio Pro") {
+                viewModel.insufficientCredits = nil
+                onOpenPricing(.insufficientCredits)
+            }
+            Button("Not now", role: .cancel) {
+                viewModel.insufficientCredits = nil
+            }
+        } message: {
+            if let issue = viewModel.insufficientCredits {
+                Text("You need \(issue.required) credits. You have \(issue.available) credits.")
+            }
         }
         .alert("Saved", isPresented: confirmationBinding) {
             Button("OK", role: .cancel) { viewModel.confirmationMessage = nil }
@@ -590,6 +613,14 @@ struct StoryPreviewView: View {
         viewModel.activeAction == action ? action.title : fallback
     }
 
+
+    private var creditIssueBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.insufficientCredits != nil },
+            set: { if !$0 { viewModel.insufficientCredits = nil } }
+        )
+    }
+
     private var errorBinding: Binding<Bool> {
         Binding(
             get: { viewModel.errorMessage != nil },
@@ -843,10 +874,12 @@ private struct EditStorySheet: View {
     let availableMoments: [StoryMomentPresentation]
     let activeAction: StoryPreviewAction?
     let isPerformingAction: Bool
+    let creditBalance: Int?
     let imageProvider: (String) -> Image?
     let onAppearMoment: (String) -> Void
     let onImportPhotos: ([PhotosPickerItem], StoryImportProgressHandler?) async throws -> [ImportedStoryMedia]
     let onSave: (StoryEditRequest) -> Void
+    let onRegenerate: () -> Void
     let onRetry: () -> Void
 
     @State private var draft = EditStoryDraft()
@@ -1090,7 +1123,7 @@ private struct EditStorySheet: View {
                 FrameMioHaptics.secondaryAction()
                 isShowingAddMoment = true
             } label: {
-                Label("Add moment", systemImage: "plus.circle.fill")
+                Label("Add moment — \(CreditPricing.addMoment)", systemImage: "plus.circle.fill")
                     .font(FrameMioTypography.headline)
                     .foregroundStyle(FrameMioColors.accent)
                     .padding(.horizontal, FrameMioSpacing.lg)
@@ -1157,6 +1190,14 @@ private struct EditStorySheet: View {
     private var anotherVersionSection: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
             SectionHeader(title: "Make Another Version", subtitle: "Tell FrameMio what to change")
+            Text("This will use \(CreditPricing.regenerateStory) credits.")
+                .font(FrameMioTypography.footnote)
+                .foregroundStyle(FrameMioColors.secondaryInk)
+            if let creditBalance {
+                Text("Current balance: \(creditBalance)")
+                    .font(FrameMioTypography.footnote)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+            }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: FrameMioSpacing.sm)], spacing: FrameMioSpacing.sm) {
                 ForEach(["More cinematic", "More emotional", "More fun", "Focus on people", "Focus on places"], id: \.self) { prompt in
                     optionChip(title: prompt, isSelected: draft.instruction == prompt) {
@@ -1164,6 +1205,10 @@ private struct EditStorySheet: View {
                     }
                 }
             }
+            PrimaryButton(title: "Regenerate Story — \(CreditPricing.regenerateStory)", systemImage: "sparkles") {
+                onRegenerate()
+            }
+            .disabled(isPerformingAction)
             TextField("Tell FrameMio what you want", text: Binding(
                 get: { draft.instruction ?? "" },
                 set: { draft.instruction = $0 }
@@ -1224,6 +1269,23 @@ private struct EditStoryDraft {
     var instruction: String?
 
     var hasChanges: Bool { request.hasChanges }
+
+    var saveButtonTitle: String {
+        if let action = creditAction {
+            return "Apply — \(CreditPricing.price(for: action))"
+        }
+        return "Save"
+    }
+
+    var creditAction: CreditAction? {
+        if !request.addMediaIDs.isEmpty || !request.replace.isEmpty {
+            return .addMoment
+        }
+        if let instruction = instruction?.trimmingCharacters(in: .whitespacesAndNewlines), !instruction.isEmpty {
+            return .aiEditStory
+        }
+        return nil
+    }
 
     var request: StoryEditRequest {
         StoryEditRequest(

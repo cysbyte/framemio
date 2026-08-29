@@ -8,7 +8,7 @@ private func apiClientDebugLog(_ message: @autoclosure () -> String) {
 enum APIClientError: Error, Sendable {
     case invalidURL
     case invalidResponse
-    case server(statusCode: Int)
+    case server(statusCode: Int, payload: Data? = nil)
 }
 
 final class URLSessionAPIClient: APIClient, @unchecked Sendable {
@@ -63,7 +63,7 @@ final class URLSessionAPIClient: APIClient, @unchecked Sendable {
         }
 
         guard (200..<300).contains(httpResponse.statusCode) else {
-            throw APIClientError.server(statusCode: httpResponse.statusCode)
+            throw APIClientError.server(statusCode: httpResponse.statusCode, payload: data)
         }
 
         return data
@@ -112,7 +112,7 @@ final class URLSessionAPIClient: APIClient, @unchecked Sendable {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, httpResponse) = try await dataWithTransientRetry(for: request)
         guard (200..<300).contains(httpResponse.statusCode) else {
-            throw APIClientError.server(statusCode: httpResponse.statusCode)
+            throw APIClientError.server(statusCode: httpResponse.statusCode, payload: data)
         }
         return data
     }
@@ -294,6 +294,33 @@ private struct AnonymousAuthResponse: Decodable {
     enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
         case refreshToken = "refresh_token"
+    }
+}
+
+final class RemoteCreditService: CreditService, @unchecked Sendable {
+    private let apiClient: APIClient
+    private let decoder: JSONDecoder
+
+    init(apiClient: APIClient) {
+        self.apiClient = apiClient
+        decoder = FrameMioJSONCoding.apiDecoder()
+    }
+
+    func balance() async throws -> CreditBalance {
+        let data = try await apiClient.data(for: APIRequest(method: .get, path: "/v1/me/credits"))
+        return try decoder.decode(CreditBalance.self, from: data)
+    }
+}
+
+final class MockCreditService: CreditService, @unchecked Sendable {
+    private let balanceValue: CreditBalance
+
+    init(balance: CreditBalance = CreditBalance(available: 200, reserved: 0)) {
+        balanceValue = balance
+    }
+
+    func balance() async throws -> CreditBalance {
+        balanceValue
     }
 }
 

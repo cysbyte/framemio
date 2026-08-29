@@ -5,6 +5,7 @@ enum AppError: LocalizedError, Hashable, Sendable {
     case invalidConfiguration
     case networkUnavailable
     case server(statusCode: Int)
+    case insufficientCredits(required: Int, available: Int)
     case invalidResponse
     case persistenceFailure
     case unsupportedMedia
@@ -21,6 +22,8 @@ enum AppError: LocalizedError, Hashable, Sendable {
             "We couldn't reach FrameMio. Check your connection and try again."
         case let .server(statusCode):
             "FrameMio returned an unexpected response (\(statusCode))."
+        case let .insufficientCredits(required, available):
+            "You need \(required) credits. You have \(available) credits."
         case .invalidResponse:
             "The response could not be understood."
         case .persistenceFailure:
@@ -47,7 +50,10 @@ enum AppError: LocalizedError, Hashable, Sendable {
                 return .invalidConfiguration
             case .invalidResponse:
                 return .invalidResponse
-            case let .server(statusCode):
+            case let .server(statusCode, payload):
+                if let payload, let mappedError = backendError(from: payload, statusCode: statusCode) {
+                    return mappedError
+                }
                 return .server(statusCode: statusCode)
             }
         }
@@ -56,4 +62,29 @@ enum AppError: LocalizedError, Hashable, Sendable {
         }
         return .message(error.localizedDescription)
     }
+
+    private static func backendError(from payload: Data, statusCode: Int) -> AppError? {
+        guard let response = try? JSONDecoder().decode(BackendErrorPayload.self, from: payload) else {
+            return nil
+        }
+        switch response.error {
+        case "insufficient_credits":
+            return .insufficientCredits(required: response.required ?? 0, available: response.available ?? 0)
+        case "story_too_large":
+            return .message(response.reason ?? response.message ?? "This story is too large for this action.")
+        default:
+            if let message = response.message, !message.isEmpty, statusCode < 500 {
+                return .message(message)
+            }
+            return nil
+        }
+    }
+}
+
+private struct BackendErrorPayload: Decodable {
+    let error: String
+    let message: String?
+    let reason: String?
+    let required: Int?
+    let available: Int?
 }

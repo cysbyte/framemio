@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/framemio/backend/internal/credits"
 	"github.com/framemio/backend/internal/models"
 	"github.com/framemio/backend/internal/store"
 )
@@ -208,18 +210,44 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		s.internalError(response, err, "prepare iOS story edit")
 		return
 	}
-	s.Logger.Info("prepared iOS story revision configuration",
-		"user_id", user.ID,
-		"project_id", project.ID,
-		"story_plan_version", config["story_plan_version"],
-		"selected_media_count", configListCount(config["selected_media_ids"]),
-		"preferred_media_order_count", configListCount(config["preferred_media_order"]),
-		"excluded_media_count", configListCount(config["excluded_media_ids"]),
-		"excluded_moment_count", configListCount(config["excluded_moment_ids"]),
-		"subtitles_enabled", valueOrUnset(config["subtitles_enabled"]),
-		"caption_style_preset", valueOrUnset(config["caption_style_preset"]),
-		"has_user_instructions", strings.TrimSpace(config["user_instructions"]) != "",
-	)
+	selectedAction := models.CreditAction("")
+	stats := credits.StoryMediaStats{}
+	if len(newMediaIDs) > 0 {
+		selectedAction = models.CreditActionAddMoment
+		stats, err = s.addedIOSStoryCreditStats(request, user.ID, newMediaIDs)
+		if err != nil {
+			s.mapStoreError(response, err)
+			return
+		}
+	} else if strings.TrimSpace(input.Instruction) != "" {
+		selectedAction = models.CreditActionAIEditStory
+		stats, err = s.currentIOSStoryCreditStats(request, user.ID, project.ID)
+		if err != nil {
+			s.mapStoreError(response, err)
+			return
+		}
+	}
+	var reservation models.CreditReservation
+	if selectedAction != "" {
+		version := strings.TrimSpace(config["story_plan_version"])
+		if version == "" {
+			s.writeError(response, http.StatusBadRequest, "invalid_story_edit", "story version is required")
+			return
+		}
+		referenceID := project.ID + ":v" + version
+		reservation, _ = s.reserveIOSStoryCredits(response, request, user.ID, selectedAction, referenceID, stats, map[string]any{"project_id": project.ID, "version": version})
+		if reservation.ID == "" {
+			return
+		}
+		defer func() {
+			if reservation.ID == "" {
+				return
+			}
+			if _, err := s.Credits.Release(request.Context(), user.ID, reservation.ID); err != nil && !errors.Is(err, store.ErrConflict) && !errors.Is(err, store.ErrNotFound) {
+				s.Logger.Warn("release iOS story edit reservation failed", "user_id", user.ID, "project_id", project.ID, "reservation_id", reservation.ID, "error", err)
+			}
+		}()
+	}
 	if s.Orchestrator == nil {
 		s.internalError(response, errors.New("job orchestrator not configured"), "job orchestrator not configured")
 		return
@@ -230,6 +258,13 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		s.mapStoreError(response, err)
 		return
 	}
+	if selectedAction != "" {
+		if err := s.Store.SetProjectCreditOperationKey(request.Context(), user.ID, project.ID, string(selectedAction)); err != nil {
+			s.internalError(response, err, "store iOS story credit operation")
+			return
+		}
+		reservation.ID = ""
+	}
 	s.Logger.Info("queued iOS story revision", "user_id", user.ID, "project_id", project.ID, "job_id", job.ID, "job_status", string(job.Status), "story_plan_version", job.Configuration["story_plan_version"], "subtitles_enabled", valueOrUnset(job.Configuration["subtitles_enabled"]), "caption_style_preset", valueOrUnset(job.Configuration["caption_style_preset"]))
 	updated, err := s.Store.GetProject(request.Context(), user.ID, project.ID)
 	if err != nil {
@@ -237,6 +272,196 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		return
 	}
 	s.writeJSON(response, http.StatusAccepted, s.makeIOSStory(request, user.ID, updated))
+}
+
+func (s *Server) regenerateIOSStory(response http.ResponseWriter, request *http.Request, storyID string) {
+	user, ok := s.authenticate(response, request)
+	if !ok {
+		return
+	}
+	storyID = strings.TrimSpace(storyID)
+	if storyID == "" {
+		s.writeError(response, http.StatusBadRequest, "invalid_story", "story id is required")
+		return
+	}
+	project, err := s.Store.GetProject(request.Context(), user.ID, storyID)
+	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	if !s.allowExpensiveOperation(response, user.ID, "regenerate_ios_story") {
+		return
+	}
+	config, err := s.iosStoryEditConfiguration(request, user.ID, project, iosStoryEditRequest{})
+	if err != nil {
+		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
+			s.writeError(response, http.StatusBadRequest, "invalid_story_edit", "story is not ready to regenerate")
+			return
+		}
+		s.internalError(response, err, "prepare iOS story regenerate")
+		return
+	}
+	stats, err := s.currentIOSStoryCreditStats(request, user.ID, project.ID)
+	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	version := strings.TrimSpace(config["story_plan_version"])
+	if version == "" {
+		s.writeError(response, http.StatusBadRequest, "invalid_story_edit", "story version is required")
+		return
+	}
+	referenceID := project.ID + ":v" + version
+	reservation, ok := s.reserveIOSStoryCredits(response, request, user.ID, models.CreditActionRegenerateStory, referenceID, stats, map[string]any{"project_id": project.ID, "version": version})
+	if !ok {
+		return
+	}
+	defer func() {
+		if reservation.ID == "" {
+			return
+		}
+		if _, err := s.Credits.Release(request.Context(), user.ID, reservation.ID); err != nil && !errors.Is(err, store.ErrConflict) && !errors.Is(err, store.ErrNotFound) {
+			s.Logger.Warn("release iOS story regenerate reservation failed", "user_id", user.ID, "project_id", project.ID, "reservation_id", reservation.ID, "error", err)
+		}
+	}()
+	config["edit_intent"] = "regenerate_story"
+	if s.Orchestrator == nil {
+		s.internalError(response, errors.New("job orchestrator not configured"), "job orchestrator not configured")
+		return
+	}
+	job, err := s.Orchestrator.RequestStoryPlanRevision(request.Context(), user.ID, project.ID, request.Header.Get("Idempotency-Key"), config)
+	if err != nil {
+		s.Logger.Error("queue iOS story regeneration failed", "user_id", user.ID, "project_id", project.ID, "story_plan_version", config["story_plan_version"], "error", err)
+		s.mapStoreError(response, err)
+		return
+	}
+	if err := s.Store.SetProjectCreditOperationKey(request.Context(), user.ID, project.ID, string(models.CreditActionRegenerateStory)); err != nil {
+		s.internalError(response, err, "store iOS story credit operation")
+		return
+	}
+	reservation.ID = ""
+	s.Logger.Info("queued iOS story regeneration", "user_id", user.ID, "project_id", project.ID, "job_id", job.ID, "job_status", string(job.Status), "story_plan_version", job.Configuration["story_plan_version"]) 
+	updated, err := s.Store.GetProject(request.Context(), user.ID, project.ID)
+	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	s.writeJSON(response, http.StatusAccepted, s.makeIOSStory(request, user.ID, updated))
+}
+
+func (s *Server) reserveIOSStoryCredits(response http.ResponseWriter, request *http.Request, userID string, action models.CreditAction, referenceID string, stats credits.StoryMediaStats, metadata map[string]any) (models.CreditReservation, bool) {
+	if s.Credits == nil {
+		s.internalError(response, errors.New("credit service not configured"), "credit service not configured")
+		return models.CreditReservation{}, false
+	}
+	quote, err := s.Credits.Quote(request.Context(), userID, action, stats)
+	if err != nil {
+		s.internalError(response, err, "quote credit action")
+		return models.CreditReservation{}, false
+	}
+	if !quote.Eligible {
+		s.writeJSON(response, http.StatusBadRequest, map[string]any{"error": "story_too_large", "reason": quote.Reason})
+		return models.CreditReservation{}, false
+	}
+	if quote.Balance < quote.Credits {
+		s.writeJSON(response, http.StatusPaymentRequired, map[string]any{"error": "insufficient_credits", "required": quote.Credits, "available": quote.Balance})
+		return models.CreditReservation{}, false
+	}
+	reservation, _, err := s.Credits.Reserve(request.Context(), userID, action, "project", referenceID, stats, metadata)
+	if err != nil {
+		if errors.Is(err, store.ErrInsufficientCredits) {
+			s.writeJSON(response, http.StatusPaymentRequired, map[string]any{"error": "insufficient_credits", "required": quote.Credits, "available": quote.Balance})
+			return models.CreditReservation{}, false
+		}
+		s.internalError(response, err, "reserve credit action")
+		return models.CreditReservation{}, false
+	}
+	return reservation, true
+}
+
+func (s *Server) currentIOSStoryCreditStats(request *http.Request, userID, projectID string) (credits.StoryMediaStats, error) {
+	stats := credits.StoryMediaStats{}
+	plan, err := s.Store.GetStoryPlan(request.Context(), userID, projectID)
+	if err == nil {
+		stats.StoryMediaCount = len(plan.Moments)
+		stats.StoryVideoSeconds = max(0, int((time.Duration(plan.TotalDurationMS) * time.Millisecond) / time.Second))
+		return stats, nil
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return stats, err
+	}
+	project, err := s.Store.GetProject(request.Context(), userID, projectID)
+	if err != nil {
+		return stats, err
+	}
+	stats.StoryMediaCount = len(project.MediaIDs)
+	for _, mediaID := range project.MediaIDs {
+		media, err := s.Store.GetMedia(request.Context(), userID, mediaID)
+		if err != nil || media.DurationSeconds == nil {
+			continue
+		}
+		stats.StoryVideoSeconds += int(*media.DurationSeconds + 0.5)
+	}
+	return stats, nil
+}
+
+func (s *Server) addedIOSStoryCreditStats(request *http.Request, userID string, mediaIDs []string) (credits.StoryMediaStats, error) {
+	stats := credits.StoryMediaStats{AddedMediaCount: len(mediaIDs)}
+	for _, mediaID := range mediaIDs {
+		media, err := s.Store.GetMedia(request.Context(), userID, mediaID)
+		if err != nil {
+			return stats, err
+		}
+		switch media.Type {
+		case models.MediaTypePhoto, models.MediaTypeLivePhoto:
+			stats.AddedPhotoCount++
+		case models.MediaTypeVideo:
+			if media.DurationSeconds != nil {
+				stats.AddedVideoSeconds += int(*media.DurationSeconds + 0.5)
+			}
+		}
+	}
+	return stats, nil
+}
+
+func (s *Server) reconcileIOSStoryProgress(request *http.Request, userID string, project models.StoryProject) models.StoryProject {
+	// story_ready is included because a StoryPlan that completed before the
+	// pipeline queued its render leaves the project parked there forever, which
+	// iOS reports as an endless "Finding meaningful moments".
+	if s.Orchestrator == nil || (project.Status != models.ProjectStatusAnalyzing && project.Status != models.ProjectStatusStoryReady) {
+		return project
+	}
+	jobs, err := s.Store.ListProjectJobs(request.Context(), userID, project.ID)
+	if err != nil {
+		s.Logger.Warn("reconcile iOS story jobs failed", "user_id", userID, "project_id", project.ID, "error", err)
+		return project
+	}
+	for _, job := range jobs {
+		if !models.IsTerminalJobStatus(job.Status) {
+			return project
+		}
+	}
+	advanced := false
+	for _, job := range jobs {
+		if job.Status != models.JobStatusCompleted {
+			continue
+		}
+		if err := s.Orchestrator.AdvanceAfterJob(request.Context(), job); err != nil {
+			s.Logger.Warn("reconcile iOS story advancement failed", "user_id", userID, "project_id", project.ID, "job_id", job.ID, "job_type", string(job.Type), "error", err)
+			return project
+		}
+		advanced = true
+	}
+	if !advanced {
+		return project
+	}
+	updated, err := s.Store.GetProject(request.Context(), userID, project.ID)
+	if err != nil {
+		s.Logger.Warn("reload reconciled iOS story failed", "user_id", userID, "project_id", project.ID, "error", err)
+		return project
+	}
+	s.Logger.Info("reconciled stalled iOS story", "user_id", userID, "project_id", project.ID, "status", string(updated.Status))
+	return updated
 }
 
 func (s *Server) newIOSStoryEditMediaIDs(project models.StoryProject, input iosStoryEditRequest) []string {
@@ -566,46 +791,6 @@ func truncateIOSConfigValue(value string, maxLength int) string {
 	return strings.TrimSpace(value[:maxLength])
 }
 
-func (s *Server) reconcileIOSStoryProgress(request *http.Request, userID string, project models.StoryProject) models.StoryProject {
-	// story_ready is included because a StoryPlan that completed before the
-	// pipeline queued its render leaves the project parked there forever, which
-	// iOS reports as an endless "Finding meaningful moments".
-	if s.Orchestrator == nil || (project.Status != models.ProjectStatusAnalyzing && project.Status != models.ProjectStatusStoryReady) {
-		return project
-	}
-	jobs, err := s.Store.ListProjectJobs(request.Context(), userID, project.ID)
-	if err != nil {
-		s.Logger.Warn("reconcile iOS story jobs failed", "user_id", userID, "project_id", project.ID, "error", err)
-		return project
-	}
-	for _, job := range jobs {
-		if !models.IsTerminalJobStatus(job.Status) {
-			return project
-		}
-	}
-	advanced := false
-	for _, job := range jobs {
-		if job.Status != models.JobStatusCompleted {
-			continue
-		}
-		if err := s.Orchestrator.AdvanceAfterJob(request.Context(), job); err != nil {
-			s.Logger.Warn("reconcile iOS story advancement failed", "user_id", userID, "project_id", project.ID, "job_id", job.ID, "job_type", string(job.Type), "error", err)
-			return project
-		}
-		advanced = true
-	}
-	if !advanced {
-		return project
-	}
-	updated, err := s.Store.GetProject(request.Context(), userID, project.ID)
-	if err != nil {
-		s.Logger.Warn("reload reconciled iOS story failed", "user_id", userID, "project_id", project.ID, "error", err)
-		return project
-	}
-	s.Logger.Info("reconciled stalled iOS story", "user_id", userID, "project_id", project.ID, "status", string(updated.Status))
-	return updated
-}
-
 func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Request) {
 	user, ok := s.authenticate(response, request)
 	if !ok {
@@ -640,26 +825,46 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 		s.writeError(response, http.StatusRequestEntityTooLarge, "story_too_large", "selected media must be under 1 GB per story")
 		return
 	}
+	idempotencyKey := strings.TrimSpace(request.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" {
+		idempotencyKey = stableIOSStoryKey(user.ID, input.Context, storyAssetIDsFromResolved(resolved))
+	}
+	projectID := stableIOSProjectID(user.ID, idempotencyKey)
 	mediaIDs := make([]string, 0, len(resolved))
 	assetIDsByMediaID := make(map[string]string, len(resolved))
 	for _, item := range resolved {
 		mediaIDs = append(mediaIDs, item.media.ID)
 		assetIDsByMediaID[item.media.ID] = item.asset.ID
 	}
-	now := s.Now().UTC()
-	project := models.StoryProject{
-		ID:        models.NewID("project"),
-		UserID:    user.ID,
-		Title:     iosStoryTitle(input.Context, resolved),
-		Context:   input.Context,
-		MediaIDs:  mediaIDs,
-		Status:    models.ProjectStatusDraft,
-		CreatedAt: now,
-		UpdatedAt: now,
+	stats := credits.StoryMediaStats{
+		PhotoCount:       countIOSStoryMedia(resolved, models.MediaTypePhoto, models.MediaTypeLivePhoto),
+		VideoCount:       countIOSStoryMedia(resolved, models.MediaTypeVideo),
+		TotalMediaCount:  len(resolved),
+		TotalVideoSeconds: sumIOSStoryVideoSeconds(resolved),
+		TotalBytes:       totalBytes,
 	}
-	idempotencyKey := strings.TrimSpace(request.Header.Get("Idempotency-Key"))
-	if idempotencyKey == "" {
-		idempotencyKey = stableIOSStoryKey(user.ID, input.Context, mediaIDs)
+	reservation, ok := s.reserveIOSStoryCredits(response, request, user.ID, models.CreditActionCreateStory, projectID, stats, map[string]any{"context": input.Context, "asset_count": len(resolved)})
+	if !ok {
+		return
+	}
+	defer func() {
+		if reservation.ID == "" {
+			return
+		}
+		if _, err := s.Credits.Release(request.Context(), user.ID, reservation.ID); err != nil && !errors.Is(err, store.ErrConflict) && !errors.Is(err, store.ErrNotFound) {
+			s.Logger.Warn("release create story reservation failed", "user_id", user.ID, "project_id", projectID, "reservation_id", reservation.ID, "error", err)
+		}
+	}()
+	project := models.StoryProject{
+		ID:                 projectID,
+		UserID:             user.ID,
+		Title:              iosStoryTitle(input.Context, resolved),
+		Context:            input.Context,
+		MediaIDs:           mediaIDs,
+		CreditOperationKey: string(models.CreditActionCreateStory),
+		Status:             models.ProjectStatusDraft,
+		CreatedAt:          s.Now().UTC(),
+		UpdatedAt:          s.Now().UTC(),
 	}
 	created, existingProject, err := s.Store.CreateProject(request.Context(), project, idempotencyKey)
 	if err != nil {
@@ -683,6 +888,7 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 		s.mapStoreError(response, err)
 		return
 	}
+	reservation.ID = ""
 	s.Logger.Info("started iOS story analysis", "user_id", user.ID, "project_id", created.ID, "job_count", len(jobs))
 	updated, err := s.Store.GetProject(request.Context(), user.ID, created.ID)
 	if err != nil {
@@ -696,6 +902,44 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 type resolvedIOSStoryAsset struct {
 	asset iosStoryAsset
 	media models.MediaAsset
+}
+
+func stableIOSProjectID(userID, idempotencyKey string) string {
+	hash := sha256.Sum256([]byte(userID + "\x00" + idempotencyKey))
+	return "project-" + hex.EncodeToString(hash[:16])
+}
+
+func storyAssetIDsFromResolved(assets []resolvedIOSStoryAsset) []string {
+	ids := make([]string, 0, len(assets))
+	for _, asset := range assets {
+		ids = append(ids, asset.media.ID)
+	}
+	return ids
+}
+
+func countIOSStoryMedia(assets []resolvedIOSStoryAsset, mediaTypes ...models.MediaType) int {
+	allowed := make(map[models.MediaType]struct{}, len(mediaTypes))
+	for _, mediaType := range mediaTypes {
+		allowed[mediaType] = struct{}{}
+	}
+	count := 0
+	for _, asset := range assets {
+		if _, ok := allowed[asset.media.Type]; ok {
+			count++
+		}
+	}
+	return count
+}
+
+func sumIOSStoryVideoSeconds(assets []resolvedIOSStoryAsset) int {
+	var total int
+	for _, asset := range assets {
+		if asset.media.Type != models.MediaTypeVideo || asset.media.DurationSeconds == nil {
+			continue
+		}
+		total += int(*asset.media.DurationSeconds + 0.5)
+	}
+	return total
 }
 
 func (s *Server) resolveIOSStoryAssets(request *http.Request, userID string, assets []iosStoryAsset) ([]resolvedIOSStoryAsset, error) {

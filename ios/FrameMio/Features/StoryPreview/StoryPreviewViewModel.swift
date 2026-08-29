@@ -79,6 +79,8 @@ final class StoryPreviewViewModel: ObservableObject {
     @Published var isPlayingVideo = false
     @Published private(set) var momentAssets: [String: MediaAsset] = [:]
     @Published private(set) var momentThumbnails: [String: UIImage] = [:]
+    @Published var insufficientCredits: CreditIssue?
+    @Published private(set) var creditBalance: Int?
 
     private var storyID: String?
     private let launchContext: MomentContext?
@@ -86,6 +88,8 @@ final class StoryPreviewViewModel: ObservableObject {
     private let launchID: UUID?
     private let storyLaunchCoordinator: StoryLaunchCoordinator?
     private let storyService: StoryService
+    private let creditService: CreditService?
+    private let onCreditsUpdated: (() -> Void)?
     private let photoLibrary: PhotoLibraryService
     private let mediaUploadStore: MediaUploadStore
     private let mediaUploadService: MediaUploadService
@@ -101,7 +105,9 @@ final class StoryPreviewViewModel: ObservableObject {
         photoLibrary: PhotoLibraryService,
         mediaUploadStore: MediaUploadStore,
         mediaUploadService: MediaUploadService,
-        analysisService: MediaAnalysisService
+        analysisService: MediaAnalysisService,
+        creditService: CreditService? = nil,
+        onCreditsUpdated: (() -> Void)? = nil
     ) {
         self.story = story
         storyID = story.id
@@ -110,6 +116,8 @@ final class StoryPreviewViewModel: ObservableObject {
         launchID = nil
         storyLaunchCoordinator = nil
         self.storyService = storyService
+        self.creditService = creditService
+        self.onCreditsUpdated = onCreditsUpdated
         self.photoLibrary = photoLibrary
         self.mediaUploadStore = mediaUploadStore
         self.mediaUploadService = mediaUploadService
@@ -122,7 +130,9 @@ final class StoryPreviewViewModel: ObservableObject {
         photoLibrary: PhotoLibraryService,
         mediaUploadStore: MediaUploadStore,
         mediaUploadService: MediaUploadService,
-        analysisService: MediaAnalysisService
+        analysisService: MediaAnalysisService,
+        creditService: CreditService? = nil,
+        onCreditsUpdated: (() -> Void)? = nil
     ) {
         self.storyID = storyID
         launchContext = nil
@@ -130,6 +140,8 @@ final class StoryPreviewViewModel: ObservableObject {
         launchID = nil
         storyLaunchCoordinator = nil
         self.storyService = storyService
+        self.creditService = creditService
+        self.onCreditsUpdated = onCreditsUpdated
         self.photoLibrary = photoLibrary
         self.mediaUploadStore = mediaUploadStore
         self.mediaUploadService = mediaUploadService
@@ -145,7 +157,9 @@ final class StoryPreviewViewModel: ObservableObject {
         photoLibrary: PhotoLibraryService,
         mediaUploadStore: MediaUploadStore,
         mediaUploadService: MediaUploadService,
-        analysisService: MediaAnalysisService
+        analysisService: MediaAnalysisService,
+        creditService: CreditService? = nil,
+        onCreditsUpdated: (() -> Void)? = nil
     ) {
         storyID = nil
         launchContext = context
@@ -153,6 +167,8 @@ final class StoryPreviewViewModel: ObservableObject {
         self.launchID = launchID
         self.storyLaunchCoordinator = storyLaunchCoordinator
         self.storyService = storyService
+        self.creditService = creditService
+        self.onCreditsUpdated = onCreditsUpdated
         self.photoLibrary = photoLibrary
         self.mediaUploadStore = mediaUploadStore
         self.mediaUploadService = mediaUploadService
@@ -186,6 +202,18 @@ final class StoryPreviewViewModel: ObservableObject {
 
     var canPlayVideo: Bool {
         playableVideoURL != nil
+    }
+
+    func refreshCreditBalance() {
+        guard let creditService else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let balance = try await creditService.balance()
+                creditBalance = balance.available
+            } catch {
+            }
+        }
     }
 
     func playVideo() {
@@ -916,10 +944,22 @@ final class StoryPreviewViewModel: ObservableObject {
                 if updatedStory.status.shouldPoll {
                     load()
                 }
+                onCreditsUpdated?()
+                refreshCreditBalance()
                 FrameMioHaptics.success()
             } catch is CancellationError {
             } catch {
-                errorMessage = AppError.from(error).localizedDescription
+                let appError = AppError.from(error)
+                if case let .insufficientCredits(required, available) = appError {
+                    insufficientCredits = CreditIssue(
+                        action: action.creditAction,
+                        required: required,
+                        available: available
+                    )
+                    errorMessage = nil
+                } else {
+                    errorMessage = appError.localizedDescription
+                }
             }
         }
     }
@@ -959,6 +999,19 @@ enum StoryPreviewAction: Hashable, Sendable {
             "Replacing moment"
         case .removeMoment:
             "Removing moment"
+        }
+    }
+
+    var creditAction: CreditAction {
+        switch self {
+        case .regenerate:
+            .regenerateStory
+        case .editStory, .replaceMoment:
+            .aiEditStory
+        case .removeMoment:
+            .removeMoment
+        case .retry, .renderAgain, .saveVideo, .deleteStory:
+            .preview
         }
     }
 }

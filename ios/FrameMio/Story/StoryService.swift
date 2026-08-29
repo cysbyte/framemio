@@ -83,20 +83,21 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
     }
 
     func regenerateStory(id: String) async throws -> Story {
-        try await saveStoryEdits(
-            storyID: id,
-            request: StoryEditRequest(
-                removeMomentIDs: [],
-                removeMediaIDs: [],
-                addMediaIDs: [],
-                replace: [],
-                style: nil,
-                subtitlesEnabled: nil,
-                subtitleStyle: nil,
-                targetDuration: nil,
-                instruction: "Make another version of this story."
+        let data = try await apiClient.data(
+            for: APIRequest(
+                method: .post,
+                path: "/v1/stories/\(id)/regenerate",
+                headers: ["Idempotency-Key": "ios-story-regenerate-\(id)-\(UUID().uuidString)"]
             )
         )
+        do {
+            let updated = try decoder.decode(Story.self, from: data)
+            let existing = try await persistence.loadStories()
+            try await persistence.saveStories([updated] + existing.filter { $0.id != updated.id })
+            return updated
+        } catch {
+            throw AppError.invalidResponse
+        }
     }
 
     func renderAgain(id: String) async throws -> Story {

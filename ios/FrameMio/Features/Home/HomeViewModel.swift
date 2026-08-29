@@ -17,18 +17,23 @@ final class HomeViewModel: ObservableObject {
     @Published private(set) var covers: [String: UIImage] = [:]
     @Published private(set) var loadingCoverIDs: Set<String> = []
     @Published private(set) var isLoading = false
+    @Published private(set) var creditBalance: Int?
+    @Published private(set) var isLoadingCreditBalance = false
     @Published var errorMessage: String?
 
     private static let homeStoryLimit = 7
     private static let coverCacheDirectoryName = "StoryCovers"
 
     private let storyService: StoryService
+    private let creditService: CreditService?
     private let mockState: HomeMockState?
     private var loadTask: Task<Void, Never>?
+    private var creditTask: Task<Void, Never>?
     private var coverTasks: [String: Task<Void, Never>] = [:]
 
-    init(storyService: StoryService, mockState: HomeMockState? = nil) {
+    init(storyService: StoryService, creditService: CreditService? = nil, mockState: HomeMockState? = nil) {
         self.storyService = storyService
+        self.creditService = creditService
         self.mockState = mockState
     }
 
@@ -52,11 +57,48 @@ final class HomeViewModel: ObservableObject {
                     updateStories(loadedStories)
                 }
                 errorMessage = nil
+                refreshCreditBalance()
             } catch is CancellationError {
             } catch {
                 errorMessage = AppError.from(error).localizedDescription
             }
         }
+    }
+
+
+    func refreshCreditBalance() {
+        guard let creditService else { return }
+        creditTask?.cancel()
+        creditTask = Task { [weak self] in
+            guard let self else { return }
+            isLoadingCreditBalance = true
+            defer { isLoadingCreditBalance = false }
+            do {
+                let balance = try await creditService.balance()
+                creditBalance = balance.available
+            } catch is CancellationError {
+            } catch {
+            }
+        }
+    }
+
+    var creditBalanceTitle: String {
+        guard let creditBalance else {
+            return isLoadingCreditBalance ? "✦ …" : "✦"
+        }
+        return "✦ \(creditBalance.formatted())"
+    }
+
+    var creditBalanceAccessibilityLabel: String {
+        guard let creditBalance else {
+            return "Credits. Opens FrameMio Pro."
+        }
+        return "\(creditBalance) credits. Opens FrameMio Pro."
+    }
+
+    var isLowOnCredits: Bool {
+        guard let creditBalance else { return false }
+        return creditBalance <= CreditPricing.lowBalanceThreshold
     }
 
     func coverImage(for story: Story) -> Image? {

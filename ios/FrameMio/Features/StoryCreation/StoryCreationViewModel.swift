@@ -20,6 +20,8 @@ final class StoryCreationViewModel: ObservableObject {
     @Published private(set) var isCreating = false
     @Published private(set) var story: Story?
     @Published private(set) var thumbnails: [String: UIImage] = [:]
+    @Published private(set) var creditBalance: Int?
+    @Published var insufficientCredits: CreditIssue?
     @Published var errorMessage: String?
 
     let context: MomentContext
@@ -28,6 +30,8 @@ final class StoryCreationViewModel: ObservableObject {
     private let analysisService: MediaAnalysisService
     private let mediaUploadService: MediaUploadService
     private let storyService: StoryService
+    private let creditService: CreditService?
+    private let onCreditsUpdated: (() -> Void)?
     private var creationTask: Task<Void, Never>?
     private var thumbnailTasks: [String: Task<Void, Never>] = [:]
 
@@ -37,7 +41,9 @@ final class StoryCreationViewModel: ObservableObject {
         photoLibrary: PhotoLibraryService,
         analysisService: MediaAnalysisService,
         mediaUploadService: MediaUploadService,
-        storyService: StoryService
+        storyService: StoryService,
+        creditService: CreditService? = nil,
+        onCreditsUpdated: (() -> Void)? = nil
     ) {
         self.context = context
         self.assets = assets
@@ -45,6 +51,8 @@ final class StoryCreationViewModel: ObservableObject {
         self.analysisService = analysisService
         self.mediaUploadService = mediaUploadService
         self.storyService = storyService
+        self.creditService = creditService
+        self.onCreditsUpdated = onCreditsUpdated
     }
 
     func image(for asset: MediaAsset) -> Image? {
@@ -75,6 +83,22 @@ final class StoryCreationViewModel: ObservableObject {
         thumbnailTasks[asset.id] = nil
     }
 
+    func refreshCreditBalance() {
+        guard let creditService else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let balance = try await creditService.balance()
+                creditBalance = balance.available
+            } catch {
+            }
+        }
+    }
+
+    var createStoryCreditCost: Int {
+        CreditPricing.price(for: .createStory)
+    }
+
     func createStory() {
         guard !isCreating else {
             storyCreationDebugLog("ignored duplicate create request while already creating")
@@ -87,6 +111,7 @@ final class StoryCreationViewModel: ObservableObject {
             isCreating = true
             progress = 0
             story = nil
+            insufficientCredits = nil
             errorMessage = nil
             defer { isCreating = false }
 
@@ -131,6 +156,8 @@ final class StoryCreationViewModel: ObservableObject {
                 progress = 1
                 storyCreationDebugLog("phase=story_create_complete story=\(story?.id ?? "nil") status=\(story?.status.rawValue ?? "nil")")
                 phaseTitle = "Story is processing."
+                onCreditsUpdated?()
+                refreshCreditBalance()
                 FrameMioHaptics.success()
             } catch is CancellationError {
                 storyCreationDebugLog("phase=cancelled progress=\(progress)")
@@ -138,8 +165,15 @@ final class StoryCreationViewModel: ObservableObject {
             } catch {
                 let appError = AppError.from(error)
                 storyCreationDebugLog("phase=failed progress=\(progress) error=\(appError.localizedDescription) raw=\(error.localizedDescription)")
-                errorMessage = appError.localizedDescription
-                phaseTitle = "Something went wrong"
+                switch appError {
+                case let .insufficientCredits(required, available):
+                    insufficientCredits = CreditIssue(action: .createStory, required: required, available: available)
+                    errorMessage = nil
+                    phaseTitle = "Not enough credits"
+                default:
+                    errorMessage = appError.localizedDescription
+                    phaseTitle = "Something went wrong"
+                }
             }
         }
     }
@@ -187,7 +221,7 @@ final class StoryCreationViewModel: ObservableObject {
         if case let AppError.server(statusCode) = AppError.from(error), statusCode == 409 {
             return true
         }
-        if case let APIClientError.server(statusCode) = error, statusCode == 409 {
+        if case let APIClientError.server(statusCode, _) = error, statusCode == 409 {
             return true
         }
         return false

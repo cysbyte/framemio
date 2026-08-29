@@ -1,14 +1,16 @@
 import SwiftUI
 
 struct AppRootView: View {
+    @Environment(\.scenePhase) private var scenePhase
     let dependencies: AppDependencies
     @State private var path: [AppRoute] = []
+    @State private var pricingSource: PricingEntryPoint?
     @StateObject private var homeViewModel: HomeViewModel
     @StateObject private var storyLaunchCoordinator: StoryLaunchCoordinator
 
     init(dependencies: AppDependencies = .preview(), homeMockState: HomeMockState? = nil) {
         self.dependencies = dependencies
-        _homeViewModel = StateObject(wrappedValue: HomeViewModel(storyService: dependencies.storyService, mockState: homeMockState))
+        _homeViewModel = StateObject(wrappedValue: HomeViewModel(storyService: dependencies.storyService, creditService: dependencies.creditService, mockState: homeMockState))
         _storyLaunchCoordinator = StateObject(
             wrappedValue: StoryLaunchCoordinator(
                 analysisService: dependencies.mediaAnalysis,
@@ -33,13 +35,34 @@ struct AppRootView: View {
                 },
                 onOpenSettings: {
                     path.append(.settings)
-                }
+                },
+                onOpenPricing: openPricing
             )
             .navigationDestination(for: AppRoute.self) { route in
                 destination(for: route)
             }
         }
         .tint(FrameMioColors.accent)
+        .sheet(item: $pricingSource) { source in
+            NavigationStack {
+                FrameMioProView(
+                    source: source,
+                    creditService: dependencies.creditService,
+                    onClose: { pricingSource = nil },
+                    onBalanceUpdated: { homeViewModel.refreshCreditBalance() }
+                )
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                homeViewModel.refreshCreditBalance()
+            }
+        }
+    }
+
+
+    private func openPricing(_ source: PricingEntryPoint) {
+        pricingSource = source
     }
 
     @ViewBuilder
@@ -72,14 +95,17 @@ struct AppRootView: View {
                     photoLibrary: dependencies.photoLibrary,
                     analysisService: dependencies.mediaAnalysis,
                     mediaUploadService: dependencies.mediaUploadService,
-                    storyService: dependencies.storyService
+                    storyService: dependencies.storyService,
+                    creditService: dependencies.creditService,
+                    onCreditsUpdated: { homeViewModel.refreshCreditBalance() }
                 ),
                 onCreate: {
                     path.append(.storyCreating(context: context, assets: assets, launchID: UUID()))
                 },
                 onCreated: { story in
                     path.append(.storyPreview(story: story))
-                }
+                },
+                onOpenPricing: openPricing
             )
         case let .storyCreating(context, assets, launchID):
             StoryPreviewView(
@@ -92,8 +118,11 @@ struct AppRootView: View {
                     photoLibrary: dependencies.photoLibrary,
                     mediaUploadStore: dependencies.mediaUploadStore,
                     mediaUploadService: dependencies.mediaUploadService,
-                    analysisService: dependencies.mediaAnalysis
-                )
+                    analysisService: dependencies.mediaAnalysis,
+                    creditService: dependencies.creditService,
+                    onCreditsUpdated: { homeViewModel.refreshCreditBalance() }
+                ),
+                onOpenPricing: openPricing
             )
         case let .storyPreview(story):
             StoryPreviewView(
@@ -103,8 +132,11 @@ struct AppRootView: View {
                     photoLibrary: dependencies.photoLibrary,
                     mediaUploadStore: dependencies.mediaUploadStore,
                     mediaUploadService: dependencies.mediaUploadService,
-                    analysisService: dependencies.mediaAnalysis
-                )
+                    analysisService: dependencies.mediaAnalysis,
+                    creditService: dependencies.creditService,
+                    onCreditsUpdated: { homeViewModel.refreshCreditBalance() }
+                ),
+                onOpenPricing: openPricing
             )
         case .settings:
             SettingsView(viewModel: SettingsViewModel(photoLibrary: dependencies.photoLibrary))

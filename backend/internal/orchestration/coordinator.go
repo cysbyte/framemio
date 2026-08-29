@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/framemio/backend/internal/credits"
 	"github.com/framemio/backend/internal/models"
 	"github.com/framemio/backend/internal/queue"
 	"github.com/framemio/backend/internal/store"
@@ -29,6 +30,7 @@ const (
 
 type Coordinator struct {
 	Store       store.Store
+	Credits     *credits.Service
 	Publisher   queue.Publisher
 	Activator   workeractivation.Activator
 	Validator   storyvalidation.Service
@@ -269,7 +271,10 @@ func (c *Coordinator) UpdateJobStatus(ctx context.Context, jobID string, status 
 func (c *Coordinator) AdvanceAfterJob(ctx context.Context, job models.ProcessingJob) error {
 	if job.Status == models.JobStatusFailed || job.Status == models.JobStatusCancelled {
 		c.Logger.Warn("job terminal failure; marking project failed", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID), slog.String("status", string(job.Status)), slog.String("error_code", job.ErrorCode))
-		return c.Store.SetProjectStatus(ctx, job.UserID, job.ProjectID, models.ProjectStatusFailed)
+		if err := c.Store.SetProjectStatus(ctx, job.UserID, job.ProjectID, models.ProjectStatusFailed); err != nil {
+			return err
+		}
+		return c.settleProjectCredits(ctx, job, models.ProjectStatusFailed)
 	}
 	if job.Status != models.JobStatusCompleted {
 		return nil
@@ -301,7 +306,10 @@ func (c *Coordinator) AdvanceAfterJob(ctx context.Context, job models.Processing
 		_, err := c.createStageJob(ctx, job.UserID, job.ProjectID, "", models.JobTypeVideoRender, inheritConfiguration(job.Configuration), stableRenderKey(job.ProjectID, version, job.Configuration["output_preset"]), true)
 		return err
 	case models.JobTypeVideoRender:
-		return c.Store.SetProjectStatus(ctx, job.UserID, job.ProjectID, models.ProjectStatusReady)
+		if err := c.Store.SetProjectStatus(ctx, job.UserID, job.ProjectID, models.ProjectStatusReady); err != nil {
+			return err
+		}
+		return c.settleProjectCredits(ctx, job, models.ProjectStatusReady)
 	default:
 		return nil
 	}
@@ -311,6 +319,49 @@ func (c *Coordinator) AdvanceAfterJob(ctx context.Context, job models.Processing
 // validation and into the render stage. The end-to-end pipeline owns this
 // transition: without it a project settles on ProjectStatusStoryReady and never
 // produces an MP4, which iOS renders forever as "Finding meaningful moments".
+func (c *Coordinator) settleProjectCredits(ctx context.Context, job models.ProcessingJob, status models.ProjectStatus) error {
+	if c == nil || c.Credits == nil || c.Store == nil {
+		return nil
+	}
+	project, err := c.Store.GetProject(ctx, job.UserID, job.ProjectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	action, ok := models.NormalizeCreditAction(project.CreditOperationKey)
+	if !ok || action == "" {
+		return nil
+	}
+	referenceID := job.ProjectID
+	if action != models.CreditActionCreateStory {
+		version := strings.TrimSpace(job.Configuration["story_plan_version"])
+		if version == "" {
+			if plan, planErr := c.Store.GetStoryPlan(ctx, job.UserID, job.ProjectID); planErr == nil {
+				version = strconv.Itoa(plan.Version)
+			} else if planErr != nil && !errors.Is(planErr, store.ErrNotFound) {
+				return planErr
+			}
+		}
+		if version != "" {
+			referenceID = job.ProjectID + ":v" + version
+		}
+	}
+	switch status {
+	case models.ProjectStatusReady:
+		_, err = c.Credits.CommitByReference(ctx, job.UserID, action, "project", referenceID)
+	case models.ProjectStatusFailed:
+		_, err = c.Credits.ReleaseByReference(ctx, job.UserID, action, "project", referenceID)
+	default:
+		return nil
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
 func (c *Coordinator) AdvanceStoryPlanToRender(ctx context.Context, userID, projectID string) error {
 	plan, err := c.Store.GetStoryPlan(ctx, userID, projectID)
 	if err != nil {

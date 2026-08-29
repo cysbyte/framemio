@@ -64,6 +64,7 @@
 		A10000000000000000000212 /* StoryPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000112 /* StoryPreviewView.swift */; };
 		A10000000000000000000213 /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000113 /* SettingsViewModel.swift */; };
 		A10000000000000000000214 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000114 /* SettingsView.swift */; };
+		A10000000000000000000217 /* FrameMioProView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000117 /* FrameMioProView.swift */; };
 		A10000000000000000000215 /* TaskCancellation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000115 /* TaskCancellation.swift */; };
 		B60000000000000000000101 /* PhotoKitMediaIntelligenceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000001 /* PhotoKitMediaIntelligenceService.swift */; };
 		B60000000000000000000102 /* MediaClusterer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000002 /* MediaClusterer.swift */; };
@@ -148,6 +149,7 @@
 		A10000000000000000000112 /* StoryPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoryPreviewView.swift; sourceTree = "<group>"; };
 		A10000000000000000000113 /* SettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModel.swift; sourceTree = "<group>"; };
 		A10000000000000000000114 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A10000000000000000000117 /* FrameMioProView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameMioProView.swift; sourceTree = "<group>"; };
 		A10000000000000000000115 /* TaskCancellation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskCancellation.swift; sourceTree = "<group>"; };
 		B60000000000000000000001 /* PhotoKitMediaIntelligenceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoKitMediaIntelligenceService.swift; sourceTree = "<group>"; };
 		B60000000000000000000002 /* MediaClusterer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaClusterer.swift; sourceTree = "<group>"; };
@@ -227,6 +229,7 @@
 				A10000000000000000000311 /* StoryCreation */,
 				A10000000000000000000312 /* StoryPreview */,
 				A10000000000000000000313 /* Settings */,
+				A10000000000000000000314 /* Pricing */,
 				A1000000000000000000000C /* Moments */,
 				A1000000000000000000000D /* Story */,
 				A1000000000000000000000E /* Profile */,
@@ -466,6 +469,14 @@
 			path = Settings;
 			sourceTree = "<group>";
 		};
+		A10000000000000000000314 /* Pricing */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000117 /* FrameMioProView.swift */,
+			);
+			path = Pricing;
+			sourceTree = "<group>";
+		};
 		B60000000000000000000020 /* FrameMioTests */ = {
 			isa = PBXGroup;
 			children = (
@@ -621,6 +632,7 @@
 				A10000000000000000000212 /* StoryPreviewView.swift in Sources */,
 				A10000000000000000000213 /* SettingsViewModel.swift in Sources */,
 				A10000000000000000000214 /* SettingsView.swift in Sources */,
+				A10000000000000000000217 /* FrameMioProView.swift in Sources */,
 				A10000000000000000000215 /* TaskCancellation.swift in Sources */,
 				B60000000000000000000101 /* PhotoKitMediaIntelligenceService.swift in Sources */,
 				B60000000000000000000102 /* MediaClusterer.swift in Sources */,

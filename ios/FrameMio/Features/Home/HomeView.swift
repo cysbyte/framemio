@@ -9,19 +9,22 @@ struct HomeView: View {
     let onOpenStory: (Story) -> Void
     let onOpenAllStories: () -> Void
     let onOpenSettings: () -> Void
+    let onOpenPricing: (PricingEntryPoint) -> Void
 
     init(
         viewModel: HomeViewModel,
         onCreateStory: @escaping (MomentContext) -> Void,
         onOpenStory: @escaping (Story) -> Void,
         onOpenAllStories: @escaping () -> Void,
-        onOpenSettings: @escaping () -> Void
+        onOpenSettings: @escaping () -> Void,
+        onOpenPricing: @escaping (PricingEntryPoint) -> Void
     ) {
         _viewModel = ObservedObject(wrappedValue: viewModel)
         self.onCreateStory = onCreateStory
         self.onOpenStory = onOpenStory
         self.onOpenAllStories = onOpenAllStories
         self.onOpenSettings = onOpenSettings
+        self.onOpenPricing = onOpenPricing
     }
 
     var body: some View {
@@ -71,19 +74,15 @@ struct HomeView: View {
         .navigationTitle("FrameMio")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(action: onOpenSettings) {
-                    Image(systemName: "gearshape")
-                        .font(FrameMioTypography.headline)
-                        .foregroundStyle(FrameMioColors.ink)
-                        .frame(width: FrameMioMetrics.minimumTouchTarget, height: FrameMioMetrics.minimumTouchTarget)
-                        .background(FrameMioColors.surface.opacity(0.78), in: Circle())
-                        .accessibilityLabel("Settings")
-                }
-                .buttonStyle(FrameMioPressButtonStyle())
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                creditButton
+                settingsButton
             }
         }
-        .task { viewModel.load() }
+        .task {
+            viewModel.load()
+            viewModel.refreshCreditBalance()
+        }
         .refreshable { viewModel.load() }
         .animation(FrameMioAnimation.gentle(reduceMotion: reduceMotion), value: viewModel.isLoading)
         .animation(FrameMioAnimation.gentle(reduceMotion: reduceMotion), value: viewModel.stories)
@@ -93,6 +92,51 @@ struct HomeView: View {
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
+    }
+
+
+    private var creditButton: some View {
+        Button {
+            FrameMioHaptics.secondaryAction()
+            onOpenPricing(.homeCreditButton)
+        } label: {
+            HStack(spacing: FrameMioSpacing.xs) {
+                Image(systemName: "sparkles")
+                    .font(.caption.weight(.semibold))
+                Text(viewModel.creditBalanceTitle)
+                    .font(FrameMioTypography.footnote.weight(.semibold))
+            }
+            .foregroundStyle(viewModel.isLowOnCredits ? FrameMioColors.accent : FrameMioColors.ink)
+            .padding(.horizontal, FrameMioSpacing.md)
+            .frame(minHeight: FrameMioMetrics.minimumTouchTarget)
+            .background(
+                viewModel.isLowOnCredits
+                    ? FrameMioColors.accentMuted.opacity(0.8)
+                    : FrameMioColors.surface.opacity(0.78),
+                in: Capsule()
+            )
+            .overlay {
+                Capsule()
+                    .stroke(
+                        viewModel.isLowOnCredits ? FrameMioColors.accent.opacity(0.28) : FrameMioColors.divider.opacity(0.42),
+                        lineWidth: FrameMioMetrics.borderWidth
+                    )
+            }
+        }
+        .buttonStyle(FrameMioPressButtonStyle())
+        .accessibilityLabel(viewModel.creditBalanceAccessibilityLabel)
+    }
+
+    private var settingsButton: some View {
+        Button(action: onOpenSettings) {
+            Image(systemName: "gearshape")
+                .font(FrameMioTypography.headline)
+                .foregroundStyle(FrameMioColors.ink)
+                .frame(width: FrameMioMetrics.minimumTouchTarget, height: FrameMioMetrics.minimumTouchTarget)
+                .background(FrameMioColors.surface.opacity(0.78), in: Circle())
+                .accessibilityLabel("Settings")
+        }
+        .buttonStyle(FrameMioPressButtonStyle())
     }
 
     private var hero: some View {
