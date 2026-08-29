@@ -555,7 +555,8 @@ final class StoryPreviewViewModel: ObservableObject {
             if let identifier = item.itemIdentifier, let asset = resolvedByIdentifier[identifier] {
                 let created = asset.creationDate?.description ?? "nil"
                 storyPreviewDebugLog("edit import using resolved photo asset=\(asset.id) kind=\(asset.kind.rawValue) created=\(created)")
-                staged.append(StagedStoryImport(asset: asset, file: nil, thumbnail: nil, fallbackAnalysis: nil))
+                let thumbnail = await thumbnailImage(for: asset)
+                staged.append(StagedStoryImport(asset: asset, file: nil, thumbnail: thumbnail, fallbackAnalysis: nil))
                 continue
             }
             staged.append(try await stagedImport(from: item))
@@ -636,6 +637,15 @@ final class StoryPreviewViewModel: ObservableObject {
         let thumbnail = await videoThumbnail(for: url)
         storyPreviewDebugLog("edit import staged video asset=\(asset.id) duration=\(asset.duration) pixels=\(asset.pixelWidth)x\(asset.pixelHeight) bytes=\(file.fileSizeBytes) content_type=\(contentType)")
         return StagedStoryImport(asset: asset, file: file, thumbnail: thumbnail, fallbackAnalysis: nil)
+    }
+
+    private func thumbnailImage(for asset: MediaAsset) async -> UIImage? {
+        do {
+            let data = try await photoLibrary.requestThumbnail(for: asset, targetSize: FrameMioMetrics.mediaThumbnailRequestSize)
+            return UIImage(data: data)
+        } catch {
+            return nil
+        }
     }
 
     private func videoMetadata(for url: URL) async throws -> VideoMetadata {

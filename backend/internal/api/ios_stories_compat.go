@@ -228,6 +228,26 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 			return
 		}
 	}
+	s.Logger.Info("prepared iOS story edit credit scope",
+		"user_id", user.ID,
+		"project_id", project.ID,
+		"selected_action", string(selectedAction),
+		"story_plan_version", config["story_plan_version"],
+		"requested_add_media_ids", joinStringsOrUnset(cleanStringList(input.AddMediaIDs)),
+		"requested_replace_to_media_ids", joinIOSStoryReplacementTargets(input.Replace),
+		"project_media_ids", joinStringsOrUnset(project.MediaIDs),
+		"new_media_ids", joinStringsOrUnset(newMediaIDs),
+		"remove_moment_ids", joinStringsOrUnset(cleanStringList(input.RemoveMomentIDs)),
+		"remove_media_ids", joinStringsOrUnset(cleanStringList(input.RemoveMediaIDs)),
+		"ordered_media_ids", joinStringsOrUnset(cleanStringList(input.OrderedMediaIDs)),
+		"instruction_present", strings.TrimSpace(input.Instruction) != "",
+		"credit_price", creditPricingForAction(selectedAction),
+		"add_media_count", stats.AddedMediaCount,
+		"add_photo_count", stats.AddedPhotoCount,
+		"add_video_seconds", stats.AddedVideoSeconds,
+		"story_media_count", stats.StoryMediaCount,
+		"story_video_seconds", stats.StoryVideoSeconds,
+	)
 	var reservation models.CreditReservation
 	if selectedAction != "" {
 		version := strings.TrimSpace(config["story_plan_version"])
@@ -259,6 +279,17 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		s.mapStoreError(response, err)
 		return
 	}
+	s.Logger.Info("queued iOS story revision request details",
+		"user_id", user.ID,
+		"project_id", project.ID,
+		"job_id", job.ID,
+		"story_plan_version", job.Configuration["story_plan_version"],
+		"selected_media_ids", job.Configuration["selected_media_ids"],
+		"preferred_media_order", job.Configuration["preferred_media_order"],
+		"excluded_media_ids", job.Configuration["excluded_media_ids"],
+		"excluded_moment_ids", job.Configuration["excluded_moment_ids"],
+		"edit_intent", job.Configuration["edit_intent"],
+	)
 	if selectedAction != "" {
 		if err := s.Store.SetProjectCreditOperationKey(request.Context(), user.ID, project.ID, string(selectedAction)); err != nil {
 			s.internalError(response, err, "store iOS story credit operation")
@@ -307,6 +338,19 @@ func (s *Server) regenerateIOSStory(response http.ResponseWriter, request *http.
 		s.mapStoreError(response, err)
 		return
 	}
+	s.Logger.Info("prepared iOS story regenerate credit scope",
+		"user_id", user.ID,
+		"project_id", project.ID,
+		"story_plan_version", config["story_plan_version"],
+		"project_media_ids", joinStringsOrUnset(project.MediaIDs),
+		"selected_media_ids", config["selected_media_ids"],
+		"preferred_media_order", config["preferred_media_order"],
+		"excluded_media_ids", config["excluded_media_ids"],
+		"excluded_moment_ids", config["excluded_moment_ids"],
+		"credit_price", creditPricingForAction(models.CreditActionRegenerateStory),
+		"story_media_count", stats.StoryMediaCount,
+		"story_video_seconds", stats.StoryVideoSeconds,
+	)
 	version := strings.TrimSpace(config["story_plan_version"])
 	if version == "" {
 		s.writeError(response, http.StatusBadRequest, "invalid_story_edit", "story version is required")
@@ -697,6 +741,33 @@ func sortedKeys(values map[string]struct{}) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func joinStringsOrUnset(values []string) string {
+	if len(values) == 0 {
+		return "unset"
+	}
+	return strings.Join(values, ",")
+}
+
+func joinIOSStoryReplacementTargets(replacements []iosStoryMomentReplace) string {
+	if len(replacements) == 0 {
+		return "unset"
+	}
+	targets := make([]string, 0, len(replacements))
+	for _, replacement := range replacements {
+		if target := strings.TrimSpace(replacement.ToMediaID); target != "" {
+			targets = append(targets, target)
+		}
+	}
+	return joinStringsOrUnset(targets)
+}
+
+func creditPricingForAction(action models.CreditAction) int {
+	if price, ok := credits.DefaultPolicy().Price(action); ok {
+		return price
+	}
+	return 0
 }
 
 func preferredIOSStoryMediaOrder(input []string, selected, projectMedia map[string]struct{}) ([]string, error) {

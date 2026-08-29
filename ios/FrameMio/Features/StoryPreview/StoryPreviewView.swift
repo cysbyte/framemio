@@ -74,10 +74,10 @@ struct StoryPreviewView: View {
                 },
                 onKeep: { selectedMoment = nil }
             )
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $isShowingEditStory) {
+        .fullScreenCover(isPresented: $isShowingEditStory) {
             if let story = viewModel.story {
                 EditStorySheet(
                     story: story,
@@ -96,10 +96,6 @@ struct StoryPreviewView: View {
                     onImportPhotos: { items, progress in
                         try await viewModel.importMediaForEdit(items, progress: progress)
                     },
-                    onSave: { request in
-                        viewModel.saveStoryEdits(request)
-                        isShowingEditStory = false
-                    },
                     onRegenerate: {
                         viewModel.regenerateStory()
                         isShowingEditStory = false
@@ -109,8 +105,6 @@ struct StoryPreviewView: View {
                         isShowingEditStory = false
                     }
                 )
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
             }
         }
         .alert("Couldn’t update story", isPresented: errorBinding) {
@@ -808,6 +802,7 @@ private struct StoryMomentCard: View {
                         .lineLimit(1)
                 }
             }
+            .frame(width: 132, height: 196, alignment: .topLeading)
         }
         .buttonStyle(FrameMioPressButtonStyle())
         .accessibilityLabel(moment.title)
@@ -833,6 +828,7 @@ private struct MomentDetailSheet: View {
                     placeholderSystemImage: moment.kind.placeholderName,
                     accessibilityTitle: moment.title
                 )
+                .frame(maxWidth: .infinity)
                 .overlay(alignment: .center) {
                     if moment.kind == .video {
                         Image(systemName: "play.fill")
@@ -887,7 +883,6 @@ private struct EditStorySheet: View {
     let imageProvider: (String) -> Image?
     let onAppearMoment: (String) -> Void
     let onImportPhotos: ([PhotosPickerItem], StoryImportProgressHandler?) async throws -> [ImportedStoryMedia]
-    let onSave: (StoryEditRequest) -> Void
     let onRegenerate: () -> Void
     let onRetry: () -> Void
 
@@ -975,15 +970,13 @@ private struct EditStorySheet: View {
             .navigationTitle("Edit Story")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .disabled(isPerformingAction)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(activeAction == .editStory ? "Saving" : "Save") {
-                        onSave(draft.request)
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Label("Back", systemImage: "chevron.left")
                     }
-                    .disabled(!draft.hasChanges || isPerformingAction)
+                    .disabled(isPerformingAction)
                 }
             }
             .sheet(item: $selectedMoment) { moment in
@@ -1001,7 +994,7 @@ private struct EditStorySheet: View {
                     },
                     onKeep: { selectedMoment = nil }
                 )
-                .presentationDetents([.medium, .large])
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $isShowingAddMoment) {
@@ -1214,10 +1207,6 @@ private struct EditStorySheet: View {
                     }
                 }
             }
-            PrimaryButton(title: "Regenerate Story — \(CreditPricing.regenerateStory)", systemImage: "sparkles") {
-                onRegenerate()
-            }
-            .disabled(isPerformingAction)
             TextField("Tell FrameMio what you want", text: Binding(
                 get: { draft.instruction ?? "" },
                 set: { draft.instruction = $0 }
@@ -1227,6 +1216,10 @@ private struct EditStorySheet: View {
             .padding(FrameMioSpacing.md)
             .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
             .accessibilityLabel("Tell FrameMio what you want")
+            PrimaryButton(title: "Regenerate Story — \(CreditPricing.regenerateStory)", systemImage: "sparkles") {
+                onRegenerate()
+            }
+            .disabled(isPerformingAction)
         }
     }
 
@@ -1278,23 +1271,6 @@ private struct EditStoryDraft {
     var instruction: String?
 
     var hasChanges: Bool { request.hasChanges }
-
-    var saveButtonTitle: String {
-        if let action = creditAction {
-            return "Apply — \(CreditPricing.price(for: action))"
-        }
-        return "Save"
-    }
-
-    var creditAction: CreditAction? {
-        if !request.addMediaIDs.isEmpty || !request.replace.isEmpty {
-            return .addMoment
-        }
-        if let instruction = instruction?.trimmingCharacters(in: .whitespacesAndNewlines), !instruction.isEmpty {
-            return .aiEditStory
-        }
-        return nil
-    }
 
     var request: StoryEditRequest {
         StoryEditRequest(
@@ -1529,11 +1505,10 @@ private struct EditMomentSheet: View {
                     image: image,
                     duration: moment.duration,
                     isLivePhoto: moment.kind == .livePhoto,
-                    aspectRatio: 1,
+                    aspectRatio: FrameMioMetrics.thumbnailAspectRatio,
                     placeholderSystemImage: moment.kind.placeholderName,
                     accessibilityTitle: moment.title
                 )
-                .frame(maxWidth: 260)
                 .frame(maxWidth: .infinity)
 
                 VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
