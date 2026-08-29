@@ -3,10 +3,13 @@ import SwiftUI
 struct AppRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     let dependencies: AppDependencies
-    @State private var path: [AppRoute] = []
+    @State private var homePath: [AppRoute] = []
     @State private var pricingSource: PricingEntryPoint?
+    @State private var selectedTab: RootTab = .home
     @StateObject private var homeViewModel: HomeViewModel
     @StateObject private var storyLaunchCoordinator: StoryLaunchCoordinator
+    @StateObject private var creditStore: CreditBalanceStore
+    @StateObject private var settingsViewModel: SettingsViewModel
 
     init(dependencies: AppDependencies = .preview(), homeMockState: HomeMockState? = nil) {
         self.dependencies = dependencies
@@ -18,23 +21,80 @@ struct AppRootView: View {
                 storyService: dependencies.storyService
             )
         )
+        _creditStore = StateObject(wrappedValue: CreditBalanceStore(creditService: dependencies.creditService))
+        _settingsViewModel = StateObject(wrappedValue: SettingsViewModel(photoLibrary: dependencies.photoLibrary))
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        TabView(selection: $selectedTab) {
+            homeTab
+                .tabItem {
+                    Label("Home", systemImage: "house")
+                }
+                .tag(RootTab.home)
+                .accessibilityLabel("Home")
+
+            NavigationStack {
+                ProfileView(creditStore: creditStore) {
+                    openPricing(.profile)
+                }
+            }
+            .tabItem {
+                Label("Profile", systemImage: "person")
+            }
+            .tag(RootTab.profile)
+            .accessibilityLabel("Profile")
+
+            NavigationStack {
+                SettingsView(
+                    viewModel: settingsViewModel,
+                    creditStore: creditStore,
+                    onBuyCredits: { openPricing(.settings) }
+                )
+            }
+            .tabItem {
+                Label("Settings", systemImage: "gear")
+            }
+            .tag(RootTab.settings)
+            .accessibilityLabel("Settings")
+        }
+        .tint(FrameMioColors.accent)
+        .fullScreenCover(item: $pricingSource) { source in
+            NavigationStack {
+                FrameMioProView(
+                    source: source,
+                    creditService: dependencies.creditService,
+                    onClose: { pricingSource = nil },
+                    onBalanceUpdated: refreshCredits
+                )
+            }
+            .onDisappear(perform: refreshCredits)
+        }
+        .onChange(of: selectedTab) { _, newTab in
+            if newTab == .profile || newTab == .settings {
+                creditStore.refresh()
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                refreshCredits()
+            }
+        }
+    }
+
+    private var homeTab: some View {
+        NavigationStack(path: $homePath) {
             HomeView(
                 viewModel: homeViewModel,
+                creditStore: creditStore,
                 onCreateStory: { context in
-                    path.append(.mediaPicker(context: context))
+                    homePath.append(.mediaPicker(context: context))
                 },
                 onOpenStory: { story in
-                    path.append(.storyPreview(story: story))
+                    homePath.append(.storyPreview(story: story))
                 },
                 onOpenAllStories: {
-                    path.append(.allStories)
-                },
-                onOpenSettings: {
-                    path.append(.settings)
+                    homePath.append(.allStories)
                 },
                 onOpenPricing: openPricing
             )
@@ -42,27 +102,15 @@ struct AppRootView: View {
                 destination(for: route)
             }
         }
-        .tint(FrameMioColors.accent)
-        .sheet(item: $pricingSource) { source in
-            NavigationStack {
-                FrameMioProView(
-                    source: source,
-                    creditService: dependencies.creditService,
-                    onClose: { pricingSource = nil },
-                    onBalanceUpdated: { homeViewModel.refreshCreditBalance() }
-                )
-            }
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active {
-                homeViewModel.refreshCreditBalance()
-            }
-        }
     }
-
 
     private func openPricing(_ source: PricingEntryPoint) {
         pricingSource = source
+    }
+
+    private func refreshCredits() {
+        homeViewModel.refreshCreditBalance()
+        creditStore.refresh()
     }
 
     @ViewBuilder
@@ -72,7 +120,7 @@ struct AppRootView: View {
             AllStoriesView(
                 viewModel: homeViewModel,
                 onOpenStory: { story in
-                    path.append(.storyPreview(story: story))
+                    homePath.append(.storyPreview(story: story))
                 }
             )
         case let .mediaPicker(context):
@@ -83,7 +131,7 @@ struct AppRootView: View {
                     selectionService: dependencies.mediaSelection
                 ),
                 onContinue: { assets in
-                    path.append(.storyCreation(context: context, assets: assets))
+                    homePath.append(.storyCreation(context: context, assets: assets))
                 }
             )
             .id(context)
@@ -97,13 +145,13 @@ struct AppRootView: View {
                     mediaUploadService: dependencies.mediaUploadService,
                     storyService: dependencies.storyService,
                     creditService: dependencies.creditService,
-                    onCreditsUpdated: { homeViewModel.refreshCreditBalance() }
+                    onCreditsUpdated: refreshCredits
                 ),
                 onCreate: {
-                    path.append(.storyCreating(context: context, assets: assets, launchID: UUID()))
+                    homePath.append(.storyCreating(context: context, assets: assets, launchID: UUID()))
                 },
                 onCreated: { story in
-                    path.append(.storyPreview(story: story))
+                    homePath.append(.storyPreview(story: story))
                 },
                 onOpenPricing: openPricing
             )
@@ -120,7 +168,7 @@ struct AppRootView: View {
                     mediaUploadService: dependencies.mediaUploadService,
                     analysisService: dependencies.mediaAnalysis,
                     creditService: dependencies.creditService,
-                    onCreditsUpdated: { homeViewModel.refreshCreditBalance() }
+                    onCreditsUpdated: refreshCredits
                 ),
                 onOpenPricing: openPricing
             )
@@ -134,14 +182,18 @@ struct AppRootView: View {
                     mediaUploadService: dependencies.mediaUploadService,
                     analysisService: dependencies.mediaAnalysis,
                     creditService: dependencies.creditService,
-                    onCreditsUpdated: { homeViewModel.refreshCreditBalance() }
+                    onCreditsUpdated: refreshCredits
                 ),
                 onOpenPricing: openPricing
             )
-        case .settings:
-            SettingsView(viewModel: SettingsViewModel(photoLibrary: dependencies.photoLibrary))
         }
     }
+}
+
+private enum RootTab: Hashable {
+    case home
+    case profile
+    case settings
 }
 
 struct AppRootView_Previews: PreviewProvider {

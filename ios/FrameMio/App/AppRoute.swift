@@ -6,5 +6,4 @@ enum AppRoute: Hashable {
     case storyCreation(context: MomentContext, assets: [MediaAsset])
     case storyPreview(story: Story)
     case storyCreating(context: MomentContext, assets: [MediaAsset], launchID: UUID)
-    case settings
 }

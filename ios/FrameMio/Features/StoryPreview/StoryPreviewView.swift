@@ -17,6 +17,7 @@ struct StoryPreviewView: View {
     @State private var isShowingDeleteConfirmation = false
 
     private let generatedVideoAspectRatio: CGFloat = 9.0 / 16.0
+    private let storyDescriptionMaxLength = 180
     private let onOpenPricing: (PricingEntryPoint) -> Void
 
     init(viewModel: StoryPreviewViewModel, onOpenPricing: @escaping (PricingEntryPoint) -> Void) {
@@ -338,7 +339,7 @@ struct StoryPreviewView: View {
                     .font(FrameMioTypography.title)
                     .foregroundStyle(FrameMioColors.ink)
 
-                Text(description)
+                Text(displayStoryDescription(description))
                     .font(FrameMioTypography.body)
                     .foregroundStyle(FrameMioColors.secondaryInk)
                     .fixedSize(horizontal: false, vertical: true)
@@ -607,6 +608,14 @@ struct StoryPreviewView: View {
             return nil
         }
         return trimmed
+    }
+
+    private func displayStoryDescription(_ value: String) -> String {
+        guard value.count > storyDescriptionMaxLength else {
+            return value
+        }
+        return String(value.prefix(storyDescriptionMaxLength))
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".…")))
     }
 
     private func actionTitle(_ action: StoryPreviewAction, fallback: String) -> String {

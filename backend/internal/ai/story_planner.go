@@ -981,10 +981,14 @@ func requestTimestampFallback(request Request) int64 {
 
 func humanText(value string) string {
 	trimmed := strings.TrimSpace(value)
-	if trimmed == "" || isGenericMediaText(trimmed) {
+	if trimmed == "" || isGenericMediaText(trimmed) || isTechnicalMediaText(trimmed) {
 		return ""
 	}
 	trimmed = strings.Split(trimmed, " · cluster:")[0]
+	trimmed = strings.TrimSpace(trimmed)
+	if trimmed == "" || isGenericMediaText(trimmed) || isTechnicalMediaText(trimmed) {
+		return ""
+	}
 	return strings.Trim(trimmed, " .")
 }
 
@@ -1001,6 +1005,29 @@ func isGenericMediaText(value string) bool {
 	default:
 		return strings.HasPrefix(normalized, "photo moment ") || strings.HasPrefix(normalized, "video moment ") || strings.HasPrefix(normalized, "moment ")
 	}
+}
+
+func isTechnicalMediaText(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+	technicalTokens := []string{
+		"transcript_segment_index",
+		"transcript_segment_indexes",
+		"transcript segment index",
+		"transcript segment indexes",
+		"frame_id",
+		"frame_ids",
+		"frame index",
+		"frame indexes",
+		"segment_id",
+		"scene_id",
+	}
+	for _, token := range technicalTokens {
+		if strings.Contains(normalized, token) {
+			return true
+		}
+	}
+	return false
 }
 
 func toDisplayTitle(value string) string {

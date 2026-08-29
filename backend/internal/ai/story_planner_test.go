@@ -181,6 +181,40 @@ func TestPlannerTruncatesLongVideoReasonsForValidation(t *testing.T) {
 	}
 }
 
+func TestPlannerSuppressesTechnicalGroundingText(t *testing.T) {
+	t.Parallel()
+	plan, err := (&Planner{Now: func() time.Time { return time.Date(2026, time.August, 29, 12, 0, 0, 0, time.UTC) }}).Plan(context.Background(), Request{
+		ProjectID:        "project-grounding-metadata",
+		DesiredDuration:  8 * time.Second,
+		StoryType:        models.StoryTypeCustom,
+		VisualStyle:      models.VisualStyleCinematic,
+		SelectedMediaIDs: []string{"video-grounding-metadata"},
+		VideoAnalyses: []models.VideoAnalysis{{
+			ID: "video-analysis-grounding-metadata", VideoID: "video-grounding-metadata", ProjectID: "project-grounding-metadata", AnalysisVersion: "video-v1", DurationMicros: 8_000_000,
+			QualitySignals: models.VideoQualitySignals{OverallScore: 0.8},
+			Segments: []models.VideoSegment{{
+				SegmentID: "segment-grounding-metadata", SceneID: "scene-grounding-metadata", StartMicros: 0, EndMicros: 4_000_000,
+				Description: "A warm family picnic by the lake",
+				Reasons: []string{
+					"Strong memory moment: transcript_segment_indexes 0 and 1 reference the strawberry spill and how funny it was.",
+					"Family laughing about the strawberry spill by the lake",
+				},
+				Importance: 0.92, VisualQuality: 0.8, MemoryValue: 0.94, EmotionalValue: 0.93, StoryRelevance: 0.94, Recommended: true, RecommendedUsage: "hero",
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Moments) == 0 {
+		t.Fatal("expected a planned moment")
+	}
+	combined := strings.ToLower(plan.Moments[0].Caption + " " + plan.Moments[0].Narrative + " " + plan.Moments[0].Reason)
+	if strings.Contains(combined, "transcript_segment_indexes") {
+		t.Fatalf("technical grounding metadata leaked into story plan: %+v", plan.Moments[0])
+	}
+}
+
 func TestPlannerUsesTranscriptTextForVideoCaptions(t *testing.T) {
 	t.Parallel()
 	plan, err := (&Planner{Now: func() time.Time { return time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC) }}).Plan(context.Background(), Request{

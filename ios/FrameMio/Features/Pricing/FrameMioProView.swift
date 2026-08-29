@@ -106,15 +106,6 @@ final class FrameMioProViewModel: ObservableObject {
         updatesTask?.cancel()
     }
 
-    var headerSubtitle: String {
-        switch source {
-        case .homeCreditButton, .settings:
-            "More moments. More stories."
-        case .insufficientCredits:
-            "You need a few more credits to keep creating."
-        }
-    }
-
     var currentBalanceText: String {
         guard let balance else {
             return "Loading credits..."
@@ -318,7 +309,6 @@ struct FrameMioProView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: FrameMioSpacing.xl) {
                 header
-                balanceCard
                 plansSection
                 benefitsSection
                 primaryActionSection
@@ -338,6 +328,7 @@ struct FrameMioProView: View {
         )
         .navigationTitle("FrameMio Pro")
         .navigationBarTitleDisplayMode(.inline)
+        .ignoresSafeArea(edges: .bottom)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button("Close") {
@@ -364,92 +355,35 @@ struct FrameMioProView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
-            Tag("FrameMio Pro", systemImage: "sparkles")
-            Text(viewModel.headerSubtitle)
-                .font(FrameMioTypography.screenTitle)
-                .foregroundStyle(FrameMioColors.ink)
-                .fixedSize(horizontal: false, vertical: true)
-            Text(viewModel.currentBalanceText)
-                .font(FrameMioTypography.body)
-                .foregroundStyle(FrameMioColors.secondaryInk)
-                .fixedSize(horizontal: false, vertical: true)
-            if let renewalText = viewModel.renewalText {
-                Text(renewalText)
-                    .font(FrameMioTypography.footnote)
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            heroImagePlaceholder
+
+            VStack(alignment: .leading, spacing: FrameMioSpacing.xs) {
+                Text(viewModel.currentBalanceText)
+                    .font(FrameMioTypography.body)
                     .foregroundStyle(FrameMioColors.secondaryInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let renewalText = viewModel.renewalText {
+                    Text(renewalText)
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                }
+                if let statusMessage = viewModel.statusMessage {
+                    Text(statusMessage)
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(FrameMioColors.accent)
+                }
             }
-            if let statusMessage = viewModel.statusMessage {
-                Text(statusMessage)
-                    .font(FrameMioTypography.footnote)
-                    .foregroundStyle(FrameMioColors.accent)
-            }
+            .padding(.horizontal, FrameMioSpacing.xs)
         }
-        .padding(FrameMioSpacing.xl)
-        .background(
-            FrameMioColors.surface.opacity(0.9),
-            in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
-                .stroke(FrameMioColors.divider.opacity(0.58), lineWidth: FrameMioMetrics.borderWidth)
-        }
-        .frameMioElevation(.subtle)
     }
 
-    private var balanceCard: some View {
-        VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
-            SectionHeader(title: "Credits", subtitle: "Used when you create or AI-edit stories")
-            HStack(spacing: FrameMioSpacing.md) {
-                VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
-                    Text("Generate Story")
-                        .font(FrameMioTypography.body)
-                        .foregroundStyle(FrameMioColors.ink)
-                    Text("40 credits")
-                        .font(FrameMioTypography.footnote)
-                        .foregroundStyle(FrameMioColors.secondaryInk)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: FrameMioSpacing.xxs) {
-                    Text("Add Moment")
-                        .font(FrameMioTypography.body)
-                        .foregroundStyle(FrameMioColors.ink)
-                    Text("20 credits")
-                        .font(FrameMioTypography.footnote)
-                        .foregroundStyle(FrameMioColors.secondaryInk)
-                }
-            }
-            HStack(spacing: FrameMioSpacing.md) {
-                VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
-                    Text("AI Edit Story")
-                        .font(FrameMioTypography.body)
-                        .foregroundStyle(FrameMioColors.ink)
-                    Text("20 credits")
-                        .font(FrameMioTypography.footnote)
-                        .foregroundStyle(FrameMioColors.secondaryInk)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: FrameMioSpacing.xxs) {
-                    Text("Free actions")
-                        .font(FrameMioTypography.body)
-                        .foregroundStyle(FrameMioColors.ink)
-                    Text("Music, captions, reorder, remove")
-                        .font(FrameMioTypography.footnote)
-                        .foregroundStyle(FrameMioColors.secondaryInk)
-                        .multilineTextAlignment(.trailing)
-                }
-            }
-        }
-        .padding(FrameMioSpacing.lg)
-        .background(
-            FrameMioColors.surface.opacity(0.82),
-            in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
-                .stroke(FrameMioColors.divider.opacity(0.58), lineWidth: FrameMioMetrics.borderWidth)
-        }
-        .frameMioElevation(.subtle)
+    private var heroImagePlaceholder: some View {
+        FrameMioBannerArtwork(assetName: "FrameMioProBanner")
+            .frame(maxWidth: .infinity)
+            .frame(height: 176)
+            .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
+            .accessibilityLabel("FrameMio Pro story image")
     }
 
     private var plansSection: some View {
@@ -599,5 +533,16 @@ struct FrameMioProView: View {
 private extension FrameMioProPlanKind {
     func displayPrice(using product: Product?, fallback: String) -> String {
         product?.displayPrice ?? fallback
+    }
+}
+
+struct FrameMioBannerArtwork: View {
+    let assetName: String
+
+    var body: some View {
+        Image(assetName)
+            .resizable()
+            .scaledToFill()
+            .accessibilityHidden(true)
     }
 }

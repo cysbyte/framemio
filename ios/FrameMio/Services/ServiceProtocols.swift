@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 protocol PhotoLibraryService: Sendable {
@@ -180,6 +181,7 @@ struct CreditBalance: Codable, Hashable, Sendable {
 enum PricingEntryPoint: String, Codable, Hashable, Identifiable, Sendable {
     case homeCreditButton
     case insufficientCredits
+    case profile
     case settings
 
     var id: String { rawValue }
@@ -241,6 +243,78 @@ struct CreditPricing {
 
 protocol CreditService: Sendable {
     func balance() async throws -> CreditBalance
+}
+
+@MainActor
+final class CreditBalanceStore: ObservableObject {
+    @Published private(set) var balance: CreditBalance?
+    @Published private(set) var isLoading = false
+    @Published private(set) var errorMessage: String?
+
+    private let creditService: CreditService?
+    private var refreshTask: Task<Void, Never>?
+
+    init(creditService: CreditService?) {
+        self.creditService = creditService
+    }
+
+    var availableCredits: Int? {
+        balance?.available
+    }
+
+    var compactTitle: String {
+        guard let availableCredits else {
+            return isLoading ? "✦ …" : "✦"
+        }
+        return "✦ \(availableCredits.formatted())"
+    }
+
+    var largeTitle: String {
+        guard let availableCredits else {
+            return isLoading ? "✦ Loading Credits" : "✦ Credits"
+        }
+        return "✦ \(availableCredits.formatted()) Credits"
+    }
+
+    var isLowOnCredits: Bool {
+        guard let availableCredits else { return false }
+        return availableCredits <= CreditPricing.lowBalanceThreshold
+    }
+
+    var compactAccessibilityLabel: String {
+        guard let availableCredits else {
+            return "Credits. Opens FrameMio Pro."
+        }
+        return "\(availableCredits) credits. Opens FrameMio Pro."
+    }
+
+    var largeAccessibilityLabel: String {
+        guard let availableCredits else {
+            return "Credit balance loading."
+        }
+        return "\(availableCredits) credits available."
+    }
+
+    func refresh() {
+        guard let creditService else { return }
+        refreshTask?.cancel()
+        refreshTask = Task { [weak self] in
+            guard let self else { return }
+            isLoading = true
+            defer { isLoading = false }
+            do {
+                balance = try await creditService.balance()
+                errorMessage = nil
+            } catch is CancellationError {
+            } catch {
+                errorMessage = AppError.from(error).localizedDescription
+            }
+        }
+    }
+
+    deinit {
+        refreshTask?.cancel()
+    }
 }
 
 protocol StoryService: Sendable {

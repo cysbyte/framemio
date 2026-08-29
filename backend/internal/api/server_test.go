@@ -1364,6 +1364,13 @@ func TestIOSStoryPresentationSuppressesGenericNames(t *testing.T) {
 	if got := iosMomentTitleIgnoringSubtitles(pollutedPlan.Moments[0], string(models.MediaTypeVideo), 0, iosCaptionTextMatchers(pollutedPlan.Captions)); got != "Family laughing near the lake" {
 		t.Fatalf("subtitle text leaked into moment title: %q", got)
 	}
+	metadataPollutedPlan := models.StoryPlan{Moments: []models.StoryMoment{{
+		Narrative: "Strong memory moment: transcript_segment_indexes 0 and 1 reference the strawberry spill and how funny it was.",
+		Reason:    "Family laughing about the strawberry spill by the lake",
+	}}}
+	if got := iosStoryDescription(metadataPollutedPlan); got != "Family laughing about the strawberry spill by the lake" {
+		t.Fatalf("technical grounding metadata leaked into story description: %q", got)
+	}
 	observationalPlan := models.StoryPlan{Moments: []models.StoryMoment{{
 		Narrative: "A woman and a young child sit on a red checkered picnic blanket by a lake, watching ducks on the water.",
 	}}}
@@ -1376,8 +1383,8 @@ func TestIOSStoryPresentationSuppressesGenericNames(t *testing.T) {
 	}
 	longMoment := strings.Repeat("lake picnic with friends ", 16)
 	longPlan := models.StoryPlan{Moments: []models.StoryMoment{{Narrative: longMoment}}}
-	if got := iosStoryDescription(longPlan); len(got) <= 220 || len(got) > 800 {
-		t.Fatalf("story description length = %d, want between legacy and max limits", len(got))
+	if got := iosStoryDescription(longPlan); len(got) <= 120 || len(got) > iosStoryDescriptionMaxLength || strings.HasSuffix(got, "...") || strings.HasSuffix(got, "…") {
+		t.Fatalf("story description = %q, want concise text within max length", got)
 	}
 }
 

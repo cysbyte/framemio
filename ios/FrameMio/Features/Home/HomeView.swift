@@ -5,25 +5,25 @@ import UIKit
 struct HomeView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var viewModel: HomeViewModel
+    @ObservedObject private var creditStore: CreditBalanceStore
     let onCreateStory: (MomentContext) -> Void
     let onOpenStory: (Story) -> Void
     let onOpenAllStories: () -> Void
-    let onOpenSettings: () -> Void
     let onOpenPricing: (PricingEntryPoint) -> Void
 
     init(
         viewModel: HomeViewModel,
+        creditStore: CreditBalanceStore,
         onCreateStory: @escaping (MomentContext) -> Void,
         onOpenStory: @escaping (Story) -> Void,
         onOpenAllStories: @escaping () -> Void,
-        onOpenSettings: @escaping () -> Void,
         onOpenPricing: @escaping (PricingEntryPoint) -> Void
     ) {
         _viewModel = ObservedObject(wrappedValue: viewModel)
+        _creditStore = ObservedObject(wrappedValue: creditStore)
         self.onCreateStory = onCreateStory
         self.onOpenStory = onOpenStory
         self.onOpenAllStories = onOpenAllStories
-        self.onOpenSettings = onOpenSettings
         self.onOpenPricing = onOpenPricing
     }
 
@@ -74,14 +74,13 @@ struct HomeView: View {
         .navigationTitle("FrameMio")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
+            ToolbarItem(placement: .topBarTrailing) {
                 creditButton
-                settingsButton
             }
         }
         .task {
             viewModel.load()
-            viewModel.refreshCreditBalance()
+            creditStore.refresh()
         }
         .refreshable { viewModel.load() }
         .animation(FrameMioAnimation.gentle(reduceMotion: reduceMotion), value: viewModel.isLoading)
@@ -102,41 +101,39 @@ struct HomeView: View {
         } label: {
             HStack(spacing: FrameMioSpacing.xs) {
                 Image(systemName: "sparkles")
-                    .font(.caption.weight(.semibold))
-                Text(viewModel.creditBalanceTitle)
-                    .font(FrameMioTypography.footnote.weight(.semibold))
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(FrameMioColors.inverseInk)
+                    .frame(width: 22, height: 22)
+                    .background(FrameMioColors.accent, in: Circle())
+                    .accessibilityHidden(true)
+                Text(creditStore.compactTitle)
+                    .font(FrameMioTypography.footnote.weight(.bold))
+                    .foregroundStyle(FrameMioColors.ink)
             }
-            .foregroundStyle(viewModel.isLowOnCredits ? FrameMioColors.accent : FrameMioColors.ink)
-            .padding(.horizontal, FrameMioSpacing.md)
+            .padding(.leading, FrameMioSpacing.xs)
+            .padding(.trailing, FrameMioSpacing.md)
             .frame(minHeight: FrameMioMetrics.minimumTouchTarget)
-            .background(
-                viewModel.isLowOnCredits
-                    ? FrameMioColors.accentMuted.opacity(0.8)
-                    : FrameMioColors.surface.opacity(0.78),
-                in: Capsule()
-            )
-            .overlay {
+            .background {
                 Capsule()
-                    .stroke(
-                        viewModel.isLowOnCredits ? FrameMioColors.accent.opacity(0.28) : FrameMioColors.divider.opacity(0.42),
-                        lineWidth: FrameMioMetrics.borderWidth
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                FrameMioColors.accentMuted.opacity(creditStore.isLowOnCredits ? 0.95 : 0.82),
+                                FrameMioColors.surface.opacity(0.96)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
             }
+            .overlay {
+                Capsule()
+                    .stroke(FrameMioColors.accent.opacity(creditStore.isLowOnCredits ? 0.52 : 0.36), lineWidth: FrameMioMetrics.borderWidth)
+            }
+            .shadow(color: FrameMioColors.accent.opacity(0.18), radius: 10, x: 0, y: 4)
         }
         .buttonStyle(FrameMioPressButtonStyle())
-        .accessibilityLabel(viewModel.creditBalanceAccessibilityLabel)
-    }
-
-    private var settingsButton: some View {
-        Button(action: onOpenSettings) {
-            Image(systemName: "gearshape")
-                .font(FrameMioTypography.headline)
-                .foregroundStyle(FrameMioColors.ink)
-                .frame(width: FrameMioMetrics.minimumTouchTarget, height: FrameMioMetrics.minimumTouchTarget)
-                .background(FrameMioColors.surface.opacity(0.78), in: Circle())
-                .accessibilityLabel("Settings")
-        }
-        .buttonStyle(FrameMioPressButtonStyle())
+        .accessibilityLabel(creditStore.compactAccessibilityLabel)
     }
 
     private var hero: some View {

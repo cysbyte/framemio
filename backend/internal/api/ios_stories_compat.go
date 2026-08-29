@@ -19,6 +19,7 @@ import (
 
 const iosMaxStoryUploadBytes int64 = 1_000_000_000
 const iosStoryVideoURLExpiry = 2 * time.Hour
+const iosStoryDescriptionMaxLength = 180
 
 type iosStory struct {
 	ID               string           `json:"id"`
@@ -340,7 +341,7 @@ func (s *Server) regenerateIOSStory(response http.ResponseWriter, request *http.
 		return
 	}
 	reservation.ID = ""
-	s.Logger.Info("queued iOS story regeneration", "user_id", user.ID, "project_id", project.ID, "job_id", job.ID, "job_status", string(job.Status), "story_plan_version", job.Configuration["story_plan_version"]) 
+	s.Logger.Info("queued iOS story regeneration", "user_id", user.ID, "project_id", project.ID, "job_id", job.ID, "job_status", string(job.Status), "story_plan_version", job.Configuration["story_plan_version"])
 	updated, err := s.Store.GetProject(request.Context(), user.ID, project.ID)
 	if err != nil {
 		s.mapStoreError(response, err)
@@ -384,7 +385,7 @@ func (s *Server) currentIOSStoryCreditStats(request *http.Request, userID, proje
 	plan, err := s.Store.GetStoryPlan(request.Context(), userID, projectID)
 	if err == nil {
 		stats.StoryMediaCount = len(plan.Moments)
-		stats.StoryVideoSeconds = max(0, int((time.Duration(plan.TotalDurationMS) * time.Millisecond) / time.Second))
+		stats.StoryVideoSeconds = max(0, int((time.Duration(plan.TotalDurationMS)*time.Millisecond)/time.Second))
 		return stats, nil
 	}
 	if !errors.Is(err, store.ErrNotFound) {
@@ -785,10 +786,27 @@ func configListCount(value string) int {
 }
 
 func truncateIOSConfigValue(value string, maxLength int) string {
+	if maxLength <= 0 {
+		return ""
+	}
 	if len(value) <= maxLength {
 		return value
 	}
-	return strings.TrimSpace(value[:maxLength])
+	truncated := make([]rune, 0, maxLength)
+	currentLength := 0
+	for _, char := range value {
+		charText := string(char)
+		if currentLength+len(charText) > maxLength {
+			break
+		}
+		truncated = append(truncated, char)
+		currentLength += len(charText)
+	}
+	text := strings.TrimSpace(string(truncated))
+	if cut := strings.LastIndexAny(text, " .,!?:;"); cut >= maxLength-24 {
+		text = strings.TrimSpace(text[:cut])
+	}
+	return strings.TrimRight(text, ".…")
 }
 
 func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Request) {
@@ -837,11 +855,11 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 		assetIDsByMediaID[item.media.ID] = item.asset.ID
 	}
 	stats := credits.StoryMediaStats{
-		PhotoCount:       countIOSStoryMedia(resolved, models.MediaTypePhoto, models.MediaTypeLivePhoto),
-		VideoCount:       countIOSStoryMedia(resolved, models.MediaTypeVideo),
-		TotalMediaCount:  len(resolved),
+		PhotoCount:        countIOSStoryMedia(resolved, models.MediaTypePhoto, models.MediaTypeLivePhoto),
+		VideoCount:        countIOSStoryMedia(resolved, models.MediaTypeVideo),
+		TotalMediaCount:   len(resolved),
 		TotalVideoSeconds: sumIOSStoryVideoSeconds(resolved),
-		TotalBytes:       totalBytes,
+		TotalBytes:        totalBytes,
 	}
 	reservation, ok := s.reserveIOSStoryCredits(response, request, user.ID, models.CreditActionCreateStory, projectID, stats, map[string]any{"context": input.Context, "asset_count": len(resolved)})
 	if !ok {
@@ -1116,7 +1134,7 @@ func iosStoryDescription(plan models.StoryPlan) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return truncateIOSConfigValue(strings.Join(parts, ". "), 800)
+	return truncateIOSConfigValue(strings.Join(parts, ". "), iosStoryDescriptionMaxLength)
 }
 
 func (s *Server) iosStoryMoments(request *http.Request, plan models.StoryPlan, mediaByID map[string]models.MediaAsset) []iosStoryMoment {
@@ -1279,12 +1297,12 @@ func iosHumanMomentTitle(value string) string {
 
 func iosHumanMomentText(value string) string {
 	trimmed := strings.TrimSpace(value)
-	if trimmed == "" || isGenericIOSMomentText(trimmed) {
+	if trimmed == "" || isGenericIOSMomentText(trimmed) || isTechnicalIOSMomentText(trimmed) {
 		return ""
 	}
 	trimmed = strings.Split(trimmed, " · cluster:")[0]
 	trimmed = strings.Trim(trimmed, " .")
-	if trimmed == "" || isGenericIOSMomentText(trimmed) {
+	if trimmed == "" || isGenericIOSMomentText(trimmed) || isTechnicalIOSMomentText(trimmed) {
 		return ""
 	}
 	return iosPersonalMemoryText(trimmed)
@@ -1395,6 +1413,29 @@ func isGenericIOSMomentText(value string) bool {
 	default:
 		return strings.HasPrefix(normalized, "photo moment ") || strings.HasPrefix(normalized, "video moment ") || strings.HasPrefix(normalized, "moment ")
 	}
+}
+
+func isTechnicalIOSMomentText(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+	technicalTokens := []string{
+		"transcript_segment_index",
+		"transcript_segment_indexes",
+		"transcript segment index",
+		"transcript segment indexes",
+		"frame_id",
+		"frame_ids",
+		"frame index",
+		"frame indexes",
+		"segment_id",
+		"scene_id",
+	}
+	for _, token := range technicalTokens {
+		if strings.Contains(normalized, token) {
+			return true
+		}
+	}
+	return false
 }
 
 func fallbackIOSMomentTitle(_ string, index int) string {
