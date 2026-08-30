@@ -683,7 +683,7 @@ final class StoryPreviewViewModel: ObservableObject {
         )
     }
 
-    private func videoCreationDate(for url: URL) async throws -> Date? {
+    nonisolated private func videoCreationDate(for url: URL) async throws -> Date? {
         let asset = AVURLAsset(url: url)
         let metadataItem = try await asset.load(.creationDate)
         return try await metadataItem?.load(.dateValue)

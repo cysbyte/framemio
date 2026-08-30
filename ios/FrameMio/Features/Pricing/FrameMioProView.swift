@@ -1,5 +1,9 @@
 import StoreKit
 import SwiftUI
+
+private func pricingDebugLog(_ message: @autoclosure () -> String) {
+    print("[FrameMio][Pricing] \(message())")
+}
 import UIKit
 
 enum FrameMioProPlanKind: String, CaseIterable, Identifiable, Sendable {
@@ -103,6 +107,18 @@ final class FrameMioProViewModel: ObservableObject {
         startTransactionUpdates()
     }
 
+    private var shouldSimulatePurchaseSuccess: Bool {
+        let environment = ProcessInfo.processInfo.environment["FRAMEMIO_SIMULATE_PURCHASE_SUCCESS"]?.lowercased()
+        if environment == "1" || environment == "true" || environment == "yes" {
+            return true
+        }
+#if DEBUG
+        return true
+#else
+        return false
+#endif
+    }
+
     deinit {
         loadTask?.cancel()
         updatesTask?.cancel()
@@ -135,61 +151,85 @@ final class FrameMioProViewModel: ObservableObject {
         loadTask = Task { [weak self] in
             guard let self else { return }
             isLoading = true
+            pricingDebugLog("load_start source=\(source.rawValue)")
             defer { isLoading = false }
             do {
-                async let productsTask = Product.products(for: FrameMioProCatalog.productIDs)
-                async let balanceTask: Void = fetchBalance()
-                let products = try await productsTask
-                monthlyProduct = products.first { $0.id == FrameMioProCatalog.monthlyProductID }
-                yearlyProduct = products.first { $0.id == FrameMioProCatalog.yearlyProductID }
-                _ = await balanceTask
-                await refreshEntitlements()
-                if selectedPlan == .yearly, yearlyProduct == nil, monthlyProduct != nil {
-                    selectedPlan = .monthly
-                } else if selectedPlan == .monthly, monthlyProduct == nil, yearlyProduct != nil {
-                    selectedPlan = .yearly
+                if shouldSimulatePurchaseSuccess {
+                    pricingDebugLog("load_debug_skip_storekit_products source=\(source.rawValue) simulated=\(shouldSimulatePurchaseSuccess)")
+                    monthlyProduct = nil
+                    yearlyProduct = nil
+                    _ = await fetchBalance()
+                    await refreshEntitlements()
+                    statusMessage = nil
+                    errorMessage = nil
+                    pricingDebugLog("load_complete_debug subscribed=\(isSubscribed) balance=\(balance.map(String.init) ?? "nil") renewal=\(renewalDate?.description ?? "nil")")
+                } else {
+                    async let productsTask = Product.products(for: FrameMioProCatalog.productIDs)
+                    async let balanceTask: Void = fetchBalance()
+                    let products = try await productsTask
+                    monthlyProduct = products.first { $0.id == FrameMioProCatalog.monthlyProductID }
+                    yearlyProduct = products.first { $0.id == FrameMioProCatalog.yearlyProductID }
+                    pricingDebugLog("load_products_loaded monthly=\(monthlyProduct != nil) yearly=\(yearlyProduct != nil)")
+                    _ = await balanceTask
+                    await refreshEntitlements()
+                    if selectedPlan == .yearly, yearlyProduct == nil, monthlyProduct != nil {
+                        selectedPlan = .monthly
+                    } else if selectedPlan == .monthly, monthlyProduct == nil, yearlyProduct != nil {
+                        selectedPlan = .yearly
+                    }
+                    statusMessage = nil
+                    errorMessage = nil
+                    pricingDebugLog("load_complete subscribed=\(isSubscribed) balance=\(balance.map(String.init) ?? "nil") renewal=\(renewalDate?.description ?? "nil")")
                 }
-                statusMessage = nil
-                errorMessage = nil
             } catch {
                 statusMessage = nil
+#if DEBUG
+                errorMessage = nil
+                pricingDebugLog("load_failed_debug suppressed_alert error=\(error.localizedDescription) mapped=\(AppError.from(error).localizedDescription)")
+#else
                 errorMessage = AppError.from(error).localizedDescription
+                pricingDebugLog("load_failed error=\(error.localizedDescription) mapped=\(AppError.from(error).localizedDescription)")
+#endif
             }
         }
     }
 
     func purchaseSelectedPlan() {
         guard !isPurchasing else { return }
-        guard let product = product(for: selectedPlan) else {
-            errorMessage = "Loading plans..."
-            return
-        }
         isPurchasing = true
         errorMessage = nil
         statusMessage = "Processing your purchase..."
+        pricingDebugLog("purchase_tapped plan=\(selectedPlan.rawValue) source=\(source.rawValue) debug_success=\(shouldSimulatePurchaseSuccess)")
         Task { [weak self] in
             guard let self else { return }
             defer { isPurchasing = false }
-            do {
-                let result = try await product.purchase()
-                switch result {
-                case let .success(verificationResult):
-                    let transaction = try verifiedTransaction(from: verificationResult)
-                    await transaction.finish()
-                    await refreshEntitlements()
-                    await fetchBalance()
-                    onBalanceUpdated()
-                    statusMessage = isSubscribed ? "FrameMio Pro is active." : "Purchase completed."
-                case .pending:
-                    statusMessage = "Purchase pending approval."
-                case .userCancelled:
+            if shouldSimulatePurchaseSuccess {
+                pricingDebugLog("simulate_purchase_success plan=\(selectedPlan.rawValue) source=\(source.rawValue) simulated=\(shouldSimulatePurchaseSuccess)")
+                await completePurchaseSuccess(statusMessage: "Debug purchase completed.")
+            } else {
+                guard let product = product(for: selectedPlan) else {
+                    errorMessage = "Loading plans..."
                     statusMessage = nil
-                @unknown default:
-                    statusMessage = "Purchase could not be completed."
+                    return
                 }
-            } catch {
-                errorMessage = AppError.from(error).localizedDescription
-                statusMessage = nil
+                do {
+                    let result = try await product.purchase()
+                    switch result {
+                    case let .success(verificationResult):
+                        let transaction = try verifiedTransaction(from: verificationResult)
+                        await transaction.finish()
+                        await completePurchaseSuccess(statusMessage: isSubscribed ? "FrameMio Pro is active." : "Purchase completed.")
+                    case .pending:
+                        statusMessage = "Purchase pending approval."
+                    case .userCancelled:
+                        statusMessage = nil
+                    @unknown default:
+                        statusMessage = "Purchase could not be completed."
+                    }
+                } catch {
+                    errorMessage = AppError.from(error).localizedDescription
+                    statusMessage = nil
+                }
             }
         }
     }
@@ -199,6 +239,7 @@ final class FrameMioProViewModel: ObservableObject {
         isRestoring = true
         errorMessage = nil
         statusMessage = "Restoring purchases..."
+        pricingDebugLog("restore_tapped source=\(source.rawValue)")
         Task { [weak self] in
             guard let self else { return }
             defer { isRestoring = false }
@@ -208,9 +249,11 @@ final class FrameMioProViewModel: ObservableObject {
                 await fetchBalance()
                 onBalanceUpdated()
                 statusMessage = "Purchases restored."
+                pricingDebugLog("restore_complete subscribed=\(isSubscribed) balance=\(balance.map(String.init) ?? "nil")")
             } catch {
                 errorMessage = AppError.from(error).localizedDescription
                 statusMessage = nil
+                pricingDebugLog("restore_failed error=\(error.localizedDescription) mapped=\(AppError.from(error).localizedDescription)")
             }
         }
     }
@@ -241,6 +284,7 @@ final class FrameMioProViewModel: ObservableObject {
     private func refreshEntitlements() async {
         var activeSubscriptionDate: Date?
         var subscriptionActive = false
+        pricingDebugLog("refresh_entitlements_start")
         for await result in Transaction.currentEntitlements {
             guard let transaction = try? verifiedTransaction(from: result) else { continue }
             guard FrameMioProCatalog.productIDs.contains(transaction.productID), transaction.revocationDate == nil else {
@@ -257,6 +301,7 @@ final class FrameMioProViewModel: ObservableObject {
         }
         isSubscribed = subscriptionActive
         renewalDate = activeSubscriptionDate
+        pricingDebugLog("refresh_entitlements_complete subscribed=\(subscriptionActive) renewal=\(activeSubscriptionDate?.description ?? "nil")")
     }
 
     private func fetchBalance() async {
@@ -264,14 +309,27 @@ final class FrameMioProViewModel: ObservableObject {
         do {
             let creditBalance = try await creditService.balance()
             balance = creditBalance.available
+            pricingDebugLog("fetch_balance_complete balance=\(creditBalance.available) reserved=\(creditBalance.reserved)")
         } catch {
+            pricingDebugLog("fetch_balance_failed error=\(error.localizedDescription)")
         }
+    }
+
+    private func completePurchaseSuccess(statusMessage: String) async {
+        pricingDebugLog("complete_purchase_success_start")
+        await refreshEntitlements()
+        await fetchBalance()
+        onBalanceUpdated()
+        errorMessage = nil
+        self.statusMessage = statusMessage
+        pricingDebugLog("complete_purchase_success_complete subscribed=\(isSubscribed) balance=\(balance.map(String.init) ?? "nil")")
     }
 
     private func startTransactionUpdates() {
         updatesTask?.cancel()
         updatesTask = Task { [weak self] in
             guard let self else { return }
+            pricingDebugLog("transaction_updates_listener_started")
             for await result in Transaction.updates {
                 guard let transaction = try? verifiedTransaction(from: result) else { continue }
                 guard FrameMioProCatalog.productIDs.contains(transaction.productID), transaction.revocationDate == nil else {
@@ -281,6 +339,7 @@ final class FrameMioProViewModel: ObservableObject {
                 await refreshEntitlements()
                 await fetchBalance()
                 onBalanceUpdated()
+                pricingDebugLog("transaction_update_applied product=\(transaction.productID)")
             }
         }
     }
@@ -289,6 +348,7 @@ final class FrameMioProViewModel: ObservableObject {
 struct FrameMioProView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: FrameMioProViewModel
+    @State private var didLogLayout = false
     private let onClose: () -> Void
 
     init(
@@ -308,17 +368,31 @@ struct FrameMioProView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: FrameMioSpacing.xl) {
-                header
-                plansSection
-                benefitsSection
-                primaryActionSection
-                restoreAction
-                footer
+        GeometryReader { proxy in
+            let contentWidth = max(proxy.size.width - FrameMioSpacing.lg * 2, 0)
+            let cardWidth = max(contentWidth - FrameMioSpacing.md, 0)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: FrameMioSpacing.xl) {
+                    header(cardWidth: cardWidth)
+                    plansSection(cardWidth: cardWidth)
+                    primaryActionSection
+                    restoreAction
+                    footer
+                }
+                .padding(.vertical, FrameMioSpacing.lg)
+                .padding(.bottom, FrameMioSpacing.xxxl)
+                .frame(width: contentWidth, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
             }
-            .padding(FrameMioSpacing.lg)
-            .padding(.bottom, FrameMioSpacing.xxxl)
+                .background {
+                    Color.clear
+                        .onAppear {
+                            guard !didLogLayout else { return }
+                            didLogLayout = true
+                            pricingDebugLog("screen_appear width=\(Int(proxy.size.width)) height=\(Int(proxy.size.height)) safe_area_leading=\(Int(proxy.safeAreaInsets.leading)) safe_area_trailing=\(Int(proxy.safeAreaInsets.trailing)) content_width=\(Int(contentWidth)) card_width=\(Int(cardWidth))")
+                        }
+            }
         }
         .background(
             LinearGradient(
@@ -354,11 +428,14 @@ struct FrameMioProView: View {
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
+        .onChange(of: viewModel.errorMessage) { _, newValue in
+            pricingDebugLog("error_message_changed value=\(newValue ?? "nil")")
+        }
     }
 
-    private var header: some View {
+    private func header(cardWidth: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            heroImagePlaceholder
+            heroImagePlaceholder(width: cardWidth)
 
             VStack(alignment: .leading, spacing: FrameMioSpacing.xs) {
                 Text(viewModel.currentBalanceText)
@@ -380,25 +457,34 @@ struct FrameMioProView: View {
         }
     }
 
-    private var heroImagePlaceholder: some View {
+    private func heroImagePlaceholder(width: CGFloat) -> some View {
         FrameMioBannerArtwork(assetName: "FrameMioProBanner")
-            .frame(maxWidth: .infinity)
+            .frame(width: width)
             .frame(height: 176)
+            .frame(maxWidth: .infinity, alignment: .center)
             .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear {
+                            pricingDebugLog("hero_banner width=\(Int(proxy.size.width)) height=\(Int(proxy.size.height))")
+                        }
+                }
+            }
             .accessibilityLabel("FrameMio Pro story image")
     }
 
-    private var plansSection: some View {
+    private func plansSection(cardWidth: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
             SectionHeader(title: "Choose your plan", subtitle: "Cancel anytime in App Store settings")
             VStack(spacing: FrameMioSpacing.md) {
-                planCard(for: .yearly)
-                planCard(for: .monthly)
+                planCard(for: .yearly, cardWidth: cardWidth)
+                planCard(for: .monthly, cardWidth: cardWidth)
             }
         }
     }
 
-    private func planCard(for plan: FrameMioProPlanKind) -> some View {
+    private func planCard(for plan: FrameMioProPlanKind, cardWidth: CGFloat) -> some View {
         let isSelected = viewModel.selectedPlan == plan
         return Button {
             viewModel.selectedPlan = plan
@@ -435,7 +521,8 @@ struct FrameMioProView: View {
                 }
             }
             .padding(FrameMioSpacing.lg)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(width: cardWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
             .background(
                 isSelected ? FrameMioColors.accentMuted.opacity(0.7) : FrameMioColors.surface.opacity(0.82),
                 in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
@@ -445,35 +532,17 @@ struct FrameMioProView: View {
                     .stroke(isSelected ? FrameMioColors.accent.opacity(0.38) : FrameMioColors.divider.opacity(0.58), lineWidth: FrameMioMetrics.borderWidth)
             }
             .frameMioElevation(.subtle)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear {
+                            pricingDebugLog("plan_card=\(plan.rawValue) width=\(Int(proxy.size.width)) height=\(Int(proxy.size.height)) selected=\(isSelected)")
+                        }
+                }
+            }
         }
         .buttonStyle(FrameMioPressButtonStyle())
         .accessibilityLabel("\(plan.title) plan")
-    }
-
-    private var benefitsSection: some View {
-        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            SectionHeader(title: "What’s included", subtitle: "Premium tools for making stories faster")
-            VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
-                benefitRow("AI Story Creation")
-                benefitRow("Automatic Video Editing")
-                benefitRow("AI Captions")
-                benefitRow("Background Music")
-                benefitRow("HD Export")
-                benefitRow("Story Editing")
-            }
-        }
-    }
-
-    private func benefitRow(_ title: String) -> some View {
-        HStack(spacing: FrameMioSpacing.sm) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(FrameMioColors.accent)
-            Text(title)
-                .font(FrameMioTypography.body)
-                .foregroundStyle(FrameMioColors.ink)
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, FrameMioSpacing.xxs)
     }
 
     private var primaryActionSection: some View {
@@ -485,7 +554,7 @@ struct FrameMioProView: View {
                     viewModel.purchaseSelectedPlan()
                 }
             }
-            .disabled(viewModel.isPurchasing || viewModel.isLoading || viewModel.isRestoring)
+            .disabled(viewModel.isPurchasing || viewModel.isRestoring)
 
             if viewModel.isPurchasing {
                 Text("Processing your purchase…")

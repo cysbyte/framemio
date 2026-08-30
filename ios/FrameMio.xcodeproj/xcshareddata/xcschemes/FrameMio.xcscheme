@@ -81,6 +81,11 @@
             value = "YES"
             isEnabled = "YES">
          </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "FRAMEMIO_SIMULATE_PURCHASE_SUCCESS"
+            value = "1"
+            isEnabled = "YES">
+         </EnvironmentVariable>
       </EnvironmentVariables>
    </LaunchAction>
    <ProfileAction
