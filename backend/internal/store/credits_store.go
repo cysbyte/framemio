@@ -49,6 +49,103 @@ func creditLedgerKey(entry models.CreditLedgerEntry) string {
 	return strings.Join([]string{entry.ReferenceType, entry.ReferenceID, string(entry.Type), string(entry.Action)}, ":")
 }
 
+func normalizeCreditBalance(balance models.CreditBalance) models.CreditBalance {
+	if balance.SubscriptionCredits == 0 && balance.PurchasedCredits == 0 && (balance.Available > 0 || balance.Reserved > 0) {
+		balance.PurchasedCredits = balance.Available
+		balance.PurchasedReserved = balance.Reserved
+	}
+	balance.Available = balance.SubscriptionCredits + balance.PurchasedCredits
+	balance.Reserved = balance.SubscriptionReserved + balance.PurchasedReserved
+	balance.TotalCredits = balance.Available
+	return balance
+}
+
+func legacyCreditBalance(balance models.CreditBalance) models.CreditBalance {
+	if balance.SubscriptionCredits == 0 && balance.PurchasedCredits == 0 && (balance.Available > 0 || balance.Reserved > 0) {
+		balance.PurchasedCredits = balance.Available
+		balance.PurchasedReserved = balance.Reserved
+	}
+	return normalizeCreditBalance(balance)
+}
+
+func persistentCreditSource() models.CreditGrantSource {
+	return models.CreditGrantSourceCreditPurchase
+}
+
+func creditReservationAllocations(balance models.CreditBalance, amount int) (models.CreditBalance, []models.CreditReservationAllocation, error) {
+	if amount < 0 {
+		return models.CreditBalance{}, nil, fmt.Errorf("reservation amount must be non-negative")
+	}
+	balance = legacyCreditBalance(balance)
+	if balance.Available < amount {
+		return models.CreditBalance{}, nil, ErrInsufficientCredits
+	}
+	remaining := amount
+	allocations := make([]models.CreditReservationAllocation, 0, 2)
+	subscriptionAllocation := min(balance.SubscriptionCredits, remaining)
+	if subscriptionAllocation > 0 {
+		balance.SubscriptionCredits -= subscriptionAllocation
+		balance.SubscriptionReserved += subscriptionAllocation
+		remaining -= subscriptionAllocation
+		allocations = append(allocations, models.CreditReservationAllocation{Source: models.CreditGrantSourceSubscriptionCycle, Amount: subscriptionAllocation})
+	}
+	if remaining > 0 {
+		persistentAllocation := min(balance.PurchasedCredits, remaining)
+		if persistentAllocation < remaining {
+			return models.CreditBalance{}, nil, ErrInsufficientCredits
+		}
+		balance.PurchasedCredits -= persistentAllocation
+		balance.PurchasedReserved += persistentAllocation
+		remaining -= persistentAllocation
+		allocations = append(allocations, models.CreditReservationAllocation{Source: persistentCreditSource(), Amount: persistentAllocation})
+	}
+	return normalizeCreditBalance(balance), allocations, nil
+}
+
+func reservationAllocationsForBalance(balance models.CreditBalance, reservation models.CreditReservation) []models.CreditReservationAllocation {
+	if len(reservation.Allocations) > 0 {
+		return reservation.Allocations
+	}
+	balance = legacyCreditBalance(balance)
+	remaining := reservation.Amount
+	allocations := make([]models.CreditReservationAllocation, 0, 2)
+	purchasedAllocation := min(balance.PurchasedReserved, remaining)
+	if purchasedAllocation > 0 {
+		allocations = append(allocations, models.CreditReservationAllocation{Source: models.CreditGrantSourceCreditPurchase, Amount: purchasedAllocation})
+		remaining -= purchasedAllocation
+	}
+	if remaining > 0 {
+		allocations = append(allocations, models.CreditReservationAllocation{Source: models.CreditGrantSourceSubscriptionCycle, Amount: remaining})
+	}
+	return allocations
+}
+
+func releaseCreditReservationAllocations(balance models.CreditBalance, allocations []models.CreditReservationAllocation) models.CreditBalance {
+	for _, allocation := range allocations {
+		switch allocation.Source {
+		case models.CreditGrantSourceSubscriptionCycle:
+			balance.SubscriptionReserved -= allocation.Amount
+			balance.SubscriptionCredits += allocation.Amount
+		default:
+			balance.PurchasedReserved -= allocation.Amount
+			balance.PurchasedCredits += allocation.Amount
+		}
+	}
+	return normalizeCreditBalance(balance)
+}
+
+func commitCreditReservationAllocations(balance models.CreditBalance, allocations []models.CreditReservationAllocation) models.CreditBalance {
+	for _, allocation := range allocations {
+		switch allocation.Source {
+		case models.CreditGrantSourceSubscriptionCycle:
+			balance.SubscriptionReserved -= allocation.Amount
+		default:
+			balance.PurchasedReserved -= allocation.Amount
+		}
+	}
+	return normalizeCreditBalance(balance)
+}
+
 func (s *MemoryStore) ensureCreditMaps() {
 	if s.creditAccounts == nil {
 		s.creditAccounts = make(map[string]models.CreditBalance)
@@ -76,7 +173,7 @@ func (s *MemoryStore) GetCreditBalance(_ context.Context, userID string) (models
 	if s.creditAccounts == nil {
 		return models.CreditBalance{}, nil
 	}
-	return s.creditAccounts[userID], nil
+	return normalizeCreditBalance(s.creditAccounts[userID]), nil
 }
 
 func (s *MemoryStore) EnsureCreditGrant(_ context.Context, grant models.CreditGrant) (models.CreditGrant, bool, error) {
@@ -99,9 +196,17 @@ func (s *MemoryStore) EnsureCreditGrant(_ context.Context, grant models.CreditGr
 	if grant.GrantedAt.IsZero() {
 		grant.GrantedAt = time.Now().UTC()
 	}
-	balance := s.creditAccounts[grant.UserID]
-	balance.Available += grant.Remaining
-	s.creditAccounts[grant.UserID] = balance
+	balance := normalizeCreditBalance(s.creditAccounts[grant.UserID])
+	switch grant.Source {
+	case models.CreditGrantSourceSubscriptionCycle:
+		balance.SubscriptionCredits = grant.Remaining
+		balance.SubscriptionReserved = 0
+		balance.SubscriptionCycleID = grant.SubscriptionCycleID
+		balance.SubscriptionCycleExpiresAt = grant.ExpiresAt
+	default:
+		balance.PurchasedCredits += grant.Remaining
+	}
+	s.creditAccounts[grant.UserID] = normalizeCreditBalance(balance)
 	s.creditGrants[grant.ID] = grant
 	s.creditGrantByReference[key] = grant.ID
 	s.creditLedger[grant.UserID] = append(s.creditLedger[grant.UserID], models.CreditLedgerEntry{
@@ -110,6 +215,7 @@ func (s *MemoryStore) EnsureCreditGrant(_ context.Context, grant models.CreditGr
 		Amount:        grant.Amount,
 		Type:          models.CreditLedgerEntryTypeGrant,
 		Action:        models.CreditActionCreateStory,
+		Source:        grant.Source,
 		ReferenceType: string(grant.Source),
 		ReferenceID:   grant.ReferenceID,
 		CreatedAt:     grant.GrantedAt,
@@ -129,15 +235,19 @@ func (s *MemoryStore) ReserveCredits(_ context.Context, reservation models.Credi
 	if reservation.ID == "" {
 		reservation.ID = models.NewID("credit-reservation")
 	}
-	balance := s.creditAccounts[reservation.UserID]
+	balance := normalizeCreditBalance(s.creditAccounts[reservation.UserID])
 	if balance.Available < reservation.Amount {
 		return models.CreditReservation{}, false, ErrInsufficientCredits
 	}
-	balance.Available -= reservation.Amount
-	balance.Reserved += reservation.Amount
+	updatedBalance, allocations, err := creditReservationAllocations(balance, reservation.Amount)
+	if err != nil {
+		return models.CreditReservation{}, false, err
+	}
+	balance = updatedBalance
 	s.creditAccounts[reservation.UserID] = balance
 	now := time.Now().UTC()
 	reservation.State = models.CreditReservationStateReserved
+	reservation.Allocations = allocations
 	if reservation.CreatedAt.IsZero() {
 		reservation.CreatedAt = now
 	}
@@ -188,11 +298,11 @@ func (s *MemoryStore) CommitCreditReservation(_ context.Context, userID, reserva
 	case models.CreditReservationStateReleased, models.CreditReservationStateCancelled:
 		return models.CreditReservation{}, ErrConflict
 	}
-	balance := s.creditAccounts[userID]
+	balance := normalizeCreditBalance(s.creditAccounts[userID])
 	if balance.Reserved < reservation.Amount {
 		return models.CreditReservation{}, ErrConflict
 	}
-	balance.Reserved -= reservation.Amount
+	balance = commitCreditReservationAllocations(balance, reservationAllocationsForBalance(balance, reservation))
 	s.creditAccounts[userID] = balance
 	now := time.Now().UTC()
 	reservation.State = models.CreditReservationStateConsumed
@@ -205,6 +315,7 @@ func (s *MemoryStore) CommitCreditReservation(_ context.Context, userID, reserva
 		Amount:        -reservation.Amount,
 		Type:          models.CreditLedgerEntryTypeConsume,
 		Action:        reservation.Action,
+		Allocations:   append([]models.CreditReservationAllocation(nil), reservation.Allocations...),
 		ReferenceType: reservation.ReferenceType,
 		ReferenceID:   reservation.ReferenceID,
 		CreatedAt:     now,
@@ -227,12 +338,11 @@ func (s *MemoryStore) ReleaseCreditReservation(_ context.Context, userID, reserv
 	case models.CreditReservationStateConsumed:
 		return models.CreditReservation{}, ErrConflict
 	}
-	balance := s.creditAccounts[userID]
+	balance := normalizeCreditBalance(s.creditAccounts[userID])
 	if balance.Reserved < reservation.Amount {
 		return models.CreditReservation{}, ErrConflict
 	}
-	balance.Reserved -= reservation.Amount
-	balance.Available += reservation.Amount
+	balance = releaseCreditReservationAllocations(balance, reservationAllocationsForBalance(balance, reservation))
 	s.creditAccounts[userID] = balance
 	now := time.Now().UTC()
 	reservation.State = models.CreditReservationStateReleased
@@ -245,6 +355,7 @@ func (s *MemoryStore) ReleaseCreditReservation(_ context.Context, userID, reserv
 		Amount:        reservation.Amount,
 		Type:          models.CreditLedgerEntryTypeRelease,
 		Action:        reservation.Action,
+		Allocations:   append([]models.CreditReservationAllocation(nil), reservation.Allocations...),
 		ReferenceType: reservation.ReferenceType,
 		ReferenceID:   reservation.ReferenceID,
 		CreatedAt:     now,
@@ -279,7 +390,7 @@ func (s *PostgresStore) GetCreditBalance(ctx context.Context, userID string) (mo
 	if err := json.Unmarshal(data, &balance); err != nil {
 		return models.CreditBalance{}, fmt.Errorf("decode credit balance: %w", err)
 	}
-	return balance, nil
+	return normalizeCreditBalance(balance), nil
 }
 
 func (s *PostgresStore) EnsureCreditGrant(ctx context.Context, grant models.CreditGrant) (models.CreditGrant, bool, error) {
@@ -320,7 +431,16 @@ func (s *PostgresStore) EnsureCreditGrant(ctx context.Context, grant models.Cred
 	if err != nil {
 		return models.CreditGrant{}, false, err
 	}
-	balance.Available += grant.Remaining
+	balance = normalizeCreditBalance(balance)
+	switch grant.Source {
+	case models.CreditGrantSourceSubscriptionCycle:
+		balance.SubscriptionCredits = grant.Remaining
+		balance.SubscriptionReserved = 0
+		balance.SubscriptionCycleID = grant.SubscriptionCycleID
+		balance.SubscriptionCycleExpiresAt = grant.ExpiresAt
+	default:
+		balance.PurchasedCredits += grant.Remaining
+	}
 	if err := saveCreditBalanceTx(ctx, tx, grant.UserID, balance); err != nil {
 		return models.CreditGrant{}, false, err
 	}
@@ -337,6 +457,7 @@ func (s *PostgresStore) EnsureCreditGrant(ctx context.Context, grant models.Cred
 		Amount:        grant.Amount,
 		Type:          models.CreditLedgerEntryTypeGrant,
 		Action:        models.CreditActionCreateStory,
+		Source:        grant.Source,
 		ReferenceType: string(grant.Source),
 		ReferenceID:   grant.ReferenceID,
 		CreatedAt:     grant.GrantedAt,
@@ -380,11 +501,15 @@ func (s *PostgresStore) ReserveCredits(ctx context.Context, reservation models.C
 	if err != nil {
 		return models.CreditReservation{}, false, err
 	}
+	balance = normalizeCreditBalance(balance)
 	if balance.Available < reservation.Amount {
 		return models.CreditReservation{}, false, ErrInsufficientCredits
 	}
-	balance.Available -= reservation.Amount
-	balance.Reserved += reservation.Amount
+	updatedBalance, allocations, err := creditReservationAllocations(balance, reservation.Amount)
+	if err != nil {
+		return models.CreditReservation{}, false, err
+	}
+	balance = updatedBalance
 	if err := saveCreditBalanceTx(ctx, tx, reservation.UserID, balance); err != nil {
 		return models.CreditReservation{}, false, err
 	}
@@ -393,6 +518,7 @@ func (s *PostgresStore) ReserveCredits(ctx context.Context, reservation models.C
 	}
 	now := time.Now().UTC()
 	reservation.State = models.CreditReservationStateReserved
+	reservation.Allocations = allocations
 	if reservation.CreatedAt.IsZero() {
 		reservation.CreatedAt = now
 	}
@@ -437,12 +563,12 @@ func (s *PostgresStore) CommitCreditReservation(ctx context.Context, userID, res
 		if balance.Reserved < reservation.Amount {
 			return models.CreditReservation{}, balance, models.CreditLedgerEntry{}, ErrConflict
 		}
-		balance.Reserved -= reservation.Amount
+		balance = commitCreditReservationAllocations(balance, reservationAllocationsForBalance(balance, reservation))
 		now := time.Now().UTC()
 		reservation.State = models.CreditReservationStateConsumed
 		reservation.ConsumedAt = &now
 		reservation.UpdatedAt = now
-		ledger := models.CreditLedgerEntry{ID: reservation.ID + ":consume", UserID: reservation.UserID, Amount: -reservation.Amount, Type: models.CreditLedgerEntryTypeConsume, Action: reservation.Action, ReferenceType: reservation.ReferenceType, ReferenceID: reservation.ReferenceID, CreatedAt: now, Metadata: reservation.Metadata}
+		ledger := models.CreditLedgerEntry{ID: reservation.ID + ":consume", UserID: reservation.UserID, Amount: -reservation.Amount, Type: models.CreditLedgerEntryTypeConsume, Action: reservation.Action, Allocations: append([]models.CreditReservationAllocation(nil), reservation.Allocations...), ReferenceType: reservation.ReferenceType, ReferenceID: reservation.ReferenceID, CreatedAt: now, Metadata: reservation.Metadata}
 		return reservation, balance, ledger, nil
 	})
 }
@@ -458,13 +584,12 @@ func (s *PostgresStore) ReleaseCreditReservation(ctx context.Context, userID, re
 		if balance.Reserved < reservation.Amount {
 			return models.CreditReservation{}, balance, models.CreditLedgerEntry{}, ErrConflict
 		}
-		balance.Reserved -= reservation.Amount
-		balance.Available += reservation.Amount
+		balance = releaseCreditReservationAllocations(balance, reservationAllocationsForBalance(balance, reservation))
 		now := time.Now().UTC()
 		reservation.State = models.CreditReservationStateReleased
 		reservation.ReleasedAt = &now
 		reservation.UpdatedAt = now
-		ledger := models.CreditLedgerEntry{ID: reservation.ID + ":release", UserID: reservation.UserID, Amount: reservation.Amount, Type: models.CreditLedgerEntryTypeRelease, Action: reservation.Action, ReferenceType: reservation.ReferenceType, ReferenceID: reservation.ReferenceID, CreatedAt: now, Metadata: reservation.Metadata}
+		ledger := models.CreditLedgerEntry{ID: reservation.ID + ":release", UserID: reservation.UserID, Amount: reservation.Amount, Type: models.CreditLedgerEntryTypeRelease, Action: reservation.Action, Allocations: append([]models.CreditReservationAllocation(nil), reservation.Allocations...), ReferenceType: reservation.ReferenceType, ReferenceID: reservation.ReferenceID, CreatedAt: now, Metadata: reservation.Metadata}
 		return reservation, balance, ledger, nil
 	})
 }

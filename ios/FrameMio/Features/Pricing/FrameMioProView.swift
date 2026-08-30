@@ -203,10 +203,10 @@ final class FrameMioProViewModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             defer { isPurchasing = false }
-            if shouldSimulatePurchaseSuccess {
+            #if DEBUG
                 pricingDebugLog("simulate_purchase_success plan=\(selectedPlan.rawValue) source=\(source.rawValue) simulated=\(shouldSimulatePurchaseSuccess)")
                 await completePurchaseSuccess(statusMessage: "Debug purchase completed.")
-            } else {
+            #else
                 guard let product = product(for: selectedPlan) else {
                     errorMessage = "Loading plans..."
                     statusMessage = nil
@@ -230,7 +230,7 @@ final class FrameMioProViewModel: ObservableObject {
                     errorMessage = AppError.from(error).localizedDescription
                     statusMessage = nil
                 }
-            }
+            #endif
         }
     }
 

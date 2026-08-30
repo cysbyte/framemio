@@ -70,6 +70,48 @@ func (s *Service) EnsureInitialGrant(ctx context.Context, userID string) (models
 	})
 }
 
+func (s *Service) EnsureCreditGrant(ctx context.Context, grant models.CreditGrant) (models.CreditGrant, bool, error) {
+	if s == nil || s.Store == nil {
+		return models.CreditGrant{}, false, fmt.Errorf("credit service is not configured")
+	}
+	if grant.GrantedAt.IsZero() {
+		grant.GrantedAt = s.Now().UTC()
+	}
+	if grant.ID == "" {
+		grant.ID = models.NewID("credit-grant")
+	}
+	if grant.Remaining <= 0 {
+		grant.Remaining = grant.Amount
+	}
+	return s.Store.EnsureCreditGrant(ctx, grant)
+}
+
+func (s *Service) GrantSubscriptionCycle(ctx context.Context, userID, cycleID string, amount int, expiresAt *time.Time, metadata map[string]any) (models.CreditGrant, bool, error) {
+	return s.EnsureCreditGrant(ctx, models.CreditGrant{
+		UserID:              userID,
+		Source:              models.CreditGrantSourceSubscriptionCycle,
+		Amount:              amount,
+		Remaining:           amount,
+		GrantedAt:           s.Now().UTC(),
+		ExpiresAt:           expiresAt,
+		SubscriptionCycleID: cycleID,
+		ReferenceID:         cycleID,
+		Metadata:            metadata,
+	})
+}
+
+func (s *Service) GrantPurchasedCredits(ctx context.Context, userID, purchaseID string, amount int, metadata map[string]any) (models.CreditGrant, bool, error) {
+	return s.EnsureCreditGrant(ctx, models.CreditGrant{
+		UserID:      userID,
+		Source:      models.CreditGrantSourceCreditPurchase,
+		Amount:      amount,
+		Remaining:   amount,
+		GrantedAt:   s.Now().UTC(),
+		ReferenceID: purchaseID,
+		Metadata:    metadata,
+	})
+}
+
 func (s *Service) Reserve(ctx context.Context, userID string, action models.CreditAction, referenceType, referenceID string, stats StoryMediaStats, metadata map[string]any) (models.CreditReservation, models.CreditQuote, error) {
 	quote, err := s.Quote(ctx, userID, action, stats)
 	if err != nil {

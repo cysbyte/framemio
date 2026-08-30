@@ -49,6 +49,7 @@ const (
 	CreditLedgerEntryTypeGrant    CreditLedgerEntryType = "GRANT"
 	CreditLedgerEntryTypeConsume  CreditLedgerEntryType = "CONSUME"
 	CreditLedgerEntryTypeRelease  CreditLedgerEntryType = "RELEASE"
+	CreditLedgerEntryTypeExpire   CreditLedgerEntryType = "EXPIRE"
 	CreditLedgerEntryTypeAdjust   CreditLedgerEntryType = "ADJUST"
 	CreditLedgerEntryTypeReversal CreditLedgerEntryType = "REVERSAL"
 	CreditLedgerEntryTypeTransfer CreditLedgerEntryType = "TRANSFER"
@@ -64,8 +65,15 @@ const (
 )
 
 type CreditBalance struct {
-	Available int `json:"available"`
-	Reserved  int `json:"reserved"`
+	Available                 int        `json:"available"`
+	Reserved                  int        `json:"reserved"`
+	SubscriptionCredits       int        `json:"subscription_credits"`
+	PurchasedCredits          int        `json:"purchased_credits"`
+	SubscriptionReserved      int        `json:"subscription_reserved,omitempty"`
+	PurchasedReserved         int        `json:"purchased_reserved,omitempty"`
+	SubscriptionCycleID       string     `json:"subscription_cycle_id,omitempty"`
+	SubscriptionCycleExpiresAt *time.Time `json:"subscription_cycle_expires_at,omitempty"`
+	TotalCredits              int        `json:"total_credits"`
 }
 
 type CreditQuote struct {
@@ -91,8 +99,9 @@ type CreditGrant struct {
 }
 
 type CreditReservationAllocation struct {
-	GrantID string `json:"grant_id"`
-	Amount  int    `json:"amount"`
+	GrantID string            `json:"grant_id,omitempty"`
+	Source  CreditGrantSource  `json:"source,omitempty"`
+	Amount  int               `json:"amount"`
 }
 
 type CreditReservation struct {
@@ -113,13 +122,15 @@ type CreditReservation struct {
 }
 
 type CreditLedgerEntry struct {
-	ID            string                `json:"id"`
-	UserID        string                `json:"user_id"`
-	Amount        int                   `json:"amount"`
-	Type          CreditLedgerEntryType `json:"type"`
-	Action        CreditAction          `json:"action"`
-	ReferenceType string                `json:"reference_type,omitempty"`
-	ReferenceID   string                `json:"reference_id,omitempty"`
-	CreatedAt     time.Time             `json:"created_at"`
-	Metadata      map[string]any        `json:"metadata,omitempty"`
+	ID            string                       `json:"id"`
+	UserID        string                       `json:"user_id"`
+	Amount        int                          `json:"amount"`
+	Type          CreditLedgerEntryType        `json:"type"`
+	Action        CreditAction                 `json:"action"`
+	Source        CreditGrantSource            `json:"source,omitempty"`
+	ReferenceType string                       `json:"reference_type,omitempty"`
+	ReferenceID   string                       `json:"reference_id,omitempty"`
+	Allocations   []CreditReservationAllocation `json:"allocations,omitempty"`
+	CreatedAt     time.Time                    `json:"created_at"`
+	Metadata      map[string]any               `json:"metadata,omitempty"`
 }
