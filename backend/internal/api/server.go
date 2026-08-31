@@ -162,6 +162,14 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
+	if request.URL.Path == "/v1/me/credits/subscription-cycle" {
+		if request.Method == http.MethodPost {
+			s.grantSubscriptionCycleCredits(response, request)
+			return
+		}
+		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
 	if request.URL.Path == "/v1/credit-quote" {
 		if request.Method == http.MethodPost {
 			s.quoteCreditAction(response, request)
@@ -559,10 +567,58 @@ func (s *Server) getMeCreditHistory(response http.ResponseWriter, request *http.
 }
 
 type creditQuoteRequest struct {
-	Action    string `json:"action"`
-	ProjectID string `json:"projectId,omitempty"`
-	StoryID   string `json:"storyId,omitempty"`
+	Action    string                  `json:"action"`
+	ProjectID string                  `json:"projectId,omitempty"`
+	StoryID   string                  `json:"storyId,omitempty"`
 	Stats     credits.StoryMediaStats `json:"stats,omitempty"`
+}
+
+type grantSubscriptionCycleRequest struct {
+	Plan       string     `json:"plan"`
+	PurchaseID string     `json:"purchase_id"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
+}
+
+func (s *Server) grantSubscriptionCycleCredits(response http.ResponseWriter, request *http.Request) {
+	user, ok := s.authenticate(response, request)
+	if !ok {
+		return
+	}
+	if s.Credits == nil {
+		s.internalError(response, errors.New("credit service not configured"), "credit service not configured")
+		return
+	}
+	var input grantSubscriptionCycleRequest
+	if !s.decodeJSON(response, request, &input) {
+		return
+	}
+	plan := strings.ToLower(strings.TrimSpace(input.Plan))
+	purchaseID := strings.TrimSpace(input.PurchaseID)
+	if purchaseID == "" {
+		s.writeError(response, http.StatusBadRequest, "invalid_purchase_id", "purchase_id is required")
+		return
+	}
+	var amount int
+	switch plan {
+	case "monthly", "com.framemio.pro.monthly":
+		amount = s.Credits.Policy.MonthlySubscriptionCycleCredits
+	case "yearly", "com.framemio.pro.yearly":
+		amount = s.Credits.Policy.YearlySubscriptionCycleCredits
+	default:
+		s.writeError(response, http.StatusBadRequest, "invalid_plan", "plan must be monthly or yearly")
+		return
+	}
+	grant, created, err := s.Credits.GrantSubscriptionCycle(request.Context(), user.ID, purchaseID, amount, input.ExpiresAt, map[string]any{"plan": plan})
+	if err != nil {
+		s.internalError(response, err, "grant subscription cycle credits")
+		return
+	}
+	if created {
+		s.Logger.Info("subscription credits granted", slog.String("user_id", user.ID), slog.String("purchase_id", purchaseID), slog.String("plan", plan), slog.Int("amount", amount))
+	} else {
+		s.Logger.Info("subscription credits grant reused", slog.String("user_id", user.ID), slog.String("purchase_id", purchaseID), slog.String("plan", plan), slog.Int("amount", amount))
+	}
+	s.writeJSON(response, http.StatusOK, grant)
 }
 
 func (s *Server) quoteCreditAction(response http.ResponseWriter, request *http.Request) {

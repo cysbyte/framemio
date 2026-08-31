@@ -243,6 +243,7 @@ struct CreditPricing {
 
 protocol CreditService: Sendable {
     func balance() async throws -> CreditBalance
+    func grantSubscriptionCycle(plan: String, purchaseID: String, expiresAt: Date?) async throws
 }
 
 @MainActor

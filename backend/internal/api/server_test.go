@@ -1416,3 +1416,46 @@ func TestPublicMusicRoutesAreUnavailableInV1(t *testing.T) {
 		t.Fatalf("V1 should not expose public music APIs, got status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestGrantSubscriptionCycleCreditsIsIdempotent(t *testing.T) {
+	t.Parallel()
+	memoryStore := store.NewMemoryStore()
+	server := newTestServer(memoryStore, queue.NewMemoryPublisher())
+	handler := server.Handler()
+
+	first := performJSON(t, handler, http.MethodPost, "/v1/me/credits/subscription-cycle", map[string]any{
+		"plan":        "monthly",
+		"purchase_id": "purchase-123",
+	}, "", true, nil)
+	if first.Code != http.StatusOK {
+		t.Fatalf("first grant status = %d, body = %s", first.Code, first.Body.String())
+	}
+	var grant models.CreditGrant
+	decodeResponse(t, first, &grant)
+	if grant.Amount != server.Credits.Policy.MonthlySubscriptionCycleCredits {
+		t.Fatalf("grant amount = %d, want %d", grant.Amount, server.Credits.Policy.MonthlySubscriptionCycleCredits)
+	}
+
+	second := performJSON(t, handler, http.MethodPost, "/v1/me/credits/subscription-cycle", map[string]any{
+		"plan":        "monthly",
+		"purchase_id": "purchase-123",
+	}, "", true, nil)
+	if second.Code != http.StatusOK {
+		t.Fatalf("second grant status = %d, body = %s", second.Code, second.Body.String())
+	}
+	var duplicateGrant models.CreditGrant
+	decodeResponse(t, second, &duplicateGrant)
+	if duplicateGrant.ID != grant.ID {
+		t.Fatal("duplicate grant created a second record")
+	}
+
+	balanceResponse := performJSON(t, handler, http.MethodGet, "/v1/me/credits", nil, "", true, nil)
+	if balanceResponse.Code != http.StatusOK {
+		t.Fatalf("balance status = %d, body = %s", balanceResponse.Code, balanceResponse.Body.String())
+	}
+	var balance models.CreditBalance
+	decodeResponse(t, balanceResponse, &balance)
+	if balance.SubscriptionCredits != server.Credits.Policy.MonthlySubscriptionCycleCredits {
+		t.Fatalf("subscription credits = %d, want %d", balance.SubscriptionCredits, server.Credits.Policy.MonthlySubscriptionCycleCredits)
+	}
+}

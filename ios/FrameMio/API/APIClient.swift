@@ -300,15 +300,34 @@ private struct AnonymousAuthResponse: Decodable {
 final class RemoteCreditService: CreditService, @unchecked Sendable {
     private let apiClient: APIClient
     private let decoder: JSONDecoder
+    private let encoder: JSONEncoder
 
     init(apiClient: APIClient) {
         self.apiClient = apiClient
         decoder = FrameMioJSONCoding.apiDecoder()
+        encoder = FrameMioJSONCoding.apiEncoder()
     }
 
     func balance() async throws -> CreditBalance {
         let data = try await apiClient.data(for: APIRequest(method: .get, path: "/v1/me/credits"))
         return try decoder.decode(CreditBalance.self, from: data)
+    }
+
+    func grantSubscriptionCycle(plan: String, purchaseID: String, expiresAt: Date?) async throws {
+        struct Request: Encodable {
+            let plan: String
+            let purchaseID: String
+            let expiresAt: Date?
+
+            enum CodingKeys: String, CodingKey {
+                case plan
+                case purchaseID = "purchase_id"
+                case expiresAt = "expires_at"
+            }
+        }
+
+        let body = try encoder.encode(Request(plan: plan, purchaseID: purchaseID, expiresAt: expiresAt))
+        _ = try await apiClient.data(for: APIRequest(method: .post, path: "/v1/me/credits/subscription-cycle", body: body))
     }
 }
 
@@ -321,6 +340,9 @@ final class MockCreditService: CreditService, @unchecked Sendable {
 
     func balance() async throws -> CreditBalance {
         balanceValue
+    }
+
+    func grantSubscriptionCycle(plan: String, purchaseID: String, expiresAt: Date?) async throws {
     }
 }
 

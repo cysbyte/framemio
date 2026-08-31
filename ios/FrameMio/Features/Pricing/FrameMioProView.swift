@@ -205,7 +205,10 @@ final class FrameMioProViewModel: ObservableObject {
             defer { isPurchasing = false }
             #if DEBUG
                 pricingDebugLog("simulate_purchase_success plan=\(selectedPlan.rawValue) source=\(source.rawValue) simulated=\(shouldSimulatePurchaseSuccess)")
-                await completePurchaseSuccess(statusMessage: "Debug purchase completed.")
+                await completePurchaseSuccess(
+                    purchaseID: "debug-\(selectedPlan.rawValue)",
+                    statusMessage: "Debug purchase completed."
+                )
             #else
                 guard let product = product(for: selectedPlan) else {
                     errorMessage = "Loading plans..."
@@ -218,7 +221,10 @@ final class FrameMioProViewModel: ObservableObject {
                     case let .success(verificationResult):
                         let transaction = try verifiedTransaction(from: verificationResult)
                         await transaction.finish()
-                        await completePurchaseSuccess(statusMessage: isSubscribed ? "FrameMio Pro is active." : "Purchase completed.")
+                        await completePurchaseSuccess(
+                            purchaseID: String(transaction.id),
+                            statusMessage: isSubscribed ? "FrameMio Pro is active." : "Purchase completed."
+                        )
                     case .pending:
                         statusMessage = "Purchase pending approval."
                     case .userCancelled:
@@ -315,8 +321,27 @@ final class FrameMioProViewModel: ObservableObject {
         }
     }
 
-    private func completePurchaseSuccess(statusMessage: String) async {
+    private func grantPurchasedCredits(purchaseID: String) async throws {
+        guard let creditService else { return }
+        pricingDebugLog("grant_subscription_cycle_start plan=\(selectedPlan.rawValue) purchase_id=\(purchaseID)")
+        do {
+            try await creditService.grantSubscriptionCycle(plan: selectedPlan.rawValue, purchaseID: purchaseID, expiresAt: renewalDate)
+            pricingDebugLog("grant_subscription_cycle_complete plan=\(selectedPlan.rawValue) purchase_id=\(purchaseID)")
+        } catch {
+            pricingDebugLog("grant_subscription_cycle_failed plan=\(selectedPlan.rawValue) purchase_id=\(purchaseID) error=\(error.localizedDescription)")
+            throw error
+        }
+    }
+
+    private func completePurchaseSuccess(purchaseID: String, statusMessage: String) async {
         pricingDebugLog("complete_purchase_success_start")
+        do {
+            try await grantPurchasedCredits(purchaseID: purchaseID)
+        } catch {
+            self.errorMessage = AppError.from(error).localizedDescription
+            self.statusMessage = nil
+            return
+        }
         await refreshEntitlements()
         await fetchBalance()
         onBalanceUpdated()
