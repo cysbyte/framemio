@@ -48,23 +48,11 @@ struct SettingsView: View {
     }
 
     private var header: some View {
-        VStack(spacing: FrameMioSpacing.md) {
-            FrameMioBannerArtwork(assetName: "FrameMioSettingsBanner")
-                .frame(maxWidth: .infinity)
-                .frame(height: 130)
-                .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
-            VStack(spacing: FrameMioSpacing.xxs) {
-                Text("Settings")
-                    .font(FrameMioTypography.screenTitle)
-                    .foregroundStyle(FrameMioColors.ink)
-                Text("Purchases, privacy, and app preferences")
-                    .font(FrameMioTypography.body)
-                    .foregroundStyle(FrameMioColors.secondaryInk)
-                    .multilineTextAlignment(.center)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .combine)
+        FrameMioBannerArtwork(assetName: "FrameMioSettingsBanner")
+            .frame(maxWidth: .infinity)
+            .frame(height: 130)
+            .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
+            .accessibilityLabel("Settings banner")
     }
 
     private var purchasesSection: some View {
@@ -74,7 +62,7 @@ struct SettingsView: View {
                 FrameMioHaptics.secondaryAction()
                 onBuyCredits()
             }
-            .accessibilityLabel("Buy Credits. Opens extra credit packs.")
+            .accessibilityLabel("Buy Credits. Opens subscription or extra credit packs.")
             SettingsActionRow(
                 title: viewModel.isRestoringPurchases ? "Restoring Purchases" : "Restore Purchases",
                 subtitle: viewModel.statusMessage ?? "Sync purchases from the App Store",

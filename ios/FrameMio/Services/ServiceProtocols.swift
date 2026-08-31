@@ -180,7 +180,16 @@ struct CreditBalance: Codable, Hashable, Sendable {
     let purchasedCredits: Int
     let subscriptionReserved: Int
     let purchasedReserved: Int
+    let subscriptionCycleExpiresAt: Date?
     let totalCredits: Int
+
+    var hasActiveSubscriptionCycle: Bool {
+        if subscriptionCredits > 0 || subscriptionReserved > 0 {
+            return true
+        }
+        guard let subscriptionCycleExpiresAt else { return false }
+        return subscriptionCycleExpiresAt > Date()
+    }
 
     enum CodingKeys: String, CodingKey {
         case available
@@ -189,6 +198,7 @@ struct CreditBalance: Codable, Hashable, Sendable {
         case purchasedCredits = "purchased_credits"
         case subscriptionReserved = "subscription_reserved"
         case purchasedReserved = "purchased_reserved"
+        case subscriptionCycleExpiresAt = "subscription_cycle_expires_at"
         case totalCredits = "total_credits"
     }
 
@@ -199,6 +209,7 @@ struct CreditBalance: Codable, Hashable, Sendable {
         purchasedCredits: Int = 0,
         subscriptionReserved: Int = 0,
         purchasedReserved: Int = 0,
+        subscriptionCycleExpiresAt: Date? = nil,
         totalCredits: Int? = nil
     ) {
         self.available = available
@@ -207,6 +218,7 @@ struct CreditBalance: Codable, Hashable, Sendable {
         self.purchasedCredits = purchasedCredits
         self.subscriptionReserved = subscriptionReserved
         self.purchasedReserved = purchasedReserved
+        self.subscriptionCycleExpiresAt = subscriptionCycleExpiresAt
         self.totalCredits = totalCredits ?? available
     }
 
@@ -218,6 +230,7 @@ struct CreditBalance: Codable, Hashable, Sendable {
         purchasedCredits = try container.decodeIfPresent(Int.self, forKey: .purchasedCredits) ?? max(available, 0)
         subscriptionReserved = try container.decodeIfPresent(Int.self, forKey: .subscriptionReserved) ?? 0
         purchasedReserved = try container.decodeIfPresent(Int.self, forKey: .purchasedReserved) ?? reserved
+        subscriptionCycleExpiresAt = try container.decodeIfPresent(Date.self, forKey: .subscriptionCycleExpiresAt)
         totalCredits = try container.decodeIfPresent(Int.self, forKey: .totalCredits) ?? available
     }
 }

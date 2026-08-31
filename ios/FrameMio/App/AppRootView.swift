@@ -36,7 +36,7 @@ struct AppRootView: View {
 
             NavigationStack {
                 ProfileView(creditStore: creditStore) {
-                    openCreditPacks(.profile)
+                    openBuyCredits(.profile)
                 }
             }
             .tabItem {
@@ -49,7 +49,7 @@ struct AppRootView: View {
                 SettingsView(
                     viewModel: settingsViewModel,
                     creditStore: creditStore,
-                    onBuyCredits: { openCreditPacks(.settings) }
+                    onBuyCredits: { openBuyCredits(.settings) }
                 )
             }
             .tabItem {
@@ -114,11 +114,36 @@ struct AppRootView: View {
     }
 
     private func openPricing(_ source: PricingEntryPoint) {
-        purchaseDestination = .pro(source)
+        guard source == .insufficientCredits else {
+            purchaseDestination = .pro(source)
+            return
+        }
+
+        if let balance = creditStore.balance, balance.hasActiveSubscriptionCycle {
+            purchaseDestination = .creditPacks(source)
+            return
+        }
+
+        Task { @MainActor in
+            let balance = (try? await dependencies.creditService.balance()) ?? creditStore.balance
+            if let balance, balance.hasActiveSubscriptionCycle {
+                purchaseDestination = .creditPacks(source)
+            } else {
+                purchaseDestination = .pro(source)
+            }
+        }
     }
 
-    private func openCreditPacks(_ source: PricingEntryPoint) {
-        purchaseDestination = .creditPacks(source)
+    private func openBuyCredits(_ source: PricingEntryPoint) {
+        if let balance = creditStore.balance {
+            purchaseDestination = balance.hasActiveSubscriptionCycle ? .creditPacks(source) : .pro(source)
+            return
+        }
+
+        Task { @MainActor in
+            let balance = (try? await dependencies.creditService.balance()) ?? creditStore.balance
+            purchaseDestination = (balance?.hasActiveSubscriptionCycle == true) ? .creditPacks(source) : .pro(source)
+        }
     }
 
     private func refreshCredits() {

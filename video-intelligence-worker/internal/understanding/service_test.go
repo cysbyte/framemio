@@ -83,6 +83,51 @@ func TestServiceCachesByProviderModelAndPreservesPreviousAnalysis(t *testing.T) 
 	}
 }
 
+func TestValidateResponseV1RepairsUngroundedCandidates(t *testing.T) {
+	t.Parallel()
+	input := testInput()
+	response := validResponse(input, "repair")
+	response.Candidates[0].FrameIDs = []string{"invented-frame", "frame-0002"}
+	response.Candidates[0].TranscriptSegmentIndexes = nil
+
+	validated, err := ValidateResponseV1(response, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := validated.Candidates[0]
+	if candidate.RecommendedUsage != domain.RecommendedUsageExclude {
+		t.Fatalf("ungrounded candidate usage = %s, want exclude", candidate.RecommendedUsage)
+	}
+	if len(candidate.FrameIDs) != 0 || len(candidate.TranscriptSegmentIndexes) != 0 {
+		t.Fatalf("ungrounded candidate kept invalid evidence: %+v", candidate)
+	}
+	if len(candidate.People) != 0 || len(candidate.Activities) != 0 || len(candidate.Speech) != 0 {
+		t.Fatalf("ungrounded candidate kept unsupported claims: %+v", candidate)
+	}
+	if candidate.StoryRelevanceScore > 0.05 {
+		t.Fatalf("ungrounded candidate score was not capped: %+v", candidate)
+	}
+}
+
+func TestValidateResponseV1KeepsValidFrameWhenSomeReferencesAreInvalid(t *testing.T) {
+	t.Parallel()
+	input := testInput()
+	response := validResponse(input, "partial repair")
+	response.Candidates[0].FrameIDs = []string{"invented-frame", "frame-0002", "frame-0001"}
+
+	validated, err := ValidateResponseV1(response, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := validated.Candidates[0]
+	if got, want := candidate.FrameIDs, []string{"frame-0001"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("frame ids = %v, want %v", got, want)
+	}
+	if candidate.RecommendedUsage != domain.RecommendedUsageHero {
+		t.Fatalf("grounded candidate usage changed to %s", candidate.RecommendedUsage)
+	}
+}
+
 func TestValidateResponseV1RequiresGroundedCompleteCandidates(t *testing.T) {
 	t.Parallel()
 	input := testInput()
@@ -101,15 +146,8 @@ func TestValidateResponseV1RequiresGroundedCompleteCandidates(t *testing.T) {
 		{name: "wrong schema", mutate: func(value *domain.VideoUnderstandingResponseV1) { value.SchemaVersion = "video-analysis.v2" }},
 		{name: "missing candidate", mutate: func(value *domain.VideoUnderstandingResponseV1) { value.Candidates = value.Candidates[:1] }},
 		{name: "invented timestamp", mutate: func(value *domain.VideoUnderstandingResponseV1) { value.Candidates[0].StartMicros++ }},
-		{name: "unknown frame", mutate: func(value *domain.VideoUnderstandingResponseV1) {
-			value.Candidates[0].FrameIDs = []string{"invented-frame"}
-		}},
-		{name: "ungrounded visual claim", mutate: func(value *domain.VideoUnderstandingResponseV1) { value.Candidates[0].FrameIDs = nil }},
-		{name: "ungrounded speech", mutate: func(value *domain.VideoUnderstandingResponseV1) { value.Candidates[0].TranscriptSegmentIndexes = nil }},
-		{name: "ungrounded useful candidate", mutate: func(value *domain.VideoUnderstandingResponseV1) {
-			value.Candidates[1].Scenery = nil
-			value.Candidates[1].FrameIDs = nil
-			value.Candidates[1].RecommendedUsage = domain.RecommendedUsageSupporting
+		{name: "unknown transcript", mutate: func(value *domain.VideoUnderstandingResponseV1) {
+			value.Candidates[0].TranscriptSegmentIndexes = []int{99}
 		}},
 		{name: "invalid score", mutate: func(value *domain.VideoUnderstandingResponseV1) { value.Candidates[0].MemoryValueScore = 1.1 }},
 		{name: "invalid usage", mutate: func(value *domain.VideoUnderstandingResponseV1) { value.Candidates[0].RecommendedUsage = "viral_clip" }},
@@ -132,8 +170,8 @@ func TestServiceRetriesInvalidResponseAndDoesNotStoreIt(t *testing.T) {
 	provider := &fakeProvider{name: "provider-a", model: "model-a", invalidSchema: true}
 	service := newService(provider, repository, &memoryArtifacts{})
 	service.RetryAttempts = 2
-	if _, err := service.Analyze(context.Background(), testRequest()); err == nil {
-		t.Fatal("expected invalid provider response to fail")
+	if _, err := service.Analyze(context.Background(), testRequest()); err == nil || !domain.IsPermanent(err) {
+		t.Fatalf("expected invalid provider response to fail permanently, got %v", err)
 	}
 	if provider.calls != 2 || repository.count() != 0 {
 		t.Fatalf("invalid response was not retried safely: calls=%d records=%d", provider.calls, repository.count())

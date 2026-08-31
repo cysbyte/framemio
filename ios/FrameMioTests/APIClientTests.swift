@@ -123,6 +123,65 @@ private final class RetryURLProtocol: URLProtocol, @unchecked Sendable {
     }
 }
 
+final class CreditBalanceModelTests: XCTestCase {
+    func testCreditBalanceDecodesSubscriptionCycleExpiry() throws {
+        let data = Data("""
+        {
+          "available": 20,
+          "reserved": 0,
+          "subscription_credits": 0,
+          "purchased_credits": 20,
+          "subscription_cycle_expires_at": "2099-09-29T00:00:00Z",
+          "total_credits": 20
+        }
+        """.utf8)
+
+        let decoder = FrameMioJSONCoding.apiDecoder()
+        let balance = try decoder.decode(CreditBalance.self, from: data)
+
+        XCTAssertEqual(balance.available, 20)
+        XCTAssertNotNil(balance.subscriptionCycleExpiresAt)
+        XCTAssertTrue(balance.hasActiveSubscriptionCycle)
+    }
+
+    func testPurchasedOnlyCreditsAreNotActiveSubscriptionCycle() throws {
+        let data = Data("""
+        {
+          "available": 100,
+          "reserved": 0,
+          "subscription_credits": 0,
+          "purchased_credits": 100,
+          "total_credits": 100
+        }
+        """.utf8)
+
+        let decoder = FrameMioJSONCoding.apiDecoder()
+        let balance = try decoder.decode(CreditBalance.self, from: data)
+
+        XCTAssertEqual(balance.available, 100)
+        XCTAssertFalse(balance.hasActiveSubscriptionCycle)
+    }
+
+    func testExpiredSubscriptionCycleIsNotActive() throws {
+        let data = Data("""
+        {
+          "available": 100,
+          "reserved": 0,
+          "subscription_credits": 0,
+          "purchased_credits": 100,
+          "subscription_cycle_expires_at": "2001-01-01T00:00:00Z",
+          "total_credits": 100
+        }
+        """.utf8)
+
+        let decoder = FrameMioJSONCoding.apiDecoder()
+        let balance = try decoder.decode(CreditBalance.self, from: data)
+
+        XCTAssertEqual(balance.available, 100)
+        XCTAssertFalse(balance.hasActiveSubscriptionCycle)
+    }
+}
+
 final class StoryModelTests: XCTestCase {
     func testStoryDecodesWithoutOptionalDescriptionOrMoments() throws {
         let data = Data("""

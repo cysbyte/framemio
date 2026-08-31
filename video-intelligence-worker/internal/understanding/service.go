@@ -163,7 +163,11 @@ func (s *Service) Analyze(ctx context.Context, request Request) (Result, error) 
 		response, providerErr = ValidateResponseV1(response, input)
 		return providerErr
 	}); err != nil {
-		return Result{}, fmt.Errorf("video understanding provider %s failed: %w", s.Provider.Name(), err)
+		wrapped := fmt.Errorf("video understanding provider %s failed: %w", s.Provider.Name(), err)
+		if errors.Is(err, domain.ErrInvalidModelOutput) {
+			return Result{}, domain.Permanent(wrapped)
+		}
+		return Result{}, wrapped
 	}
 	analysis := makePersistentAnalysis(request, response, strings.TrimSpace(s.Provider.Name()), strings.TrimSpace(s.Provider.Model()), s.now().UTC())
 	if err := analysisvalidation.Validate(analysis); err != nil {
@@ -379,14 +383,12 @@ func ValidateResponseV1(response domain.VideoUnderstandingResponseV1, input doma
 		if err != nil {
 			return domain.VideoUnderstandingResponseV1{}, err
 		}
-		candidate.FrameIDs, err = validateFrameReferences(candidate.FrameIDs, candidate.SegmentID, frames)
-		if err != nil {
-			return domain.VideoUnderstandingResponseV1{}, err
-		}
+		candidate.FrameIDs = validateFrameReferences(candidate.FrameIDs, candidate.SegmentID, frames)
 		candidate.TranscriptSegmentIndexes, err = validateTranscriptReferences(candidate.TranscriptSegmentIndexes, segment, input.Transcript.Segments)
 		if err != nil {
 			return domain.VideoUnderstandingResponseV1{}, err
 		}
+		repairUngroundedCandidate(candidate)
 		if hasVisualClaims(*candidate) && len(candidate.FrameIDs) == 0 {
 			return domain.VideoUnderstandingResponseV1{}, fmt.Errorf("%w: candidate %s has ungrounded visual claims", domain.ErrInvalidModelOutput, candidate.SegmentID)
 		}
@@ -406,14 +408,14 @@ func ValidateResponseV1(response domain.VideoUnderstandingResponseV1, input doma
 	return response, nil
 }
 
-func validateFrameReferences(values []string, segmentID string, frames map[string]domain.VideoUnderstandingFrameV1) ([]string, error) {
+func validateFrameReferences(values []string, segmentID string, frames map[string]domain.VideoUnderstandingFrameV1) []string {
 	seen := make(map[string]struct{}, len(values))
 	result := make([]string, 0, len(values))
 	for _, value := range values {
 		value = strings.TrimSpace(value)
 		frame, exists := frames[value]
 		if value == "" || !exists || frame.SegmentID != segmentID {
-			return nil, fmt.Errorf("%w: segment %s references an unknown or unrelated frame", domain.ErrInvalidModelOutput, segmentID)
+			continue
 		}
 		if _, duplicate := seen[value]; duplicate {
 			continue
@@ -421,7 +423,38 @@ func validateFrameReferences(values []string, segmentID string, frames map[strin
 		seen[value] = struct{}{}
 		result = append(result, value)
 	}
-	return result, nil
+	return result
+}
+
+func repairUngroundedCandidate(candidate *domain.VideoSegmentAnalysisV1) {
+	visualGrounded := len(candidate.FrameIDs) > 0
+	audioGrounded := len(candidate.TranscriptSegmentIndexes) > 0
+	if !visualGrounded {
+		candidate.People = nil
+		candidate.Activities = nil
+		candidate.Interactions = nil
+		candidate.Expressions = nil
+		candidate.Objects = nil
+		candidate.Food = nil
+		candidate.Locations = nil
+		candidate.Scenery = nil
+		candidate.Events = nil
+		candidate.InterestingActions = nil
+	}
+	if !audioGrounded {
+		candidate.Speech = nil
+		candidate.MeaningfulAudio = nil
+	}
+	if visualGrounded || audioGrounded {
+		return
+	}
+	candidate.RecommendedUsage = domain.RecommendedUsageExclude
+	candidate.Description = "Segment excluded because no grounded evidence matched this segment."
+	candidate.Reason = "The model did not return valid frame or transcript evidence for this segment."
+	candidate.ImportanceScore = min(candidate.ImportanceScore, 0.05)
+	candidate.MemoryValueScore = min(candidate.MemoryValueScore, 0.05)
+	candidate.EmotionalValueScore = min(candidate.EmotionalValueScore, 0.05)
+	candidate.StoryRelevanceScore = min(candidate.StoryRelevanceScore, 0.05)
 }
 
 func validateTranscriptReferences(values []int, segment domain.CandidateSegment, transcript []domain.TranscriptSegment) ([]int, error) {

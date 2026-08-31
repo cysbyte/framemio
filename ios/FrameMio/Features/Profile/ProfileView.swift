@@ -43,22 +43,11 @@ struct ProfileView: View {
     }
 
     private var header: some View {
-        VStack(spacing: FrameMioSpacing.md) {
-            FrameMioBannerArtwork(assetName: "FrameMioProfileBanner")
-                .frame(maxWidth: .infinity)
-                .frame(height: 130)
-                .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
-            VStack(spacing: FrameMioSpacing.xxs) {
-                Text("Profile")
-                    .font(FrameMioTypography.screenTitle)
-                    .foregroundStyle(FrameMioColors.ink)
-                Text(planTitle)
-                    .font(FrameMioTypography.body)
-                    .foregroundStyle(FrameMioColors.secondaryInk)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .combine)
+        FrameMioBannerArtwork(assetName: "FrameMioProfileBanner")
+            .frame(maxWidth: .infinity)
+            .frame(height: 130)
+            .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
+            .accessibilityLabel("Profile banner")
     }
 
     private var creditCard: some View {
@@ -113,7 +102,7 @@ struct ProfileView: View {
             FrameMioHaptics.secondaryAction()
             onBuyCredits()
         }
-        .accessibilityLabel("Buy Credits. Opens extra credit packs.")
+        .accessibilityLabel("Buy Credits. Opens subscription or extra credit packs.")
     }
 
     private var planTitle: String {
