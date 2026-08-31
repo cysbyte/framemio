@@ -813,7 +813,7 @@ struct FrameMioCreditPacksView: View {
                 }
             }
             .padding(.horizontal, FrameMioSpacing.lg)
-            .padding(.vertical, FrameMioSpacing.lg)
+            .padding(.top, 0)
             .padding(.bottom, FrameMioSpacing.xxxl)
         }
         .background {
@@ -841,10 +841,6 @@ struct FrameMioCreditPacksView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            FrameMioBannerArtwork(assetName: "FrameMioPricingBanner")
-                .frame(height: 150)
-                .frame(maxWidth: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
             Text("Extra Credits")
                 .font(FrameMioTypography.screenTitle)
                 .foregroundStyle(FrameMioColors.ink)

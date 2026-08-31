@@ -37,14 +37,6 @@ struct StoryCreationView: View {
                         .font(FrameMioTypography.body)
                         .foregroundStyle(FrameMioColors.secondaryInk)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("This will use \(viewModel.createStoryCreditCost) credits.")
-                        .font(FrameMioTypography.footnote)
-                        .foregroundStyle(FrameMioColors.secondaryInk)
-                    if let balance = viewModel.creditBalance {
-                        Text("You have \(balance) credits. After generating: \(max(0, balance - viewModel.createStoryCreditCost)).")
-                            .font(FrameMioTypography.footnote)
-                            .foregroundStyle(FrameMioColors.secondaryInk)
-                    }
                 }
                 .padding(FrameMioSpacing.xl)
                 .background(
@@ -91,7 +83,7 @@ struct StoryCreationView: View {
                 } else if let story = viewModel.story {
                     processingStartedCard(story)
                 } else {
-                    PrimaryButton(title: "Create Story — \(viewModel.createStoryCreditCost)", systemImage: "sparkles") {
+                    PrimaryButton(title: "Create Story (\(viewModel.createStoryCreditCost) credits)", systemImage: "sparkles") {
                         onCreate()
                     }
                 }

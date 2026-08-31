@@ -22,11 +22,18 @@ require_var IMAGE
 : "${ECS_PRESERVE_DESIRED_COUNT:=false}"
 : "${ECS_MIN_CAPACITY:=$ECS_SERVICE_DESIRED_COUNT}"
 : "${ECS_MAX_CAPACITY:=$ECS_SERVICE_DESIRED_COUNT}"
+: "${ECS_ENABLE_SQS_AUTOSCALING:=false}"
+: "${ECS_SQS_QUEUE_URL:=}"
+: "${ECS_SQS_SCALE_OUT_CAPACITY:=1}"
+: "${ECS_SQS_SCALE_OUT_COOLDOWN:=30}"
+: "${ECS_SQS_SCALE_IN_COOLDOWN:=60}"
+: "${ECS_SQS_SCALE_OUT_EVALUATION_PERIODS:=1}"
+: "${ECS_SQS_SCALE_IN_EVALUATION_PERIODS:=3}"
 : "${RDS_AUTO_START_ENABLED:=false}"
 : "${RDS_CLUSTER_IDENTIFIER:=}"
 : "${DATABASE_PROVIDER:=rds}"
 
-for numeric_var in ECS_SERVICE_DESIRED_COUNT ECS_MIN_CAPACITY ECS_MAX_CAPACITY; do
+for numeric_var in ECS_SERVICE_DESIRED_COUNT ECS_MIN_CAPACITY ECS_MAX_CAPACITY ECS_SQS_SCALE_OUT_CAPACITY ECS_SQS_SCALE_OUT_COOLDOWN ECS_SQS_SCALE_IN_COOLDOWN ECS_SQS_SCALE_OUT_EVALUATION_PERIODS ECS_SQS_SCALE_IN_EVALUATION_PERIODS; do
   if [[ "${!numeric_var}" =~ ^[0-9]+$ ]]; then
     :
   else
@@ -90,6 +97,123 @@ start_rds_cluster_if_needed() {
 }
 
 start_rds_cluster_if_needed
+
+queue_name_from_url() {
+  QUEUE_URL="$1" node --input-type=module -e '
+    const queueURL = process.env.QUEUE_URL || "";
+    if (!queueURL) {
+      throw new Error("queue URL is empty");
+    }
+    const parsed = new URL(queueURL);
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    if (parts.length === 0) {
+      throw new Error(`could not determine queue name from ${queueURL}`);
+    }
+    process.stdout.write(decodeURIComponent(parts[parts.length - 1]));
+  '
+}
+
+put_sqs_metric_math_alarm() {
+  local alarm_name="$1"
+  local alarm_description="$2"
+  local queue_name="$3"
+  local comparison_operator="$4"
+  local evaluation_periods="$5"
+  local alarm_action="$6"
+  local metrics_file
+  metrics_file="$(mktemp)"
+  QUEUE_NAME="$queue_name" node --input-type=module >"$metrics_file" -e '
+    const queueName = process.env.QUEUE_NAME;
+    const metric = (id, metricName) => ({
+      Id: id,
+      MetricStat: {
+        Metric: {
+          Namespace: "AWS/SQS",
+          MetricName: metricName,
+          Dimensions: [{ Name: "QueueName", Value: queueName }],
+        },
+        Period: 60,
+        Stat: "Maximum",
+      },
+      ReturnData: false,
+    });
+    process.stdout.write(JSON.stringify([
+      metric("visible", "ApproximateNumberOfMessagesVisible"),
+      metric("inflight", "ApproximateNumberOfMessagesNotVisible"),
+      metric("delayed", "ApproximateNumberOfMessagesDelayed"),
+      {
+        Id: "total",
+        Expression: "visible + inflight + delayed",
+        Label: "Total queue messages",
+        ReturnData: true,
+      },
+    ]));
+  '
+  aws cloudwatch put-metric-alarm \
+    --region "$AWS_REGION" \
+    --alarm-name "$alarm_name" \
+    --alarm-description "$alarm_description" \
+    --comparison-operator "$comparison_operator" \
+    --threshold 0 \
+    --evaluation-periods "$evaluation_periods" \
+    --datapoints-to-alarm "$evaluation_periods" \
+    --metrics "file://$metrics_file" \
+    --treat-missing-data notBreaching \
+    --alarm-actions "$alarm_action" >/dev/null
+  rm -f "$metrics_file"
+}
+
+configure_sqs_autoscaling() {
+  if [[ "$ECS_ENABLE_SQS_AUTOSCALING" != "true" ]]; then
+    return 0
+  fi
+
+  require_var ECS_SQS_QUEUE_URL
+
+  local queue_name resource_id scale_out_policy_arn scale_in_policy_arn
+  queue_name="$(queue_name_from_url "$ECS_SQS_QUEUE_URL")"
+  resource_id="service/$ECS_CLUSTER/$ECS_SERVICE"
+
+  echo "Configuring SQS autoscaling for $ECS_SERVICE using queue $queue_name"
+
+  scale_out_policy_arn="$(aws application-autoscaling put-scaling-policy \
+    --region "$AWS_REGION" \
+    --service-namespace ecs \
+    --scalable-dimension ecs:service:DesiredCount \
+    --resource-id "$resource_id" \
+    --policy-name "$ECS_SERVICE-sqs-scale-out" \
+    --policy-type StepScaling \
+    --step-scaling-policy-configuration "{\"AdjustmentType\":\"ExactCapacity\",\"Cooldown\":$ECS_SQS_SCALE_OUT_COOLDOWN,\"MetricAggregationType\":\"Maximum\",\"StepAdjustments\":[{\"MetricIntervalLowerBound\":0,\"ScalingAdjustment\":$ECS_SQS_SCALE_OUT_CAPACITY}]}" \
+    --query PolicyARN \
+    --output text)"
+
+  scale_in_policy_arn="$(aws application-autoscaling put-scaling-policy \
+    --region "$AWS_REGION" \
+    --service-namespace ecs \
+    --scalable-dimension ecs:service:DesiredCount \
+    --resource-id "$resource_id" \
+    --policy-name "$ECS_SERVICE-sqs-scale-in" \
+    --policy-type StepScaling \
+    --step-scaling-policy-configuration "{\"AdjustmentType\":\"ExactCapacity\",\"Cooldown\":$ECS_SQS_SCALE_IN_COOLDOWN,\"MetricAggregationType\":\"Maximum\",\"StepAdjustments\":[{\"MetricIntervalUpperBound\":0,\"ScalingAdjustment\":0}]}" \
+    --query PolicyARN \
+    --output text)"
+
+  put_sqs_metric_math_alarm \
+    "$ECS_SERVICE-sqs-has-work" \
+    "Scale $ECS_SERVICE to $ECS_SQS_SCALE_OUT_CAPACITY when SQS has visible, in-flight, or delayed messages." \
+    "$queue_name" \
+    GreaterThanThreshold \
+    "$ECS_SQS_SCALE_OUT_EVALUATION_PERIODS" \
+    "$scale_out_policy_arn"
+
+  put_sqs_metric_math_alarm \
+    "$ECS_SERVICE-sqs-idle" \
+    "Scale $ECS_SERVICE to 0 after SQS is idle." \
+    "$queue_name" \
+    LessThanOrEqualToThreshold \
+    "$ECS_SQS_SCALE_IN_EVALUATION_PERIODS" \
+    "$scale_in_policy_arn"
+}
 
 echo "Fetching task definition $ECS_TASK_DEFINITION"
 aws ecs describe-task-definition \
@@ -282,6 +406,8 @@ if [[ "$ECS_REGISTER_SCALABLE_TARGET" == "true" ]]; then
     --min-capacity "$ECS_MIN_CAPACITY" \
     --max-capacity "$ECS_MAX_CAPACITY" >/dev/null
 fi
+
+configure_sqs_autoscaling
 
 aws ecs wait services-stable \
   --region "$AWS_REGION" \

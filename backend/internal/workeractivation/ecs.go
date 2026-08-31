@@ -31,6 +31,7 @@ type ECSRunTaskActivator struct {
 	renderContainerName  string
 	storyTaskDefinition  string
 	storyContainerName   string
+	allowedJobTypes      map[models.JobType]struct{}
 	logger               *slog.Logger
 }
 
@@ -46,6 +47,7 @@ type ECSRunTaskConfig struct {
 	RenderContainerName  string
 	StoryTaskDefinition  string
 	StoryContainerName   string
+	AllowedJobTypes      []models.JobType
 	Logger               *slog.Logger
 }
 
@@ -87,6 +89,7 @@ func NewECSRunTaskActivator(ctx context.Context, config ECSRunTaskConfig) (*ECSR
 		renderContainerName:  valueOrDefault(config.RenderContainerName, "Main"),
 		storyTaskDefinition:  strings.TrimSpace(config.StoryTaskDefinition),
 		storyContainerName:   valueOrDefault(config.StoryContainerName, "Main"),
+		allowedJobTypes:      allowedJobTypes(config.AllowedJobTypes),
 		logger:               logger,
 	}, nil
 }
@@ -107,6 +110,7 @@ func NewECSRunTaskActivatorFromEnv(ctx context.Context, logger *slog.Logger) (*E
 		RenderContainerName:  os.Getenv("RENDER_WORKER_CONTAINER_NAME"),
 		StoryTaskDefinition:  firstEnv("STORY_WORKER_TASK_DEFINITION", "BACKEND_WORKER_TASK_DEFINITION"),
 		StoryContainerName:   firstEnv("STORY_WORKER_CONTAINER_NAME", "BACKEND_WORKER_CONTAINER_NAME"),
+		AllowedJobTypes:      readJobTypes(os.Getenv("ECS_WORKER_RUN_TASK_JOB_TYPES")),
 		Logger:               logger,
 	})
 	if err != nil {
@@ -117,6 +121,10 @@ func NewECSRunTaskActivatorFromEnv(ctx context.Context, logger *slog.Logger) (*E
 
 func (a *ECSRunTaskActivator) Activate(ctx context.Context, message queue.JobMessage) error {
 	if a == nil {
+		return nil
+	}
+	if !a.jobTypeAllowed(message.JobType) {
+		a.logger.Info("worker activation skipped", slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)), slog.String("reason", "job_type_not_allowed"))
 		return nil
 	}
 	taskDefinition, containerName, reason, ok := a.workerFor(message.JobType)
@@ -187,6 +195,32 @@ func (a *ECSRunTaskActivator) workerFor(jobType models.JobType) (string, string,
 	}
 }
 
+func (a *ECSRunTaskActivator) jobTypeAllowed(jobType models.JobType) bool {
+	if len(a.allowedJobTypes) == 0 {
+		return true
+	}
+	normalized, ok := models.NormalizeJobType(jobType)
+	if !ok {
+		return false
+	}
+	_, ok = a.allowedJobTypes[normalized]
+	return ok
+}
+
+func allowedJobTypes(jobTypes []models.JobType) map[models.JobType]struct{} {
+	if len(jobTypes) == 0 {
+		return nil
+	}
+	result := make(map[models.JobType]struct{}, len(jobTypes))
+	for _, jobType := range jobTypes {
+		normalized, ok := models.NormalizeJobType(jobType)
+		if ok {
+			result[normalized] = struct{}{}
+		}
+	}
+	return result
+}
+
 func firstEnv(names ...string) string {
 	for _, name := range names {
 		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
@@ -198,6 +232,17 @@ func firstEnv(names ...string) string {
 
 func readList(value string) []string {
 	return compact(strings.Split(value, ","))
+}
+
+func readJobTypes(value string) []models.JobType {
+	values := compact(strings.Split(value, ","))
+	result := make([]models.JobType, 0, len(values))
+	for _, value := range values {
+		if jobType, ok := models.NormalizeJobType(models.JobType(value)); ok {
+			result = append(result, jobType)
+		}
+	}
+	return result
 }
 
 func compact(values []string) []string {

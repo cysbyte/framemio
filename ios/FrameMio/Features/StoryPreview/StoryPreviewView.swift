@@ -769,6 +769,8 @@ private struct StoryMomentCard: View {
                     placeholderSystemImage: moment.kind.placeholderName,
                     accessibilityTitle: moment.title
                 )
+                .frame(width: 132, height: 132)
+                .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.media, style: .continuous))
                 .overlay(alignment: .center) {
                     if moment.kind == .video {
                         Image(systemName: moment.kind.iconName)
