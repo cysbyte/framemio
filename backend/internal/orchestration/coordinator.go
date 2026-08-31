@@ -330,12 +330,12 @@ func (c *Coordinator) settleProjectCredits(ctx context.Context, job models.Proce
 		}
 		return err
 	}
-	action, ok := models.NormalizeCreditAction(project.CreditOperationKey)
-	if !ok || action == "" {
+	actions := creditActionsFromProjectKey(project.CreditOperationKey)
+	if len(actions) == 0 {
 		return nil
 	}
 	referenceID := job.ProjectID
-	if action != models.CreditActionCreateStory {
+	if !creditActionsContain(actions, models.CreditActionCreateStory) {
 		version := strings.TrimSpace(job.Configuration["story_plan_version"])
 		if version == "" {
 			if plan, planErr := c.Store.GetStoryPlan(ctx, job.UserID, job.ProjectID); planErr == nil {
@@ -348,18 +348,98 @@ func (c *Coordinator) settleProjectCredits(ctx context.Context, job models.Proce
 			referenceID = job.ProjectID + ":v" + version
 		}
 	}
-	switch status {
-	case models.ProjectStatusReady:
-		_, err = c.Credits.CommitByReference(ctx, job.UserID, action, "project", referenceID)
-	case models.ProjectStatusFailed:
-		_, err = c.Credits.ReleaseByReference(ctx, job.UserID, action, "project", referenceID)
-	default:
-		return nil
+	c.Logger.Info("settling project credit reservations",
+		slog.String("user_id", job.UserID),
+		slog.String("project_id", job.ProjectID),
+		slog.String("job_id", job.ID),
+		slog.String("status", string(status)),
+		slog.String("reference_id", referenceID),
+		slog.String("credit_operation_key", project.CreditOperationKey),
+		slog.Int("action_count", len(actions)),
+	)
+	for _, action := range actions {
+		switch status {
+		case models.ProjectStatusReady:
+			reservation, err := c.Credits.CommitByReference(ctx, job.UserID, action, "project", referenceID)
+			if err == nil {
+				c.Logger.Info("committed project credit reservation",
+					slog.String("user_id", job.UserID),
+					slog.String("project_id", job.ProjectID),
+					slog.String("job_id", job.ID),
+					slog.String("reference_id", referenceID),
+					slog.String("action", string(action)),
+					slog.String("reservation_id", reservation.ID),
+					slog.Int("amount", reservation.Amount),
+				)
+			}
+		case models.ProjectStatusFailed:
+			reservation, err := c.Credits.ReleaseByReference(ctx, job.UserID, action, "project", referenceID)
+			if err == nil {
+				c.Logger.Info("released project credit reservation",
+					slog.String("user_id", job.UserID),
+					slog.String("project_id", job.ProjectID),
+					slog.String("job_id", job.ID),
+					slog.String("reference_id", referenceID),
+					slog.String("action", string(action)),
+					slog.String("reservation_id", reservation.ID),
+					slog.Int("amount", reservation.Amount),
+				)
+			}
+		default:
+			return nil
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			c.Logger.Warn("project credit reservation missing during settlement",
+				slog.String("user_id", job.UserID),
+				slog.String("project_id", job.ProjectID),
+				slog.String("job_id", job.ID),
+				slog.String("reference_id", referenceID),
+				slog.String("action", string(action)),
+			)
+			continue
+		}
+		if err != nil {
+			c.Logger.Warn("project credit reservation settlement failed",
+				slog.String("user_id", job.UserID),
+				slog.String("project_id", job.ProjectID),
+				slog.String("job_id", job.ID),
+				slog.String("reference_id", referenceID),
+				slog.String("action", string(action)),
+				slog.Any("error", err),
+			)
+			return err
+		}
 	}
-	if errors.Is(err, store.ErrNotFound) {
-		return nil
+	return nil
+}
+
+func creditActionsFromProjectKey(value string) []models.CreditAction {
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ';' || r == '|'
+	})
+	actions := make([]models.CreditAction, 0, len(parts))
+	seen := make(map[models.CreditAction]struct{}, len(parts))
+	for _, part := range parts {
+		action, ok := models.NormalizeCreditAction(strings.TrimSpace(part))
+		if !ok || action == "" {
+			continue
+		}
+		if _, exists := seen[action]; exists {
+			continue
+		}
+		seen[action] = struct{}{}
+		actions = append(actions, action)
 	}
-	return err
+	return actions
+}
+
+func creditActionsContain(actions []models.CreditAction, target models.CreditAction) bool {
+	for _, action := range actions {
+		if action == target {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Coordinator) AdvanceStoryPlanToRender(ctx context.Context, userID, projectID string) error {

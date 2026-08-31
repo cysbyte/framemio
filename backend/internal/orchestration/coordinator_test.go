@@ -6,10 +6,82 @@ import (
 	"testing"
 	"time"
 
+	"github.com/framemio/backend/internal/credits"
 	"github.com/framemio/backend/internal/models"
 	"github.com/framemio/backend/internal/queue"
 	"github.com/framemio/backend/internal/store"
 )
+
+func TestCoordinatorSettlesCombinedEditCreditReservations(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	now := time.Date(2026, time.August, 21, 10, 0, 0, 0, time.UTC)
+	creditService := credits.New(memoryStore, credits.DefaultPolicy(), func() time.Time { return now })
+	coordinator := New(Coordinator{Store: memoryStore, Publisher: publisher, Now: func() time.Time { return now }, Credits: creditService})
+
+	if _, _, err := creditService.GrantPurchasedCredits(ctx, "user-1", "test-purchase-combined-edit", 100, nil); err != nil {
+		t.Fatal(err)
+	}
+	media := models.MediaAsset{ID: "media-1", UserID: "user-1", Type: models.MediaTypePhoto, Status: models.MediaStatusReady, FileName: "IMG_0001", ContentType: "image/jpeg", FileSizeBytes: 100, S3Key: "source/media-1", UploadID: "upload-1", CreatedAt: now, UpdatedAt: now}
+	session := models.UploadSession{ID: media.UploadID, UserID: media.UserID, MediaID: media.ID, S3Key: media.S3Key, Strategy: models.UploadStrategySingle, CreatedAt: now}
+	if err := memoryStore.CreateMediaUpload(ctx, media, session); err != nil {
+		t.Fatal(err)
+	}
+	project := models.StoryProject{
+		ID:                 "project-combined-edit",
+		UserID:             "user-1",
+		Title:              "Combined edit",
+		MediaIDs:           []string{"media-1"},
+		CreditOperationKey: "REGENERATE_STORY,ADD_MOMENT",
+		Status:             models.ProjectStatusRendering,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+	if _, _, err := memoryStore.CreateProject(ctx, project, "project-combined-edit"); err != nil {
+		t.Fatal(err)
+	}
+	referenceID := project.ID + ":v2"
+	if _, _, err := creditService.Reserve(ctx, "user-1", models.CreditActionRegenerateStory, "project", referenceID, credits.StoryMediaStats{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := creditService.Reserve(ctx, "user-1", models.CreditActionAddMoment, "project", referenceID, credits.StoryMediaStats{AddedMediaCount: 1, AddedPhotoCount: 1}, nil); err != nil {
+		t.Fatal(err)
+	}
+	balance, err := memoryStore.GetCreditBalance(ctx, "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if balance.Available != 40 || balance.Reserved != 60 {
+		t.Fatalf("post-reserve balance = %+v, want available 40 reserved 60", balance)
+	}
+
+	renderJob, _, err := memoryStore.CreateJob(ctx, models.ProcessingJob{
+		ID:            "job-combined-edit-render",
+		UserID:        "user-1",
+		ProjectID:     project.ID,
+		Type:          models.JobTypeVideoRender,
+		Status:        models.JobStatusQueued,
+		Configuration: map[string]string{"story_plan_version": "2"},
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}, "render-combined-edit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordinator.UpdateJobStatus(ctx, renderJob.ID, models.JobStatusCompleted, 1, "", "", "renders/project-combined-edit.mp4", "video/mp4"); err != nil {
+		t.Fatal(err)
+	}
+	balance, err = memoryStore.GetCreditBalance(ctx, "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if balance.Available != 40 || balance.Reserved != 0 {
+		t.Fatalf("post-commit balance = %+v, want available 40 reserved 0", balance)
+	}
+}
 
 func TestCoordinatorChainsReusableVideoStages(t *testing.T) {
 	t.Parallel()

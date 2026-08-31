@@ -711,6 +711,83 @@ func TestIOSStoryEditRejectsForeignMediaReference(t *testing.T) {
 	}
 }
 
+func TestIOSStoryEditAddMomentReservesAddAndRegenerateCredits(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	handler := newTestServer(memoryStore, publisher).Handler()
+	now := time.Date(2026, time.August, 19, 10, 0, 0, 0, time.UTC)
+
+	original := createReadyIOSMedia(t, handler, "asset-edit-charge-original", models.MediaTypePhoto)
+	project := models.StoryProject{
+		ID:        "project-edit-charge",
+		UserID:    "user-1",
+		Title:     "Charged edit",
+		Context:   "Special moments",
+		MediaIDs:  []string{original.MediaID},
+		Status:    models.ProjectStatusReady,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if _, _, err := memoryStore.CreateProject(context.Background(), project, "project-edit-charge"); err != nil {
+		t.Fatal(err)
+	}
+	if err := memoryStore.SaveStoryPlan(context.Background(), "user-1", models.StoryPlan{
+		SchemaVersion: models.StoryPlanSchemaVersionV1,
+		ID:            "plan-edit-charge",
+		ProjectID:     project.ID,
+		Version:       1,
+		Moments: []models.StoryMoment{{
+			MomentID:   "moment-original",
+			AssetID:    original.MediaID,
+			MediaID:    original.MediaID,
+			MediaType:  models.MediaTypePhoto,
+			Narrative:  "Original",
+			DurationMS: 4000,
+		}},
+		Output:          models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 8, Preset: "premium-memory"},
+		TotalDurationMS: 4000,
+		CreatedAt:       now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	added := createReadyIOSMedia(t, handler, "asset-edit-charge-added", models.MediaTypePhoto)
+	editResponse := performJSON(t, handler, http.MethodPost, "/v1/stories/"+project.ID+"/versions", map[string]any{
+		"addMediaIds": []string{added.MediaID},
+		"analyses": []map[string]any{{
+			"assetID":     added.MediaID,
+			"labels":      []string{"sunset"},
+			"peopleCount": 1,
+			"confidence":  0.9,
+		}},
+	}, "edit-charge-add-moment", true, nil)
+	if editResponse.Code != http.StatusAccepted {
+		t.Fatalf("edit iOS story status = %d, body = %s", editResponse.Code, editResponse.Body.String())
+	}
+	stored, err := memoryStore.GetProject(context.Background(), "user-1", project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.CreditOperationKey != "REGENERATE_STORY,ADD_MOMENT" {
+		t.Fatalf("credit operation key = %q", stored.CreditOperationKey)
+	}
+	balance, err := memoryStore.GetCreditBalance(context.Background(), "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if balance.Available != 40 || balance.Reserved != 60 {
+		t.Fatalf("expected 60 credits reserved for add+regenerate from initial 100, got %+v", balance)
+	}
+	if _, err := memoryStore.GetCreditReservationByReference(context.Background(), "user-1", models.CreditActionRegenerateStory, "project", project.ID+":v2"); err != nil {
+		t.Fatalf("missing regenerate reservation: %v", err)
+	}
+	if _, err := memoryStore.GetCreditReservationByReference(context.Background(), "user-1", models.CreditActionAddMoment, "project", project.ID+":v2"); err != nil {
+		t.Fatalf("missing add moment reservation: %v", err)
+	}
+}
+
 func TestIOSStoryEditAddsUploadedPhotoOutsideOriginalStory(t *testing.T) {
 	t.Parallel()
 
@@ -836,6 +913,84 @@ func TestIOSStoryEditDefersStoryPlanUntilNewVideoAnalysis(t *testing.T) {
 	after := publisher.Messages()
 	if len(after) <= before || after[len(after)-1].JobType != models.JobTypeStoryPlan {
 		t.Fatalf("deferred story revision was not published after video analysis: before=%d after=%+v", before, after)
+	}
+}
+
+func TestIOSStoryVideoMomentsUseRepresentativeFrameThumbnail(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	handler := newTestServer(memoryStore, publisher).Handler()
+
+	video := createReadyIOSMedia(t, handler, "asset-video-thumbnail", models.MediaTypeVideo)
+	storyResponse := performJSON(t, handler, http.MethodPost, "/v1/stories", map[string]any{
+		"context": "Special moments",
+		"assets":  []map[string]any{{"id": "asset-video-thumbnail", "kind": "video", "pixelWidth": 1920, "pixelHeight": 1080, "duration": 12}},
+	}, "", true, nil)
+	if storyResponse.Code != http.StatusCreated {
+		t.Fatalf("create iOS story status = %d, body = %s", storyResponse.Code, storyResponse.Body.String())
+	}
+	var story iosStory
+	decodeResponse(t, storyResponse, &story)
+
+	now := time.Date(2026, time.August, 19, 10, 0, 0, 0, time.UTC)
+	frameKey := "users/user-1/video-analysis/" + video.MediaID + "/frame-2.jpg"
+	if err := memoryStore.SaveVideoAnalysis(context.Background(), "user-1", models.VideoAnalysis{
+		ID:              "video-analysis-thumbnail",
+		VideoID:         video.MediaID,
+		ProjectID:       story.ID,
+		AnalysisVersion: "thumb-v1",
+		DurationMicros:  12_000_000,
+		Scenes: []models.VideoScene{{
+			SceneID:     "scene-video-thumbnail",
+			StartMicros: 1_000_000,
+			EndMicros:   5_000_000,
+			RepresentativeFrames: []models.Frame{
+				{FrameID: "frame-1", TimestampMicros: 500_000, S3Key: "users/user-1/video-analysis/" + video.MediaID + "/frame-1.jpg"},
+				{FrameID: "frame-2", TimestampMicros: 2_000_000, S3Key: frameKey},
+			},
+		}},
+		QualitySignals: models.VideoQualitySignals{OverallScore: 0.9},
+		CreatedAt:      now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := memoryStore.SaveStoryPlan(context.Background(), "user-1", models.StoryPlan{
+		SchemaVersion: models.StoryPlanSchemaVersionV1,
+		ID:            "plan-video-thumbnail",
+		ProjectID:     story.ID,
+		Version:       1,
+		TitleText:     "Video thumbnail story",
+		Moments: []models.StoryMoment{{
+			MomentID:             "moment-video-thumbnail",
+			AssetID:              video.MediaID,
+			MediaID:              video.MediaID,
+			MediaType:            models.MediaTypeVideo,
+			VideoAnalysisVersion: "thumb-v1",
+			StartMicros:          1_500_000,
+			EndMicros:            4_000_000,
+			Narrative:            "Video moment",
+			DurationMS:           2500,
+		}},
+		Output:          models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 12, Preset: "social"},
+		TotalDurationMS: 2500,
+		CreatedAt:       now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	getResponse := performJSON(t, handler, http.MethodGet, "/v1/stories/"+story.ID, nil, "", true, nil)
+	if getResponse.Code != http.StatusOK {
+		t.Fatalf("get iOS story status = %d, body = %s", getResponse.Code, getResponse.Body.String())
+	}
+	var updated iosStory
+	decodeResponse(t, getResponse, &updated)
+	if len(updated.Moments) != 1 {
+		t.Fatalf("expected one story moment, got %+v", updated.Moments)
+	}
+	if updated.Moments[0].ThumbnailURL == nil || !strings.Contains(*updated.Moments[0].ThumbnailURL, frameKey) {
+		t.Fatalf("video moment thumbnail should use representative frame %q, got %+v", frameKey, updated.Moments[0].ThumbnailURL)
 	}
 }
 

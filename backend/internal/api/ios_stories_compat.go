@@ -211,27 +211,39 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		s.internalError(response, err, "prepare iOS story edit")
 		return
 	}
-	selectedAction := models.CreditAction("")
+	creditActions := []models.CreditAction{models.CreditActionRegenerateStory}
+	statsByAction := map[models.CreditAction]credits.StoryMediaStats{}
 	stats := credits.StoryMediaStats{}
 	if len(newMediaIDs) > 0 {
-		selectedAction = models.CreditActionAddMoment
+		creditActions = append(creditActions, models.CreditActionAddMoment)
 		stats, err = s.addedIOSStoryCreditStats(request, user.ID, newMediaIDs)
 		if err != nil {
 			s.mapStoreError(response, err)
 			return
 		}
-	} else if strings.TrimSpace(input.Instruction) != "" {
-		selectedAction = models.CreditActionAIEditStory
-		stats, err = s.currentIOSStoryCreditStats(request, user.ID, project.ID)
+		statsByAction[models.CreditActionAddMoment] = stats
+	}
+	if strings.TrimSpace(input.Instruction) != "" {
+		storyStats, err := s.currentIOSStoryCreditStats(request, user.ID, project.ID)
 		if err != nil {
 			s.mapStoreError(response, err)
 			return
 		}
+		creditActions = append(creditActions, models.CreditActionAIEditStory)
+		statsByAction[models.CreditActionAIEditStory] = storyStats
+	}
+	if _, ok := statsByAction[models.CreditActionRegenerateStory]; !ok {
+		storyStats, err := s.currentIOSStoryCreditStats(request, user.ID, project.ID)
+		if err != nil {
+			s.mapStoreError(response, err)
+			return
+		}
+		statsByAction[models.CreditActionRegenerateStory] = storyStats
 	}
 	s.Logger.Info("prepared iOS story edit credit scope",
 		"user_id", user.ID,
 		"project_id", project.ID,
-		"selected_action", string(selectedAction),
+		"selected_action", joinCreditActionsForProject(creditActions),
 		"story_plan_version", config["story_plan_version"],
 		"requested_add_media_ids", joinStringsOrUnset(cleanStringList(input.AddMediaIDs)),
 		"requested_replace_to_media_ids", joinIOSStoryReplacementTargets(input.Replace),
@@ -241,31 +253,62 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		"remove_media_ids", joinStringsOrUnset(cleanStringList(input.RemoveMediaIDs)),
 		"ordered_media_ids", joinStringsOrUnset(cleanStringList(input.OrderedMediaIDs)),
 		"instruction_present", strings.TrimSpace(input.Instruction) != "",
-		"credit_price", creditPricingForAction(selectedAction),
+		"credit_price", creditPricingForActions(creditActions),
 		"add_media_count", stats.AddedMediaCount,
 		"add_photo_count", stats.AddedPhotoCount,
 		"add_video_seconds", stats.AddedVideoSeconds,
 		"story_media_count", stats.StoryMediaCount,
 		"story_video_seconds", stats.StoryVideoSeconds,
 	)
-	var reservation models.CreditReservation
-	if selectedAction != "" {
+	reservations := make([]models.CreditReservation, 0, len(creditActions))
+	if len(creditActions) > 0 {
 		version := strings.TrimSpace(config["story_plan_version"])
 		if version == "" {
 			s.writeError(response, http.StatusBadRequest, "invalid_story_edit", "story version is required")
 			return
 		}
 		referenceID := project.ID + ":v" + version
-		reservation, _ = s.reserveIOSStoryCredits(response, request, user.ID, selectedAction, referenceID, stats, map[string]any{"project_id": project.ID, "version": version})
-		if reservation.ID == "" {
-			return
-		}
-		defer func() {
+		for _, action := range creditActions {
+			actionStats := statsByAction[action]
+			s.Logger.Info("reserving iOS story edit credits",
+				"user_id", user.ID,
+				"project_id", project.ID,
+				"reference_id", referenceID,
+				"action", string(action),
+				"credit_price", creditPricingForAction(action),
+				"add_media_count", actionStats.AddedMediaCount,
+				"story_media_count", actionStats.StoryMediaCount,
+				"story_video_seconds", actionStats.StoryVideoSeconds,
+			)
+			reservation, _ := s.reserveIOSStoryCredits(response, request, user.ID, action, referenceID, actionStats, map[string]any{"project_id": project.ID, "version": version})
 			if reservation.ID == "" {
+				s.Logger.Warn("reserve iOS story edit credits stopped",
+					"user_id", user.ID,
+					"project_id", project.ID,
+					"reference_id", referenceID,
+					"action", string(action),
+				)
 				return
 			}
-			if _, err := s.Credits.Release(request.Context(), user.ID, reservation.ID); err != nil && !errors.Is(err, store.ErrConflict) && !errors.Is(err, store.ErrNotFound) {
-				s.Logger.Warn("release iOS story edit reservation failed", "user_id", user.ID, "project_id", project.ID, "reservation_id", reservation.ID, "error", err)
+			s.Logger.Info("reserved iOS story edit credits",
+				"user_id", user.ID,
+				"project_id", project.ID,
+				"reference_id", referenceID,
+				"action", string(action),
+				"reservation_id", reservation.ID,
+				"reserved_amount", reservation.Amount,
+				"allocation_count", len(reservation.Allocations),
+			)
+			reservations = append(reservations, reservation)
+		}
+		defer func() {
+			for _, reservation := range reservations {
+				if reservation.ID == "" {
+					continue
+				}
+				if _, err := s.Credits.Release(request.Context(), user.ID, reservation.ID); err != nil && !errors.Is(err, store.ErrConflict) && !errors.Is(err, store.ErrNotFound) {
+					s.Logger.Warn("release iOS story edit reservation failed", "user_id", user.ID, "project_id", project.ID, "reservation_id", reservation.ID, "action", string(reservation.Action), "error", err)
+				}
 			}
 		}()
 	}
@@ -290,12 +333,20 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		"excluded_moment_ids", job.Configuration["excluded_moment_ids"],
 		"edit_intent", job.Configuration["edit_intent"],
 	)
-	if selectedAction != "" {
-		if err := s.Store.SetProjectCreditOperationKey(request.Context(), user.ID, project.ID, string(selectedAction)); err != nil {
+	if len(creditActions) > 0 {
+		creditOperationKey := joinCreditActionsForProject(creditActions)
+		if err := s.Store.SetProjectCreditOperationKey(request.Context(), user.ID, project.ID, creditOperationKey); err != nil {
 			s.internalError(response, err, "store iOS story credit operation")
 			return
 		}
-		reservation.ID = ""
+		s.Logger.Info("stored iOS story edit credit operation key",
+			"user_id", user.ID,
+			"project_id", project.ID,
+			"story_plan_version", job.Configuration["story_plan_version"],
+			"credit_operation_key", creditOperationKey,
+			"reservation_count", len(reservations),
+		)
+		reservations = nil
 	}
 	s.Logger.Info("queued iOS story revision", "user_id", user.ID, "project_id", project.ID, "job_id", job.ID, "job_status", string(job.Status), "story_plan_version", job.Configuration["story_plan_version"], "subtitles_enabled", valueOrUnset(job.Configuration["subtitles_enabled"]), "caption_style_preset", valueOrUnset(job.Configuration["caption_style_preset"]))
 	updated, err := s.Store.GetProject(request.Context(), user.ID, project.ID)
@@ -404,23 +455,37 @@ func (s *Server) reserveIOSStoryCredits(response http.ResponseWriter, request *h
 		s.internalError(response, err, "quote credit action")
 		return models.CreditReservation{}, false
 	}
+	s.Logger.Info("quoted iOS story credits",
+		"user_id", userID,
+		"action", string(action),
+		"reference_id", referenceID,
+		"required_credits", quote.Credits,
+		"available_credits", quote.Balance,
+		"balance_after", quote.BalanceAfter,
+		"eligible", quote.Eligible,
+		"reason", valueOrUnset(quote.Reason),
+	)
 	if !quote.Eligible {
+		s.Logger.Warn("rejected iOS story credit reservation as ineligible", "user_id", userID, "action", string(action), "reference_id", referenceID, "reason", quote.Reason)
 		s.writeJSON(response, http.StatusBadRequest, map[string]any{"error": "story_too_large", "reason": quote.Reason})
 		return models.CreditReservation{}, false
 	}
 	if quote.Balance < quote.Credits {
+		s.Logger.Warn("rejected iOS story credit reservation for insufficient credits", "user_id", userID, "action", string(action), "reference_id", referenceID, "required_credits", quote.Credits, "available_credits", quote.Balance)
 		s.writeJSON(response, http.StatusPaymentRequired, map[string]any{"error": "insufficient_credits", "required": quote.Credits, "available": quote.Balance})
 		return models.CreditReservation{}, false
 	}
 	reservation, _, err := s.Credits.Reserve(request.Context(), userID, action, "project", referenceID, stats, metadata)
 	if err != nil {
 		if errors.Is(err, store.ErrInsufficientCredits) {
+			s.Logger.Warn("iOS story credit reservation raced insufficient credits", "user_id", userID, "action", string(action), "reference_id", referenceID, "required_credits", quote.Credits, "available_credits", quote.Balance)
 			s.writeJSON(response, http.StatusPaymentRequired, map[string]any{"error": "insufficient_credits", "required": quote.Credits, "available": quote.Balance})
 			return models.CreditReservation{}, false
 		}
 		s.internalError(response, err, "reserve credit action")
 		return models.CreditReservation{}, false
 	}
+	s.Logger.Info("created iOS story credit reservation", "user_id", userID, "action", string(action), "reference_id", referenceID, "reservation_id", reservation.ID, "reserved_amount", reservation.Amount, "allocation_count", len(reservation.Allocations))
 	return reservation, true
 }
 
@@ -768,6 +833,39 @@ func creditPricingForAction(action models.CreditAction) int {
 		return price
 	}
 	return 0
+}
+
+func creditPricingForActions(actions []models.CreditAction) int {
+	total := 0
+	for _, action := range uniqueCreditActions(actions) {
+		total += creditPricingForAction(action)
+	}
+	return total
+}
+
+func joinCreditActionsForProject(actions []models.CreditAction) string {
+	unique := uniqueCreditActions(actions)
+	values := make([]string, 0, len(unique))
+	for _, action := range unique {
+		values = append(values, string(action))
+	}
+	return strings.Join(values, ",")
+}
+
+func uniqueCreditActions(actions []models.CreditAction) []models.CreditAction {
+	seen := make(map[models.CreditAction]struct{}, len(actions))
+	unique := make([]models.CreditAction, 0, len(actions))
+	for _, action := range actions {
+		if action == "" {
+			continue
+		}
+		if _, exists := seen[action]; exists {
+			continue
+		}
+		seen[action] = struct{}{}
+		unique = append(unique, action)
+	}
+	return unique
 }
 
 func preferredIOSStoryMediaOrder(input []string, selected, projectMedia map[string]struct{}) ([]string, error) {
@@ -1165,6 +1263,7 @@ func (s *Server) makeIOSStory(request *http.Request, userID string, project mode
 			story.Duration += *media.DurationSeconds
 		}
 	}
+	videoAnalysesByMediaID := s.iosVideoAnalysesByMediaID(request, userID, project.ID)
 	if plan, err := s.Store.GetStoryPlan(request.Context(), userID, project.ID); err == nil {
 		if strings.TrimSpace(plan.TitleText) != "" {
 			story.Title = plan.TitleText
@@ -1173,12 +1272,12 @@ func (s *Server) makeIOSStory(request *http.Request, userID string, project mode
 			story.Duration = float64(plan.TotalDurationMS) / 1000
 		}
 		story.Description = iosStoryDescription(plan)
-		story.Moments = s.iosStoryMoments(request, plan, mediaByID)
+		story.Moments = s.iosStoryMoments(request, plan, mediaByID, videoAnalysesByMediaID)
 		if len(story.Moments) > 0 {
 			story.AssetIDs = storyAssetIDsFromMoments(story.Moments)
 		}
 	}
-	story.AvailableMoments = s.iosAvailableMoments(request, project, mediaByID, story.Moments)
+	story.AvailableMoments = s.iosAvailableMoments(request, project, mediaByID, story.Moments, videoAnalysesByMediaID)
 	story.Title = iosDisplayStoryTitle(story.Title, story.Moments, project.Context)
 	if story.Duration <= 0 {
 		story.Duration = float64(max(8, len(project.MediaIDs)*4))
@@ -1208,7 +1307,7 @@ func iosStoryDescription(plan models.StoryPlan) string {
 	return truncateIOSConfigValue(strings.Join(parts, ". "), iosStoryDescriptionMaxLength)
 }
 
-func (s *Server) iosStoryMoments(request *http.Request, plan models.StoryPlan, mediaByID map[string]models.MediaAsset) []iosStoryMoment {
+func (s *Server) iosStoryMoments(request *http.Request, plan models.StoryPlan, mediaByID map[string]models.MediaAsset, videoAnalysesByMediaID map[string]models.VideoAnalysis) []iosStoryMoment {
 	moments := make([]iosStoryMoment, 0, len(plan.Moments))
 	captionTexts := iosCaptionTextMatchers(plan.Captions)
 	for index, moment := range plan.Moments {
@@ -1228,7 +1327,7 @@ func (s *Server) iosStoryMoments(request *http.Request, plan models.StoryPlan, m
 		}
 		var thumbnailURL *string
 		if media, ok := mediaByID[mediaID]; ok {
-			thumbnailURL = s.iosStoryThumbnailURL(request, media)
+			thumbnailURL = s.iosStoryThumbnailURL(request, media, iosStoryMomentVideoThumbnailKey(moment, videoAnalysesByMediaID[mediaID]))
 		}
 		var creationDate *time.Time
 		if media, ok := mediaByID[mediaID]; ok {
@@ -1249,19 +1348,93 @@ func (s *Server) iosStoryMoments(request *http.Request, plan models.StoryPlan, m
 	return moments
 }
 
-func (s *Server) iosStoryThumbnailURL(request *http.Request, media models.MediaAsset) *string {
-	if s.ObjectStorage == nil || media.S3Key == "" {
-		return nil
-	}
-	if media.Type != models.MediaTypePhoto && media.Type != models.MediaTypeLivePhoto {
-		return nil
-	}
-	url, err := s.ObjectStorage.PresignedDownloadURL(request.Context(), media.S3Key, iosStoryVideoURLExpiry)
+func (s *Server) iosVideoAnalysesByMediaID(request *http.Request, userID, projectID string) map[string]models.VideoAnalysis {
+	_, videoAnalyses, err := s.Store.ListProjectAnalyses(request.Context(), userID, projectID)
 	if err != nil {
-		s.Logger.Warn("presign iOS story thumbnail url failed", "media_id", media.ID, "s3_key", media.S3Key, "error", err)
+		s.Logger.Warn("load iOS story video analyses for thumbnails failed", "user_id", userID, "project_id", projectID, "error", err)
+		return nil
+	}
+	analysesByMediaID := make(map[string]models.VideoAnalysis, len(videoAnalyses))
+	for _, analysis := range videoAnalyses {
+		mediaID := strings.TrimSpace(analysis.VideoID)
+		if mediaID != "" {
+			analysesByMediaID[mediaID] = analysis
+		}
+	}
+	return analysesByMediaID
+}
+
+func (s *Server) iosStoryThumbnailURL(request *http.Request, media models.MediaAsset, videoThumbnailKeys ...string) *string {
+	if s.ObjectStorage == nil {
+		return nil
+	}
+	thumbnailKey := ""
+	switch media.Type {
+	case models.MediaTypePhoto, models.MediaTypeLivePhoto:
+		thumbnailKey = strings.TrimSpace(media.S3Key)
+	case models.MediaTypeVideo:
+		for _, key := range videoThumbnailKeys {
+			if trimmed := strings.TrimSpace(key); trimmed != "" {
+				thumbnailKey = trimmed
+				break
+			}
+		}
+	}
+	if thumbnailKey == "" {
+		return nil
+	}
+	url, err := s.ObjectStorage.PresignedDownloadURL(request.Context(), thumbnailKey, iosStoryVideoURLExpiry)
+	if err != nil {
+		s.Logger.Warn("presign iOS story thumbnail url failed", "media_id", media.ID, "s3_key", thumbnailKey, "error", err)
 		return nil
 	}
 	return &url
+}
+
+func iosStoryMomentVideoThumbnailKey(moment models.StoryMoment, analysis models.VideoAnalysis) string {
+	if strings.TrimSpace(analysis.VideoID) == "" {
+		return ""
+	}
+	if strings.TrimSpace(moment.VideoAnalysisVersion) != "" && strings.TrimSpace(analysis.AnalysisVersion) != "" && strings.TrimSpace(moment.VideoAnalysisVersion) != strings.TrimSpace(analysis.AnalysisVersion) {
+		return iosVideoAnalysisFallbackThumbnailKey(analysis)
+	}
+	if moment.StartMicros < moment.EndMicros {
+		for _, scene := range analysis.Scenes {
+			if scene.EndMicros <= moment.StartMicros || scene.StartMicros >= moment.EndMicros {
+				continue
+			}
+			if key := iosFrameThumbnailKey(scene.RepresentativeFrames, moment.StartMicros, moment.EndMicros); key != "" {
+				return key
+			}
+		}
+	}
+	return iosVideoAnalysisFallbackThumbnailKey(analysis)
+}
+
+func iosVideoAnalysisFallbackThumbnailKey(analysis models.VideoAnalysis) string {
+	for _, scene := range analysis.Scenes {
+		if key := iosFrameThumbnailKey(scene.RepresentativeFrames, 0, 0); key != "" {
+			return key
+		}
+	}
+	return ""
+}
+
+func iosFrameThumbnailKey(frames []models.Frame, startMicros, endMicros int64) string {
+	if startMicros < endMicros {
+		for _, frame := range frames {
+			key := strings.TrimSpace(frame.S3Key)
+			if key != "" && frame.TimestampMicros >= startMicros && frame.TimestampMicros <= endMicros {
+				return key
+			}
+		}
+	}
+	for _, frame := range frames {
+		if key := strings.TrimSpace(frame.S3Key); key != "" {
+			return key
+		}
+	}
+	return ""
 }
 
 func firstHumanIOSText(values ...string) string {
@@ -1314,7 +1487,7 @@ func normalizeIOSSubtitleComparison(value string) string {
 	return strings.Join(strings.Fields(strings.ToLower(strings.Trim(value, " .!?\n\t\r"))), " ")
 }
 
-func (s *Server) iosAvailableMoments(request *http.Request, project models.StoryProject, mediaByID map[string]models.MediaAsset, selected []iosStoryMoment) []iosStoryMoment {
+func (s *Server) iosAvailableMoments(request *http.Request, project models.StoryProject, mediaByID map[string]models.MediaAsset, selected []iosStoryMoment, videoAnalysesByMediaID map[string]models.VideoAnalysis) []iosStoryMoment {
 	selectedMedia := make(map[string]struct{}, len(selected))
 	for _, moment := range selected {
 		selectedMedia[moment.MediaID] = struct{}{}
@@ -1330,7 +1503,7 @@ func (s *Server) iosAvailableMoments(request *http.Request, project models.Story
 			ID:           mediaID,
 			MediaID:      mediaID,
 			Type:         string(media.Type),
-			ThumbnailURL: s.iosStoryThumbnailURL(request, media),
+			ThumbnailURL: s.iosStoryThumbnailURL(request, media, iosVideoAnalysisFallbackThumbnailKey(videoAnalysesByMediaID[mediaID])),
 			Title:        fallbackIOSMomentTitle(string(media.Type), index),
 			CreationDate: media.CreationDate,
 			Selected:     isSelected,
