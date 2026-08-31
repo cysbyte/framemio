@@ -35,37 +35,65 @@ export async function runRenderWorker(config = loadConfig()): Promise<void> {
     workRoot: config.workRoot,
   });
   let idleDeadline = Date.now() + config.waitTimeoutMs;
+  const shutdown = installShutdownHandler();
   console.info(JSON.stringify({level: 'info', msg: 'render worker started', run_once: config.runOnce, job_id: config.jobID ?? '', renderer_mode: config.rendererMode}));
 
-  do {
-    const received = await queue.receive(10, 20, config.visibilityTimeoutSeconds);
-    if (received.length > 0) {
-      console.info(JSON.stringify({level: 'info', msg: 'render worker run-once received messages', run_once: config.runOnce, target_job_id: config.jobID ?? '', count: received.length}));
-    }
-    let handledMessage = false;
-    for (const message of received) {
-      if (await handleMessage(message, {queue, backend, worker, config})) {
-        handledMessage = true;
-        if (config.runOnce && (!config.jobID || message.message.jobId === config.jobID)) {
-          console.info(JSON.stringify({level: 'info', msg: 'render worker run-once target handled', target_job_id: config.jobID ?? '', job_id: message.message.jobId}));
-          return;
-        }
-        if (config.runOnce && config.jobID) {
-          console.info(JSON.stringify({level: 'info', msg: 'render worker run-once continuing after available job', target_job_id: config.jobID, handled_job_id: message.message.jobId}));
+  try {
+    do {
+      const received = await queue.receive(10, 20, config.visibilityTimeoutSeconds);
+      if (received.length > 0) {
+        console.info(JSON.stringify({level: 'info', msg: 'render worker run-once received messages', run_once: config.runOnce, target_job_id: config.jobID ?? '', count: received.length}));
+      }
+      let handledMessage = false;
+      for (const message of received) {
+        if (await handleMessage(message, {queue, backend, worker, config})) {
+          handledMessage = true;
+          if (config.runOnce && (!config.jobID || message.message.jobId === config.jobID)) {
+            console.info(JSON.stringify({level: 'info', msg: 'render worker run-once target handled', target_job_id: config.jobID ?? '', job_id: message.message.jobId}));
+            return;
+          }
+          if (config.runOnce && config.jobID) {
+            console.info(JSON.stringify({level: 'info', msg: 'render worker run-once continuing after available job', target_job_id: config.jobID, handled_job_id: message.message.jobId}));
+          }
         }
       }
-    }
-    if (config.runOnce && config.jobID && handledMessage) {
-      idleDeadline = Date.now() + config.waitTimeoutMs;
-    }
-    if (config.runOnce && Date.now() >= idleDeadline) {
-      console.error(JSON.stringify({level: 'error', msg: 'render worker run-once timed out before target', target_job_id: config.jobID ?? '', wait_timeout_ms: config.waitTimeoutMs}));
-      throw new Error(`timed out waiting for render job ${config.jobID ?? ''}`);
-    }
-    if (!config.runOnce) {
-      await sleep(1000);
-    }
-  } while (!config.runOnce || Date.now() < idleDeadline);
+      if (config.runOnce && config.jobID && handledMessage) {
+        idleDeadline = Date.now() + config.waitTimeoutMs;
+      }
+      if (config.runOnce && Date.now() >= idleDeadline) {
+        console.error(JSON.stringify({level: 'error', msg: 'render worker run-once timed out before target', target_job_id: config.jobID ?? '', wait_timeout_ms: config.waitTimeoutMs}));
+        throw new Error(`timed out waiting for render job ${config.jobID ?? ''}`);
+      }
+      if (shutdown.requested) {
+        console.info(JSON.stringify({level: 'info', msg: 'render worker shutdown requested after current message'}));
+        return;
+      }
+      if (!config.runOnce) {
+        await sleep(1000);
+      }
+    } while ((!config.runOnce || Date.now() < idleDeadline) && !shutdown.requested);
+  } finally {
+    shutdown.dispose();
+  }
+}
+
+function installShutdownHandler(): {requested: boolean; dispose: () => void} {
+  const state = {requested: false};
+  const onSignal = (signal: NodeJS.Signals) => {
+    state.requested = true;
+    console.info(JSON.stringify({level: 'info', msg: 'render worker shutdown requested', signal}));
+  };
+  process.once('SIGTERM', onSignal);
+  process.once('SIGINT', onSignal);
+  return {
+    get requested() {
+      return state.requested;
+    },
+    dispose: () => {
+      process.off('SIGTERM', onSignal);
+      process.off('SIGINT', onSignal);
+    },
+  };
 }
 
 async function handleMessage(received: ReceivedJobMessage, dependencies: {
