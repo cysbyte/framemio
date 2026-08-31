@@ -147,6 +147,30 @@ final class StoryModelTests: XCTestCase {
         XCTAssertEqual(story.assetIDs, ["photo-1", "video-1"])
     }
 
+    func testStoryDecodesBackendProgressMetadata() throws {
+        let data = Data("""
+        {
+          "id": "story-progress",
+          "title": "Weekend Clips",
+          "context": "Special moments",
+          "createdAt": "2026-08-26T07:00:00Z",
+          "duration": 24,
+          "assetIDs": ["video-1"],
+          "status": "analyzing",
+          "progressTitle": "Finding the best parts...",
+          "progressDetail": "Scanning scenes, motion, faces, and meaningful highlights.",
+          "progressValue": 0.615
+        }
+        """.utf8)
+
+        let decoder = FrameMioJSONCoding.apiDecoder()
+        let story = try decoder.decode(Story.self, from: data)
+
+        XCTAssertEqual(story.progressTitle, "Finding the best parts...")
+        XCTAssertEqual(story.progressDetail, "Scanning scenes, motion, faces, and meaningful highlights.")
+        XCTAssertEqual(story.progressValue, 0.615)
+    }
+
     func testStoryDecodesMixedPhotoAndVideoMoments() throws {
         let data = Data("""
         {

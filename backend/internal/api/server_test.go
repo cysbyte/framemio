@@ -504,6 +504,62 @@ func TestIOSStoriesCompatibilityCreatesProjectAndFetchesStories(t *testing.T) {
 	}
 }
 
+func TestIOSStoryIncludesBackendJobProgress(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	handler := newTestServer(memoryStore, publisher).Handler()
+
+	uploadResponse := createReadyIOSMedia(t, handler, "asset-progress-video", models.MediaTypeVideo)
+	storyResponse := performJSON(t, handler, http.MethodPost, "/v1/stories", map[string]any{
+		"context": "Weekend clips",
+		"assets": []map[string]any{{
+			"id":          "asset-progress-video",
+			"kind":        "video",
+			"duration":    12,
+			"pixelWidth":  1920,
+			"pixelHeight": 1080,
+		}},
+	}, "", true, nil)
+	if storyResponse.Code != http.StatusCreated {
+		t.Fatalf("create iOS story status = %d, body = %s", storyResponse.Code, storyResponse.Body.String())
+	}
+	var story iosStory
+	decodeResponse(t, storyResponse, &story)
+
+	now := time.Date(2026, time.August, 19, 10, 1, 0, 0, time.UTC)
+	if _, _, err := memoryStore.CreateJob(context.Background(), models.ProcessingJob{
+		ID:        "job-progress-understand",
+		UserID:    "user-1",
+		ProjectID: story.ID,
+		MediaID:   uploadResponse.MediaID,
+		Type:      models.JobTypeVideoUnderstand,
+		Status:    models.JobStatusRunning,
+		Progress:  0.5,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}, "job-progress-understand"); err != nil {
+		t.Fatal(err)
+	}
+
+	getResponse := performJSON(t, handler, http.MethodGet, "/v1/stories/"+story.ID, nil, "", true, nil)
+	if getResponse.Code != http.StatusOK {
+		t.Fatalf("get iOS story status = %d, body = %s", getResponse.Code, getResponse.Body.String())
+	}
+	var fetched iosStory
+	decodeResponse(t, getResponse, &fetched)
+	if fetched.ProgressTitle != "Finding the best parts..." {
+		t.Fatalf("progress title = %q", fetched.ProgressTitle)
+	}
+	if !strings.Contains(fetched.ProgressDetail, "Scanning scenes") {
+		t.Fatalf("progress detail = %q", fetched.ProgressDetail)
+	}
+	if fetched.ProgressValue == nil || *fetched.ProgressValue < 0.61 || *fetched.ProgressValue > 0.62 {
+		t.Fatalf("progress value = %v", fetched.ProgressValue)
+	}
+}
+
 func TestIOSStoriesCompatibilityDeletesStory(t *testing.T) {
 	t.Parallel()
 

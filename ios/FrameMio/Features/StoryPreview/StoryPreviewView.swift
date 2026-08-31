@@ -147,6 +147,7 @@ struct StoryPreviewView: View {
 
                 FrameMioProgressView(value: viewModel.progressValue, title: viewModel.progressTitle)
 
+                progressDetail
                 processingSteps
             }
         }
@@ -316,6 +317,7 @@ struct StoryPreviewView: View {
         } else if story.status.shouldPoll {
             VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
                 FrameMioProgressView(value: viewModel.progressValue, title: viewModel.progressTitle)
+                progressDetail
                 processingSteps
             }
         }
@@ -416,11 +418,24 @@ struct StoryPreviewView: View {
         .accessibilityHint("Removes this story from FrameMio.")
     }
 
+    private var progressDetail: some View {
+        Group {
+            if let detail = viewModel.progressDetail {
+                Text(detail)
+                    .font(FrameMioTypography.caption)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(detail)
+            }
+        }
+    }
+
     private var processingSteps: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.xs) {
-            processingStep("Understanding your moments", isActive: viewModel.progressValue >= 0.18)
-            processingStep("Finding the best parts", isActive: viewModel.progressValue >= 0.58)
-            processingStep("Putting it together", isActive: viewModel.progressValue >= 0.86)
+            processingStep("Media prepared", isActive: viewModel.progressValue >= 0.28)
+            processingStep("Highlights found", isActive: viewModel.progressValue >= 0.55)
+            processingStep("Story written", isActive: viewModel.progressValue >= 0.72)
+            processingStep("Film rendered", isActive: viewModel.progressValue >= 0.88)
         }
     }
 

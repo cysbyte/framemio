@@ -95,6 +95,9 @@ struct Story: Identifiable, Codable, Hashable, Sendable {
     var status: StoryStatus
     var videoURL: URL?
     var description: String? = nil
+    var progressTitle: String? = nil
+    var progressDetail: String? = nil
+    var progressValue: Double? = nil
     var moments: [StoryMoment]? = nil
     var availableMoments: [StoryMoment]? = nil
 }

@@ -31,6 +31,9 @@ type iosStory struct {
 	Status           string           `json:"status"`
 	VideoURL         *string          `json:"videoURL,omitempty"`
 	Description      string           `json:"description,omitempty"`
+	ProgressTitle    string           `json:"progressTitle,omitempty"`
+	ProgressDetail   string           `json:"progressDetail,omitempty"`
+	ProgressValue    *float64         `json:"progressValue,omitempty"`
 	Moments          []iosStoryMoment `json:"moments,omitempty"`
 	AvailableMoments []iosStoryMoment `json:"availableMoments,omitempty"`
 }
@@ -1244,13 +1247,17 @@ func sanitizeIOSStoryText(value string) string {
 }
 
 func (s *Server) makeIOSStory(request *http.Request, userID string, project models.StoryProject) iosStory {
+	progress := s.iosStoryProgress(request, userID, project)
 	story := iosStory{
-		ID:        project.ID,
-		Title:     project.Title,
-		Context:   project.Context,
-		CreatedAt: iosTimeString(project.CreatedAt),
-		AssetIDs:  append([]string(nil), project.MediaIDs...),
-		Status:    iosStoryStatus(project.Status),
+		ID:             project.ID,
+		Title:          project.Title,
+		Context:        project.Context,
+		CreatedAt:      iosTimeString(project.CreatedAt),
+		AssetIDs:       append([]string(nil), project.MediaIDs...),
+		Status:         iosStoryStatus(project.Status),
+		ProgressTitle:  progress.Title,
+		ProgressDetail: progress.Detail,
+		ProgressValue:  progress.Value,
 	}
 	mediaByID := make(map[string]models.MediaAsset, len(project.MediaIDs))
 	for _, mediaID := range project.MediaIDs {
@@ -1764,6 +1771,150 @@ func (s *Server) iosStoryVideoURL(request *http.Request, userID string, project 
 		return nil
 	}
 	return &url
+}
+
+type iosStoryProgress struct {
+	Title  string
+	Detail string
+	Value  *float64
+}
+
+func (s *Server) iosStoryProgress(request *http.Request, userID string, project models.StoryProject) iosStoryProgress {
+	if project.Status == models.ProjectStatusReady || project.Status == models.ProjectStatusFailed {
+		return iosStoryFallbackProgress(project.Status)
+	}
+	jobs, err := s.Store.ListProjectJobs(request.Context(), userID, project.ID)
+	if err != nil {
+		s.Logger.Warn("list iOS story jobs for progress failed", "user_id", userID, "project_id", project.ID, "error", err)
+		return iosStoryFallbackProgress(project.Status)
+	}
+	return iosStoryProgressFromJobs(project.Status, jobs)
+}
+
+func iosStoryProgressFromJobs(status models.ProjectStatus, jobs []models.ProcessingJob) iosStoryProgress {
+	switch status {
+	case models.ProjectStatusReady:
+		return iosStoryProgress{Title: "Ready to watch.", Detail: "Your story is ready.", Value: iosProgressValue(1)}
+	case models.ProjectStatusFailed:
+		return iosStoryProgress{Title: "This story needs another try.", Detail: "Something interrupted the last render.", Value: iosProgressValue(0)}
+	}
+
+	if len(jobs) == 0 {
+		return iosStoryFallbackProgress(status)
+	}
+
+	sortedJobs := append([]models.ProcessingJob(nil), jobs...)
+	sort.SliceStable(sortedJobs, func(first, second int) bool {
+		if sortedJobs[first].UpdatedAt.Equal(sortedJobs[second].UpdatedAt) {
+			return sortedJobs[first].CreatedAt.Before(sortedJobs[second].CreatedAt)
+		}
+		return sortedJobs[first].UpdatedAt.Before(sortedJobs[second].UpdatedAt)
+	})
+
+	if job, ok := latestIOSStoryProgressJob(sortedJobs, models.JobStatusRunning); ok {
+		return iosStoryProgressForJob(job)
+	}
+	if job, ok := earliestIOSStoryProgressJob(sortedJobs, models.JobStatusQueued); ok {
+		return iosStoryProgressForJob(job)
+	}
+	if status == models.ProjectStatusRendering || status == models.ProjectStatusStoryReady {
+		return iosStoryProgress{Title: "Preparing the final render...", Detail: "Your moments are selected; the video worker is getting the film ready.", Value: iosProgressValue(0.84)}
+	}
+	return iosStoryFallbackProgress(status)
+}
+
+func latestIOSStoryProgressJob(jobs []models.ProcessingJob, status models.JobStatus) (models.ProcessingJob, bool) {
+	for index := len(jobs) - 1; index >= 0; index-- {
+		if jobs[index].Status == status {
+			return jobs[index], true
+		}
+	}
+	return models.ProcessingJob{}, false
+}
+
+func earliestIOSStoryProgressJob(jobs []models.ProcessingJob, status models.JobStatus) (models.ProcessingJob, bool) {
+	for _, job := range jobs {
+		if job.Status == status {
+			return job, true
+		}
+	}
+	return models.ProcessingJob{}, false
+}
+
+func iosStoryProgressForJob(job models.ProcessingJob) iosStoryProgress {
+	progress := clampIOSStoryJobProgress(job.Progress)
+	switch job.Type {
+	case models.JobTypeMediaPreprocess:
+		if job.Status == models.JobStatusQueued {
+			return iosStoryProgress{Title: "Preparing video clips...", Detail: "Your media is waiting for the next worker.", Value: iosProgressValue(0.22)}
+		}
+		return iosStoryProgress{Title: "Preparing video clips...", Detail: "Reading your photos and videos before choosing moments.", Value: iosProgressValue(0.25 + progress*0.10)}
+	case models.JobTypeTranscribe:
+		if job.Status == models.JobStatusQueued {
+			return iosStoryProgress{Title: "Listening for voices...", Detail: "Audio transcription is queued for this story.", Value: iosProgressValue(0.36)}
+		}
+		return iosStoryProgress{Title: "Listening for voices...", Detail: "Capturing spoken moments from your video clips.", Value: iosProgressValue(0.40 + progress*0.10)}
+	case models.JobTypeVideoUnderstand:
+		if job.Status == models.JobStatusQueued {
+			return iosStoryProgress{Title: "Finding the best parts...", Detail: "Visual understanding is queued; longer videos can take a bit.", Value: iosProgressValue(0.50)}
+		}
+		return iosStoryProgress{Title: "Finding the best parts...", Detail: "Scanning scenes, motion, faces, and meaningful highlights.", Value: iosProgressValue(0.55 + progress*0.13)}
+	case models.JobTypeStoryPlan:
+		if job.Status == models.JobStatusQueued {
+			return iosStoryProgress{Title: "Writing your story...", Detail: "The story planner is waiting for the analyzed moments.", Value: iosProgressValue(0.68)}
+		}
+		return iosStoryProgress{Title: "Writing your story...", Detail: "Choosing the rhythm, captions, and moment order.", Value: iosProgressValue(0.72 + progress*0.08)}
+	case models.JobTypeStoryValidate:
+		if job.Status == models.JobStatusQueued {
+			return iosStoryProgress{Title: "Checking the story flow...", Detail: "FrameMio is preparing the render plan.", Value: iosProgressValue(0.80)}
+		}
+		return iosStoryProgress{Title: "Checking the story flow...", Detail: "Making sure the planned story is ready to render.", Value: iosProgressValue(0.82 + progress*0.04)}
+	case models.JobTypeVideoRender:
+		if job.Status == models.JobStatusQueued {
+			return iosStoryProgress{Title: "Creating your film...", Detail: "The render worker is queued; first renders can take a moment to start.", Value: iosProgressValue(0.86)}
+		}
+		return iosStoryProgress{Title: "Creating your film...", Detail: "Rendering the final video with timing, motion, and captions.", Value: iosProgressValue(0.88 + progress*0.10)}
+	default:
+		return iosStoryFallbackProgress(models.ProjectStatusAnalyzing)
+	}
+}
+
+func iosStoryFallbackProgress(status models.ProjectStatus) iosStoryProgress {
+	switch status {
+	case models.ProjectStatusDraft:
+		return iosStoryProgress{Title: "Preparing your memories...", Detail: "FrameMio is getting your story ready.", Value: iosProgressValue(0.12)}
+	case models.ProjectStatusAnalyzing, models.ProjectStatusStoryReady:
+		return iosStoryProgress{Title: "Finding meaningful moments...", Detail: "This can take longer for video-heavy stories.", Value: iosProgressValue(0.58)}
+	case models.ProjectStatusRendering:
+		return iosStoryProgress{Title: "Creating your film...", Detail: "Rendering the final video now.", Value: iosProgressValue(0.86)}
+	case models.ProjectStatusReady:
+		return iosStoryProgress{Title: "Ready to watch.", Detail: "Your story is ready.", Value: iosProgressValue(1)}
+	case models.ProjectStatusFailed:
+		return iosStoryProgress{Title: "This story needs another try.", Detail: "Something interrupted the last render.", Value: iosProgressValue(0)}
+	default:
+		return iosStoryProgress{Title: "Preparing your memories...", Detail: "FrameMio is getting your story ready.", Value: iosProgressValue(0.08)}
+	}
+}
+
+func iosProgressValue(value float64) *float64 {
+	clamped := value
+	if clamped < 0 {
+		clamped = 0
+	}
+	if clamped > 1 {
+		clamped = 1
+	}
+	return &clamped
+}
+
+func clampIOSStoryJobProgress(value float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
 }
 
 func iosStoryStatus(status models.ProjectStatus) string {

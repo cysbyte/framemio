@@ -274,6 +274,10 @@ final class StoryPreviewViewModel: ObservableObject {
             return storyLaunchCoordinator.phaseTitle
         }
 
+        if let title = nonEmptyProgressText(story?.progressTitle) {
+            return title
+        }
+
         return switch story?.status {
         case .queued:
             "Preparing your memories..."
@@ -290,9 +294,20 @@ final class StoryPreviewViewModel: ObservableObject {
         }
     }
 
+    var progressDetail: String? {
+        if storyLaunchCoordinator != nil, story == nil {
+            return "Uploading and local analysis happen first; server rendering starts right after."
+        }
+        return nonEmptyProgressText(story?.progressDetail)
+    }
+
     var progressValue: Double {
         if let storyLaunchCoordinator, story == nil {
             return storyLaunchCoordinator.progress
+        }
+
+        if let progressValue = story?.progressValue, progressValue.isFinite {
+            return min(max(progressValue, 0), 1)
         }
 
         return switch story?.status {
@@ -309,6 +324,12 @@ final class StoryPreviewViewModel: ObservableObject {
         case nil:
             0.08
         }
+    }
+
+    private func nonEmptyProgressText(_ text: String?) -> String? {
+        guard let text else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     func load() {
