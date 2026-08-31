@@ -1116,7 +1116,7 @@ private struct EditStorySheet: View {
                 FrameMioHaptics.secondaryAction()
                 isShowingAddMoment = true
             } label: {
-                Label("Add moment — \(CreditPricing.addMoment)", systemImage: "plus.circle.fill")
+                Label("Add Moment (\(CreditPricing.addMoment) credits)", systemImage: "plus.circle.fill")
                     .font(FrameMioTypography.headline)
                     .foregroundStyle(FrameMioColors.accent)
                     .padding(.horizontal, FrameMioSpacing.lg)
@@ -1207,7 +1207,7 @@ private struct EditStorySheet: View {
             .padding(FrameMioSpacing.md)
             .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
             .accessibilityLabel("Tell FrameMio what you want")
-            PrimaryButton(title: "Regenerate Story — \(CreditPricing.regenerateStory)", systemImage: "sparkles") {
+            PrimaryButton(title: "Regenerate Story (\(CreditPricing.regenerateStory) credits)", systemImage: "sparkles") {
                 onRegenerate(draft.request)
             }
             .disabled(isPerformingAction)
@@ -1811,9 +1811,9 @@ private struct AddMomentSelectionSheet: View {
     private var addButtonTitle: String {
         if !allowsMultipleSelection { return "Replace Moment" }
         switch selectedCount {
-        case 0: return "Add Moments"
-        case 1: return "Add 1 Moment"
-        default: return "Add \(selectedCount) Moments"
+        case 0: return "Add Moment (\(CreditPricing.addMoment) credits)"
+        case 1: return "Add Moment (\(CreditPricing.addMoment) credits)"
+        default: return "Add \(selectedCount) Moments (\(CreditPricing.addMoment) credits)"
         }
     }
 

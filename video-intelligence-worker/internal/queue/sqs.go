@@ -190,8 +190,21 @@ func (c *Consumer) handleMessage(ctx context.Context, handler Handler, received 
 		slog.String("job_id", message.JobID), slog.String("media_id", message.MediaID),
 		slog.Int("receive_count", receiveCount), slog.Any("error", err),
 	)
-	if domain.IsPermanent(err) {
+	if errors.Is(err, domain.ErrNotFound) {
+		c.logger.Warn("delete stale video analysis message", slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID), slog.String("media_id", message.MediaID), slog.String("job_type", message.JobType), slog.Int("receive_count", receiveCount))
+		c.delete(ctx, *received.ReceiptHandle)
+		return
+	}
+	if domain.IsPermanent(err) || (c.maxAttempts > 0 && receiveCount >= c.maxAttempts) {
+		if receiveCount >= c.maxAttempts && !domain.IsPermanent(err) {
+			c.logger.Error("video analysis max receive count exceeded", slog.String("job_id", message.JobID), slog.String("media_id", message.MediaID), slog.Int("receive_count", receiveCount), slog.Int("max_attempts", c.maxAttempts))
+		}
 		if failErr := handler.MarkFailed(ctx, message, err); failErr != nil {
+			if errors.Is(failErr, domain.ErrNotFound) {
+				c.logger.Warn("delete stale video analysis message after mark failed", slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID), slog.String("media_id", message.MediaID), slog.String("job_type", message.JobType), slog.Int("receive_count", receiveCount))
+				c.delete(ctx, *received.ReceiptHandle)
+				return
+			}
 			c.logger.Error("record terminal video analysis failure", slog.String("job_id", message.JobID), slog.Any("error", failErr))
 			return
 		}
