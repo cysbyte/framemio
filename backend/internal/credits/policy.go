@@ -22,12 +22,21 @@ type Limits struct {
 	AIEditMaxDurationSec          int
 }
 
+type CreditPack struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Subtitle  string `json:"subtitle"`
+	ProductID string `json:"product_id,omitempty"`
+	Credits   int    `json:"credits"`
+}
+
 type Policy struct {
 	Prices                          map[models.CreditAction]int
 	Limits                          Limits
 	InitialGrant                    int
 	MonthlySubscriptionCycleCredits int
 	YearlySubscriptionCycleCredits  int
+	CreditPacks                     []CreditPack
 }
 
 func DefaultPolicy() Policy {
@@ -58,6 +67,11 @@ func DefaultPolicy() Policy {
 		InitialGrant:                    100,
 		MonthlySubscriptionCycleCredits: 300,
 		YearlySubscriptionCycleCredits:  360,
+		CreditPacks: []CreditPack{
+			{ID: "small", Title: "Small Pack", Subtitle: "A few more story moments", Credits: 100},
+			{ID: "medium", Title: "Medium Pack", Subtitle: "More room for memories", Credits: 300},
+			{ID: "large", Title: "Large Pack", Subtitle: "Keep creating all week", Credits: 700},
+		},
 	}
 }
 
@@ -87,6 +101,7 @@ func LoadPolicyFromEnv() Policy {
 	if value, ok := readIntEnv("CREDIT_SUBSCRIPTION_YEARLY_CYCLE_CREDITS"); ok {
 		policy.YearlySubscriptionCycleCredits = value
 	}
+	policy.CreditPacks = loadCreditPacksFromEnv(policy.CreditPacks)
 	policy.Limits.CreateStoryMaxPhotos = readIntEnvOrDefault("CREDIT_CREATE_STORY_MAX_PHOTOS", policy.Limits.CreateStoryMaxPhotos)
 	policy.Limits.CreateStoryMaxVideoSeconds = readIntEnvOrDefault("CREDIT_CREATE_STORY_MAX_VIDEO_SECONDS", policy.Limits.CreateStoryMaxVideoSeconds)
 	policy.Limits.CreateStoryMaxMedia = readIntEnvOrDefault("CREDIT_CREATE_STORY_MAX_MEDIA", policy.Limits.CreateStoryMaxMedia)
@@ -103,6 +118,16 @@ func LoadPolicyFromEnv() Policy {
 func (p Policy) Price(action models.CreditAction) (int, bool) {
 	price, ok := p.Prices[action]
 	return price, ok
+}
+
+func (p Policy) CreditPack(id string) (CreditPack, bool) {
+	normalizedID := strings.ToLower(strings.TrimSpace(id))
+	for _, pack := range p.CreditPacks {
+		if strings.ToLower(pack.ID) == normalizedID || (pack.ProductID != "" && strings.ToLower(pack.ProductID) == normalizedID) {
+			return pack, true
+		}
+	}
+	return CreditPack{}, false
 }
 
 func (p Policy) Quote(action models.CreditAction, balance int, eligible bool, reason string) models.CreditQuote {
@@ -186,4 +211,29 @@ func readIntEnvOrDefault(name string, fallback int) int {
 		return value
 	}
 	return fallback
+}
+
+func loadCreditPacksFromEnv(defaults []CreditPack) []CreditPack {
+	packs := append([]CreditPack(nil), defaults...)
+	for index, key := range []string{"SMALL", "MEDIUM", "LARGE"} {
+		if index >= len(packs) {
+			continue
+		}
+		if value := strings.TrimSpace(os.Getenv("CREDIT_PACK_" + key + "_ID")); value != "" {
+			packs[index].ID = value
+		}
+		if value := strings.TrimSpace(os.Getenv("CREDIT_PACK_" + key + "_TITLE")); value != "" {
+			packs[index].Title = value
+		}
+		if value := strings.TrimSpace(os.Getenv("CREDIT_PACK_" + key + "_SUBTITLE")); value != "" {
+			packs[index].Subtitle = value
+		}
+		if value := strings.TrimSpace(os.Getenv("CREDIT_PACK_" + key + "_PRODUCT_ID")); value != "" {
+			packs[index].ProductID = value
+		}
+		if value, ok := readIntEnv("CREDIT_PACK_" + key + "_CREDITS"); ok {
+			packs[index].Credits = value
+		}
+	}
+	return packs
 }

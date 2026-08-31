@@ -52,7 +52,7 @@ struct ProfileView: View {
                 Text("Profile")
                     .font(FrameMioTypography.screenTitle)
                     .foregroundStyle(FrameMioColors.ink)
-                Text(viewModel.planTitle)
+                Text(planTitle)
                     .font(FrameMioTypography.body)
                     .foregroundStyle(FrameMioColors.secondaryInk)
             }
@@ -72,6 +72,17 @@ struct ProfileView: View {
                 .font(FrameMioTypography.body)
                 .foregroundStyle(FrameMioColors.secondaryInk)
                 .multilineTextAlignment(.center)
+            if let balance = creditStore.balance {
+                HStack(spacing: FrameMioSpacing.md) {
+                    Text("\(balance.subscriptionCredits.formatted()) monthly")
+                    Text("\(balance.purchasedCredits.formatted()) purchased")
+                }
+                .font(FrameMioTypography.footnote)
+                .foregroundStyle(FrameMioColors.secondaryInk)
+                Text("Purchased credits carry over.")
+                    .font(FrameMioTypography.footnote)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+            }
             if creditStore.isLoading {
                 ProgressView()
                     .tint(FrameMioColors.accent)
@@ -102,12 +113,20 @@ struct ProfileView: View {
             FrameMioHaptics.secondaryAction()
             onBuyCredits()
         }
-        .accessibilityLabel("Buy Credits. Opens subscription plans.")
+        .accessibilityLabel("Buy Credits. Opens extra credit packs.")
+    }
+
+    private var planTitle: String {
+        viewModel.isSubscribed || (creditStore.balance?.subscriptionCredits ?? 0) > 0 ? "FrameMio Pro" : "Free Plan"
+    }
+
+    private var subscriptionSubtitle: String {
+        planTitle == "FrameMio Pro" ? "Active" : "Upgrade when you need more credits"
     }
 
     private var subscriptionCard: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            SectionHeader(title: "Subscription", subtitle: viewModel.subscriptionSubtitle)
+            SectionHeader(title: "Subscription", subtitle: subscriptionSubtitle)
             HStack(spacing: FrameMioSpacing.md) {
                 Image(systemName: viewModel.isSubscribed ? "sparkles" : "person.crop.circle")
                     .foregroundStyle(FrameMioColors.accent)
@@ -115,7 +134,7 @@ struct ProfileView: View {
                     .background(FrameMioColors.accentMuted.opacity(0.7), in: Circle())
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
-                    Text(viewModel.planTitle)
+                    Text(planTitle)
                         .font(FrameMioTypography.headline)
                         .foregroundStyle(FrameMioColors.ink)
                     if let renewalText = viewModel.renewalText {

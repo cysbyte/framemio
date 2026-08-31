@@ -4,7 +4,7 @@ struct AppRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     let dependencies: AppDependencies
     @State private var homePath: [AppRoute] = []
-    @State private var pricingSource: PricingEntryPoint?
+    @State private var purchaseDestination: PurchaseDestination?
     @State private var selectedTab: RootTab = .home
     @StateObject private var homeViewModel: HomeViewModel
     @StateObject private var storyLaunchCoordinator: StoryLaunchCoordinator
@@ -36,7 +36,7 @@ struct AppRootView: View {
 
             NavigationStack {
                 ProfileView(creditStore: creditStore) {
-                    openPricing(.profile)
+                    openCreditPacks(.profile)
                 }
             }
             .tabItem {
@@ -49,7 +49,7 @@ struct AppRootView: View {
                 SettingsView(
                     viewModel: settingsViewModel,
                     creditStore: creditStore,
-                    onBuyCredits: { openPricing(.settings) }
+                    onBuyCredits: { openCreditPacks(.settings) }
                 )
             }
             .tabItem {
@@ -59,14 +59,23 @@ struct AppRootView: View {
             .accessibilityLabel("Settings")
         }
         .tint(FrameMioColors.accent)
-        .fullScreenCover(item: $pricingSource) { source in
+        .fullScreenCover(item: $purchaseDestination) { destination in
             NavigationStack {
-                FrameMioProView(
-                    source: source,
-                    creditService: dependencies.creditService,
-                    onClose: { pricingSource = nil },
-                    onBalanceUpdated: refreshCredits
-                )
+                switch destination {
+                case let .pro(source):
+                    FrameMioProView(
+                        source: source,
+                        creditService: dependencies.creditService,
+                        onClose: { purchaseDestination = nil },
+                        onBalanceUpdated: refreshCredits
+                    )
+                case .creditPacks:
+                    FrameMioCreditPacksView(
+                        creditService: dependencies.creditService,
+                        onClose: { purchaseDestination = nil },
+                        onBalanceUpdated: refreshCredits
+                    )
+                }
             }
             .onDisappear(perform: refreshCredits)
         }
@@ -105,7 +114,11 @@ struct AppRootView: View {
     }
 
     private func openPricing(_ source: PricingEntryPoint) {
-        pricingSource = source
+        purchaseDestination = .pro(source)
+    }
+
+    private func openCreditPacks(_ source: PricingEntryPoint) {
+        purchaseDestination = .creditPacks(source)
     }
 
     private func refreshCredits() {
@@ -194,6 +207,20 @@ private enum RootTab: Hashable {
     case home
     case profile
     case settings
+}
+
+private enum PurchaseDestination: Identifiable, Hashable {
+    case pro(PricingEntryPoint)
+    case creditPacks(PricingEntryPoint)
+
+    var id: String {
+        switch self {
+        case let .pro(source):
+            return "pro-\(source.rawValue)"
+        case let .creditPacks(source):
+            return "credit-packs-\(source.rawValue)"
+        }
+    }
 }
 
 struct AppRootView_Previews: PreviewProvider {

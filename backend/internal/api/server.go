@@ -146,6 +146,14 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
+	if request.URL.Path == "/v1/credit-packs" {
+		if request.Method == http.MethodGet {
+			s.listCreditPacks(response, request)
+			return
+		}
+		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
 	if request.URL.Path == "/v1/me/credits" {
 		if request.Method == http.MethodGet {
 			s.getMeCredits(response, request)
@@ -157,6 +165,14 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 	if request.URL.Path == "/v1/me/credits/history" {
 		if request.Method == http.MethodGet {
 			s.getMeCreditHistory(response, request)
+			return
+		}
+		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if request.URL.Path == "/v1/me/credits/purchased" {
+		if request.Method == http.MethodPost {
+			s.grantPurchasedCredits(response, request)
 			return
 		}
 		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
@@ -579,6 +595,19 @@ type grantSubscriptionCycleRequest struct {
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 }
 
+type grantPurchasedCreditsRequest struct {
+	PackID     string `json:"pack_id"`
+	PurchaseID string `json:"purchase_id"`
+}
+
+func (s *Server) listCreditPacks(response http.ResponseWriter, request *http.Request) {
+	if s.Credits == nil {
+		s.internalError(response, errors.New("credit service not configured"), "credit service not configured")
+		return
+	}
+	s.writeJSON(response, http.StatusOK, map[string]any{"packs": s.Credits.Policy.CreditPacks})
+}
+
 func (s *Server) grantSubscriptionCycleCredits(response http.ResponseWriter, request *http.Request) {
 	user, ok := s.authenticate(response, request)
 	if !ok {
@@ -619,6 +648,51 @@ func (s *Server) grantSubscriptionCycleCredits(response http.ResponseWriter, req
 		s.Logger.Info("subscription credits grant reused", slog.String("user_id", user.ID), slog.String("purchase_id", purchaseID), slog.String("plan", plan), slog.Int("amount", amount))
 	}
 	s.writeJSON(response, http.StatusOK, grant)
+}
+
+func (s *Server) grantPurchasedCredits(response http.ResponseWriter, request *http.Request) {
+	user, ok := s.authenticate(response, request)
+	if !ok {
+		return
+	}
+	if s.Credits == nil {
+		s.internalError(response, errors.New("credit service not configured"), "credit service not configured")
+		return
+	}
+	var input grantPurchasedCreditsRequest
+	if !s.decodeJSON(response, request, &input) {
+		return
+	}
+	packID := strings.TrimSpace(input.PackID)
+	purchaseID := strings.TrimSpace(input.PurchaseID)
+	if purchaseID == "" {
+		s.writeError(response, http.StatusBadRequest, "invalid_purchase_id", "purchase_id is required")
+		return
+	}
+	pack, ok := s.Credits.Policy.CreditPack(packID)
+	if !ok || pack.Credits <= 0 {
+		s.writeError(response, http.StatusBadRequest, "invalid_credit_pack", "credit pack is invalid")
+		return
+	}
+	grant, duplicate, err := s.Credits.GrantPurchasedCredits(request.Context(), user.ID, purchaseID, pack.Credits, map[string]any{
+		"pack_id":    pack.ID,
+		"product_id": pack.ProductID,
+	})
+	if err != nil {
+		s.internalError(response, err, "grant purchased credits")
+		return
+	}
+	balance, err := s.Credits.GetBalance(request.Context(), user.ID)
+	if err != nil {
+		s.internalError(response, err, "get credit balance after purchase")
+		return
+	}
+	if duplicate {
+		s.Logger.Info("purchased credits grant reused", slog.String("user_id", user.ID), slog.String("purchase_id", purchaseID), slog.String("pack_id", pack.ID), slog.Int("amount", pack.Credits))
+	} else {
+		s.Logger.Info("purchased credits granted", slog.String("user_id", user.ID), slog.String("purchase_id", purchaseID), slog.String("pack_id", pack.ID), slog.Int("amount", pack.Credits))
+	}
+	s.writeJSON(response, http.StatusOK, map[string]any{"grant": grant, "balance": balance})
 }
 
 func (s *Server) quoteCreditAction(response http.ResponseWriter, request *http.Request) {

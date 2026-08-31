@@ -313,6 +313,15 @@ final class RemoteCreditService: CreditService, @unchecked Sendable {
         return try decoder.decode(CreditBalance.self, from: data)
     }
 
+    func creditPacks() async throws -> [CreditPack] {
+        struct Response: Decodable {
+            let packs: [CreditPack]
+        }
+
+        let data = try await apiClient.data(for: APIRequest(method: .get, path: "/v1/credit-packs"))
+        return try decoder.decode(Response.self, from: data).packs
+    }
+
     func grantSubscriptionCycle(plan: String, purchaseID: String, expiresAt: Date?) async throws {
         struct Request: Encodable {
             let plan: String
@@ -329,6 +338,25 @@ final class RemoteCreditService: CreditService, @unchecked Sendable {
         let body = try encoder.encode(Request(plan: plan, purchaseID: purchaseID, expiresAt: expiresAt))
         _ = try await apiClient.data(for: APIRequest(method: .post, path: "/v1/me/credits/subscription-cycle", body: body))
     }
+
+    func grantPurchasedCredits(packID: String, purchaseID: String) async throws -> CreditBalance {
+        struct Request: Encodable {
+            let packID: String
+            let purchaseID: String
+
+            enum CodingKeys: String, CodingKey {
+                case packID = "pack_id"
+                case purchaseID = "purchase_id"
+            }
+        }
+        struct Response: Decodable {
+            let balance: CreditBalance
+        }
+
+        let body = try encoder.encode(Request(packID: packID, purchaseID: purchaseID))
+        let data = try await apiClient.data(for: APIRequest(method: .post, path: "/v1/me/credits/purchased", body: body))
+        return try decoder.decode(Response.self, from: data).balance
+    }
 }
 
 final class MockCreditService: CreditService, @unchecked Sendable {
@@ -342,7 +370,19 @@ final class MockCreditService: CreditService, @unchecked Sendable {
         balanceValue
     }
 
+    func creditPacks() async throws -> [CreditPack] {
+        [
+            CreditPack(id: "small", title: "Small Pack", subtitle: "A few more story moments", productID: nil, credits: 100),
+            CreditPack(id: "medium", title: "Medium Pack", subtitle: "More room for memories", productID: nil, credits: 300),
+            CreditPack(id: "large", title: "Large Pack", subtitle: "Keep creating all week", productID: nil, credits: 700)
+        ]
+    }
+
     func grantSubscriptionCycle(plan: String, purchaseID: String, expiresAt: Date?) async throws {
+    }
+
+    func grantPurchasedCredits(packID: String, purchaseID: String) async throws -> CreditBalance {
+        balanceValue
     }
 }
 

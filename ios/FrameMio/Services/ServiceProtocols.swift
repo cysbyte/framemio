@@ -176,6 +176,66 @@ enum CreditAction: String, Codable, Hashable, Sendable {
 struct CreditBalance: Codable, Hashable, Sendable {
     let available: Int
     let reserved: Int
+    let subscriptionCredits: Int
+    let purchasedCredits: Int
+    let subscriptionReserved: Int
+    let purchasedReserved: Int
+    let totalCredits: Int
+
+    enum CodingKeys: String, CodingKey {
+        case available
+        case reserved
+        case subscriptionCredits = "subscription_credits"
+        case purchasedCredits = "purchased_credits"
+        case subscriptionReserved = "subscription_reserved"
+        case purchasedReserved = "purchased_reserved"
+        case totalCredits = "total_credits"
+    }
+
+    init(
+        available: Int,
+        reserved: Int,
+        subscriptionCredits: Int = 0,
+        purchasedCredits: Int = 0,
+        subscriptionReserved: Int = 0,
+        purchasedReserved: Int = 0,
+        totalCredits: Int? = nil
+    ) {
+        self.available = available
+        self.reserved = reserved
+        self.subscriptionCredits = subscriptionCredits
+        self.purchasedCredits = purchasedCredits
+        self.subscriptionReserved = subscriptionReserved
+        self.purchasedReserved = purchasedReserved
+        self.totalCredits = totalCredits ?? available
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        available = try container.decode(Int.self, forKey: .available)
+        reserved = try container.decodeIfPresent(Int.self, forKey: .reserved) ?? 0
+        subscriptionCredits = try container.decodeIfPresent(Int.self, forKey: .subscriptionCredits) ?? 0
+        purchasedCredits = try container.decodeIfPresent(Int.self, forKey: .purchasedCredits) ?? max(available, 0)
+        subscriptionReserved = try container.decodeIfPresent(Int.self, forKey: .subscriptionReserved) ?? 0
+        purchasedReserved = try container.decodeIfPresent(Int.self, forKey: .purchasedReserved) ?? reserved
+        totalCredits = try container.decodeIfPresent(Int.self, forKey: .totalCredits) ?? available
+    }
+}
+
+struct CreditPack: Codable, Hashable, Identifiable, Sendable {
+    let id: String
+    let title: String
+    let subtitle: String
+    let productID: String?
+    let credits: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case subtitle
+        case productID = "product_id"
+        case credits
+    }
 }
 
 enum PricingEntryPoint: String, Codable, Hashable, Identifiable, Sendable {
@@ -243,7 +303,9 @@ struct CreditPricing {
 
 protocol CreditService: Sendable {
     func balance() async throws -> CreditBalance
+    func creditPacks() async throws -> [CreditPack]
     func grantSubscriptionCycle(plan: String, purchaseID: String, expiresAt: Date?) async throws
+    func grantPurchasedCredits(packID: String, purchaseID: String) async throws -> CreditBalance
 }
 
 @MainActor

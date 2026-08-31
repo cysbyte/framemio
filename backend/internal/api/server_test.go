@@ -1417,6 +1417,49 @@ func TestPublicMusicRoutesAreUnavailableInV1(t *testing.T) {
 	}
 }
 
+func TestGrantPurchasedCreditsAddsPersistentBalance(t *testing.T) {
+	t.Parallel()
+	memoryStore := store.NewMemoryStore()
+	server := newTestServer(memoryStore, queue.NewMemoryPublisher())
+	handler := server.Handler()
+
+	packs := performJSON(t, handler, http.MethodGet, "/v1/credit-packs", nil, "", true, nil)
+	if packs.Code != http.StatusOK {
+		t.Fatalf("credit packs status = %d, body = %s", packs.Code, packs.Body.String())
+	}
+
+	first := performJSON(t, handler, http.MethodPost, "/v1/me/credits/purchased", map[string]any{
+		"pack_id":     "medium",
+		"purchase_id": "credit-purchase-123",
+	}, "", true, nil)
+	if first.Code != http.StatusOK {
+		t.Fatalf("first purchased grant status = %d, body = %s", first.Code, first.Body.String())
+	}
+	var firstBody struct {
+		Balance models.CreditBalance `json:"balance"`
+	}
+	decodeResponse(t, first, &firstBody)
+	wantPurchasedCredits := server.Credits.Policy.InitialGrant + 300
+	if firstBody.Balance.PurchasedCredits != wantPurchasedCredits {
+		t.Fatalf("purchased credits = %d, want %d", firstBody.Balance.PurchasedCredits, wantPurchasedCredits)
+	}
+
+	second := performJSON(t, handler, http.MethodPost, "/v1/me/credits/purchased", map[string]any{
+		"pack_id":     "medium",
+		"purchase_id": "credit-purchase-123",
+	}, "", true, nil)
+	if second.Code != http.StatusOK {
+		t.Fatalf("second purchased grant status = %d, body = %s", second.Code, second.Body.String())
+	}
+	var secondBody struct {
+		Balance models.CreditBalance `json:"balance"`
+	}
+	decodeResponse(t, second, &secondBody)
+	if secondBody.Balance.PurchasedCredits != wantPurchasedCredits {
+		t.Fatalf("duplicate purchased grant changed balance: %+v", secondBody.Balance)
+	}
+}
+
 func TestGrantSubscriptionCycleCreditsIsIdempotent(t *testing.T) {
 	t.Parallel()
 	memoryStore := store.NewMemoryStore()

@@ -642,3 +642,298 @@ struct FrameMioBannerArtwork: View {
             .accessibilityHidden(true)
     }
 }
+
+@MainActor
+final class FrameMioCreditPacksViewModel: ObservableObject {
+    @Published private(set) var packs: [CreditPack] = []
+    @Published private(set) var products: [String: Product] = [:]
+    @Published private(set) var balance: CreditBalance?
+    @Published private(set) var isLoading = false
+    @Published private(set) var isPurchasing = false
+    @Published var selectedPackID: String?
+    @Published var statusMessage: String?
+    @Published var errorMessage: String?
+
+    private let creditService: CreditService?
+    private let onBalanceUpdated: () -> Void
+    private var loadTask: Task<Void, Never>?
+
+    init(creditService: CreditService?, onBalanceUpdated: @escaping () -> Void) {
+        self.creditService = creditService
+        self.onBalanceUpdated = onBalanceUpdated
+    }
+
+    deinit {
+        loadTask?.cancel()
+    }
+
+    var selectedPack: CreditPack? {
+        packs.first { $0.id == selectedPackID } ?? packs.first
+    }
+
+    var primaryButtonTitle: String {
+        guard let selectedPack else { return "Loading Credit Packs" }
+        return "Buy \(selectedPack.credits.formatted()) Credits"
+    }
+
+    func displayPrice(for pack: CreditPack) -> String {
+        guard let productID = pack.productID, let product = products[productID] else {
+#if DEBUG
+            return "Debug"
+#else
+            return "Unavailable"
+#endif
+        }
+        return product.displayPrice
+    }
+
+    func load() {
+        loadTask?.cancel()
+        loadTask = Task { [weak self] in
+            guard let self else { return }
+            isLoading = true
+            defer { isLoading = false }
+            do {
+                guard let creditService else { return }
+                async let packsTask = creditService.creditPacks()
+                async let balanceTask = creditService.balance()
+                let loadedPacks = try await packsTask
+                packs = loadedPacks
+                if selectedPackID == nil {
+                    selectedPackID = loadedPacks.first?.id
+                }
+                balance = try await balanceTask
+#if !DEBUG
+                let productIDs = loadedPacks.compactMap(\.productID)
+                let loadedProducts = try await Product.products(for: productIDs)
+                products = Dictionary(uniqueKeysWithValues: loadedProducts.map { ($0.id, $0) })
+#endif
+                errorMessage = nil
+            } catch {
+                errorMessage = AppError.from(error).localizedDescription
+            }
+        }
+    }
+
+    func purchaseSelectedPack() {
+        guard !isPurchasing, let pack = selectedPack else { return }
+        isPurchasing = true
+        errorMessage = nil
+        statusMessage = "Processing your credit purchase..."
+        Task { [weak self] in
+            guard let self else { return }
+            defer { isPurchasing = false }
+            do {
+#if DEBUG
+                let purchaseID = "debug-credit-pack-\(pack.id)"
+                balance = try await creditService?.grantPurchasedCredits(packID: pack.id, purchaseID: purchaseID)
+                statusMessage = "Debug credit purchase completed."
+#else
+                guard let productID = pack.productID, let product = products[productID] else {
+                    statusMessage = nil
+                    errorMessage = "Credit pack products are not configured yet."
+                    return
+                }
+                let result = try await product.purchase()
+                switch result {
+                case let .success(verificationResult):
+                    let transaction = try verifiedTransaction(from: verificationResult)
+                    await transaction.finish()
+                    balance = try await creditService?.grantPurchasedCredits(packID: pack.id, purchaseID: String(transaction.id))
+                    statusMessage = "Credits added."
+                case .pending:
+                    statusMessage = "Purchase pending approval."
+                    return
+                case .userCancelled:
+                    statusMessage = nil
+                    return
+                @unknown default:
+                    statusMessage = "Purchase could not be completed."
+                    return
+                }
+#endif
+                onBalanceUpdated()
+            } catch {
+                statusMessage = nil
+                errorMessage = AppError.from(error).localizedDescription
+            }
+        }
+    }
+
+    private func verifiedTransaction<T>(from result: VerificationResult<T>) throws -> T {
+        switch result {
+        case let .verified(value):
+            return value
+        case let .unverified(_, error):
+            throw error
+        }
+    }
+}
+
+struct FrameMioCreditPacksView: View {
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var viewModel: FrameMioCreditPacksViewModel
+    private let onClose: () -> Void
+
+    init(
+        creditService: CreditService?,
+        onClose: @escaping () -> Void,
+        onBalanceUpdated: @escaping () -> Void
+    ) {
+        _viewModel = StateObject(wrappedValue: FrameMioCreditPacksViewModel(creditService: creditService, onBalanceUpdated: onBalanceUpdated))
+        self.onClose = onClose
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
+                header
+                balanceCard
+                packsSection
+                PrimaryButton(
+                    title: viewModel.primaryButtonTitle,
+                    systemImage: "sparkles",
+                    action: { viewModel.purchaseSelectedPack() },
+                    isDisabled: viewModel.selectedPack == nil,
+                    isLoading: viewModel.isPurchasing
+                )
+                .accessibilityLabel("Buy Credits. Adds purchased credits.")
+
+                if let statusMessage = viewModel.statusMessage {
+                    Text(statusMessage)
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+                if let errorMessage = viewModel.errorMessage {
+                    Text(errorMessage)
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+            }
+            .padding(.horizontal, FrameMioSpacing.lg)
+            .padding(.vertical, FrameMioSpacing.lg)
+            .padding(.bottom, FrameMioSpacing.xxxl)
+        }
+        .background {
+            LinearGradient(
+                colors: [FrameMioColors.canvas, FrameMioColors.accentMuted.opacity(0.22)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+        }
+        .navigationTitle("Extra Credits")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Done") {
+                    onClose()
+                    dismiss()
+                }
+                .accessibilityLabel("Close Extra Credits")
+            }
+        }
+        .task { viewModel.load() }
+        .refreshable { viewModel.load() }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            FrameMioBannerArtwork(assetName: "FrameMioPricingBanner")
+                .frame(height: 150)
+                .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
+            Text("Extra Credits")
+                .font(FrameMioTypography.screenTitle)
+                .foregroundStyle(FrameMioColors.ink)
+            Text("Purchased credits carry over and are used after your monthly credits.")
+                .font(FrameMioTypography.body)
+                .foregroundStyle(FrameMioColors.secondaryInk)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var balanceCard: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.xs) {
+            Text("Available Credits")
+                .font(FrameMioTypography.footnote)
+                .foregroundStyle(FrameMioColors.secondaryInk)
+            Text("✦ \((viewModel.balance?.available ?? 0).formatted())")
+                .font(FrameMioTypography.display)
+                .foregroundStyle(FrameMioColors.ink)
+            HStack {
+                Text("Monthly \((viewModel.balance?.subscriptionCredits ?? 0).formatted())")
+                Spacer()
+                Text("Purchased \((viewModel.balance?.purchasedCredits ?? 0).formatted())")
+            }
+            .font(FrameMioTypography.footnote)
+            .foregroundStyle(FrameMioColors.secondaryInk)
+        }
+        .padding(FrameMioSpacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(FrameMioColors.surface.opacity(0.86), in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                .stroke(FrameMioColors.divider.opacity(0.55), lineWidth: FrameMioMetrics.borderWidth)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\((viewModel.balance?.available ?? 0)) credits available")
+    }
+
+    private var packsSection: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            SectionHeader(title: "Credit Packs", subtitle: "One-time credits for more stories")
+            if viewModel.isLoading && viewModel.packs.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .tint(FrameMioColors.accent)
+                    .accessibilityLabel("Loading credit packs")
+            } else {
+                ForEach(viewModel.packs) { pack in
+                    creditPackRow(pack)
+                }
+            }
+        }
+    }
+
+    private func creditPackRow(_ pack: CreditPack) -> some View {
+        Button {
+            FrameMioHaptics.secondaryAction()
+            viewModel.selectedPackID = pack.id
+        } label: {
+            HStack(spacing: FrameMioSpacing.md) {
+                VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
+                    Text(pack.title)
+                        .font(FrameMioTypography.headline)
+                        .foregroundStyle(FrameMioColors.ink)
+                    Text(pack.subtitle)
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                    Text("\(pack.credits.formatted()) purchased credits")
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(FrameMioColors.accent)
+                }
+                Spacer(minLength: FrameMioSpacing.md)
+                VStack(alignment: .trailing, spacing: FrameMioSpacing.xxs) {
+                    Text(viewModel.displayPrice(for: pack))
+                        .font(FrameMioTypography.headline)
+                        .foregroundStyle(FrameMioColors.ink)
+                    Image(systemName: viewModel.selectedPackID == pack.id ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(viewModel.selectedPackID == pack.id ? FrameMioColors.accent : FrameMioColors.secondaryInk)
+                        .accessibilityHidden(true)
+                }
+            }
+            .padding(FrameMioSpacing.lg)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(FrameMioColors.surface.opacity(0.9), in: RoundedRectangle(cornerRadius: FrameMioRadius.medium, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: FrameMioRadius.medium, style: .continuous)
+                    .stroke(viewModel.selectedPackID == pack.id ? FrameMioColors.accent.opacity(0.7) : FrameMioColors.divider.opacity(0.5), lineWidth: FrameMioMetrics.borderWidth)
+            }
+        }
+        .buttonStyle(FrameMioPressButtonStyle())
+        .accessibilityLabel("\(pack.title), \(pack.credits) purchased credits")
+    }
+}
