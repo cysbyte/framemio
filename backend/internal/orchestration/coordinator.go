@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -331,6 +332,11 @@ func (c *Coordinator) settleProjectCredits(ctx context.Context, job models.Proce
 		return err
 	}
 	actions := creditActionsFromProjectKey(project.CreditOperationKey)
+	if len(actions) > 1 {
+		sort.SliceStable(actions, func(left, right int) bool {
+			return creditActionSettlementPriority(actions[left]) < creditActionSettlementPriority(actions[right])
+		})
+	}
 	if len(actions) == 0 {
 		return nil
 	}
@@ -361,6 +367,17 @@ func (c *Coordinator) settleProjectCredits(ctx context.Context, job models.Proce
 		switch status {
 		case models.ProjectStatusReady:
 			reservation, err := c.Credits.CommitByReference(ctx, job.UserID, action, "project", referenceID)
+			if err != nil {
+				c.Logger.Warn("failed to commit project credit reservation",
+					slog.String("user_id", job.UserID),
+					slog.String("project_id", job.ProjectID),
+					slog.String("job_id", job.ID),
+					slog.String("reference_id", referenceID),
+					slog.String("action", string(action)),
+					slog.Any("error", err),
+				)
+				continue
+			}
 			if err == nil {
 				c.Logger.Info("committed project credit reservation",
 					slog.String("user_id", job.UserID),
@@ -374,6 +391,17 @@ func (c *Coordinator) settleProjectCredits(ctx context.Context, job models.Proce
 			}
 		case models.ProjectStatusFailed:
 			reservation, err := c.Credits.ReleaseByReference(ctx, job.UserID, action, "project", referenceID)
+			if err != nil {
+				c.Logger.Warn("failed to release project credit reservation",
+					slog.String("user_id", job.UserID),
+					slog.String("project_id", job.ProjectID),
+					slog.String("job_id", job.ID),
+					slog.String("reference_id", referenceID),
+					slog.String("action", string(action)),
+					slog.Any("error", err),
+				)
+				continue
+			}
 			if err == nil {
 				c.Logger.Info("released project credit reservation",
 					slog.String("user_id", job.UserID),
@@ -411,6 +439,21 @@ func (c *Coordinator) settleProjectCredits(ctx context.Context, job models.Proce
 		}
 	}
 	return nil
+}
+
+func creditActionSettlementPriority(action models.CreditAction) int {
+	switch action {
+	case models.CreditActionAddMoment:
+		return 0
+	case models.CreditActionAIEditStory:
+		return 1
+	case models.CreditActionRegenerateStory:
+		return 2
+	case models.CreditActionCreateStory:
+		return 3
+	default:
+		return 10
+	}
 }
 
 func creditActionsFromProjectKey(value string) []models.CreditAction {
