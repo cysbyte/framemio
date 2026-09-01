@@ -63,8 +63,8 @@ struct ProfileView: View {
                 .multilineTextAlignment(.center)
             if let balance = creditStore.balance {
                 HStack(spacing: FrameMioSpacing.md) {
-                    Text("\(balance.subscriptionCredits.formatted()) monthly")
-                    Text("\(balance.purchasedCredits.formatted()) purchased")
+                    Text("\(balance.displaySubscriptionCredits.formatted()) monthly")
+                    Text("\(balance.displayPurchasedCredits.formatted()) purchased")
                 }
                 .font(FrameMioTypography.footnote)
                 .foregroundStyle(FrameMioColors.secondaryInk)
@@ -106,7 +106,7 @@ struct ProfileView: View {
     }
 
     private var planTitle: String {
-        viewModel.isSubscribed || (creditStore.balance?.subscriptionCredits ?? 0) > 0 ? "FrameMio Pro" : "Free Plan"
+        viewModel.isSubscribed || (creditStore.balance?.displaySubscriptionCredits ?? 0) > 0 ? "FrameMio Pro" : "Free Plan"
     }
 
     private var subscriptionSubtitle: String {

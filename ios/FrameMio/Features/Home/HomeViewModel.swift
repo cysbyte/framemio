@@ -75,7 +75,7 @@ final class HomeViewModel: ObservableObject {
             defer { isLoadingCreditBalance = false }
             do {
                 let balance = try await creditService.balance()
-                creditBalance = balance.available
+                creditBalance = balance.displayCredits
             } catch is CancellationError {
             } catch {
             }

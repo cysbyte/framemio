@@ -210,7 +210,7 @@ final class StoryPreviewViewModel: ObservableObject {
             guard let self else { return }
             do {
                 let balance = try await creditService.balance()
-                creditBalance = balance.available
+                creditBalance = balance.displayCredits
             } catch {
             }
         }

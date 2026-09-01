@@ -144,10 +144,10 @@ struct SettingsView: View {
     }
 
     private var creditSummary: String {
-        guard let available = creditStore.availableCredits else {
+        guard let displayCredits = creditStore.displayCredits else {
             return creditStore.isLoading ? "Loading current balance" : "Open FrameMio Pro"
         }
-        return "Current balance: \(available.formatted()) credits"
+        return "Current balance: \(displayCredits.formatted()) credits"
     }
 
     private var statusTitle: String {

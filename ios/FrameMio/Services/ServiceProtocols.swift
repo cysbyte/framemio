@@ -183,6 +183,11 @@ struct CreditBalance: Codable, Hashable, Sendable {
     let subscriptionCycleExpiresAt: Date?
     let totalCredits: Int
 
+    var displayCredits: Int { totalCredits }
+    var spendableCredits: Int { available }
+    var displaySubscriptionCredits: Int { subscriptionCredits + subscriptionReserved }
+    var displayPurchasedCredits: Int { purchasedCredits + purchasedReserved }
+
     var hasActiveSubscriptionCycle: Bool {
         if subscriptionCredits > 0 || subscriptionReserved > 0 {
             return true
@@ -219,7 +224,7 @@ struct CreditBalance: Codable, Hashable, Sendable {
         self.subscriptionReserved = subscriptionReserved
         self.purchasedReserved = purchasedReserved
         self.subscriptionCycleExpiresAt = subscriptionCycleExpiresAt
-        self.totalCredits = totalCredits ?? available
+        self.totalCredits = totalCredits ?? (available + reserved)
     }
 
     init(from decoder: Decoder) throws {
@@ -231,7 +236,7 @@ struct CreditBalance: Codable, Hashable, Sendable {
         subscriptionReserved = try container.decodeIfPresent(Int.self, forKey: .subscriptionReserved) ?? 0
         purchasedReserved = try container.decodeIfPresent(Int.self, forKey: .purchasedReserved) ?? reserved
         subscriptionCycleExpiresAt = try container.decodeIfPresent(Date.self, forKey: .subscriptionCycleExpiresAt)
-        totalCredits = try container.decodeIfPresent(Int.self, forKey: .totalCredits) ?? available
+        totalCredits = try container.decodeIfPresent(Int.self, forKey: .totalCredits) ?? (available + reserved)
     }
 }
 
@@ -335,21 +340,25 @@ final class CreditBalanceStore: ObservableObject {
     }
 
     var availableCredits: Int? {
-        balance?.available
+        balance?.spendableCredits
+    }
+
+    var displayCredits: Int? {
+        balance?.displayCredits
     }
 
     var compactTitle: String {
-        guard let availableCredits else {
+        guard let displayCredits else {
             return isLoading ? "✦ …" : "✦"
         }
-        return "✦ \(availableCredits.formatted())"
+        return "✦ \(displayCredits.formatted())"
     }
 
     var largeTitle: String {
-        guard let availableCredits else {
+        guard let displayCredits else {
             return isLoading ? "✦ Loading Credits" : "✦ Credits"
         }
-        return "✦ \(availableCredits.formatted()) Credits"
+        return "✦ \(displayCredits.formatted()) Credits"
     }
 
     var isLowOnCredits: Bool {
@@ -358,17 +367,17 @@ final class CreditBalanceStore: ObservableObject {
     }
 
     var compactAccessibilityLabel: String {
-        guard let availableCredits else {
+        guard let displayCredits else {
             return "Credits. Opens FrameMio Pro."
         }
-        return "\(availableCredits) credits. Opens FrameMio Pro."
+        return "\(displayCredits) credits. Opens FrameMio Pro."
     }
 
     var largeAccessibilityLabel: String {
-        guard let availableCredits else {
+        guard let displayCredits else {
             return "Credit balance loading."
         }
-        return "\(availableCredits) credits available."
+        return "\(displayCredits) credits available."
     }
 
     func refresh() {

@@ -856,13 +856,13 @@ struct FrameMioCreditPacksView: View {
             Text("Available Credits")
                 .font(FrameMioTypography.footnote)
                 .foregroundStyle(FrameMioColors.secondaryInk)
-            Text("✦ \((viewModel.balance?.available ?? 0).formatted())")
+            Text("✦ \((viewModel.balance?.displayCredits ?? 0).formatted())")
                 .font(FrameMioTypography.display)
                 .foregroundStyle(FrameMioColors.ink)
             HStack {
-                Text("Monthly \((viewModel.balance?.subscriptionCredits ?? 0).formatted())")
+                Text("Monthly \((viewModel.balance?.displaySubscriptionCredits ?? 0).formatted())")
                 Spacer()
-                Text("Purchased \((viewModel.balance?.purchasedCredits ?? 0).formatted())")
+                Text("Purchased \((viewModel.balance?.displayPurchasedCredits ?? 0).formatted())")
             }
             .font(FrameMioTypography.footnote)
             .foregroundStyle(FrameMioColors.secondaryInk)
@@ -875,7 +875,7 @@ struct FrameMioCreditPacksView: View {
                 .stroke(FrameMioColors.divider.opacity(0.55), lineWidth: FrameMioMetrics.borderWidth)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\((viewModel.balance?.available ?? 0)) credits available")
+        .accessibilityLabel("\((viewModel.balance?.displayCredits ?? 0)) credits available")
     }
 
     private var packsSection: some View {

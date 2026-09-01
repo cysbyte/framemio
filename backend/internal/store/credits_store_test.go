@@ -42,7 +42,7 @@ func TestMemoryStoreReserveConsumesSubscriptionCreditsFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get balance: %v", err)
 	}
-	if balance.SubscriptionCredits != 0 || balance.PurchasedCredits != 480 || balance.Reserved != 40 {
+	if balance.SubscriptionCredits != 0 || balance.PurchasedCredits != 480 || balance.Available != 480 || balance.Reserved != 40 || balance.TotalCredits != 520 {
 		t.Fatalf("unexpected post-reserve balance: %+v", balance)
 	}
 
@@ -53,8 +53,46 @@ func TestMemoryStoreReserveConsumesSubscriptionCreditsFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get balance after commit: %v", err)
 	}
-	if balance.SubscriptionCredits != 0 || balance.PurchasedCredits != 480 || balance.Reserved != 0 {
+	if balance.SubscriptionCredits != 0 || balance.PurchasedCredits != 480 || balance.Available != 480 || balance.Reserved != 0 || balance.TotalCredits != 480 {
 		t.Fatalf("unexpected post-commit balance: %+v", balance)
+	}
+}
+
+func TestMemoryStoreReleaseRestoresReservedCredits(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore()
+	store.ensureCreditMaps()
+	store.creditAccounts["user-1"] = models.CreditBalance{SubscriptionCredits: 30, PurchasedCredits: 100}
+
+	reservation, _, err := store.ReserveCredits(context.Background(), models.CreditReservation{
+		UserID:        "user-1",
+		Action:        models.CreditActionCreateStory,
+		Amount:        40,
+		ReferenceType: "story",
+		ReferenceID:   "story-release",
+	})
+	if err != nil {
+		t.Fatalf("reserve credits: %v", err)
+	}
+
+	balance, err := store.GetCreditBalance(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("get balance: %v", err)
+	}
+	if balance.Available != 90 || balance.Reserved != 40 || balance.TotalCredits != 130 {
+		t.Fatalf("unexpected post-reserve balance: %+v", balance)
+	}
+
+	if _, err := store.ReleaseCreditReservation(context.Background(), "user-1", reservation.ID); err != nil {
+		t.Fatalf("release reservation: %v", err)
+	}
+	balance, err = store.GetCreditBalance(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("get balance after release: %v", err)
+	}
+	if balance.SubscriptionCredits != 30 || balance.PurchasedCredits != 100 || balance.Available != 130 || balance.Reserved != 0 || balance.TotalCredits != 130 {
+		t.Fatalf("unexpected post-release balance: %+v", balance)
 	}
 }
 
@@ -123,7 +161,7 @@ func TestMemoryStoreLegacyBalanceMigratesToPurchasedCredits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get balance: %v", err)
 	}
-	if balance.SubscriptionCredits != 0 || balance.PurchasedCredits != 100 || balance.PurchasedReserved != 20 || balance.TotalCredits != 100 {
+	if balance.SubscriptionCredits != 0 || balance.PurchasedCredits != 100 || balance.PurchasedReserved != 20 || balance.Available != 100 || balance.Reserved != 20 || balance.TotalCredits != 120 {
 		t.Fatalf("unexpected legacy migration balance: %+v", balance)
 	}
 }

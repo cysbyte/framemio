@@ -56,7 +56,7 @@ func normalizeCreditBalance(balance models.CreditBalance) models.CreditBalance {
 	}
 	balance.Available = balance.SubscriptionCredits + balance.PurchasedCredits
 	balance.Reserved = balance.SubscriptionReserved + balance.PurchasedReserved
-	balance.TotalCredits = balance.Available
+	balance.TotalCredits = balance.Available + balance.Reserved
 	return balance
 }
 
