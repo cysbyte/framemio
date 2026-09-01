@@ -49,3 +49,44 @@ func TestReadJobTypesNormalizesValues(t *testing.T) {
 		t.Fatalf("readJobTypes returned %#v", jobTypes)
 	}
 }
+
+func TestECSRunTaskActivatorRoutesWorkerServices(t *testing.T) {
+	activator := &ECSRunTaskActivator{
+		videoServiceName:  "video-service",
+		renderServiceName: "render-service",
+		storyServiceName:  "story-service",
+	}
+
+	tests := []struct {
+		jobType models.JobType
+		want    string
+	}{
+		{models.JobTypeMediaPreprocess, "video-service"},
+		{models.JobTypeTranscribe, "video-service"},
+		{models.JobTypeVideoUnderstand, "video-service"},
+		{models.JobTypeVideoRender, "render-service"},
+		{models.JobTypeStoryPlan, "story-service"},
+	}
+
+	for _, test := range tests {
+		got, _, ok := activator.serviceFor(test.jobType)
+		if !ok {
+			t.Fatalf("serviceFor(%s) ok = false, want true", test.jobType)
+		}
+		if got != test.want {
+			t.Fatalf("serviceFor(%s) = %q, want %q", test.jobType, got, test.want)
+		}
+	}
+}
+
+func TestReadIntUsesFallbackForInvalidValues(t *testing.T) {
+	if got := readInt(" 3 ", 1); got != 3 {
+		t.Fatalf("readInt valid = %d, want 3", got)
+	}
+	if got := readInt("", 1); got != 1 {
+		t.Fatalf("readInt empty = %d, want fallback 1", got)
+	}
+	if got := readInt("not-a-number", 2); got != 2 {
+		t.Fatalf("readInt invalid = %d, want fallback 2", got)
+	}
+}

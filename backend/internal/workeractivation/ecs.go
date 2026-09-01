@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -27,10 +28,14 @@ type ECSRunTaskActivator struct {
 	assignPublicIP       types.AssignPublicIp
 	videoTaskDefinition  string
 	videoContainerName   string
+	videoServiceName     string
 	renderTaskDefinition string
 	renderContainerName  string
+	renderServiceName    string
 	storyTaskDefinition  string
 	storyContainerName   string
+	storyServiceName     string
+	serviceScaleOutCount int32
 	allowedJobTypes      map[models.JobType]struct{}
 	logger               *slog.Logger
 }
@@ -43,10 +48,14 @@ type ECSRunTaskConfig struct {
 	AssignPublicIP       bool
 	VideoTaskDefinition  string
 	VideoContainerName   string
+	VideoServiceName     string
 	RenderTaskDefinition string
 	RenderContainerName  string
+	RenderServiceName    string
 	StoryTaskDefinition  string
 	StoryContainerName   string
+	StoryServiceName     string
+	ServiceScaleOutCount int32
 	AllowedJobTypes      []models.JobType
 	Logger               *slog.Logger
 }
@@ -77,6 +86,10 @@ func NewECSRunTaskActivator(ctx context.Context, config ECSRunTaskConfig) (*ECSR
 	if logger == nil {
 		logger = slog.Default()
 	}
+	serviceScaleOutCount := config.ServiceScaleOutCount
+	if serviceScaleOutCount <= 0 {
+		serviceScaleOutCount = 1
+	}
 	return &ECSRunTaskActivator{
 		client:               ecs.NewFromConfig(awsConfiguration),
 		cluster:              strings.TrimSpace(config.Cluster),
@@ -85,10 +98,14 @@ func NewECSRunTaskActivator(ctx context.Context, config ECSRunTaskConfig) (*ECSR
 		assignPublicIP:       assignPublicIP,
 		videoTaskDefinition:  strings.TrimSpace(config.VideoTaskDefinition),
 		videoContainerName:   valueOrDefault(config.VideoContainerName, "Main"),
+		videoServiceName:     strings.TrimSpace(config.VideoServiceName),
 		renderTaskDefinition: strings.TrimSpace(config.RenderTaskDefinition),
 		renderContainerName:  valueOrDefault(config.RenderContainerName, "Main"),
+		renderServiceName:    strings.TrimSpace(config.RenderServiceName),
 		storyTaskDefinition:  strings.TrimSpace(config.StoryTaskDefinition),
 		storyContainerName:   valueOrDefault(config.StoryContainerName, "Main"),
+		storyServiceName:     strings.TrimSpace(config.StoryServiceName),
+		serviceScaleOutCount: serviceScaleOutCount,
 		allowedJobTypes:      allowedJobTypes(config.AllowedJobTypes),
 		logger:               logger,
 	}, nil
@@ -106,10 +123,14 @@ func NewECSRunTaskActivatorFromEnv(ctx context.Context, logger *slog.Logger) (*E
 		AssignPublicIP:       readBool(firstEnv("ECS_WORKER_ASSIGN_PUBLIC_IP", "ECS_ASSIGN_PUBLIC_IP"), true),
 		VideoTaskDefinition:  os.Getenv("VIDEO_WORKER_TASK_DEFINITION"),
 		VideoContainerName:   os.Getenv("VIDEO_WORKER_CONTAINER_NAME"),
+		VideoServiceName:     os.Getenv("VIDEO_WORKER_SERVICE_NAME"),
 		RenderTaskDefinition: os.Getenv("RENDER_WORKER_TASK_DEFINITION"),
 		RenderContainerName:  os.Getenv("RENDER_WORKER_CONTAINER_NAME"),
+		RenderServiceName:    os.Getenv("RENDER_WORKER_SERVICE_NAME"),
 		StoryTaskDefinition:  firstEnv("STORY_WORKER_TASK_DEFINITION", "BACKEND_WORKER_TASK_DEFINITION"),
 		StoryContainerName:   firstEnv("STORY_WORKER_CONTAINER_NAME", "BACKEND_WORKER_CONTAINER_NAME"),
+		StoryServiceName:     firstEnv("STORY_WORKER_SERVICE_NAME", "BACKEND_WORKER_SERVICE_NAME"),
+		ServiceScaleOutCount: int32(readInt(os.Getenv("ECS_WORKER_SERVICE_SCALE_OUT_COUNT"), 1)),
 		AllowedJobTypes:      readJobTypes(os.Getenv("ECS_WORKER_RUN_TASK_JOB_TYPES")),
 		Logger:               logger,
 	})
@@ -123,14 +144,15 @@ func (a *ECSRunTaskActivator) Activate(ctx context.Context, message queue.JobMes
 	if a == nil {
 		return nil
 	}
-	if !a.jobTypeAllowed(message.JobType) {
-		a.logger.Info("worker activation skipped", slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)), slog.String("reason", "job_type_not_allowed"))
-		return nil
-	}
+	serviceScaleErr := a.scaleServiceForJob(ctx, message)
 	taskDefinition, containerName, reason, ok := a.workerFor(message.JobType)
 	if !ok {
 		a.logger.Info("worker activation skipped", slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)), slog.String("reason", "unsupported_job_type"))
-		return nil
+		return serviceScaleErr
+	}
+	if !a.jobTypeAllowed(message.JobType) {
+		a.logger.Info("worker run-task activation skipped", slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)), slog.String("reason", "job_type_not_allowed"))
+		return serviceScaleErr
 	}
 	if taskDefinition == "" {
 		return fmt.Errorf("%s task definition is not configured", reason)
@@ -179,7 +201,47 @@ func (a *ECSRunTaskActivator) Activate(ctx context.Context, message queue.JobMes
 		taskARNs = append(taskARNs, aws.ToString(task.TaskArn))
 	}
 	a.logger.Info("started one-off ECS worker task", slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)), slog.String("reason", reason), slog.Int("tasks", len(output.Tasks)), slog.Any("task_arns", taskARNs))
+	return serviceScaleErr
+}
+
+func (a *ECSRunTaskActivator) scaleServiceForJob(ctx context.Context, message queue.JobMessage) error {
+	serviceName, reason, ok := a.serviceFor(message.JobType)
+	if !ok {
+		return nil
+	}
+	if serviceName == "" {
+		a.logger.Info("worker service scale skipped", slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)), slog.String("reason", reason), slog.String("skip_reason", "service_not_configured"))
+		return nil
+	}
+	desiredCount := a.serviceScaleOutCount
+	if desiredCount <= 0 {
+		desiredCount = 1
+	}
+	a.logger.Info("scaling worker service for job", slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)), slog.String("reason", reason), slog.String("cluster", a.cluster), slog.String("service", serviceName), slog.Int("desired_count", int(desiredCount)))
+	_, err := a.client.UpdateService(ctx, &ecs.UpdateServiceInput{
+		Cluster:      aws.String(a.cluster),
+		Service:      aws.String(serviceName),
+		DesiredCount: aws.Int32(desiredCount),
+	})
+	if err != nil {
+		a.logger.Warn("worker service scale failed", slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)), slog.String("reason", reason), slog.String("service", serviceName), slog.Any("error", err))
+		return fmt.Errorf("scale %s service: %w", reason, err)
+	}
+	a.logger.Info("worker service scale requested", slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)), slog.String("reason", reason), slog.String("service", serviceName), slog.Int("desired_count", int(desiredCount)))
 	return nil
+}
+
+func (a *ECSRunTaskActivator) serviceFor(jobType models.JobType) (string, string, bool) {
+	switch jobType {
+	case models.JobTypeMediaPreprocess, models.JobTypeTranscribe, models.JobTypeVideoUnderstand:
+		return a.videoServiceName, "video-worker", true
+	case models.JobTypeStoryPlan:
+		return a.storyServiceName, "story-worker", true
+	case models.JobTypeVideoRender:
+		return a.renderServiceName, "render-worker", true
+	default:
+		return "", "", false
+	}
 }
 
 func (a *ECSRunTaskActivator) workerFor(jobType models.JobType) (string, string, string, bool) {
@@ -253,6 +315,14 @@ func compact(values []string) []string {
 		}
 	}
 	return result
+}
+
+func readInt(value string, fallback int) int {
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func readBool(value string, fallback bool) bool {
