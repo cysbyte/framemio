@@ -459,7 +459,8 @@ struct StoryPreviewView: View {
                     description: nonEmpty(metadata.description),
                     kind: kind,
                     duration: kind == .video ? asset?.duration : nil,
-                    captureDate: metadata.creationDate ?? asset?.creationDate
+                    captureDate: metadata.creationDate ?? asset?.creationDate,
+                    sourceAssetID: metadata.sourceAssetID ?? asset?.localIdentifier
                 )
             }
         }
@@ -478,7 +479,8 @@ struct StoryPreviewView: View {
                 description: nonEmpty(metadata?.description),
                 kind: kind,
                 duration: kind == .video ? asset?.duration : nil,
-                captureDate: metadata?.creationDate ?? asset?.creationDate
+                captureDate: metadata?.creationDate ?? asset?.creationDate,
+                sourceAssetID: metadata?.sourceAssetID ?? asset?.localIdentifier
             )
         }
     }
@@ -496,7 +498,8 @@ struct StoryPreviewView: View {
                     description: nonEmpty(metadata.description),
                     kind: kind,
                     duration: kind == .video ? asset?.duration : nil,
-                    captureDate: metadata.creationDate ?? asset?.creationDate
+                    captureDate: metadata.creationDate ?? asset?.creationDate,
+                    sourceAssetID: metadata.sourceAssetID ?? asset?.localIdentifier
                 )
             }
         }
@@ -513,7 +516,8 @@ struct StoryPreviewView: View {
                 description: nonEmpty(metadata?.description),
                 kind: kind,
                 duration: kind == .video ? asset?.duration : nil,
-                captureDate: metadata?.creationDate ?? asset?.creationDate
+                captureDate: metadata?.creationDate ?? asset?.creationDate,
+                sourceAssetID: metadata?.sourceAssetID ?? asset?.localIdentifier
             )
         }
     }
@@ -691,7 +695,15 @@ private struct StoryMomentPresentation: Identifiable, Hashable {
     let kind: Kind
     let duration: TimeInterval?
     let captureDate: Date?
+    let sourceAssetID: String?
     let isImportedFromPhotos: Bool
+
+    var sourceIdentityKey: String {
+        if let source = sourceAssetID?.trimmingCharacters(in: .whitespacesAndNewlines), !source.isEmpty {
+            return source
+        }
+        return assetID
+    }
 
     init(
         id: String,
@@ -702,6 +714,7 @@ private struct StoryMomentPresentation: Identifiable, Hashable {
         kind: Kind,
         duration: TimeInterval?,
         captureDate: Date? = nil,
+        sourceAssetID: String? = nil,
         isImportedFromPhotos: Bool = false
     ) {
         self.id = id
@@ -712,6 +725,7 @@ private struct StoryMomentPresentation: Identifiable, Hashable {
         self.kind = kind
         self.duration = duration
         self.captureDate = captureDate
+        self.sourceAssetID = sourceAssetID
         self.isImportedFromPhotos = isImportedFromPhotos
     }
 
@@ -726,6 +740,7 @@ private struct StoryMomentPresentation: Identifiable, Hashable {
             kind: kind,
             duration: kind == .video ? imported.sourceAsset.duration : nil,
             captureDate: imported.sourceAsset.creationDate,
+            sourceAssetID: imported.sourceAsset.localIdentifier ?? imported.sourceAsset.id,
             isImportedFromPhotos: true
         )
     }
@@ -834,7 +849,7 @@ private struct MomentDetailSheet: View {
                     placeholderSystemImage: moment.kind.placeholderName,
                     accessibilityTitle: moment.title
                 )
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .overlay(alignment: .center) {
                     if moment.kind == .video {
                         Image(systemName: "play.fill")
@@ -920,8 +935,29 @@ private struct EditStorySheet: View {
     }
 
     private var selectableMoments: [StoryMomentPresentation] {
-        let visibleIDs = Set(displayedMoments.map(\.assetID))
-        return (availableMoments + importedMoments).filter { !visibleIDs.contains($0.assetID) }
+        let visibleMediaIDs = Set(displayedMoments.map(\.assetID))
+        let visibleSourceKeys = Set(displayedMoments.map(\.sourceIdentityKey))
+        return (availableMoments + importedMoments).filter { moment in
+            !visibleMediaIDs.contains(moment.assetID) && !visibleSourceKeys.contains(moment.sourceIdentityKey)
+        }
+    }
+
+    private func newImportedMomentPresentations(from imported: [ImportedStoryMedia]) -> (presentations: [StoryMomentPresentation], media: [ImportedStoryMedia]) {
+        var existingSourceKeys = Set((displayedMoments + importedMoments).map(\.sourceIdentityKey))
+        var presentations: [StoryMomentPresentation] = []
+        var media: [ImportedStoryMedia] = []
+        presentations.reserveCapacity(imported.count)
+        media.reserveCapacity(imported.count)
+        for item in imported {
+            let presentation = StoryMomentPresentation(imported: item, index: importedMoments.count + presentations.count)
+            guard existingSourceKeys.insert(presentation.sourceIdentityKey).inserted else {
+                storyPreviewUIDebugLog("edit sheet ignored duplicate imported source=\(presentation.sourceIdentityKey) media=\(presentation.assetID)")
+                continue
+            }
+            presentations.append(presentation)
+            media.append(item)
+        }
+        return (presentations, media)
     }
 
     private func momentsWithChronologicalAdditions(base: [StoryMomentPresentation], added: [StoryMomentPresentation]) -> [StoryMomentPresentation] {
@@ -1010,10 +1046,10 @@ private struct EditStorySheet: View {
                     onAppearMoment: onAppearMoment,
                     onImportPhotos: { items, progress in
                         let imported = try await onImportPhotos(items, progress)
-                        let presentations = imported.map { StoryMomentPresentation(imported: $0, index: importedMoments.count) }
-                        importedMoments.append(contentsOf: presentations)
-                        draft.addAnalysis(imported)
-                        return presentations
+                        let filtered = newImportedMomentPresentations(from: imported)
+                        importedMoments.append(contentsOf: filtered.presentations)
+                        draft.addAnalysis(filtered.media)
+                        return filtered.presentations
                     },
                     onRemoveImported: { moment in
                         importedMoments.removeAll { $0.assetID == moment.assetID }
@@ -1037,10 +1073,10 @@ private struct EditStorySheet: View {
                     onAppearMoment: onAppearMoment,
                     onImportPhotos: { items, progress in
                         let imported = try await onImportPhotos(items, progress)
-                        let presentations = imported.map { StoryMomentPresentation(imported: $0, index: importedMoments.count) }
-                        importedMoments.append(contentsOf: presentations)
-                        draft.addAnalysis(imported)
-                        return presentations
+                        let filtered = newImportedMomentPresentations(from: imported)
+                        importedMoments.append(contentsOf: filtered.presentations)
+                        draft.addAnalysis(filtered.media)
+                        return filtered.presentations
                     },
                     onRemoveImported: { moment in
                         importedMoments.removeAll { $0.assetID == moment.assetID }
@@ -1591,7 +1627,7 @@ private struct AddMomentSelectionSheet: View {
 
     private var allMoments: [StoryMomentPresentation] {
         var seen = Set<String>()
-        let merged = (moments + importedMoments).filter { seen.insert($0.assetID).inserted }
+        let merged = (moments + importedMoments).filter { seen.insert($0.sourceIdentityKey).inserted }
         return merged.sorted(by: momentPrecedes)
     }
 
@@ -1877,6 +1913,15 @@ private struct AddMomentSelectionSheet: View {
                     importStatusMessage = message
                 }
                 storyPreviewUIDebugLog("add sheet import returned count=\(imported.count) ids=\(imported.map(\.assetID).joined(separator: ","))")
+                guard !imported.isEmpty else {
+                    importErrorMessage = "Those items are already in this story."
+                    selectedPhotoItems = []
+                    importProgress = nil
+                    importStatusMessage = "Preparing media…"
+                    isImportingPhotos = false
+                    storyPreviewUIDebugLog("add sheet import skipped all duplicates")
+                    return
+                }
                 importedMoments.append(contentsOf: imported)
                 if !allowsMultipleSelection {
                     selectedAssetIDs.removeAll()

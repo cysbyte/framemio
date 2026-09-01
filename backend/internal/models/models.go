@@ -42,6 +42,7 @@ type MediaAsset struct {
 	Orientation     string      `json:"orientation,omitempty"`
 	S3Key           string      `json:"s3_key"`
 	UploadID        string      `json:"upload_id"`
+	SourceAssetID   string      `json:"source_asset_id,omitempty"`
 	ETag            string      `json:"etag,omitempty"`
 	CreatedAt       time.Time   `json:"created_at"`
 	UpdatedAt       time.Time   `json:"updated_at"`

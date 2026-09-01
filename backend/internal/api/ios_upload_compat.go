@@ -18,6 +18,7 @@ type iosCreateUploadSessionRequest struct {
 
 type iosUploadMediaMetadata struct {
 	AssetID               string           `json:"assetID"`
+	SourceAssetID         string           `json:"sourceAssetId,omitempty"`
 	MediaType             models.MediaType `json:"mediaType"`
 	ContentType           string           `json:"contentType"`
 	FileName              string           `json:"fileName"`
@@ -132,7 +133,8 @@ func (s *Server) createIOSUploadSession(response http.ResponseWriter, request *h
 		FileName: metadata.FileName, ContentType: metadata.ContentType, FileSizeBytes: metadata.FileSizeBytes,
 		DurationSeconds: metadata.DurationSeconds, CreationDate: metadata.CreationDate, PixelWidth: metadata.PixelWidth,
 		PixelHeight: metadata.PixelHeight, Orientation: metadata.Orientation, S3Key: session.S3Key, UploadID: session.ID,
-		CreatedAt: now, UpdatedAt: now,
+		SourceAssetID: strings.TrimSpace(metadata.SourceAssetID),
+		CreatedAt:     now, UpdatedAt: now,
 	}
 	if err := s.Store.CreateMediaUpload(request.Context(), media, session); err != nil {
 		s.Logger.Error("persist iOS upload session failed", "user_id", user.ID, "asset_id", metadata.AssetID, "media_id", mediaID, "upload_id", session.ID, "error", err)

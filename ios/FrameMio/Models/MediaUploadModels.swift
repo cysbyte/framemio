@@ -184,6 +184,7 @@ struct MediaUploadOptions: Hashable, Sendable {
 
 struct MediaUploadMetadata: Codable, Hashable, Sendable {
     let assetID: String
+    let sourceAssetID: String?
     let mediaType: UploadMediaType
     let contentType: String
     let fileName: String
@@ -195,6 +196,22 @@ struct MediaUploadMetadata: Codable, Hashable, Sendable {
     let orientation: MediaOrientation
     let optimization: MediaUploadOptimization
     let preferredPartSizeBytes: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case assetID = "assetID"
+        case sourceAssetID = "sourceAssetId"
+        case mediaType
+        case contentType
+        case fileName
+        case fileSizeBytes
+        case duration
+        case creationDate
+        case pixelWidth
+        case pixelHeight
+        case orientation
+        case optimization
+        case preferredPartSizeBytes
+    }
 }
 
 struct UploadCompletionNotification: Codable, Hashable, Sendable {

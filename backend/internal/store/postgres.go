@@ -358,8 +358,14 @@ func (s *PostgresStore) AddProjectMedia(ctx context.Context, userID, projectID s
 		return models.StoryProject{}, err
 	}
 	existing := make(map[string]struct{}, len(project.MediaIDs))
+	existingSourceAssets := make(map[string]struct{}, len(project.MediaIDs))
 	for _, mediaID := range project.MediaIDs {
 		existing[mediaID] = struct{}{}
+		if media, err := s.GetMedia(ctx, userID, mediaID); err == nil {
+			if sourceAssetID := strings.TrimSpace(media.SourceAssetID); sourceAssetID != "" {
+				existingSourceAssets[sourceAssetID] = struct{}{}
+			}
+		}
 	}
 	changed := false
 	for _, mediaID := range mediaIDs {
@@ -376,6 +382,12 @@ func (s *PostgresStore) AddProjectMedia(ctx context.Context, userID, projectID s
 		}
 		if _, ok := existing[mediaID]; ok {
 			continue
+		}
+		if sourceAssetID := strings.TrimSpace(media.SourceAssetID); sourceAssetID != "" {
+			if _, ok := existingSourceAssets[sourceAssetID]; ok {
+				continue
+			}
+			existingSourceAssets[sourceAssetID] = struct{}{}
 		}
 		project.MediaIDs = append(project.MediaIDs, mediaID)
 		existing[mediaID] = struct{}{}

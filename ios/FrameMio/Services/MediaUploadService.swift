@@ -502,6 +502,7 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
     private func uploadMetadata(from record: MediaUpload, options: MediaUploadOptions) -> MediaUploadMetadata {
         MediaUploadMetadata(
             assetID: record.assetID,
+            sourceAssetID: record.localIdentifier ?? record.assetID,
             mediaType: record.mediaType,
             contentType: record.contentType,
             fileName: record.fileName,

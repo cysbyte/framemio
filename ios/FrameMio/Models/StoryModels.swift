@@ -17,6 +17,7 @@ enum StoryMomentType: String, Codable, Hashable, Sendable {
 struct StoryMoment: Identifiable, Codable, Hashable, Sendable {
     let id: String
     let mediaID: String
+    let sourceAssetID: String?
     let type: StoryMomentType?
     let thumbnailURL: URL?
     let title: String?
@@ -28,6 +29,7 @@ struct StoryMoment: Identifiable, Codable, Hashable, Sendable {
         case id
         case momentID = "momentId"
         case mediaID = "mediaId"
+        case sourceAssetID = "sourceAssetId"
         case type
         case thumbnailURL = "thumbnailUrl"
         case title
@@ -39,6 +41,7 @@ struct StoryMoment: Identifiable, Codable, Hashable, Sendable {
     init(
         id: String,
         mediaID: String,
+        sourceAssetID: String? = nil,
         type: StoryMomentType? = nil,
         thumbnailURL: URL? = nil,
         title: String? = nil,
@@ -48,6 +51,7 @@ struct StoryMoment: Identifiable, Codable, Hashable, Sendable {
     ) {
         self.id = id
         self.mediaID = mediaID
+        self.sourceAssetID = sourceAssetID
         self.type = type
         self.thumbnailURL = thumbnailURL
         self.title = title
@@ -64,6 +68,7 @@ struct StoryMoment: Identifiable, Codable, Hashable, Sendable {
             ?? decodedMediaID
         id = decodedID
         mediaID = decodedMediaID.isEmpty ? decodedID : decodedMediaID
+        sourceAssetID = try container.decodeIfPresent(String.self, forKey: .sourceAssetID)
         type = try container.decodeIfPresent(StoryMomentType.self, forKey: .type)
         thumbnailURL = try container.decodeIfPresent(URL.self, forKey: .thumbnailURL)
         title = try container.decodeIfPresent(String.self, forKey: .title)
@@ -76,6 +81,7 @@ struct StoryMoment: Identifiable, Codable, Hashable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(mediaID, forKey: .mediaID)
+        try container.encodeIfPresent(sourceAssetID, forKey: .sourceAssetID)
         try container.encodeIfPresent(type, forKey: .type)
         try container.encodeIfPresent(thumbnailURL, forKey: .thumbnailURL)
         try container.encodeIfPresent(title, forKey: .title)

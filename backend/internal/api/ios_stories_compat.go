@@ -39,15 +39,16 @@ type iosStory struct {
 }
 
 type iosStoryMoment struct {
-	ID           string     `json:"id"`
-	MomentID     string     `json:"momentId,omitempty"`
-	MediaID      string     `json:"mediaId"`
-	Type         string     `json:"type,omitempty"`
-	ThumbnailURL *string    `json:"thumbnailUrl,omitempty"`
-	Title        string     `json:"title,omitempty"`
-	Description  string     `json:"description,omitempty"`
-	CreationDate *time.Time `json:"creationDate,omitempty"`
-	Selected     bool       `json:"selected"`
+	ID            string     `json:"id"`
+	MomentID      string     `json:"momentId,omitempty"`
+	MediaID       string     `json:"mediaId"`
+	SourceAssetID string     `json:"sourceAssetId,omitempty"`
+	Type          string     `json:"type,omitempty"`
+	ThumbnailURL  *string    `json:"thumbnailUrl,omitempty"`
+	Title         string     `json:"title,omitempty"`
+	Description   string     `json:"description,omitempty"`
+	CreationDate  *time.Time `json:"creationDate,omitempty"`
+	Selected      bool       `json:"selected"`
 }
 
 type iosCreateStoryRequest struct {
@@ -607,6 +608,25 @@ func (s *Server) newIOSStoryEditMediaIDs(project models.StoryProject, input iosS
 	return newMediaIDs
 }
 
+func (s *Server) iosStorySelectedMediaHasDuplicateSource(request *http.Request, userID string, selected map[string]struct{}) (bool, string) {
+	seen := make(map[string]string, len(selected))
+	for mediaID := range selected {
+		media, err := s.Store.GetMedia(request.Context(), userID, mediaID)
+		if err != nil {
+			continue
+		}
+		sourceAssetID := strings.TrimSpace(media.SourceAssetID)
+		if sourceAssetID == "" {
+			continue
+		}
+		if existingMediaID, ok := seen[sourceAssetID]; ok && existingMediaID != mediaID {
+			return true, sourceAssetID
+		}
+		seen[sourceAssetID] = mediaID
+	}
+	return false, ""
+}
+
 func (s *Server) saveIOSStoryEditAnalyses(request *http.Request, userID, projectID string, input iosStoryEditRequest) error {
 	if len(input.Analyses) == 0 {
 		return nil
@@ -710,6 +730,11 @@ func (s *Server) iosStoryEditConfiguration(request *http.Request, userID string,
 		selected[mediaID] = struct{}{}
 		delete(excludedMedia, mediaID)
 	}
+	if hasDuplicate, duplicateSourceID := s.iosStorySelectedMediaHasDuplicateSource(request, userID, selected); hasDuplicate {
+		s.Logger.Warn("rejected iOS story revision duplicate source asset", "user_id", userID, "project_id", project.ID, "source_asset_id", duplicateSourceID)
+		return nil, store.ErrConflict
+	}
+
 	if len(selected) == 0 {
 		return nil, store.ErrConflict
 	}
@@ -1341,15 +1366,16 @@ func (s *Server) iosStoryMoments(request *http.Request, plan models.StoryPlan, m
 			creationDate = media.CreationDate
 		}
 		moments = append(moments, iosStoryMoment{
-			ID:           momentID,
-			MomentID:     momentID,
-			MediaID:      mediaID,
-			Type:         mediaType,
-			ThumbnailURL: thumbnailURL,
-			Title:        iosMomentTitleIgnoringSubtitles(moment, mediaType, index, captionTexts),
-			Description:  firstHumanIOSPresentationText(captionTexts, moment.Narrative, moment.Caption, moment.Reason),
-			CreationDate: creationDate,
-			Selected:     true,
+			ID:            momentID,
+			MomentID:      momentID,
+			MediaID:       mediaID,
+			SourceAssetID: sourceAssetIDForMedia(mediaByID[mediaID]),
+			Type:          mediaType,
+			ThumbnailURL:  thumbnailURL,
+			Title:         iosMomentTitleIgnoringSubtitles(moment, mediaType, index, captionTexts),
+			Description:   firstHumanIOSPresentationText(captionTexts, moment.Narrative, moment.Caption, moment.Reason),
+			CreationDate:  creationDate,
+			Selected:      true,
 		})
 	}
 	return moments
@@ -1507,16 +1533,21 @@ func (s *Server) iosAvailableMoments(request *http.Request, project models.Story
 		}
 		_, isSelected := selectedMedia[mediaID]
 		available = append(available, iosStoryMoment{
-			ID:           mediaID,
-			MediaID:      mediaID,
-			Type:         string(media.Type),
-			ThumbnailURL: s.iosStoryThumbnailURL(request, media, iosVideoAnalysisFallbackThumbnailKey(videoAnalysesByMediaID[mediaID])),
-			Title:        fallbackIOSMomentTitle(string(media.Type), index),
-			CreationDate: media.CreationDate,
-			Selected:     isSelected,
+			ID:            mediaID,
+			MediaID:       mediaID,
+			SourceAssetID: sourceAssetIDForMedia(media),
+			Type:          string(media.Type),
+			ThumbnailURL:  s.iosStoryThumbnailURL(request, media, iosVideoAnalysisFallbackThumbnailKey(videoAnalysesByMediaID[mediaID])),
+			Title:         fallbackIOSMomentTitle(string(media.Type), index),
+			CreationDate:  media.CreationDate,
+			Selected:      isSelected,
 		})
 	}
 	return available
+}
+
+func sourceAssetIDForMedia(media models.MediaAsset) string {
+	return strings.TrimSpace(media.SourceAssetID)
 }
 
 func storyAssetIDsFromMoments(moments []iosStoryMoment) []string {

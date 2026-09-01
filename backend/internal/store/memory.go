@@ -223,8 +223,14 @@ func (s *MemoryStore) AddProjectMedia(_ context.Context, userID, projectID strin
 		return models.StoryProject{}, ErrInvalidOwner
 	}
 	existing := make(map[string]struct{}, len(project.MediaIDs))
+	existingSourceAssets := make(map[string]struct{}, len(project.MediaIDs))
 	for _, mediaID := range project.MediaIDs {
 		existing[mediaID] = struct{}{}
+		if media, ok := s.media[mediaID]; ok {
+			if sourceAssetID := strings.TrimSpace(media.SourceAssetID); sourceAssetID != "" {
+				existingSourceAssets[sourceAssetID] = struct{}{}
+			}
+		}
 	}
 	changed := false
 	for _, mediaID := range mediaIDs {
@@ -244,6 +250,12 @@ func (s *MemoryStore) AddProjectMedia(_ context.Context, userID, projectID strin
 		}
 		if _, ok := existing[mediaID]; ok {
 			continue
+		}
+		if sourceAssetID := strings.TrimSpace(media.SourceAssetID); sourceAssetID != "" {
+			if _, ok := existingSourceAssets[sourceAssetID]; ok {
+				continue
+			}
+			existingSourceAssets[sourceAssetID] = struct{}{}
 		}
 		project.MediaIDs = append(project.MediaIDs, mediaID)
 		existing[mediaID] = struct{}{}
