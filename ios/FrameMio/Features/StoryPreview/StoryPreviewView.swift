@@ -924,10 +924,22 @@ private struct EditStorySheet: View {
     private var displayedMoments: [StoryMomentPresentation] {
         let removed = draft.removedMomentIDs.union(draft.removedMediaIDs)
         let replacementSources = Set(draft.replacements.compactMap { $0.fromMomentID } + draft.replacements.compactMap { $0.fromMediaID })
-        let base = moments.filter { !removed.contains($0.id) && !removed.contains($0.assetID) && !replacementSources.contains($0.id) && !replacementSources.contains($0.assetID) }
+        let baseCandidates = moments.filter { !removed.contains($0.id) && !removed.contains($0.assetID) && !replacementSources.contains($0.id) && !replacementSources.contains($0.assetID) }
+        var visibleSourceKeys = Set<String>()
+        let base = baseCandidates.filter { moment in
+            let inserted = visibleSourceKeys.insert(moment.sourceIdentityKey).inserted
+            if !inserted {
+                storyPreviewUIDebugLog("edit sheet hiding duplicate visible moment media=\(moment.assetID) source=\(moment.sourceIdentityKey)")
+            }
+            return inserted
+        }
         let existingIDs = Set(base.map(\.assetID))
         let addableMoments = availableMoments + importedMoments
-        let added = addableMoments.filter { draft.addedMediaIDs.contains($0.assetID) && !existingIDs.contains($0.assetID) }
+        let added = addableMoments.filter { moment in
+            draft.addedMediaIDs.contains(moment.assetID)
+                && !existingIDs.contains(moment.assetID)
+                && visibleSourceKeys.insert(moment.sourceIdentityKey).inserted
+        }
         guard !draft.orderedMediaIDs.isEmpty else {
             return momentsWithChronologicalAdditions(base: base, added: added)
         }
@@ -1056,7 +1068,9 @@ private struct EditStorySheet: View {
                         draft.removeImported(moment)
                     },
                     onAdd: { selectedMoments in
+                        storyPreviewUIDebugLog("edit sheet add selected=\(selectedMoments.map(\.assetID).joined(separator: ",")) sources=\(selectedMoments.map(\.sourceIdentityKey).joined(separator: ",")) before=\(displayedMoments.map(\.assetID).joined(separator: ","))")
                         draft.add(selectedMoments, currentMoments: displayedMoments)
+                        storyPreviewUIDebugLog("edit sheet add draft added=\(draft.addedMediaIDs.sorted().joined(separator: ",")) ordered=\(draft.orderedMediaIDs.joined(separator: ",")) after=\(displayedMoments.map(\.assetID).joined(separator: ","))")
                         isShowingAddMoment = false
                     },
                     onCancel: { isShowingAddMoment = false }
@@ -1259,6 +1273,7 @@ private struct EditStorySheet: View {
             .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
             .accessibilityLabel("Tell FrameMio what you want")
             PrimaryButton(title: "Regenerate Story (\(CreditPricing.regenerateStory) credits)", systemImage: "sparkles") {
+                storyPreviewUIDebugLog("edit sheet regenerate tapped has_changes=\(draft.request.hasChanges) added=\(draft.addedMediaIDs.sorted().joined(separator: ",")) ordered=\(draft.orderedMediaIDs.joined(separator: ",")) visible=\(displayedMoments.map(\.assetID).joined(separator: ","))")
                 onRegenerate(draft.request)
             }
             .disabled(isPerformingAction)

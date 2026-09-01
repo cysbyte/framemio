@@ -1,6 +1,7 @@
 import AVFoundation
 import Combine
 import CoreTransferable
+import CryptoKit
 import Foundation
 import Photos
 import PhotosUI
@@ -460,7 +461,7 @@ final class StoryPreviewViewModel: ObservableObject {
                 if let file = asset.file {
                     progress?(0.22, "Preparing upload…")
                     try await mediaUploadStore.save(makeStagedUploadRecord(asset: asset.asset, file: file))
-                    storyPreviewDebugLog("edit import staged picker asset=\(asset.asset.id) file=\(file.fileName) bytes=\(file.fileSizeBytes) content_type=\(file.contentType)")
+                    storyPreviewDebugLog("edit import staged picker asset=\(asset.asset.id) local_identifier=\(asset.asset.localIdentifier ?? "nil") file=\(file.fileName) bytes=\(file.fileSizeBytes) content_type=\(file.contentType)")
                 }
             }
 
@@ -584,7 +585,7 @@ final class StoryPreviewViewModel: ObservableObject {
             try Task.checkCancellation()
             if let identifier = item.itemIdentifier, let asset = resolvedByIdentifier[identifier] {
                 let created = asset.creationDate?.description ?? "nil"
-                storyPreviewDebugLog("edit import using resolved photo asset=\(asset.id) kind=\(asset.kind.rawValue) created=\(created)")
+                storyPreviewDebugLog("edit import using resolved photo asset=\(asset.id) local_identifier=\(asset.localIdentifier ?? "nil") kind=\(asset.kind.rawValue) created=\(created)")
                 let thumbnail = await thumbnailImage(for: asset)
                 staged.append(StagedStoryImport(asset: asset, file: nil, thumbnail: thumbnail, fallbackAnalysis: nil))
                 continue
@@ -595,16 +596,18 @@ final class StoryPreviewViewModel: ObservableObject {
     }
 
     private func stagedImport(from item: PhotosPickerItem) async throws -> StagedStoryImport {
+        let trimmedIdentifier = item.itemIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let sourceIdentifier = trimmedIdentifier.isEmpty ? nil : trimmedIdentifier
         if item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) || $0.conforms(to: .video) }) {
-            return try await stagedVideoImport(from: item)
+            return try await stagedVideoImport(from: item, sourceIdentifier: sourceIdentifier)
         }
         if item.supportedContentTypes.contains(where: { $0.conforms(to: .image) }) {
-            return try await stagedPhotoImport(from: item)
+            return try await stagedPhotoImport(from: item, sourceIdentifier: sourceIdentifier)
         }
         throw AppError.unsupportedMedia
     }
 
-    private func stagedPhotoImport(from item: PhotosPickerItem) async throws -> StagedStoryImport {
+    private func stagedPhotoImport(from item: PhotosPickerItem, sourceIdentifier: String?) async throws -> StagedStoryImport {
         guard let data = try await item.loadTransferable(type: Data.self),
               let image = UIImage(data: data),
               let jpegData = image.jpegData(compressionQuality: 0.92) else {
@@ -617,10 +620,11 @@ final class StoryPreviewViewModel: ObservableObject {
             contentType: "image/jpeg",
             fileSizeBytes: Int64(jpegData.count)
         )
-        let assetID = "picker-\(UUID().uuidString)"
+        let fingerprintIdentifier = "picker-photo-\(Self.sha256Hex(for: jpegData).prefix(32))"
+        let assetID = sourceIdentifier ?? fingerprintIdentifier
         let asset = MediaAsset(
             id: assetID,
-            localIdentifier: nil,
+            localIdentifier: sourceIdentifier ?? fingerprintIdentifier,
             kind: .image,
             creationDate: nil,
             duration: 0,
@@ -628,11 +632,11 @@ final class StoryPreviewViewModel: ObservableObject {
             pixelHeight: Int(image.size.height.rounded())
         )
         let analysis = MediaAnalysis(assetID: assetID, labels: ["photo", "memory"], peopleCount: 0, confidence: 0.5)
-        storyPreviewDebugLog("edit import staged photo asset=\(asset.id) pixels=\(asset.pixelWidth)x\(asset.pixelHeight) bytes=\(file.fileSizeBytes)")
+        storyPreviewDebugLog("edit import staged photo asset=\(asset.id) source_identifier=\(sourceIdentifier ?? "nil") local_identifier=\(asset.localIdentifier ?? "nil") pixels=\(asset.pixelWidth)x\(asset.pixelHeight) bytes=\(file.fileSizeBytes)")
         return StagedStoryImport(asset: asset, file: file, thumbnail: image, fallbackAnalysis: analysis)
     }
 
-    private func stagedVideoImport(from item: PhotosPickerItem) async throws -> StagedStoryImport {
+    private func stagedVideoImport(from item: PhotosPickerItem, sourceIdentifier: String?) async throws -> StagedStoryImport {
         let url: URL
         if let movie = try await item.loadTransferable(type: PickedStoryMovie.self) {
             url = movie.url
@@ -655,9 +659,10 @@ final class StoryPreviewViewModel: ObservableObject {
             contentType: contentType,
             fileSizeBytes: fileSizeBytes
         )
+        let fingerprintIdentifier = try await mediaFingerprintIdentifier(for: url, prefix: "picker-video")
         let asset = MediaAsset(
-            id: "picker-\(UUID().uuidString)",
-            localIdentifier: nil,
+            id: sourceIdentifier ?? fingerprintIdentifier,
+            localIdentifier: sourceIdentifier ?? fingerprintIdentifier,
             kind: .video,
             creationDate: creationDate,
             duration: metadata.duration,
@@ -665,8 +670,29 @@ final class StoryPreviewViewModel: ObservableObject {
             pixelHeight: metadata.pixelHeight
         )
         let thumbnail = await videoThumbnail(for: url)
-        storyPreviewDebugLog("edit import staged video asset=\(asset.id) duration=\(asset.duration) pixels=\(asset.pixelWidth)x\(asset.pixelHeight) bytes=\(file.fileSizeBytes) content_type=\(contentType)")
+        storyPreviewDebugLog("edit import staged video asset=\(asset.id) source_identifier=\(sourceIdentifier ?? "nil") local_identifier=\(asset.localIdentifier ?? "nil") duration=\(asset.duration) pixels=\(asset.pixelWidth)x\(asset.pixelHeight) bytes=\(file.fileSizeBytes) content_type=\(contentType)")
         return StagedStoryImport(asset: asset, file: file, thumbnail: thumbnail, fallbackAnalysis: nil)
+    }
+
+    nonisolated private static func sha256Hex(for data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    nonisolated private func mediaFingerprintIdentifier(for url: URL, prefix: String) async throws -> String {
+        let digest = try await Task.detached(priority: .utility) { () throws -> String in
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            var hasher = SHA256()
+            while true {
+                let chunk = try handle.read(upToCount: 1_048_576) ?? Data()
+                if chunk.isEmpty {
+                    break
+                }
+                hasher.update(data: chunk)
+            }
+            return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        }.value
+        return "\(prefix)-\(digest.prefix(32))"
     }
 
     private func thumbnailImage(for asset: MediaAsset) async -> UIImage? {
@@ -729,7 +755,7 @@ final class StoryPreviewViewModel: ObservableObject {
         return MediaUpload(
             id: uploadID,
             assetID: asset.id,
-            localIdentifier: nil,
+            localIdentifier: asset.localIdentifier,
             mediaID: nil,
             mediaType: asset.isVideo ? .video : .photo,
             fileName: file.fileName,
@@ -754,7 +780,11 @@ final class StoryPreviewViewModel: ObservableObject {
 
     func saveStoryEdits(_ request: StoryEditRequest) {
         guard let storyID, request.hasChanges, story?.status.shouldPoll != true else { return }
-        perform(.editStory) { [storyService] in
+        storyPreviewDebugLog("edit save requested story=\(storyID) add=\(request.addMediaIDs.joined(separator: ",")) remove_media=\(request.removeMediaIDs.joined(separator: ",")) remove_moments=\(request.removeMomentIDs.joined(separator: ",")) ordered=\(request.orderedMediaIDs.joined(separator: ",")) replace=\(request.replace.count) analyses=\(request.analyses.count) has_instruction=\(request.instruction?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)")
+        perform(.editStory, mapResult: { [weak self] updatedStory in
+            self?.storyPreviewDebugLogEditResult(updatedStory, request: request)
+            return self?.storyWithPendingEdit(request, appliedTo: updatedStory) ?? updatedStory
+        }) { [storyService] in
             try await storyService.saveStoryEdits(storyID: storyID, request: request)
         }
     }
@@ -814,6 +844,91 @@ final class StoryPreviewViewModel: ObservableObject {
                 instruction: "Remove this moment from the story."
             )
             return try await storyService.saveStoryEdits(storyID: storyID, request: request)
+        }
+    }
+
+    private func storyPreviewDebugLogEditResult(_ updatedStory: Story, request: StoryEditRequest) {
+        let returnedMomentIDs = (updatedStory.moments ?? []).map(\.mediaID).joined(separator: ",")
+        let returnedAvailableIDs = (updatedStory.availableMoments ?? []).map(\.mediaID).joined(separator: ",")
+        storyPreviewDebugLog("edit save response story=\(updatedStory.id) status=\(updatedStory.status.rawValue) requested_add=\(request.addMediaIDs.joined(separator: ",")) returned_moments=\(returnedMomentIDs) returned_available=\(returnedAvailableIDs)")
+    }
+
+    private func storyWithPendingEdit(_ request: StoryEditRequest, appliedTo updatedStory: Story) -> Story {
+        var merged = updatedStory
+        var moments = merged.moments ?? []
+        let removedMomentIDs = Set(request.removeMomentIDs)
+        let removedMediaIDs = Set(request.removeMediaIDs)
+        moments.removeAll { removedMomentIDs.contains($0.id) || removedMediaIDs.contains($0.mediaID) }
+        var existingMediaIDs = Set(moments.map(\.mediaID))
+        var availableByMediaID: [String: StoryMoment] = [:]
+        for availableMoment in merged.availableMoments ?? [] {
+            availableByMediaID[availableMoment.mediaID] = availableMoment
+        }
+        for mediaID in request.addMediaIDs where !existingMediaIDs.contains(mediaID) {
+            existingMediaIDs.insert(mediaID)
+            if let existing = availableByMediaID[mediaID] {
+                moments.append(StoryMoment(
+                    id: existing.id,
+                    mediaID: existing.mediaID,
+                    sourceAssetID: existing.sourceAssetID,
+                    type: existing.type,
+                    thumbnailURL: existing.thumbnailURL,
+                    title: existing.title,
+                    description: existing.description,
+                    creationDate: existing.creationDate,
+                    isSelected: true
+                ))
+                continue
+            }
+            let asset = momentAssets[mediaID]
+            moments.append(StoryMoment(
+                id: mediaID,
+                mediaID: mediaID,
+                sourceAssetID: asset?.localIdentifier,
+                type: storyMomentType(for: asset?.kind),
+                thumbnailURL: nil,
+                title: nil,
+                description: "Added to this version. FrameMio is rebuilding your story.",
+                creationDate: asset?.creationDate,
+                isSelected: true
+            ))
+        }
+        if !request.orderedMediaIDs.isEmpty {
+            let order = Dictionary(uniqueKeysWithValues: request.orderedMediaIDs.enumerated().map { ($0.element, $0.offset) })
+            moments.sort { left, right in
+                switch (order[left.mediaID], order[right.mediaID]) {
+                case let (.some(leftIndex), .some(rightIndex)):
+                    return leftIndex < rightIndex
+                case (.some, .none):
+                    return true
+                case (.none, .some):
+                    return false
+                case (.none, .none):
+                    return false
+                }
+            }
+        }
+        merged.moments = deduplicatedStoryMoments(moments)
+        merged.assetIDs = merged.moments?.map(\.mediaID) ?? merged.assetIDs
+        storyPreviewDebugLog("edit optimistic moments story=\(merged.id) status=\(merged.status.rawValue) moments=\((merged.moments ?? []).map(\.mediaID).joined(separator: ","))")
+        return merged
+    }
+
+    private func deduplicatedStoryMoments(_ moments: [StoryMoment]) -> [StoryMoment] {
+        var seen = Set<String>()
+        return moments.filter { moment in
+            let sourceKey = moment.sourceAssetID?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = sourceKey?.isEmpty == false ? sourceKey! : moment.mediaID
+            return seen.insert(key).inserted
+        }
+    }
+
+    private func storyMomentType(for kind: MediaKind?) -> StoryMomentType? {
+        switch kind {
+        case .image: return .photo
+        case .video: return .video
+        case .livePhoto: return .livePhoto
+        case nil: return nil
         }
     }
 
@@ -969,7 +1084,11 @@ final class StoryPreviewViewModel: ObservableObject {
         }
     }
 
-    private func perform(_ action: StoryPreviewAction, operation: @escaping @Sendable () async throws -> Story) {
+    private func perform(
+        _ action: StoryPreviewAction,
+        mapResult: (@MainActor (Story) -> Story)? = nil,
+        operation: @escaping @Sendable () async throws -> Story
+    ) {
         guard activeAction == nil else { return }
         actionTask?.cancel()
         actionTask = Task { [weak self] in
@@ -978,10 +1097,12 @@ final class StoryPreviewViewModel: ObservableObject {
             errorMessage = nil
             defer { activeAction = nil }
             do {
-                let updatedStory = try await operation()
+                let operationStory = try await operation()
+                let updatedStory = mapResult?(operationStory) ?? operationStory
                 story = updatedStory
                 cacheLaunchAssets(for: updatedStory)
-                if updatedStory.status.shouldPoll {
+                storyPreviewDebugLog("action completed action=\(action.title) story=\(updatedStory.id) status=\(updatedStory.status.rawValue) should_poll=\(updatedStory.status.shouldPoll)")
+                if updatedStory.status.shouldPoll || action == .editStory {
                     load()
                 }
                 onCreditsUpdated?()

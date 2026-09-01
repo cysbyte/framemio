@@ -163,6 +163,15 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		return
 	}
 	newMediaIDs := s.newIOSStoryEditMediaIDs(project, input)
+	s.Logger.Info("trace iOS story edit media request",
+		"user_id", user.ID,
+		"project_id", project.ID,
+		"project_media_ids", joinStringsOrUnset(project.MediaIDs),
+		"requested_add_media_ids", joinStringsOrUnset(cleanStringList(input.AddMediaIDs)),
+		"new_media_ids", joinStringsOrUnset(newMediaIDs),
+		"requested_add_sources", s.iosStoryMediaSourcePairs(request, user.ID, cleanStringList(input.AddMediaIDs)),
+		"project_sources", s.iosStoryMediaSourcePairs(request, user.ID, project.MediaIDs),
+	)
 	if len(newMediaIDs) > 0 {
 		project, err = s.Store.AddProjectMedia(request.Context(), user.ID, project.ID, newMediaIDs)
 		if err != nil {
@@ -608,6 +617,34 @@ func (s *Server) newIOSStoryEditMediaIDs(project models.StoryProject, input iosS
 	return newMediaIDs
 }
 
+func (s *Server) iosStoryMediaSourcePairs(request *http.Request, userID string, mediaIDs []string) string {
+	if len(mediaIDs) == 0 {
+		return "unset"
+	}
+	pairs := make([]string, 0, len(mediaIDs))
+	for _, mediaID := range mediaIDs {
+		mediaID = strings.TrimSpace(mediaID)
+		if mediaID == "" {
+			continue
+		}
+		media, err := s.Store.GetMedia(request.Context(), userID, mediaID)
+		if err != nil {
+			pairs = append(pairs, mediaID+":lookup_error")
+			continue
+		}
+		sourceAssetID := strings.TrimSpace(media.SourceAssetID)
+		if sourceAssetID == "" {
+			sourceAssetID = "unset"
+		}
+		pairs = append(pairs, mediaID+":"+sourceAssetID)
+	}
+	if len(pairs) == 0 {
+		return "unset"
+	}
+	sort.Strings(pairs)
+	return strings.Join(pairs, ",")
+}
+
 func (s *Server) iosStorySelectedMediaHasDuplicateSource(request *http.Request, userID string, selected map[string]struct{}) (bool, string) {
 	seen := make(map[string]string, len(selected))
 	for mediaID := range selected {
@@ -730,8 +767,14 @@ func (s *Server) iosStoryEditConfiguration(request *http.Request, userID string,
 		selected[mediaID] = struct{}{}
 		delete(excludedMedia, mediaID)
 	}
+	s.Logger.Info("trace iOS story edit selected media sources",
+		"user_id", userID,
+		"project_id", project.ID,
+		"selected_media_ids", joinStringsOrUnset(sortedKeys(selected)),
+		"selected_sources", s.iosStoryMediaSourcePairs(request, userID, sortedKeys(selected)),
+	)
 	if hasDuplicate, duplicateSourceID := s.iosStorySelectedMediaHasDuplicateSource(request, userID, selected); hasDuplicate {
-		s.Logger.Warn("rejected iOS story revision duplicate source asset", "user_id", userID, "project_id", project.ID, "source_asset_id", duplicateSourceID)
+		s.Logger.Warn("rejected iOS story revision duplicate source asset", "user_id", userID, "project_id", project.ID, "source_asset_id", duplicateSourceID, "selected_sources", s.iosStoryMediaSourcePairs(request, userID, sortedKeys(selected)))
 		return nil, store.ErrConflict
 	}
 

@@ -125,7 +125,7 @@ func (s *Server) createIOSUploadSession(response http.ResponseWriter, request *h
 		s.internalError(response, err, "authorize iOS upload")
 		return
 	}
-	s.Logger.Info("authorized iOS upload", "user_id", user.ID, "asset_id", metadata.AssetID, "media_id", mediaID, "upload_id", session.ID, "strategy", string(session.Strategy), "part_count", len(session.Parts), "file_size_bytes", metadata.FileSizeBytes, "content_type", metadata.ContentType)
+	s.Logger.Info("authorized iOS upload", "user_id", user.ID, "asset_id", metadata.AssetID, "source_asset_id", strings.TrimSpace(metadata.SourceAssetID), "media_id", mediaID, "upload_id", session.ID, "strategy", string(session.Strategy), "part_count", len(session.Parts), "file_size_bytes", metadata.FileSizeBytes, "content_type", metadata.ContentType)
 	session.IdempotencyKey = input.IdempotencyKey
 	now := s.Now().UTC()
 	media := models.MediaAsset{
@@ -149,7 +149,7 @@ func (s *Server) createIOSUploadSession(response http.ResponseWriter, request *h
 		s.internalError(response, err, "persist iOS upload session")
 		return
 	}
-	s.Logger.Info("created iOS upload session", "user_id", user.ID, "asset_id", metadata.AssetID, "media_id", media.ID, "upload_id", session.ID, "strategy", string(session.Strategy), "part_count", len(session.Parts))
+	s.Logger.Info("created iOS upload session", "user_id", user.ID, "asset_id", metadata.AssetID, "source_asset_id", strings.TrimSpace(metadata.SourceAssetID), "media_id", media.ID, "upload_id", session.ID, "strategy", string(session.Strategy), "part_count", len(session.Parts))
 	s.writeJSON(response, http.StatusCreated, makeIOSUploadSession(session))
 }
 
