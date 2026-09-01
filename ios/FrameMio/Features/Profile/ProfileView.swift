@@ -130,8 +130,12 @@ struct ProfileView: View {
                         Text(renewalText)
                             .font(FrameMioTypography.footnote)
                             .foregroundStyle(FrameMioColors.secondaryInk)
+                    } else if let balance = creditStore.balance {
+                        Text("FrameMio Pro includes \(balance.monthlySubscriptionCycleCredits.formatted())–\(balance.yearlySubscriptionCycleCredits.formatted()) credits every month.")
+                            .font(FrameMioTypography.footnote)
+                            .foregroundStyle(FrameMioColors.secondaryInk)
                     } else {
-                        Text("FrameMio Pro includes \(FrameMioProCatalog.monthlyCredits.formatted())–\(FrameMioProCatalog.yearlyCredits.formatted()) credits every month.")
+                        Text("FrameMio Pro credits refresh every billing cycle.")
                             .font(FrameMioTypography.footnote)
                             .foregroundStyle(FrameMioColors.secondaryInk)
                     }

@@ -73,6 +73,9 @@ type CreditBalance struct {
 	PurchasedReserved          int        `json:"purchased_reserved,omitempty"`
 	SubscriptionCycleID        string     `json:"subscription_cycle_id,omitempty"`
 	SubscriptionCycleExpiresAt *time.Time `json:"subscription_cycle_expires_at,omitempty"`
+	InitialCreditGrant         int        `json:"initial_credit_grant,omitempty"`
+	MonthlySubscriptionCycleCredits int   `json:"monthly_subscription_cycle_credits,omitempty"`
+	YearlySubscriptionCycleCredits  int    `json:"yearly_subscription_cycle_credits,omitempty"`
 	TotalCredits               int        `json:"total_credits"`
 }
 

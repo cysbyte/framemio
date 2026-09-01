@@ -181,6 +181,9 @@ struct CreditBalance: Codable, Hashable, Sendable {
     let subscriptionReserved: Int
     let purchasedReserved: Int
     let subscriptionCycleExpiresAt: Date?
+    let initialCreditGrant: Int
+    let monthlySubscriptionCycleCredits: Int
+    let yearlySubscriptionCycleCredits: Int
     let totalCredits: Int
 
     var displayCredits: Int { totalCredits }
@@ -204,6 +207,9 @@ struct CreditBalance: Codable, Hashable, Sendable {
         case subscriptionReserved = "subscription_reserved"
         case purchasedReserved = "purchased_reserved"
         case subscriptionCycleExpiresAt = "subscription_cycle_expires_at"
+        case initialCreditGrant = "initial_credit_grant"
+        case monthlySubscriptionCycleCredits = "monthly_subscription_cycle_credits"
+        case yearlySubscriptionCycleCredits = "yearly_subscription_cycle_credits"
         case totalCredits = "total_credits"
     }
 
@@ -215,6 +221,9 @@ struct CreditBalance: Codable, Hashable, Sendable {
         subscriptionReserved: Int = 0,
         purchasedReserved: Int = 0,
         subscriptionCycleExpiresAt: Date? = nil,
+        initialCreditGrant: Int = AppConfiguration.initialCreditGrant,
+        monthlySubscriptionCycleCredits: Int = AppConfiguration.monthlySubscriptionCycleCredits,
+        yearlySubscriptionCycleCredits: Int = AppConfiguration.yearlySubscriptionCycleCredits,
         totalCredits: Int? = nil
     ) {
         self.available = available
@@ -224,6 +233,9 @@ struct CreditBalance: Codable, Hashable, Sendable {
         self.subscriptionReserved = subscriptionReserved
         self.purchasedReserved = purchasedReserved
         self.subscriptionCycleExpiresAt = subscriptionCycleExpiresAt
+        self.initialCreditGrant = initialCreditGrant
+        self.monthlySubscriptionCycleCredits = monthlySubscriptionCycleCredits
+        self.yearlySubscriptionCycleCredits = yearlySubscriptionCycleCredits
         self.totalCredits = totalCredits ?? (available + reserved)
     }
 
@@ -236,6 +248,9 @@ struct CreditBalance: Codable, Hashable, Sendable {
         subscriptionReserved = try container.decodeIfPresent(Int.self, forKey: .subscriptionReserved) ?? 0
         purchasedReserved = try container.decodeIfPresent(Int.self, forKey: .purchasedReserved) ?? reserved
         subscriptionCycleExpiresAt = try container.decodeIfPresent(Date.self, forKey: .subscriptionCycleExpiresAt)
+        initialCreditGrant = try container.decodeIfPresent(Int.self, forKey: .initialCreditGrant) ?? AppConfiguration.initialCreditGrant
+        monthlySubscriptionCycleCredits = try container.decodeIfPresent(Int.self, forKey: .monthlySubscriptionCycleCredits) ?? AppConfiguration.monthlySubscriptionCycleCredits
+        yearlySubscriptionCycleCredits = try container.decodeIfPresent(Int.self, forKey: .yearlySubscriptionCycleCredits) ?? AppConfiguration.yearlySubscriptionCycleCredits
         totalCredits = try container.decodeIfPresent(Int.self, forKey: .totalCredits) ?? (available + reserved)
     }
 }

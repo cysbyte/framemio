@@ -29,7 +29,14 @@ func (s *Service) GetBalance(ctx context.Context, userID string) (models.CreditB
 	if s == nil || s.Store == nil {
 		return models.CreditBalance{}, fmt.Errorf("credit service is not configured")
 	}
-	return s.Store.GetCreditBalance(ctx, userID)
+	balance, err := s.Store.GetCreditBalance(ctx, userID)
+	if err != nil {
+		return models.CreditBalance{}, err
+	}
+	balance.InitialCreditGrant = s.Policy.InitialGrant
+	balance.MonthlySubscriptionCycleCredits = s.Policy.MonthlySubscriptionCycleCredits
+	balance.YearlySubscriptionCycleCredits = s.Policy.YearlySubscriptionCycleCredits
+	return balance, nil
 }
 
 func (s *Service) GetHistory(ctx context.Context, userID string) ([]models.CreditLedgerEntry, error) {

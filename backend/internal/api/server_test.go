@@ -1738,6 +1738,26 @@ func TestGrantPurchasedCreditsAddsPersistentBalance(t *testing.T) {
 	}
 }
 
+func TestCreditBalanceExposesSubscriptionCyclePolicy(t *testing.T) {
+	t.Parallel()
+	memoryStore := store.NewMemoryStore()
+	server := newTestServer(memoryStore, queue.NewMemoryPublisher())
+	handler := server.Handler()
+
+	response := performJSON(t, handler, http.MethodGet, "/v1/me/credits", nil, "", true, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("credit balance status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var balance models.CreditBalance
+	decodeResponse(t, response, &balance)
+	if balance.MonthlySubscriptionCycleCredits != server.Credits.Policy.MonthlySubscriptionCycleCredits {
+		t.Fatalf("monthly credits = %d, want %d", balance.MonthlySubscriptionCycleCredits, server.Credits.Policy.MonthlySubscriptionCycleCredits)
+	}
+	if balance.YearlySubscriptionCycleCredits != server.Credits.Policy.YearlySubscriptionCycleCredits {
+		t.Fatalf("yearly credits = %d, want %d", balance.YearlySubscriptionCycleCredits, server.Credits.Policy.YearlySubscriptionCycleCredits)
+	}
+}
+
 func TestGrantSubscriptionCycleCreditsIsIdempotent(t *testing.T) {
 	t.Parallel()
 	memoryStore := store.NewMemoryStore()

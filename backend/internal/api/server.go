@@ -605,7 +605,12 @@ func (s *Server) listCreditPacks(response http.ResponseWriter, request *http.Req
 		s.internalError(response, errors.New("credit service not configured"), "credit service not configured")
 		return
 	}
-	s.writeJSON(response, http.StatusOK, map[string]any{"packs": s.Credits.Policy.CreditPacks})
+	s.writeJSON(response, http.StatusOK, map[string]any{
+		"packs":                               s.Credits.Policy.CreditPacks,
+		"initial_credit_grant":                s.Credits.Policy.InitialGrant,
+		"monthly_subscription_cycle_credits": s.Credits.Policy.MonthlySubscriptionCycleCredits,
+		"yearly_subscription_cycle_credits":  s.Credits.Policy.YearlySubscriptionCycleCredits,
+	})
 }
 
 func (s *Server) grantSubscriptionCycleCredits(response http.ResponseWriter, request *http.Request) {

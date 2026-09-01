@@ -48,15 +48,6 @@ enum FrameMioProPlanKind: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    var creditsPerCycle: Int {
-        switch self {
-        case .yearly:
-            FrameMioProCatalog.yearlyCredits
-        case .monthly:
-            FrameMioProCatalog.monthlyCredits
-        }
-    }
-
     var bestValueBadge: String? {
         switch self {
         case .yearly:
@@ -86,6 +77,8 @@ final class FrameMioProViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var isPurchasing = false
     @Published private(set) var isRestoring = false
+    @Published private(set) var monthlySubscriptionCycleCredits = FrameMioProCatalog.monthlyCredits
+    @Published private(set) var yearlySubscriptionCycleCredits = FrameMioProCatalog.yearlyCredits
     @Published var selectedPlan: FrameMioProPlanKind = .yearly
     @Published var statusMessage: String?
     @Published var errorMessage: String?
@@ -315,6 +308,8 @@ final class FrameMioProViewModel: ObservableObject {
         do {
             let creditBalance = try await creditService.balance()
             balance = creditBalance.available
+            monthlySubscriptionCycleCredits = creditBalance.monthlySubscriptionCycleCredits
+            yearlySubscriptionCycleCredits = creditBalance.yearlySubscriptionCycleCredits
             pricingDebugLog("fetch_balance_complete balance=\(creditBalance.available) reserved=\(creditBalance.reserved)")
         } catch {
             pricingDebugLog("fetch_balance_failed error=\(error.localizedDescription)")
@@ -536,7 +531,7 @@ struct FrameMioProView: View {
                 Text(plan.displayPrice(using: product(for: plan), fallback: plan.fallbackPrice) + plan.pricePeriodText)
                     .font(FrameMioTypography.headline)
                     .foregroundStyle(FrameMioColors.ink)
-                Text("\(plan.creditsPerCycle.formatted()) credits every month")
+                Text("\(plan == .monthly ? viewModel.monthlySubscriptionCycleCredits : viewModel.yearlySubscriptionCycleCredits) credits every month")
                     .font(FrameMioTypography.body)
                     .foregroundStyle(FrameMioColors.secondaryInk)
                 if let savings = plan.savingsBadge {
