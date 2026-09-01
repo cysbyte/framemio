@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/framemio/backend/internal/api"
+	"github.com/framemio/backend/internal/credits"
 	"github.com/framemio/backend/internal/models"
 	"github.com/framemio/backend/internal/orchestration"
 	"github.com/framemio/backend/internal/queue"
@@ -69,8 +70,9 @@ func main() {
 		logger.Info("ECS worker RunTask activation enabled")
 	}
 
+	creditService := credits.New(database, credits.LoadPolicyFromEnv(), time.Now)
 	storyPlanValidator := storyvalidation.New(database, objects, storyvalidation.DefaultConfig())
-	coordinator := orchestration.New(orchestration.Coordinator{Store: database, Publisher: publisher, Activator: activator, Validator: storyPlanValidator, Logger: logger})
+	coordinator := orchestration.New(orchestration.Coordinator{Store: database, Publisher: publisher, Activator: activator, Validator: storyPlanValidator, Logger: logger, Credits: creditService})
 	if configuration.WorkerRunOnce {
 		if err := runWorkerOnce(ctx, database, coordinator, configuration, logger); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.Error("backend worker run-once failed", slog.Any("error", err))
@@ -81,6 +83,7 @@ func main() {
 
 	application := api.NewServer(api.Server{
 		Store:              database,
+		Credits:            creditService,
 		ObjectStorage:      objects,
 		Publisher:          publisher,
 		Activator:          activator,
