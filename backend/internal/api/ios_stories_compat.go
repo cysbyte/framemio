@@ -228,8 +228,12 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 	statsByAction := map[models.CreditAction]credits.StoryMediaStats{}
 	stats := credits.StoryMediaStats{}
 	if len(newMediaIDs) > 0 {
+		// no-op placeholder to keep the existing attachment flow below
+	}
+	requestedAddMediaIDs := cleanStringList(input.AddMediaIDs)
+	if len(requestedAddMediaIDs) > 0 {
 		creditActions = append(creditActions, models.CreditActionAddMoment)
-		stats, err = s.addedIOSStoryCreditStats(request, user.ID, newMediaIDs)
+		stats, err = s.addedIOSStoryCreditStats(request, user.ID, requestedAddMediaIDs)
 		if err != nil {
 			s.mapStoreError(response, err)
 			return

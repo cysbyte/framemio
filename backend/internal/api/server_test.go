@@ -844,6 +844,70 @@ func TestIOSStoryEditAddMomentReservesAddAndRegenerateCredits(t *testing.T) {
 	}
 }
 
+func TestIOSStoryEditAddExistingProjectMomentStillReservesAddCredits(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	handler := newTestServer(memoryStore, publisher).Handler()
+	now := time.Date(2026, time.August, 19, 10, 0, 0, 0, time.UTC)
+
+	original := createReadyIOSMedia(t, handler, "asset-edit-charge-existing-original", models.MediaTypePhoto)
+	added := createReadyIOSMedia(t, handler, "asset-edit-charge-existing-added", models.MediaTypePhoto)
+	project := models.StoryProject{
+		ID:        "project-edit-charge-existing",
+		UserID:    "user-1",
+		Title:     "Charged edit",
+		Context:   "Special moments",
+		MediaIDs:  []string{original.MediaID, added.MediaID},
+		Status:    models.ProjectStatusReady,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if _, _, err := memoryStore.CreateProject(context.Background(), project, "project-edit-charge-existing"); err != nil {
+		t.Fatal(err)
+	}
+	if err := memoryStore.SaveStoryPlan(context.Background(), "user-1", models.StoryPlan{
+		SchemaVersion: models.StoryPlanSchemaVersionV1,
+		ID:            "plan-edit-charge-existing",
+		ProjectID:     project.ID,
+		Version:       1,
+		Moments: []models.StoryMoment{{
+			MomentID:   "moment-original",
+			AssetID:    original.MediaID,
+			MediaID:    original.MediaID,
+			MediaType:  models.MediaTypePhoto,
+			Narrative:  "Original",
+			DurationMS: 4000,
+		}},
+		Output:          models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 8, Preset: "premium-memory"},
+		TotalDurationMS: 4000,
+		CreatedAt:       now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	editResponse := performJSON(t, handler, http.MethodPost, "/v1/stories/"+project.ID+"/versions", map[string]any{
+		"addMediaIds": []string{added.MediaID},
+		"analyses": []map[string]any{{
+			"assetID":     added.MediaID,
+			"labels":      []string{"sunset"},
+			"peopleCount": 1,
+			"confidence":  0.9,
+		}},
+	}, "edit-charge-add-existing-moment", true, nil)
+	if editResponse.Code != http.StatusAccepted {
+		t.Fatalf("edit iOS story status = %d, body = %s", editResponse.Code, editResponse.Body.String())
+	}
+	balance, err := memoryStore.GetCreditBalance(context.Background(), "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if balance.Available != 40 || balance.Reserved != 60 {
+		t.Fatalf("expected 60 credits reserved for add+regenerate from initial 100, got %+v", balance)
+	}
+}
+
 func TestIOSStoryEditAddsUploadedPhotoOutsideOriginalStory(t *testing.T) {
 	t.Parallel()
 
