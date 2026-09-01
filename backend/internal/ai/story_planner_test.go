@@ -136,7 +136,8 @@ func TestPlannerUsesAnalysisForStoryAndMomentNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(strings.ToLower(plan.TitleText), "special moments") || strings.Contains(strings.ToLower(plan.TitleText), "your moments") {
+	lowerTitle := strings.ToLower(plan.TitleText)
+	if strings.Contains(lowerTitle, "selected moments") || strings.Contains(lowerTitle, "special moments") || strings.Contains(lowerTitle, "your moments") {
 		t.Fatalf("story title should be analysis-derived, got %q", plan.TitleText)
 	}
 	if !strings.Contains(strings.ToLower(plan.TitleText), "family breakfast") {

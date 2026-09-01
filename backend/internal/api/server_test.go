@@ -1541,6 +1541,9 @@ func TestIOSStoryPresentationSuppressesGenericNames(t *testing.T) {
 	if got := iosDisplayStoryTitle("Special moments story", moments, "Special moments"); got != "Family breakfast by the window" {
 		t.Fatalf("story title = %q", got)
 	}
+	if got := iosDisplayStoryTitle("Selected moments", moments, "Selected moments"); got != "Family breakfast by the window" {
+		t.Fatalf("selected moments story title = %q", got)
+	}
 	if got := iosMomentTitle(models.StoryMoment{Caption: "Video moment", Narrative: "Everyone laughing near the lake"}, string(models.MediaTypeVideo), 0); got != "Everyone laughing near the lake" {
 		t.Fatalf("moment title = %q", got)
 	}

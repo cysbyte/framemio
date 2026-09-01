@@ -1729,7 +1729,7 @@ func isGenericIOSMomentText(value string) bool {
 		return true
 	}
 	switch normalized {
-	case "special moments", "special moments story", "your moments", "your day in moments", "a memory story",
+	case "selected moments", "selected moments story", "special moments", "special moments story", "your moments", "your day in moments", "a memory story",
 		"opening moment", "the next memory", "a favorite part",
 		"photo moment", "video moment", "live photo moment", "a meaningful photo moment",
 		"first uploaded image", "updated image", "uploaded image", "image", "photo", "video",

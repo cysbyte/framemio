@@ -1,3 +1,5 @@
+import AVFoundation
+import UIKit
 import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
@@ -72,6 +74,9 @@ struct StoryPreviewView: View {
             MomentDetailSheet(
                 moment: moment,
                 image: viewModel.image(forStoryAssetID: moment.assetID),
+                videoURLProvider: { assetID in
+                    await viewModel.playableMomentVideoURL(forStoryAssetID: assetID)
+                },
                 isPerformingAction: viewModel.isPerformingAction,
                 onRemove: {
                     viewModel.removeMoment(assetID: moment.assetID)
@@ -88,18 +93,22 @@ struct StoryPreviewView: View {
                     story: story,
                     moments: momentPresentations(for: story),
                     availableMoments: availableMomentPresentations(for: story),
+                    thumbnailRevision: viewModel.thumbnailRevision,
                     activeAction: viewModel.activeAction,
                     isPerformingAction: viewModel.isPerformingAction,
                     creditBalance: viewModel.creditBalance,
                     imageProvider: { viewModel.image(forStoryAssetID: $0) },
+                    videoURLProvider: { assetID in
+                        await viewModel.playableMomentVideoURL(forStoryAssetID: assetID)
+                    },
                     onAppearMoment: { assetID in
                         viewModel.loadThumbnail(
                             forStoryAssetID: assetID,
                             targetSize: CGSize(width: 220, height: 220)
                         )
                     },
-                    onImportPhotos: { items, progress in
-                        try await viewModel.importMediaForEdit(items, progress: progress)
+                    onImportPhotos: { items, progress, excludedSourceIDs in
+                        try await viewModel.importMediaForEdit(items, progress: progress, excludedSourceIDs: excludedSourceIDs)
                     },
                     onRegenerate: { request in
                         if request.hasChanges {
@@ -834,31 +843,28 @@ private struct StoryMomentCard: View {
 private struct MomentDetailSheet: View {
     let moment: StoryMomentPresentation
     let image: Image?
+    let videoURLProvider: (String) async -> URL?
     let isPerformingAction: Bool
     let onRemove: () -> Void
     let onKeep: () -> Void
 
+    @State private var fullScreenVideo: FullScreenStoryVideo?
+    @State private var sourceVideoURL: URL?
+    @State private var isLoadingVideo = false
+    @State private var videoErrorMessage: String?
+
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
-                MediaThumbnail(
-                    image: image,
-                    duration: moment.duration,
-                    isLivePhoto: moment.kind == .livePhoto,
-                    aspectRatio: FrameMioMetrics.thumbnailAspectRatio,
-                    placeholderSystemImage: moment.kind.placeholderName,
-                    accessibilityTitle: moment.title
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .overlay(alignment: .center) {
-                    if moment.kind == .video {
-                        Image(systemName: "play.fill")
-                            .font(.headline.weight(.semibold))
-                            .foregroundStyle(FrameMioColors.inverseInk)
-                            .frame(width: 42, height: 42)
-                            .background(FrameMioColors.mediaScrim, in: Circle())
-                            .accessibilityHidden(true)
+                momentPreview
+                    .task(id: moment.assetID) {
+                        await loadSourceVideoIfNeeded()
                     }
+
+                if let videoErrorMessage {
+                    Text(videoErrorMessage)
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(.red)
                 }
 
                 VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
@@ -889,7 +895,86 @@ private struct MomentDetailSheet: View {
             .background(FrameMioColors.canvas.ignoresSafeArea())
             .navigationTitle(moment.title)
             .navigationBarTitleDisplayMode(.inline)
+            .fullScreenCover(item: $fullScreenVideo) { video in
+                FullScreenStoryVideoPlayer(url: video.url)
+            }
         }
+    }
+
+    private var momentPreview: some View {
+        let previewWidth = max(0, UIScreen.main.bounds.width - FrameMioSpacing.lg * 2)
+        let previewHeight = previewWidth / FrameMioMetrics.thumbnailAspectRatio
+
+        return ZStack {
+            if moment.kind == .video, let sourceVideoURL {
+                AspectFillVideoPreview(url: sourceVideoURL)
+                    .frame(width: previewWidth, height: previewHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.media, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: FrameMioRadius.media, style: .continuous)
+                            .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+                    }
+            } else {
+                MediaThumbnail(
+                    image: image,
+                    duration: moment.duration,
+                    isLivePhoto: moment.kind == .livePhoto,
+                    aspectRatio: FrameMioMetrics.thumbnailAspectRatio,
+                    placeholderSystemImage: moment.kind.placeholderName,
+                    accessibilityTitle: moment.title
+                )
+                .frame(width: previewWidth, height: previewHeight)
+            }
+
+            if moment.kind == .video {
+                Button(action: playVideo) {
+                    ZStack {
+                        Circle()
+                            .fill(FrameMioColors.mediaScrim.opacity(0.78))
+                            .frame(width: 54, height: 54)
+                        if isLoadingVideo {
+                            ProgressView()
+                                .tint(FrameMioColors.inverseInk)
+                        } else {
+                            Image(systemName: "play.fill")
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(FrameMioColors.inverseInk)
+                                .offset(x: 2)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoadingVideo)
+                .accessibilityLabel("Play moment video")
+            }
+        }
+        .frame(width: previewWidth, height: previewHeight)
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private func playVideo() {
+        guard moment.kind == .video, !isLoadingVideo else { return }
+        if let sourceVideoURL {
+            fullScreenVideo = FullScreenStoryVideo(url: sourceVideoURL)
+            return
+        }
+        isLoadingVideo = true
+        videoErrorMessage = nil
+        Task {
+            let videoURL = await videoURLProvider(moment.assetID)
+            isLoadingVideo = false
+            if let videoURL {
+                sourceVideoURL = videoURL
+                fullScreenVideo = FullScreenStoryVideo(url: videoURL)
+            } else {
+                videoErrorMessage = "This source video isn't available on this device."
+            }
+        }
+    }
+
+    private func loadSourceVideoIfNeeded() async {
+        guard moment.kind == .video, sourceVideoURL == nil else { return }
+        sourceVideoURL = await videoURLProvider(moment.assetID)
     }
 }
 
@@ -898,12 +983,14 @@ private struct EditStorySheet: View {
     let story: Story
     let moments: [StoryMomentPresentation]
     let availableMoments: [StoryMomentPresentation]
+    let thumbnailRevision: Int
     let activeAction: StoryPreviewAction?
     let isPerformingAction: Bool
     let creditBalance: Int?
     let imageProvider: (String) -> Image?
+    let videoURLProvider: (String) async -> URL?
     let onAppearMoment: (String) -> Void
-    let onImportPhotos: ([PhotosPickerItem], StoryImportProgressHandler?) async throws -> [ImportedStoryMedia]
+    let onImportPhotos: ([PhotosPickerItem], StoryImportProgressHandler?, Set<String>) async throws -> [ImportedStoryMedia]
     let onRegenerate: (StoryEditRequest) -> Void
     let onRetry: () -> Void
 
@@ -946,10 +1033,16 @@ private struct EditStorySheet: View {
         return draft.ordered(base + added)
     }
 
+    private var visibleMediaIDs: Set<String> {
+        Set(displayedMoments.map(\.assetID))
+    }
+
+    private var visibleSourceKeys: Set<String> {
+        Set(displayedMoments.map(\.sourceIdentityKey))
+    }
+
     private var selectableMoments: [StoryMomentPresentation] {
-        let visibleMediaIDs = Set(displayedMoments.map(\.assetID))
-        let visibleSourceKeys = Set(displayedMoments.map(\.sourceIdentityKey))
-        return (availableMoments + importedMoments).filter { moment in
+        (availableMoments + importedMoments).filter { moment in
             !visibleMediaIDs.contains(moment.assetID) && !visibleSourceKeys.contains(moment.sourceIdentityKey)
         }
     }
@@ -1037,6 +1130,7 @@ private struct EditStorySheet: View {
                 EditMomentSheet(
                     moment: moment,
                     image: imageProvider(moment.assetID),
+                    videoURLProvider: videoURLProvider,
                     isPerformingAction: isPerformingAction,
                     onRemove: {
                         draft.remove(moment)
@@ -1054,10 +1148,12 @@ private struct EditStorySheet: View {
             .sheet(isPresented: $isShowingAddMoment) {
                 AddMomentSelectionSheet(
                     moments: selectableMoments,
+                    excludedSourceIDs: visibleSourceKeys,
+                    thumbnailRevision: thumbnailRevision,
                     imageProvider: imageProvider,
                     onAppearMoment: onAppearMoment,
-                    onImportPhotos: { items, progress in
-                        let imported = try await onImportPhotos(items, progress)
+                    onImportPhotos: { items, progress, excludedSourceIDs in
+                        let imported = try await onImportPhotos(items, progress, excludedSourceIDs)
                         let filtered = newImportedMomentPresentations(from: imported)
                         importedMoments.append(contentsOf: filtered.presentations)
                         draft.addAnalysis(filtered.media)
@@ -1083,10 +1179,12 @@ private struct EditStorySheet: View {
                     title: "Replace Moment",
                     moments: selectableMoments,
                     allowsMultipleSelection: false,
+                    excludedSourceIDs: visibleSourceKeys,
+                    thumbnailRevision: thumbnailRevision,
                     imageProvider: imageProvider,
                     onAppearMoment: onAppearMoment,
-                    onImportPhotos: { items, progress in
-                        let imported = try await onImportPhotos(items, progress)
+                    onImportPhotos: { items, progress, excludedSourceIDs in
+                        let imported = try await onImportPhotos(items, progress, excludedSourceIDs)
                         let filtered = newImportedMomentPresentations(from: imported)
                         importedMoments.append(contentsOf: filtered.presentations)
                         draft.addAnalysis(filtered.media)
@@ -1550,23 +1648,30 @@ private struct StoryMomentRow: View {
 private struct EditMomentSheet: View {
     let moment: StoryMomentPresentation
     let image: Image?
+    let videoURLProvider: (String) async -> URL?
     let isPerformingAction: Bool
     let onRemove: () -> Void
     let onReplace: () -> Void
     let onKeep: () -> Void
 
+    @State private var fullScreenVideo: FullScreenStoryVideo?
+    @State private var sourceVideoURL: URL?
+    @State private var isLoadingVideo = false
+    @State private var videoErrorMessage: String?
+
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
-                MediaThumbnail(
-                    image: image,
-                    duration: moment.duration,
-                    isLivePhoto: moment.kind == .livePhoto,
-                    aspectRatio: FrameMioMetrics.thumbnailAspectRatio,
-                    placeholderSystemImage: moment.kind.placeholderName,
-                    accessibilityTitle: moment.title
-                )
-                .frame(maxWidth: .infinity)
+                momentPreview
+                    .task(id: moment.assetID) {
+                        await loadSourceVideoIfNeeded()
+                    }
+
+                if let videoErrorMessage {
+                    Text(videoErrorMessage)
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(.red)
+                }
 
                 VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
                     Text(moment.title)
@@ -1594,6 +1699,130 @@ private struct EditMomentSheet: View {
             .background(FrameMioColors.canvas.ignoresSafeArea())
             .navigationTitle(moment.title)
             .navigationBarTitleDisplayMode(.inline)
+            .fullScreenCover(item: $fullScreenVideo) { video in
+                FullScreenStoryVideoPlayer(url: video.url)
+            }
+        }
+    }
+
+    private var momentPreview: some View {
+        let previewWidth = max(0, UIScreen.main.bounds.width - FrameMioSpacing.lg * 2)
+        let previewHeight = previewWidth / FrameMioMetrics.thumbnailAspectRatio
+
+        return ZStack {
+            if moment.kind == .video, let sourceVideoURL {
+                AspectFillVideoPreview(url: sourceVideoURL)
+                    .frame(width: previewWidth, height: previewHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.media, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: FrameMioRadius.media, style: .continuous)
+                            .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+                    }
+            } else {
+                MediaThumbnail(
+                    image: image,
+                    duration: moment.duration,
+                    isLivePhoto: moment.kind == .livePhoto,
+                    aspectRatio: FrameMioMetrics.thumbnailAspectRatio,
+                    placeholderSystemImage: moment.kind.placeholderName,
+                    accessibilityTitle: moment.title
+                )
+                .frame(width: previewWidth, height: previewHeight)
+            }
+
+            if moment.kind == .video {
+                Button(action: playVideo) {
+                    ZStack {
+                        Circle()
+                            .fill(FrameMioColors.mediaScrim.opacity(0.78))
+                            .frame(width: 54, height: 54)
+                        if isLoadingVideo {
+                            ProgressView()
+                                .tint(FrameMioColors.inverseInk)
+                        } else {
+                            Image(systemName: "play.fill")
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(FrameMioColors.inverseInk)
+                                .offset(x: 2)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoadingVideo)
+                .accessibilityLabel("Play moment video")
+            }
+        }
+        .frame(width: previewWidth, height: previewHeight)
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private func playVideo() {
+        guard moment.kind == .video, !isLoadingVideo else { return }
+        if let sourceVideoURL {
+            fullScreenVideo = FullScreenStoryVideo(url: sourceVideoURL)
+            return
+        }
+        isLoadingVideo = true
+        videoErrorMessage = nil
+        Task {
+            let videoURL = await videoURLProvider(moment.assetID)
+            isLoadingVideo = false
+            if let videoURL {
+                sourceVideoURL = videoURL
+                fullScreenVideo = FullScreenStoryVideo(url: videoURL)
+            } else {
+                videoErrorMessage = "This source video isn't available on this device."
+            }
+        }
+    }
+
+    private func loadSourceVideoIfNeeded() async {
+        guard moment.kind == .video, sourceVideoURL == nil else { return }
+        sourceVideoURL = await videoURLProvider(moment.assetID)
+    }
+}
+
+private struct AspectFillVideoPreview: UIViewRepresentable {
+    let url: URL
+
+    func makeUIView(context: Context) -> AspectFillVideoPreviewView {
+        let view = AspectFillVideoPreviewView()
+        view.update(url: url)
+        return view
+    }
+
+    func updateUIView(_ uiView: AspectFillVideoPreviewView, context: Context) {
+        uiView.update(url: url)
+    }
+
+    final class AspectFillVideoPreviewView: UIView {
+        private let player = AVPlayer()
+        private var currentURL: URL?
+
+        override class var layerClass: AnyClass { AVPlayerLayer.self }
+
+        private var playerLayer: AVPlayerLayer {
+            layer as! AVPlayerLayer
+        }
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            player.isMuted = true
+            playerLayer.player = player
+            playerLayer.videoGravity = .resizeAspectFill
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        func update(url: URL) {
+            guard currentURL != url else { return }
+            currentURL = url
+            let item = AVPlayerItem(url: url)
+            player.replaceCurrentItem(with: item)
+            player.pause()
+            player.seek(to: CMTime(seconds: 0.1, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
         }
     }
 }
@@ -1602,9 +1831,11 @@ private struct AddMomentSelectionSheet: View {
     let title: String
     let moments: [StoryMomentPresentation]
     let allowsMultipleSelection: Bool
+    let excludedSourceIDs: Set<String>
+    let thumbnailRevision: Int
     let imageProvider: (String) -> Image?
     let onAppearMoment: (String) -> Void
-    let onImportPhotos: ([PhotosPickerItem], StoryImportProgressHandler?) async throws -> [StoryMomentPresentation]
+    let onImportPhotos: ([PhotosPickerItem], StoryImportProgressHandler?, Set<String>) async throws -> [StoryMomentPresentation]
     let onRemoveImported: (StoryMomentPresentation) -> Void
     let onAdd: ([StoryMomentPresentation]) -> Void
     let onCancel: () -> Void
@@ -1613,9 +1844,11 @@ private struct AddMomentSelectionSheet: View {
         title: String = "Add to Story",
         moments: [StoryMomentPresentation],
         allowsMultipleSelection: Bool = true,
+        excludedSourceIDs: Set<String>,
+        thumbnailRevision: Int,
         imageProvider: @escaping (String) -> Image?,
         onAppearMoment: @escaping (String) -> Void,
-        onImportPhotos: @escaping ([PhotosPickerItem], StoryImportProgressHandler?) async throws -> [StoryMomentPresentation],
+        onImportPhotos: @escaping ([PhotosPickerItem], StoryImportProgressHandler?, Set<String>) async throws -> [StoryMomentPresentation],
         onRemoveImported: @escaping (StoryMomentPresentation) -> Void,
         onAdd: @escaping ([StoryMomentPresentation]) -> Void,
         onCancel: @escaping () -> Void
@@ -1623,6 +1856,8 @@ private struct AddMomentSelectionSheet: View {
         self.title = title
         self.moments = moments
         self.allowsMultipleSelection = allowsMultipleSelection
+        self.excludedSourceIDs = excludedSourceIDs
+        self.thumbnailRevision = thumbnailRevision
         self.imageProvider = imageProvider
         self.onAppearMoment = onAppearMoment
         self.onImportPhotos = onImportPhotos
@@ -1828,7 +2063,8 @@ private struct AddMomentSelectionSheet: View {
     }
 
     private func mediaCell(for moment: StoryMomentPresentation) -> some View {
-        ZStack(alignment: .topTrailing) {
+        let _ = thumbnailRevision
+        return ZStack(alignment: .topTrailing) {
             MediaThumbnail(
                 image: imageProvider(moment.assetID),
                 duration: moment.kind == .video ? moment.duration : nil,
@@ -1923,10 +2159,10 @@ private struct AddMomentSelectionSheet: View {
         importErrorMessage = nil
         Task {
             do {
-                let imported = try await onImportPhotos(items) { value, message in
+                let imported = try await onImportPhotos(items, { value, message in
                     importProgress = value
                     importStatusMessage = message
-                }
+                }, excludedSourceIDs)
                 storyPreviewUIDebugLog("add sheet import returned count=\(imported.count) ids=\(imported.map(\.assetID).joined(separator: ","))")
                 guard !imported.isEmpty else {
                     importErrorMessage = "Those items are already in this story."

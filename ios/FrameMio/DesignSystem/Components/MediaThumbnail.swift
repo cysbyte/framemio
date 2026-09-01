@@ -81,16 +81,21 @@ struct MediaThumbnail: View {
                 )
                 .aspectRatio(aspectRatio, contentMode: .fit)
                 .overlay {
-                    if let image {
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    } else {
-                        Image(systemName: placeholderSystemImage)
-                            .font(.title2.weight(.medium))
-                            .symbolRenderingMode(.monochrome)
-                            .foregroundStyle(FrameMioColors.inverseInk.opacity(FrameMioOpacity.artworkSymbol))
-                            .accessibilityHidden(true)
+                    GeometryReader { proxy in
+                        if let image {
+                            image
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: proxy.size.width, height: proxy.size.height)
+                                .clipped()
+                        } else {
+                            Image(systemName: placeholderSystemImage)
+                                .font(.title2.weight(.medium))
+                                .symbolRenderingMode(.monochrome)
+                                .foregroundStyle(FrameMioColors.inverseInk.opacity(FrameMioOpacity.artworkSymbol))
+                                .frame(width: proxy.size.width, height: proxy.size.height)
+                                .accessibilityHidden(true)
+                        }
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.media, style: .continuous))

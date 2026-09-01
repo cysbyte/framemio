@@ -80,6 +80,7 @@ final class StoryPreviewViewModel: ObservableObject {
     @Published var isPlayingVideo = false
     @Published private(set) var momentAssets: [String: MediaAsset] = [:]
     @Published private(set) var momentThumbnails: [String: UIImage] = [:]
+    @Published private(set) var thumbnailRevision = 0
     @Published var insufficientCredits: CreditIssue?
     @Published private(set) var creditBalance: Int?
 
@@ -98,6 +99,7 @@ final class StoryPreviewViewModel: ObservableObject {
     private var loadTask: Task<Void, Never>?
     private var actionTask: Task<Void, Never>?
     private var thumbnailTasks: [String: Task<Void, Never>] = [:]
+    private var momentVideoURLs: [String: URL] = [:]
     private var launchCancellable: AnyCancellable?
 
     init(
@@ -227,8 +229,77 @@ final class StoryPreviewViewModel: ObservableObject {
     }
 
     func image(forStoryAssetID storyAssetID: String) -> Image? {
-        guard let image = momentThumbnails[storyAssetID] else { return nil }
-        return Image(uiImage: image)
+        if let image = momentThumbnails[storyAssetID] {
+            return Image(uiImage: image)
+        }
+        guard let sourceID = sourceIdentity(forStoryAssetID: storyAssetID) else {
+            return nil
+        }
+        for aliasID in thumbnailAliasIDs(forSourceID: sourceID) where aliasID != storyAssetID {
+            if let image = momentThumbnails[aliasID] {
+                storyPreviewDebugLog("thumbnail alias hit requested=\(storyAssetID) alias=\(aliasID) source=\(sourceID)")
+                return Image(uiImage: image)
+            }
+        }
+        return nil
+    }
+
+    func playableMomentVideoURL(forStoryAssetID storyAssetID: String) async -> URL? {
+        if let cachedURL = momentVideoURLs[storyAssetID], FileManager.default.fileExists(atPath: cachedURL.path) {
+            return cachedURL
+        }
+
+        if let sourceID = sourceIdentity(forStoryAssetID: storyAssetID),
+           let cachedURL = momentVideoURLs[sourceID],
+           FileManager.default.fileExists(atPath: cachedURL.path) {
+            momentVideoURLs[storyAssetID] = cachedURL
+            return cachedURL
+        }
+
+        if let uploadURL = await stagedUploadVideoURL(forStoryAssetID: storyAssetID) {
+            momentVideoURLs[storyAssetID] = uploadURL
+            return uploadURL
+        }
+
+        guard let asset = await resolveMomentAsset(forStoryAssetID: storyAssetID), asset.isVideo else {
+            storyPreviewDebugLog("moment video unavailable no_video_asset media=\(storyAssetID)")
+            return nil
+        }
+
+        if let originalMediaSource = photoLibrary as? OriginalMediaSource {
+            do {
+                let file = try await originalMediaSource.materializeOriginalMedia(
+                    for: asset,
+                    allowsNetworkAccess: true,
+                    progress: nil
+                )
+                momentVideoURLs[storyAssetID] = file.url
+                storyPreviewDebugLog("moment video materialized media=\(storyAssetID) url=\(file.url.lastPathComponent)")
+                return file.url
+            } catch {
+                storyPreviewDebugLog("moment video materialize failed media=\(storyAssetID) error=\(error.localizedDescription)")
+            }
+        }
+
+        return nil
+    }
+
+    private func stagedUploadVideoURL(forStoryAssetID storyAssetID: String) async -> URL? {
+        do {
+            guard let upload = try await mediaUploadStore.allUploads().first(where: {
+                $0.mediaID == storyAssetID || $0.assetID == storyAssetID
+            }),
+                  upload.mediaType == .video,
+                  let url = upload.stagedFileURL,
+                  FileManager.default.fileExists(atPath: url.path) else {
+                return nil
+            }
+            storyPreviewDebugLog("moment video using staged upload media=\(storyAssetID) upload=\(upload.id)")
+            return url
+        } catch {
+            storyPreviewDebugLog("moment video staged lookup failed media=\(storyAssetID) error=\(error.localizedDescription)")
+            return nil
+        }
     }
 
     func loadThumbnail(forStoryAssetID storyAssetID: String, targetSize: CGSize) {
@@ -242,7 +313,7 @@ final class StoryPreviewViewModel: ObservableObject {
                     let data = try await photoLibrary.requestThumbnail(for: asset, targetSize: targetSize)
                     try Task.checkCancellation()
                     if let image = UIImage(data: data) {
-                        momentThumbnails[storyAssetID] = image
+                        cacheMomentThumbnail(image, forStoryAssetID: storyAssetID, reason: "local_asset")
                         return
                     }
                 }
@@ -250,10 +321,11 @@ final class StoryPreviewViewModel: ObservableObject {
                 let data = try await Self.downloadThumbnail(from: remoteURL)
                 try Task.checkCancellation()
                 if let image = UIImage(data: data) {
-                    momentThumbnails[storyAssetID] = image
+                    cacheMomentThumbnail(image, forStoryAssetID: storyAssetID, reason: "remote_url")
                 }
             } catch is CancellationError {
             } catch {
+                storyPreviewDebugLog("thumbnail load failed media=\(storyAssetID) error=\(error.localizedDescription)")
             }
         }
     }
@@ -269,6 +341,58 @@ final class StoryPreviewViewModel: ObservableObject {
             moment.id == storyAssetID || moment.mediaID == storyAssetID
         }?.thumbnailURL
     }
+
+    private func cacheMomentThumbnail(_ image: UIImage, forStoryAssetID storyAssetID: String, reason: String) {
+        var changed = false
+        for aliasID in thumbnailAliasIDs(forStoryAssetID: storyAssetID) {
+            if momentThumbnails[aliasID] == nil {
+                momentThumbnails[aliasID] = image
+                changed = true
+            }
+        }
+        if changed {
+            thumbnailRevision += 1
+        }
+        storyPreviewDebugLog("thumbnail cached media=\(storyAssetID) reason=\(reason) aliases=\(thumbnailAliasIDs(forStoryAssetID: storyAssetID).joined(separator: ",")) revision=\(thumbnailRevision)")
+    }
+
+    private func thumbnailAliasIDs(forStoryAssetID storyAssetID: String) -> [String] {
+        guard let sourceID = sourceIdentity(forStoryAssetID: storyAssetID) else {
+            return [storyAssetID]
+        }
+        return thumbnailAliasIDs(forSourceID: sourceID, including: storyAssetID)
+    }
+
+    private func thumbnailAliasIDs(forSourceID sourceID: String, including storyAssetID: String? = nil) -> [String] {
+        var ids: [String] = []
+        var seen = Set<String>()
+        func append(_ value: String?) {
+            let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !trimmed.isEmpty, seen.insert(trimmed).inserted else { return }
+            ids.append(trimmed)
+        }
+        append(storyAssetID)
+        for (mediaID, asset) in momentAssets where asset.localIdentifier == sourceID {
+            append(mediaID)
+        }
+        for moment in (story?.moments ?? []) + (story?.availableMoments ?? []) where moment.sourceAssetID?.trimmingCharacters(in: .whitespacesAndNewlines) == sourceID {
+            append(moment.mediaID)
+            append(moment.id)
+        }
+        return ids.isEmpty ? [sourceID] : ids
+    }
+
+    private func sourceIdentity(forStoryAssetID storyAssetID: String) -> String? {
+        if let sourceID = momentAssets[storyAssetID]?.localIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines), !sourceID.isEmpty {
+            return sourceID
+        }
+        let allMoments = (story?.moments ?? []) + (story?.availableMoments ?? [])
+        if let sourceID = allMoments.first(where: { $0.mediaID == storyAssetID || $0.id == storyAssetID })?.sourceAssetID?.trimmingCharacters(in: .whitespacesAndNewlines), !sourceID.isEmpty {
+            return sourceID
+        }
+        return nil
+    }
+
 
     var progressTitle: String {
         if let storyLaunchCoordinator, story == nil {
@@ -393,8 +517,9 @@ final class StoryPreviewViewModel: ObservableObject {
         while !Task.isCancelled {
             do {
                 let latest = try await storyService.story(id: storyID)
-                story = latest
+                try await cacheUploadAssets(for: latest)
                 cacheLaunchAssets(for: latest)
+                story = latest
                 errorMessage = nil
                 isLoading = false
 
@@ -441,24 +566,52 @@ final class StoryPreviewViewModel: ObservableObject {
 
     func importMediaForEdit(
         _ items: [PhotosPickerItem],
-        progress: StoryImportProgressHandler? = nil
+        progress: StoryImportProgressHandler? = nil,
+        excludedSourceIDs: Set<String> = []
     ) async throws -> [ImportedStoryMedia] {
         let contentTypeSummary = items
             .map { $0.supportedContentTypes.map(\.identifier).joined(separator: "|") }
             .joined(separator: ",")
         progress?(0.04, "Reading your selection…")
-        storyPreviewDebugLog("edit import start picker_items=\(items.count) content_types=\(contentTypeSummary)")
+        let normalizedExcludedSourceIDs = Set(excludedSourceIDs.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+        let filteredItems = items.filter { item in
+            let identifier = item.itemIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !identifier.isEmpty, normalizedExcludedSourceIDs.contains(identifier) else {
+                return true
+            }
+            storyPreviewDebugLog("edit import skipped duplicate picker source=\(identifier)")
+            return false
+        }
+        storyPreviewDebugLog("edit import start picker_items=\(items.count) filtered_items=\(filteredItems.count) excluded_sources=\(normalizedExcludedSourceIDs.count) content_types=\(contentTypeSummary)")
+        guard !filteredItems.isEmpty else {
+            progress?(1.0, "Already in your story")
+            storyPreviewDebugLog("edit import stopped all_picker_items_already_in_story")
+            return []
+        }
         do {
-            let assets = try await assetsForPickedItems(items)
+            let resolvedAssets = try await assetsForPickedItems(filteredItems)
             progress?(0.16, "Preparing media…")
-            storyPreviewDebugLog("edit import assets ready count=\(assets.count) photos=\(assets.filter { !$0.asset.isVideo }.count) videos=\(assets.filter(\.asset.isVideo).count) staged=\(assets.filter { $0.file != nil }.count)")
+            let filteredAssets = resolvedAssets.filter { stagedImport in
+                let sourceID = stagedImport.asset.localIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                guard !sourceID.isEmpty, normalizedExcludedSourceIDs.contains(sourceID) else {
+                    return true
+                }
+                storyPreviewDebugLog("edit import skipped duplicate resolved source=\(sourceID) asset=\(stagedImport.asset.id)")
+                return false
+            }
+            let assets = try await importsWithMaterializedVideoFiles(filteredAssets)
+            storyPreviewDebugLog("edit import assets ready resolved=\(resolvedAssets.count) filtered=\(assets.count) photos=\(assets.filter { !$0.asset.isVideo }.count) videos=\(assets.filter(\.asset.isVideo).count) staged=\(assets.filter { $0.file != nil }.count)")
             guard !assets.isEmpty else {
-                storyPreviewDebugLog("edit import stopped no_assets")
+                progress?(1.0, "Already in your story")
+                storyPreviewDebugLog("edit import stopped all_resolved_assets_already_in_story")
                 return []
             }
 
             for asset in assets {
                 if let file = asset.file {
+                    if asset.asset.isVideo {
+                        cacheLocalMomentVideoPreview(from: file.url, for: asset.asset)
+                    }
                     progress?(0.22, "Preparing upload…")
                     try await mediaUploadStore.save(makeStagedUploadRecord(asset: asset.asset, file: file))
                     storyPreviewDebugLog("edit import staged picker asset=\(asset.asset.id) local_identifier=\(asset.asset.localIdentifier ?? "nil") file=\(file.fileName) bytes=\(file.fileSizeBytes) content_type=\(file.contentType)")
@@ -506,8 +659,14 @@ final class StoryPreviewViewModel: ObservableObject {
                     pixelHeight: asset.asset.pixelHeight
                 )
                 momentAssets[mediaID] = storyAsset
+                if asset.asset.isVideo, let sourcePreviewURL = momentVideoURLs[asset.asset.id] {
+                    momentVideoURLs[mediaID] = sourcePreviewURL
+                    if let sourceID = asset.asset.localIdentifier {
+                        momentVideoURLs[sourceID] = sourcePreviewURL
+                    }
+                }
                 if let thumbnail = asset.thumbnail {
-                    momentThumbnails[mediaID] = thumbnail
+                    cacheMomentThumbnail(thumbnail, forStoryAssetID: mediaID, reason: "edit_import")
                 }
 
                 let analysis: MediaAnalysis?
@@ -695,6 +854,27 @@ final class StoryPreviewViewModel: ObservableObject {
         return "\(prefix)-\(digest.prefix(32))"
     }
 
+    private func importsWithMaterializedVideoFiles(_ imports: [StagedStoryImport]) async throws -> [StagedStoryImport] {
+        guard let originalMediaSource = photoLibrary as? OriginalMediaSource else { return imports }
+        var prepared: [StagedStoryImport] = []
+        prepared.reserveCapacity(imports.count)
+        for item in imports {
+            guard item.asset.isVideo, item.file == nil else {
+                prepared.append(item)
+                continue
+            }
+            let file = try await originalMediaSource.materializeOriginalMedia(
+                for: item.asset,
+                allowsNetworkAccess: true,
+                progress: nil
+            )
+            cacheLocalMomentVideoPreview(from: file.url, for: item.asset)
+            prepared.append(StagedStoryImport(asset: item.asset, file: file, thumbnail: item.thumbnail, fallbackAnalysis: item.fallbackAnalysis))
+            storyPreviewDebugLog("edit import materialized resolved video asset=\(item.asset.id) file=\(file.fileName) bytes=\(file.fileSizeBytes)")
+        }
+        return prepared
+    }
+
     private func thumbnailImage(for asset: MediaAsset) async -> UIImage? {
         do {
             let data = try await photoLibrary.requestThumbnail(for: asset, targetSize: FrameMioMetrics.mediaThumbnailRequestSize)
@@ -748,6 +928,32 @@ final class StoryPreviewViewModel: ObservableObject {
                 return nil
             }
         }.value
+    }
+
+    private func cacheLocalMomentVideoPreview(from sourceURL: URL, for asset: MediaAsset) {
+        do {
+            let previewURL = try copyMomentVideoPreview(from: sourceURL)
+            momentVideoURLs[asset.id] = previewURL
+            if let sourceID = asset.localIdentifier {
+                momentVideoURLs[sourceID] = previewURL
+            }
+            storyPreviewDebugLog("edit import cached local video preview asset=\(asset.id) url=\(previewURL.lastPathComponent)")
+        } catch {
+            storyPreviewDebugLog("edit import local video preview cache failed asset=\(asset.id) error=\(error.localizedDescription)")
+        }
+    }
+
+    private func copyMomentVideoPreview(from sourceURL: URL) throws -> URL {
+        let fileManager = FileManager.default
+        let directory = (fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fileManager.temporaryDirectory)
+            .appendingPathComponent("FrameMio", isDirectory: true)
+            .appendingPathComponent("MomentVideoPreviews", isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fileExtension = sourceURL.pathExtension.isEmpty ? "mov" : sourceURL.pathExtension
+        let destinationURL = directory.appendingPathComponent("moment-\(UUID().uuidString).\(fileExtension)")
+        try fileManager.copyItem(at: sourceURL, to: destinationURL)
+        return destinationURL
     }
 
     private func makeStagedUploadRecord(asset: MediaAsset, file: OriginalMediaFile) -> MediaUpload {
@@ -960,6 +1166,34 @@ final class StoryPreviewViewModel: ObservableObject {
         }
     }
 
+    private func cacheUploadAssets(for story: Story) async throws {
+        let storyMediaIDs = Set(
+            story.assetIDs
+                + (story.moments ?? []).map(\.mediaID)
+                + (story.availableMoments ?? []).map(\.mediaID)
+        )
+        guard !storyMediaIDs.isEmpty else { return }
+
+        let uploads = try await mediaUploadStore.allUploads()
+        var cachedCount = 0
+        for upload in uploads {
+            guard let mediaID = upload.mediaID, storyMediaIDs.contains(mediaID) else { continue }
+            momentAssets[mediaID] = MediaAsset(
+                id: mediaID,
+                localIdentifier: upload.localIdentifier,
+                kind: mediaKind(for: upload.mediaType),
+                creationDate: upload.creationDate,
+                duration: upload.duration ?? 0,
+                pixelWidth: upload.pixelWidth,
+                pixelHeight: upload.pixelHeight
+            )
+            cachedCount += 1
+        }
+        if cachedCount > 0 {
+            storyPreviewDebugLog("cached upload source assets story=\(story.id) count=\(cachedCount)")
+        }
+    }
+
     private func resolveMomentAsset(forStoryAssetID storyAssetID: String) async -> MediaAsset? {
         if let asset = momentAsset(for: storyAssetID) {
             return asset
@@ -1099,8 +1333,9 @@ final class StoryPreviewViewModel: ObservableObject {
             do {
                 let operationStory = try await operation()
                 let updatedStory = mapResult?(operationStory) ?? operationStory
-                story = updatedStory
+                try await cacheUploadAssets(for: updatedStory)
                 cacheLaunchAssets(for: updatedStory)
+                story = updatedStory
                 storyPreviewDebugLog("action completed action=\(action.title) story=\(updatedStory.id) status=\(updatedStory.status.rawValue) should_poll=\(updatedStory.status.shouldPoll)")
                 if updatedStory.status.shouldPoll || action == .editStory {
                     load()
