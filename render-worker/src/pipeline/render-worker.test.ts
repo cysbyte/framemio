@@ -39,8 +39,7 @@ test('preprocesses b-roll video without muting A-roll audio', async () => {
         asset_id: 'video-1',
         media_type: 'video',
         video_analysis_version: 'video-v1',
-        source_start_micros: 6_000_000,
-        source_end_micros: 8_000_000,
+        source_end_micros: 2_000_000,
         start_ms: 1200,
         duration_ms: 2000,
         reason: 'semantic_match',
@@ -51,8 +50,8 @@ test('preprocesses b-roll video without muting A-roll audio', async () => {
   const trimOperations = harness.ffmpeg.operations.filter((operation) => operation.name === 'trimVideo');
   assert.equal(trimOperations.length, 2);
   assert.equal(trimOperations[0].request.keepAudio, true);
-  assert.equal(trimOperations[1].request.startMicros, 6_000_000);
-  assert.equal(trimOperations[1].request.endMicros, 8_000_000);
+  assert.equal(trimOperations[1].request.startMicros, 0);
+  assert.equal(trimOperations[1].request.endMicros, 2_000_000);
   assert.equal(trimOperations[1].request.keepAudio, false);
   assert.equal(harness.remotion.rendered[0].broll.length, 1);
 });

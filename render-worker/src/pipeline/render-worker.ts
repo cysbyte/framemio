@@ -182,7 +182,8 @@ function validateInput(input: RenderInput, rendererVersion: string): void {
     if (overlay.start_ms + overlay.duration_ms > (input.story_plan.total_duration_ms ?? Number.MAX_SAFE_INTEGER)) {
       throw new RenderInputError(`b-roll overlay exceeds story duration at index ${index}`);
     }
-    if (overlay.media_type === 'video' && ((overlay.source_start_micros ?? -1) < 0 || (overlay.source_end_micros ?? 0) <= (overlay.source_start_micros ?? -1))) {
+    const sourceStartMicros = overlay.source_start_micros ?? 0;
+    if (overlay.media_type === 'video' && (sourceStartMicros < 0 || (overlay.source_end_micros ?? 0) <= sourceStartMicros)) {
       throw new RenderInputError(`invalid b-roll source segment at index ${index}`);
     }
   }
