@@ -93,6 +93,34 @@ jobs:
           PROFILE_NAME="$(/usr/libexec/PlistBuddy -c 'Print Name' "${PROFILE_PLIST}")"
           PROFILE_TEAM_ID="$(/usr/libexec/PlistBuddy -c 'Print TeamIdentifier:0' "${PROFILE_PLIST}")"
 
+          SIGNING_CERT_SHA1="$(security find-identity -v -p codesigning "${KEYCHAIN_PATH}" | awk -F'[ )]+' '/Apple Distribution/ { print $3; exit }')"
+          if [ -z "${SIGNING_CERT_SHA1}" ]; then
+            echo "No Apple Distribution signing certificate was found in the uploaded p12." >&2
+            exit 1
+          fi
+
+          python3 - "${PROFILE_PLIST}" "${RUNNER_TEMP}/profile-cert-sha1s.txt" <<'PY'
+          import hashlib
+          import plistlib
+          import sys
+
+          profile_plist_path = sys.argv[1]
+          output_path = sys.argv[2]
+
+          with open(profile_plist_path, "rb") as profile_file:
+              profile = plistlib.load(profile_file)
+
+          with open(output_path, "w", encoding="utf-8") as output_file:
+              for certificate in profile.get("DeveloperCertificates", []):
+                  output_file.write(hashlib.sha1(certificate).hexdigest().upper() + "\n")
+          PY
+
+          if ! grep -qx "${SIGNING_CERT_SHA1}" "${RUNNER_TEMP}/profile-cert-sha1s.txt"; then
+            echo "Provisioning profile '${PROFILE_NAME}' does not include the Apple Distribution certificate from APPLE_CERTIFICATE_P12_BASE64." >&2
+            echo "Regenerate the App Store provisioning profile for ${BUNDLE_ID}, select this Apple Distribution certificate, then update APPLE_PROVISION_PROFILE_BASE64." >&2
+            exit 1
+          fi
+
           if [ "${PROFILE_TEAM_ID}" != "${TEAM_ID}" ]; then
             echo "Provisioning profile team ${PROFILE_TEAM_ID} does not match expected team ${TEAM_ID}." >&2
             exit 1
