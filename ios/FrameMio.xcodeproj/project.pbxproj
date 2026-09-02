@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		D80000000000000000000001 /* HomeHeroPreview.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D80000000000000000000002 /* HomeHeroPreview.mp4 */; };
 		A10000000000000000000010 /* FrameMioApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000020 /* FrameMioApp.swift */; };
 		A10000000000000000000011 /* AppRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000021 /* AppRootView.swift */; };
 		A10000000000000000000012 /* AppTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000022 /* AppTab.swift */; };
@@ -37,8 +36,6 @@
 		A1000000000000000000005D /* SectionHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000007D /* SectionHeader.swift */; };
 		A1000000000000000000005E /* EmptyState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000007E /* EmptyState.swift */; };
 		A1000000000000000000005F /* LoadingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000007F /* LoadingState.swift */; };
-		A10000000000000000000321 /* StoryWaitingAnimation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000320 /* StoryWaitingAnimation.swift */; };
-		A10000000000000000000331 /* StoryVideoPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000330 /* StoryVideoPlayer.swift */; };
 		A10000000000000000000060 /* Tag.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000080 /* Tag.swift */; };
 		A10000000000000000000061 /* FrameMioProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000081 /* FrameMioProgressView.swift */; };
 		A10000000000000000000062 /* FrameMioOpacity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000082 /* FrameMioOpacity.swift */; };
@@ -59,13 +56,15 @@
 		A1000000000000000000020E /* MediaPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000010E /* MediaPickerView.swift */; };
 		A1000000000000000000020F /* StoryCreationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000010F /* StoryCreationViewModel.swift */; };
 		A10000000000000000000210 /* StoryCreationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000110 /* StoryCreationView.swift */; };
-		A10000000000000000000216 /* StoryLaunchCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000116 /* StoryLaunchCoordinator.swift */; };
 		A10000000000000000000211 /* StoryPreviewViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000111 /* StoryPreviewViewModel.swift */; };
 		A10000000000000000000212 /* StoryPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000112 /* StoryPreviewView.swift */; };
 		A10000000000000000000213 /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000113 /* SettingsViewModel.swift */; };
 		A10000000000000000000214 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000114 /* SettingsView.swift */; };
-		A10000000000000000000217 /* FrameMioProView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000117 /* FrameMioProView.swift */; };
 		A10000000000000000000215 /* TaskCancellation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000115 /* TaskCancellation.swift */; };
+		A10000000000000000000216 /* StoryLaunchCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000116 /* StoryLaunchCoordinator.swift */; };
+		A10000000000000000000217 /* FrameMioProView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000117 /* FrameMioProView.swift */; };
+		A10000000000000000000321 /* StoryWaitingAnimation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000320 /* StoryWaitingAnimation.swift */; };
+		A10000000000000000000331 /* StoryVideoPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000330 /* StoryVideoPlayer.swift */; };
 		B60000000000000000000101 /* PhotoKitMediaIntelligenceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000001 /* PhotoKitMediaIntelligenceService.swift */; };
 		B60000000000000000000102 /* MediaClusterer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000002 /* MediaClusterer.swift */; };
 		B60000000000000000000103 /* MediaIntelligenceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000003 /* MediaIntelligenceStore.swift */; };
@@ -78,6 +77,7 @@
 		C70000000000000000000105 /* DirectObjectStorageClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70000000000000000000005 /* DirectObjectStorageClient.swift */; };
 		C70000000000000000000106 /* MediaUploadStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70000000000000000000006 /* MediaUploadStore.swift */; };
 		C70000000000000000000107 /* MediaUploadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70000000000000000000007 /* MediaUploadTests.swift */; };
+		D80000000000000000000001 /* HomeHeroPreview.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D80000000000000000000002 /* HomeHeroPreview.mp4 */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -91,7 +91,6 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		D80000000000000000000002 /* HomeHeroPreview.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = HomeHeroPreview.mp4; sourceTree = "<group>"; };
 		A10000000000000000000020 /* FrameMioApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameMioApp.swift; sourceTree = "<group>"; };
 		A10000000000000000000021 /* AppRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRootView.swift; sourceTree = "<group>"; };
 		A10000000000000000000022 /* AppTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTab.swift; sourceTree = "<group>"; };
@@ -122,8 +121,6 @@
 		A1000000000000000000007D /* SectionHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionHeader.swift; sourceTree = "<group>"; };
 		A1000000000000000000007E /* EmptyState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyState.swift; sourceTree = "<group>"; };
 		A1000000000000000000007F /* LoadingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingState.swift; sourceTree = "<group>"; };
-		A10000000000000000000320 /* StoryWaitingAnimation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoryWaitingAnimation.swift; sourceTree = "<group>"; };
-		A10000000000000000000330 /* StoryVideoPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoryVideoPlayer.swift; sourceTree = "<group>"; };
 		A10000000000000000000080 /* Tag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tag.swift; sourceTree = "<group>"; };
 		A10000000000000000000081 /* FrameMioProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameMioProgressView.swift; sourceTree = "<group>"; };
 		A10000000000000000000082 /* FrameMioOpacity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameMioOpacity.swift; sourceTree = "<group>"; };
@@ -144,13 +141,15 @@
 		A1000000000000000000010E /* MediaPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPickerView.swift; sourceTree = "<group>"; };
 		A1000000000000000000010F /* StoryCreationViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoryCreationViewModel.swift; sourceTree = "<group>"; };
 		A10000000000000000000110 /* StoryCreationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoryCreationView.swift; sourceTree = "<group>"; };
-		A10000000000000000000116 /* StoryLaunchCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoryLaunchCoordinator.swift; sourceTree = "<group>"; };
 		A10000000000000000000111 /* StoryPreviewViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoryPreviewViewModel.swift; sourceTree = "<group>"; };
 		A10000000000000000000112 /* StoryPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoryPreviewView.swift; sourceTree = "<group>"; };
 		A10000000000000000000113 /* SettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModel.swift; sourceTree = "<group>"; };
 		A10000000000000000000114 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		A10000000000000000000117 /* FrameMioProView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameMioProView.swift; sourceTree = "<group>"; };
 		A10000000000000000000115 /* TaskCancellation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskCancellation.swift; sourceTree = "<group>"; };
+		A10000000000000000000116 /* StoryLaunchCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoryLaunchCoordinator.swift; sourceTree = "<group>"; };
+		A10000000000000000000117 /* FrameMioProView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameMioProView.swift; sourceTree = "<group>"; };
+		A10000000000000000000320 /* StoryWaitingAnimation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoryWaitingAnimation.swift; sourceTree = "<group>"; };
+		A10000000000000000000330 /* StoryVideoPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoryVideoPlayer.swift; sourceTree = "<group>"; };
 		B60000000000000000000001 /* PhotoKitMediaIntelligenceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoKitMediaIntelligenceService.swift; sourceTree = "<group>"; };
 		B60000000000000000000002 /* MediaClusterer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaClusterer.swift; sourceTree = "<group>"; };
 		B60000000000000000000003 /* MediaIntelligenceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaIntelligenceStore.swift; sourceTree = "<group>"; };
@@ -164,6 +163,7 @@
 		C70000000000000000000005 /* DirectObjectStorageClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectObjectStorageClient.swift; sourceTree = "<group>"; };
 		C70000000000000000000006 /* MediaUploadStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaUploadStore.swift; sourceTree = "<group>"; };
 		C70000000000000000000007 /* MediaUploadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaUploadTests.swift; sourceTree = "<group>"; };
+		D80000000000000000000002 /* HomeHeroPreview.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = HomeHeroPreview.mp4; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -670,13 +670,13 @@
 		A10000000000000000000040 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				USE_HEADERMAP = NO;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = SRX8W875LC;
+				DEVELOPMENT_TEAM = RAXZ4685K6;
+				ENABLE_TESTABILITY = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_APIBaseURL = "https://api.framemio.com";
 				INFOPLIST_KEY_CFBundleDisplayName = FrameMio;
@@ -692,30 +692,29 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.framemio.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
-				ENABLE_TESTABILITY = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
+				USE_HEADERMAP = NO;
 			};
 			name = Debug;
 		};
 		A10000000000000000000041 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				USE_HEADERMAP = NO;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = SRX8W875LC;
+				DEVELOPMENT_TEAM = RAXZ4685K6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_APIBaseURL = "https://api.framemio.com";
 				INFOPLIST_KEY_CFBundleDisplayName = FrameMio;
@@ -731,7 +730,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.framemio.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -740,16 +739,16 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited)";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
+				USE_HEADERMAP = NO;
 			};
 			name = Release;
 		};
 		B60000000000000000000041 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				USE_HEADERMAP = NO;
 				DEVELOPMENT_TEAM = SRX8W875LC;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -761,16 +760,16 @@
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FrameMio.app/FrameMio";
+				USE_HEADERMAP = NO;
 			};
 			name = Debug;
 		};
 		B60000000000000000000042 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				USE_HEADERMAP = NO;
 				DEVELOPMENT_TEAM = SRX8W875LC;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -782,6 +781,7 @@
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FrameMio.app/FrameMio";
+				USE_HEADERMAP = NO;
 			};
 			name = Release;
 		};
