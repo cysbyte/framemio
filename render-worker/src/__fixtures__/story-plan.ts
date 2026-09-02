@@ -23,6 +23,16 @@ export function fixtureMediaAssets(): SourceMediaAsset[] {
       file_name: 'IMG_1002.MOV',
       etag: 'video-etag',
     },
+    {
+      id: 'photo-2',
+      media_type: 'photo',
+      s3_key: 'source/photo-2.jpg',
+      content_type: 'image/jpeg',
+      width: 3024,
+      height: 4032,
+      file_name: 'IMG_1003.jpg',
+      etag: 'photo-2-etag',
+    },
   ];
 }
 

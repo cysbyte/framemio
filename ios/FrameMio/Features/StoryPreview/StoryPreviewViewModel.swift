@@ -232,6 +232,9 @@ final class StoryPreviewViewModel: ObservableObject {
         if let image = momentThumbnails[storyAssetID] {
             return Image(uiImage: image)
         }
+        if let cachedImage = cachedThumbnailImage(forStoryAssetID: storyAssetID) {
+            return Image(uiImage: cachedImage)
+        }
         guard let sourceID = sourceIdentity(forStoryAssetID: storyAssetID) else {
             return nil
         }
@@ -239,6 +242,10 @@ final class StoryPreviewViewModel: ObservableObject {
             if let image = momentThumbnails[aliasID] {
                 storyPreviewDebugLog("thumbnail alias hit requested=\(storyAssetID) alias=\(aliasID) source=\(sourceID)")
                 return Image(uiImage: image)
+            }
+            if let cachedImage = cachedThumbnailImage(forStoryAssetID: aliasID) {
+                storyPreviewDebugLog("thumbnail cache hit requested=\(storyAssetID) alias=\(aliasID) source=\(sourceID)")
+                return Image(uiImage: cachedImage)
             }
         }
         return nil
@@ -286,8 +293,9 @@ final class StoryPreviewViewModel: ObservableObject {
 
     private func stagedUploadVideoURL(forStoryAssetID storyAssetID: String) async -> URL? {
         do {
+            let sourceID = sourceIdentity(forStoryAssetID: storyAssetID)
             guard let upload = try await mediaUploadStore.allUploads().first(where: {
-                $0.mediaID == storyAssetID || $0.assetID == storyAssetID
+                $0.mediaID == storyAssetID || $0.assetID == storyAssetID || $0.localIdentifier == storyAssetID || (sourceID != nil && $0.localIdentifier == sourceID)
             }),
                   upload.mediaType == .video,
                   let url = upload.stagedFileURL,
@@ -344,16 +352,28 @@ final class StoryPreviewViewModel: ObservableObject {
 
     private func cacheMomentThumbnail(_ image: UIImage, forStoryAssetID storyAssetID: String, reason: String) {
         var changed = false
+        guard let storyID else { return }
         for aliasID in thumbnailAliasIDs(forStoryAssetID: storyAssetID) {
             if momentThumbnails[aliasID] == nil {
                 momentThumbnails[aliasID] = image
                 changed = true
             }
+            StoryThumbnailCache.save(image, storyID: storyID, storyAssetID: aliasID)
         }
         if changed {
             thumbnailRevision += 1
         }
         storyPreviewDebugLog("thumbnail cached media=\(storyAssetID) reason=\(reason) aliases=\(thumbnailAliasIDs(forStoryAssetID: storyAssetID).joined(separator: ",")) revision=\(thumbnailRevision)")
+    }
+
+    private func cachedThumbnailImage(forStoryAssetID storyAssetID: String) -> UIImage? {
+        guard let storyID else { return nil }
+        for aliasID in thumbnailAliasIDs(forStoryAssetID: storyAssetID) {
+            if let image = StoryThumbnailCache.load(storyID: storyID, storyAssetID: aliasID) {
+                return image
+            }
+        }
+        return nil
     }
 
     private func thumbnailAliasIDs(forStoryAssetID storyAssetID: String) -> [String] {
@@ -1198,23 +1218,40 @@ final class StoryPreviewViewModel: ObservableObject {
         if let asset = momentAsset(for: storyAssetID) {
             return asset
         }
+        let sourceID = sourceIdentity(forStoryAssetID: storyAssetID)
         do {
-            guard let upload = try await mediaUploadStore.allUploads().first(where: {
-                $0.mediaID == storyAssetID || $0.assetID == storyAssetID
-            }) else {
-                return nil
+            if let upload = try await mediaUploadStore.allUploads().first(where: {
+                $0.mediaID == storyAssetID || $0.assetID == storyAssetID || $0.localIdentifier == storyAssetID || (sourceID != nil && $0.localIdentifier == sourceID)
+            }) {
+                let asset = MediaAsset(
+                    id: storyAssetID,
+                    localIdentifier: upload.localIdentifier,
+                    kind: mediaKind(for: upload.mediaType),
+                    creationDate: upload.creationDate,
+                    duration: upload.duration ?? 0,
+                    pixelWidth: upload.pixelWidth,
+                    pixelHeight: upload.pixelHeight
+                )
+                momentAssets[storyAssetID] = asset
+                if let localIdentifier = upload.localIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines), !localIdentifier.isEmpty {
+                    momentAssets[localIdentifier] = asset
+                }
+                if let sourceID {
+                    momentAssets[sourceID] = asset
+                }
+                return asset
             }
-            let asset = MediaAsset(
-                id: storyAssetID,
-                localIdentifier: upload.localIdentifier,
-                kind: mediaKind(for: upload.mediaType),
-                creationDate: upload.creationDate,
-                duration: upload.duration ?? 0,
-                pixelWidth: upload.pixelWidth,
-                pixelHeight: upload.pixelHeight
-            )
-            momentAssets[storyAssetID] = asset
-            return asset
+
+            if let sourceID, !sourceID.isEmpty {
+                let resolved = try await photoLibrary.resolveAssets(localIdentifiers: [sourceID])
+                if let asset = resolved.first {
+                    momentAssets[storyAssetID] = asset
+                    momentAssets[sourceID] = asset
+                    storyPreviewDebugLog("resolved moment asset from photo library story_asset=\(storyAssetID) source=\(sourceID)")
+                    return asset
+                }
+            }
+            return nil
         } catch {
             return nil
         }
@@ -1409,6 +1446,60 @@ enum StoryPreviewAction: Hashable, Sendable {
         case .retry, .renderAgain, .saveVideo, .deleteStory:
             .preview
         }
+    }
+}
+
+enum StoryThumbnailCache {
+    private static let cacheDirectoryName = "story-thumbnails-v1"
+
+    static func load(storyID: String, storyAssetID: String, fileManager: FileManager = .default) -> UIImage? {
+        let fileURL = fileURL(storyID: storyID, storyAssetID: storyAssetID, fileManager: fileManager)
+        guard let data = try? Data(contentsOf: fileURL) else { return nil }
+        return UIImage(data: data)
+    }
+
+    static func save(
+        _ image: UIImage,
+        storyID: String,
+        storyAssetID: String,
+        fileManager: FileManager = .default
+    ) {
+        guard let data = image.jpegData(compressionQuality: 0.82) else { return }
+        let directory = cacheDirectory(fileManager: fileManager)
+        do {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            try data.write(to: fileURL(storyID: storyID, storyAssetID: storyAssetID, fileManager: fileManager), options: .atomic)
+        } catch {
+        }
+    }
+
+    private static func cacheDirectory(fileManager: FileManager) -> URL {
+        let baseURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? fileManager.temporaryDirectory
+        return baseURL
+            .appendingPathComponent("FrameMio", isDirectory: true)
+            .appendingPathComponent(cacheDirectoryName, isDirectory: true)
+    }
+
+    private static func fileURL(storyID: String, storyAssetID: String, fileManager: FileManager) -> URL {
+        let fileName = "\(safeCacheComponent(storyID))-\(fnv1a64Hex(storyAssetID)).jpg"
+        return cacheDirectory(fileManager: fileManager).appendingPathComponent(fileName, isDirectory: false)
+    }
+
+    private static func safeCacheComponent(_ value: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let scalars = value.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" }
+        let sanitized = String(scalars)
+        return sanitized.isEmpty ? "story" : sanitized
+    }
+
+    private static func fnv1a64Hex(_ value: String) -> String {
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 0x100000001b3
+        }
+        return String(format: "%016llx", hash)
     }
 }
 

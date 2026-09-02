@@ -606,8 +606,8 @@ func (s *Server) listCreditPacks(response http.ResponseWriter, request *http.Req
 		return
 	}
 	s.writeJSON(response, http.StatusOK, map[string]any{
-		"packs":                               s.Credits.Policy.CreditPacks,
-		"initial_credit_grant":                s.Credits.Policy.InitialGrant,
+		"packs":                              s.Credits.Policy.CreditPacks,
+		"initial_credit_grant":               s.Credits.Policy.InitialGrant,
 		"monthly_subscription_cycle_credits": s.Credits.Policy.MonthlySubscriptionCycleCredits,
 		"yearly_subscription_cycle_credits":  s.Credits.Policy.YearlySubscriptionCycleCredits,
 	})
@@ -841,8 +841,9 @@ func (s *Server) getRenderInput(response http.ResponseWriter, request *http.Requ
 		s.writeError(response, http.StatusConflict, "story_plan_version_mismatch", "render job targets a different story plan version")
 		return
 	}
-	assets := make([]renderInputMediaAsset, 0, len(project.MediaIDs))
-	for _, mediaID := range project.MediaIDs {
+	mediaIDs := renderInputMediaIDs(project.MediaIDs, plan)
+	assets := make([]renderInputMediaAsset, 0, len(mediaIDs))
+	for _, mediaID := range mediaIDs {
 		media, err := s.Store.GetMedia(request.Context(), job.UserID, mediaID)
 		if err != nil {
 			s.mapStoreError(response, err)
@@ -864,7 +865,7 @@ func (s *Server) getRenderInput(response http.ResponseWriter, request *http.Requ
 	if strings.TrimSpace(outputKey) == "" {
 		outputKey = renderOutputKey(job.UserID, job.ProjectID, plan.Version, job.Configuration["output_preset"])
 	}
-	s.Logger.Info("render input prepared", slog.String("job_id", job.ID), slog.String("project_id", job.ProjectID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.Int("moment_count", len(plan.Moments)), slog.Int("caption_count", len(plan.Captions)), slog.Int("media_asset_count", len(assets)))
+	s.Logger.Info("render input prepared", slog.String("job_id", job.ID), slog.String("project_id", job.ProjectID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)), slog.Int("media_asset_count", len(assets)))
 	s.writeJSON(response, http.StatusOK, renderInputResponse{
 		JobID:       job.ID,
 		ProjectID:   job.ProjectID,
@@ -872,6 +873,41 @@ func (s *Server) getRenderInput(response http.ResponseWriter, request *http.Requ
 		MediaAssets: assets,
 		OutputS3Key: outputKey,
 	})
+}
+
+func renderInputMediaIDs(projectMediaIDs []string, plan models.StoryPlan) []string {
+	seen := make(map[string]struct{}, len(projectMediaIDs)+len(plan.Moments)+len(plan.BRoll))
+	ids := make([]string, 0, len(projectMediaIDs)+len(plan.BRoll))
+	add := func(mediaID string) {
+		mediaID = strings.TrimSpace(mediaID)
+		if mediaID == "" {
+			return
+		}
+		if _, exists := seen[mediaID]; exists {
+			return
+		}
+		seen[mediaID] = struct{}{}
+		ids = append(ids, mediaID)
+	}
+	for _, mediaID := range projectMediaIDs {
+		add(mediaID)
+	}
+	for _, moment := range plan.Moments {
+		add(firstNonEmptyString(moment.AssetID, moment.MediaID))
+	}
+	for _, overlay := range plan.BRoll {
+		add(firstNonEmptyString(overlay.AssetID, overlay.MediaID))
+	}
+	return ids
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func renderOutputKey(userID, projectID string, storyPlanVersion int, outputPreset string) string {

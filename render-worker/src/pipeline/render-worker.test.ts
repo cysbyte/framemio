@@ -16,6 +16,7 @@ async function createHarness() {
   const root = await mkdtemp(path.join(tmpdir(), 'framemio-render-test-'));
   const objectStore = new LocalFixtureObjectStore(path.join(root, 'object-store'));
   await objectStore.putText('source/photo-1.jpg', 'fixture photo bytes');
+  await objectStore.putText('source/photo-2.jpg', 'fixture b-roll photo bytes');
   await objectStore.putText('source/video-1.mov', 'fixture video bytes');
   const ffmpeg = new DeterministicFixtureFfmpegClient();
   const remotion = new FixtureRemotionRenderer();
@@ -28,6 +29,79 @@ async function createHarness() {
   });
   return {root, objectStore, ffmpeg, remotion, worker};
 }
+
+test('preprocesses b-roll video without muting A-roll audio', async () => {
+  const harness = await createHarness();
+  await harness.worker.render(fixtureRenderInput({
+    story_plan: fixtureStoryPlan({
+      broll: [{
+        broll_id: 'broll-video-1',
+        asset_id: 'video-1',
+        media_type: 'video',
+        video_analysis_version: 'video-v1',
+        source_start_micros: 6_000_000,
+        source_end_micros: 8_000_000,
+        start_ms: 1200,
+        duration_ms: 2000,
+        reason: 'semantic_match',
+      }],
+    }),
+  }));
+
+  const trimOperations = harness.ffmpeg.operations.filter((operation) => operation.name === 'trimVideo');
+  assert.equal(trimOperations.length, 2);
+  assert.equal(trimOperations[0].request.keepAudio, true);
+  assert.equal(trimOperations[1].request.startMicros, 6_000_000);
+  assert.equal(trimOperations[1].request.endMicros, 8_000_000);
+  assert.equal(trimOperations[1].request.keepAudio, false);
+  assert.equal(harness.remotion.rendered[0].broll.length, 1);
+});
+
+test('ffmpeg fallback renderer overlays b-roll before captions', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'framemio-broll-render-test-'));
+  const fakeFfmpeg = path.join(root, 'fake-ffmpeg.cjs');
+  const argsPath = path.join(root, 'ffmpeg-args.json');
+  const outputPath = path.join(root, 'story.mp4');
+  await writeFile(fakeFfmpeg, `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.writeFileSync(process.env.FRAMEMIO_FFMPEG_ARGS_PATH, JSON.stringify(args));
+fs.writeFileSync(args[args.length - 1], 'fake mp4');
+`, 'utf8');
+  await chmod(fakeFfmpeg, 0o755);
+
+  const previousArgsPath = process.env.FRAMEMIO_FFMPEG_ARGS_PATH;
+  process.env.FRAMEMIO_FFMPEG_ARGS_PATH = argsPath;
+  try {
+    const assets = fixtureMediaAssets();
+    const assetPaths = new Map(assets.map((asset) => [asset.id, `/asset/${asset.file_name}`]));
+    const composition = buildComposition(fixtureStoryPlan({
+      broll: [{broll_id: 'broll-photo-1', asset_id: 'photo-2', media_type: 'photo', start_ms: 1000, duration_ms: 1500, reason: 'semantic_match'}],
+    }), assets, assetPaths, new Map(), {
+      work_dir: root,
+      assets_dir: path.join(root, 'assets'),
+      clips_dir: path.join(root, 'clips'),
+      output_file: outputPath,
+      composition_file: path.join(root, 'composition.json'),
+    });
+
+    await new FfmpegCompositionRenderer({ffmpegBinary: fakeFfmpeg}).renderComposition(composition, outputPath);
+
+    const args = JSON.parse(await readFile(argsPath, 'utf8')) as string[];
+    const inputs = args.flatMap((arg, index) => arg === '-i' ? [args[index + 1]] : []);
+    assert.deepEqual(inputs, ['/asset/IMG_1001.jpg', '/asset/IMG_1002.MOV', '/asset/IMG_1003.jpg']);
+    const filterComplex = args[args.indexOf('-filter_complex') + 1];
+    assert.match(filterComplex, /\[basev\]\[bv0\]overlay=0:0:enable='between\(t,1\.000,2\.500\)'\[basev_broll_0\]/);
+    assert.match(filterComplex, /\[basev_broll_0\]drawtext=/);
+    assert.match(filterComplex, /\[1:a\]atrim=duration=4\.500/);
+  } finally {
+    if (previousArgsPath === undefined) {
+      delete process.env.FRAMEMIO_FFMPEG_ARGS_PATH;
+    } else {
+      process.env.FRAMEMIO_FFMPEG_ARGS_PATH = previousArgsPath;
+    }
+  }
+});
 
 test('renders a validated story plan deterministically', async () => {
   const harness = await createHarness();

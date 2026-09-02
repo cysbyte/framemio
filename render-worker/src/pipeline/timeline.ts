@@ -5,6 +5,7 @@ import {
   framesFromMilliseconds,
   millisecondsFromFrames,
   resolutionForAspectRatio,
+  stableBRollClipId,
   stableClipId,
 } from '../determinism.js';
 import type {
@@ -13,8 +14,10 @@ import type {
   RenderPaths,
   ResolvedAudio,
   SourceMediaAsset,
+  StoryBRoll,
   StoryMoment,
   StoryPlan,
+  TimelineBRoll,
   TimelineClip,
   TransitionType,
   VideoTransform,
@@ -74,6 +77,33 @@ export function buildComposition(
     nextFrame += durationFrames;
     return clip;
   });
+  const broll: TimelineBRoll[] = (storyPlan.broll ?? []).map((overlay, index) => {
+    const asset = assetsByID.get(overlay.asset_id);
+    if (!asset) {
+      throw new RenderInputError(`missing b-roll media asset: ${overlay.asset_id}`);
+    }
+    const overlayID = stableBRollClipId(overlay, index);
+    const sourcePath = assetPaths.get(asset.id);
+    const preparedPath = preparedPaths.get(overlayID) ?? sourcePath;
+    if (!sourcePath || !preparedPath) {
+      throw new RenderInputError(`missing prepared path for b-roll asset: ${asset.id}`);
+    }
+    const durationFrames = framesFromMilliseconds(overlay.duration_ms, fps);
+    return {
+      broll_id: overlay.broll_id ?? overlayID,
+      asset_id: asset.id,
+      media_type: asset.media_type,
+      source_path: sourcePath,
+      prepared_path: preparedPath,
+      start_frame: Math.max(0, Math.round((overlay.start_ms / 1000) * fps)),
+      duration_frames: durationFrames,
+      duration_ms: millisecondsFromFrames(durationFrames, fps),
+      source_start_micros: overlay.source_start_micros,
+      source_end_micros: overlay.source_end_micros,
+      crop_intent: overlay.crop_intent ?? 'fill',
+      transform: asset.media_type === 'video' ? brollVideoTransform(overlay) : brollPhotoTransform(overlay, overlayID),
+    };
+  });
   return {
     renderer_version: rendererVersion,
     story_plan_id: storyPlan.id,
@@ -86,6 +116,7 @@ export function buildComposition(
     title_text: storyPlan.title_text,
     ending_text: storyPlan.ending_text,
     clips,
+    broll,
     captions: storyPlan.captions ?? [],
     caption_style: storyPlan.caption_style,
     audio: resolveAudio(storyPlan, paths, fps),
@@ -124,6 +155,14 @@ function videoTransform(moment: StoryMoment): VideoTransform {
     crop: moment.crop_intent === 'fit' ? 'fit' : 'fill',
     scale: 1,
   };
+}
+
+function brollPhotoTransform(overlay: StoryBRoll, seed: string): KenBurnsTransform {
+  return photoTransform({asset_id: overlay.asset_id, duration_ms: overlay.duration_ms, crop_intent: overlay.crop_intent}, seed);
+}
+
+function brollVideoTransform(overlay: StoryBRoll): VideoTransform {
+  return {kind: 'video', crop: overlay.crop_intent === 'fit' ? 'fit' : 'fill', scale: 1};
 }
 
 function transitionFor(moment: StoryMoment): TransitionType {

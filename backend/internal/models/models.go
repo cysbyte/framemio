@@ -237,6 +237,7 @@ type StoryPlan struct {
 	EndingText          string         `json:"ending_text,omitempty"`
 	UserInstructions    string         `json:"user_instructions,omitempty"`
 	Moments             []StoryMoment  `json:"moments"`
+	BRoll               []StoryBRoll   `json:"broll,omitempty"`
 	Captions            []StoryCaption `json:"captions,omitempty"`
 	CaptionStyle        *CaptionStyle  `json:"caption_style,omitempty"`
 	Audio               *StoryAudio    `json:"audio,omitempty"`
@@ -260,6 +261,30 @@ type StoryMoment struct {
 	Transition           string    `json:"transition,omitempty"`
 	Reason               string    `json:"reason,omitempty"`
 	Score                float64   `json:"score,omitempty"`
+}
+
+type StoryBRoll struct {
+	BrollID              string            `json:"broll_id,omitempty"`
+	AssetID              string            `json:"asset_id"`
+	MediaID              string            `json:"media_id,omitempty"`
+	MediaType            MediaType         `json:"media_type,omitempty"`
+	VideoAnalysisVersion string            `json:"video_analysis_version,omitempty"`
+	SourceStartMicros    int64             `json:"source_start_micros,omitempty"`
+	SourceEndMicros      int64             `json:"source_end_micros,omitempty"`
+	StartMS              int               `json:"start_ms"`
+	DurationMS           int               `json:"duration_ms"`
+	Anchor               *StoryBRollAnchor `json:"anchor,omitempty"`
+	CropIntent           string            `json:"crop_intent,omitempty"`
+	Reason               string            `json:"reason,omitempty"`
+	Confidence           float64           `json:"confidence,omitempty"`
+	Score                float64           `json:"score,omitempty"`
+}
+
+type StoryBRollAnchor struct {
+	Type     string `json:"type"`
+	MomentID string `json:"moment_id,omitempty"`
+	StartMS  int    `json:"start_ms,omitempty"`
+	EndMS    int    `json:"end_ms,omitempty"`
 }
 
 type StoryAudio struct {

@@ -51,6 +51,29 @@ func TestValidateStoryPlanAcceptsValidPlan(t *testing.T) {
 	}
 }
 
+func TestValidateStoryPlanAcceptsValidBRoll(t *testing.T) {
+	t.Parallel()
+	validator, plan := validStoryPlanFixture(t)
+	plan.BRoll = []models.StoryBRoll{{
+		BrollID:              "broll-1",
+		AssetID:              "video-1",
+		MediaType:            models.MediaTypeVideo,
+		VideoAnalysisVersion: "video-analysis-v1",
+		SourceStartMicros:    4_000_000,
+		SourceEndMicros:      5_000_000,
+		StartMS:              1000,
+		DurationMS:           1000,
+		Anchor:               &models.StoryBRollAnchor{Type: "transcript", MomentID: "moment-1", StartMS: 1000, EndMS: 2000},
+		CropIntent:           "fill",
+		Reason:               "semantic_match",
+		Confidence:           0.91,
+		Score:                0.88,
+	}}
+	if err := validator.Validate(context.Background(), "user-1", plan); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestValidateStoryPlanAcceptsMultipleSegmentsFromSameVideo(t *testing.T) {
 	t.Parallel()
 	validator, plan := validStoryPlanFixture(t)
@@ -212,6 +235,22 @@ func TestValidateStoryPlanRejectsInvalidInputs(t *testing.T) {
 			},
 			field: "total_duration_ms",
 			code:  "out_of_range",
+		},
+		{
+			name: "broll source segment out of range",
+			mutate: func(plan *models.StoryPlan) {
+				plan.BRoll = []models.StoryBRoll{{AssetID: "video-1", MediaType: models.MediaTypeVideo, VideoAnalysisVersion: "video-analysis-v1", SourceStartMicros: 7_500_000, SourceEndMicros: 9_000_000, StartMS: 500, DurationMS: 1000, Anchor: &models.StoryBRollAnchor{Type: "moment", MomentID: "moment-1", StartMS: 500, EndMS: 1500}}}
+			},
+			field: "broll[0].source_segment",
+			code:  "out_of_range",
+		},
+		{
+			name: "broll anchor unknown moment",
+			mutate: func(plan *models.StoryPlan) {
+				plan.BRoll = []models.StoryBRoll{{AssetID: "video-1", MediaType: models.MediaTypeVideo, VideoAnalysisVersion: "video-analysis-v1", SourceStartMicros: 4_000_000, SourceEndMicros: 5_000_000, StartMS: 500, DurationMS: 1000, Anchor: &models.StoryBRollAnchor{Type: "moment", MomentID: "missing", StartMS: 500, EndMS: 1500}}}
+			},
+			field: "broll[0].anchor.moment_id",
+			code:  "unknown_moment",
 		},
 	}
 

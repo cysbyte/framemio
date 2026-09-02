@@ -41,16 +41,17 @@ type Planner struct {
 const maxVideoMomentDuration = 5 * time.Second
 
 type candidate struct {
-	moment      models.StoryMoment
-	captionCues []captionCue
-	sourceTime  int64
-	score       float64
-	repetition  string
-	mediaID     string
-	clusterID   string
-	isVideo     bool
-	isSelected  bool
-	isEnding    bool
+	moment        models.StoryMoment
+	captionCues   []captionCue
+	sourceTime    int64
+	score         float64
+	repetition    string
+	mediaID       string
+	clusterID     string
+	semanticTerms map[string]struct{}
+	isVideo       bool
+	isSelected    bool
+	isEnding      bool
 }
 
 type captionCue struct {
@@ -124,6 +125,7 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 			})
 		}
 	}
+	broll := planBRoll(request, moments, captions, candidates, totalDuration)
 	if request.SubtitlesEnabled != nil && !*request.SubtitlesEnabled {
 		captions = nil
 	}
@@ -147,6 +149,7 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 		EndingText:          endingText,
 		UserInstructions:    strings.TrimSpace(request.UserInstructions),
 		Moments:             moments,
+		BRoll:               broll,
 		Captions:            captions,
 		CaptionStyle:        captionStyle,
 		Output: models.StoryOutput{
@@ -238,6 +241,7 @@ func ValidateStoryPlan(plan models.StoryPlan) error {
 		return errors.New("story plan requires at least one moment")
 	}
 	seenMoments := make(map[string]struct{}, len(plan.Moments))
+	momentIDs := make(map[string]struct{}, len(plan.Moments))
 	durationMS := 0
 	for index, moment := range plan.Moments {
 		mediaID := moment.AssetID
@@ -251,6 +255,9 @@ func ValidateStoryPlan(plan models.StoryPlan) error {
 			return fmt.Errorf("duplicate moment %s", momentKey(moment))
 		}
 		seenMoments[momentKey(moment)] = struct{}{}
+		if strings.TrimSpace(moment.MomentID) != "" {
+			momentIDs[moment.MomentID] = struct{}{}
+		}
 		if moment.MediaType == models.MediaTypeVideo {
 			if strings.TrimSpace(moment.VideoAnalysisVersion) == "" || moment.StartMicros < 0 || moment.EndMicros <= moment.StartMicros {
 				return fmt.Errorf("video moment %s is missing valid analysis references", mediaID)
@@ -264,11 +271,10 @@ func ValidateStoryPlan(plan models.StoryPlan) error {
 	if plan.TotalDurationMS > 0 && durationMS != plan.TotalDurationMS {
 		return fmt.Errorf("story plan duration mismatch: moments=%d total=%d", durationMS, plan.TotalDurationMS)
 	}
+	if err := validateBRollOverlays(plan, momentIDs, durationMS); err != nil {
+		return err
+	}
 	if len(plan.Captions) > 0 {
-		momentIDs := make(map[string]struct{}, len(plan.Moments))
-		for _, moment := range plan.Moments {
-			momentIDs[moment.MomentID] = struct{}{}
-		}
 		for _, caption := range plan.Captions {
 			if strings.TrimSpace(caption.MomentID) == "" || strings.TrimSpace(caption.Text) == "" {
 				return errors.New("captions require a moment reference and text")
@@ -277,6 +283,46 @@ func ValidateStoryPlan(plan models.StoryPlan) error {
 				return fmt.Errorf("caption references unknown moment %s", caption.MomentID)
 			}
 		}
+	}
+	return nil
+}
+
+func validateBRollOverlays(plan models.StoryPlan, momentIDs map[string]struct{}, totalDurationMS int) error {
+	seen := make(map[string]struct{}, len(plan.BRoll))
+	usedDurationMS := 0
+	for index, overlay := range plan.BRoll {
+		assetID := strings.TrimSpace(firstNonEmpty(overlay.AssetID, overlay.MediaID))
+		if assetID == "" || overlay.DurationMS <= 0 {
+			return fmt.Errorf("broll %d requires a media reference and positive duration", index)
+		}
+		if overlay.StartMS < 0 || overlay.StartMS+overlay.DurationMS > totalDurationMS {
+			return fmt.Errorf("broll %s timing is outside story duration", assetID)
+		}
+		if overlay.MediaType == models.MediaTypeVideo && (strings.TrimSpace(overlay.VideoAnalysisVersion) == "" || overlay.SourceStartMicros < 0 || overlay.SourceEndMicros <= overlay.SourceStartMicros) {
+			return fmt.Errorf("video broll %s is missing valid source references", assetID)
+		}
+		if overlay.MediaType != models.MediaTypeVideo && (overlay.SourceStartMicros != 0 || overlay.SourceEndMicros != 0) {
+			return fmt.Errorf("photo broll %s must not define source timestamps", assetID)
+		}
+		if overlay.Anchor != nil {
+			if overlay.Anchor.StartMS < 0 || overlay.Anchor.EndMS <= overlay.Anchor.StartMS || overlay.Anchor.EndMS > totalDurationMS {
+				return fmt.Errorf("broll %s anchor timing is invalid", assetID)
+			}
+			if strings.TrimSpace(overlay.Anchor.MomentID) != "" {
+				if _, exists := momentIDs[overlay.Anchor.MomentID]; !exists {
+					return fmt.Errorf("broll %s references unknown anchor moment %s", assetID, overlay.Anchor.MomentID)
+				}
+			}
+		}
+		key := fmt.Sprintf("%s:%s:%d:%d:%d:%d", assetID, overlay.VideoAnalysisVersion, overlay.SourceStartMicros, overlay.SourceEndMicros, overlay.StartMS, overlay.DurationMS)
+		if _, exists := seen[key]; exists {
+			return fmt.Errorf("duplicate broll reference %s", key)
+		}
+		seen[key] = struct{}{}
+		usedDurationMS += overlay.DurationMS
+	}
+	if totalDurationMS > 0 && float64(usedDurationMS) > float64(totalDurationMS)*maxBRollRatio+1 {
+		return fmt.Errorf("broll duration exceeds story ratio")
 	}
 	return nil
 }
@@ -326,7 +372,8 @@ func buildCandidates(request Request, selected map[string]struct{}, clusters map
 			},
 			sourceTime: timestamp, score: photoScore(photo, selected, clusterID),
 			repetition: repetitionKey(mediaID, clusterID, timestamp, "photo"), mediaID: mediaID, clusterID: clusterID,
-			isSelected: hasMedia(selected, mediaID),
+			semanticTerms: photoSemanticTerms(photo),
+			isSelected:    hasMedia(selected, mediaID),
 		})
 	}
 	for _, analysis := range request.VideoAnalyses {
@@ -374,7 +421,7 @@ func buildCandidates(request Request, selected map[string]struct{}, clusters map
 				moment: moment, captionCues: transcriptCaptionCues(analysis.Transcript, segment.StartMicros, endMicros),
 				sourceTime: sourceTimelineMicros(mediaBaseTime, segmentTime), score: score,
 				repetition: repetitionKey(mediaID, clusterID, segmentTime, segment.SceneID),
-				mediaID:    mediaID, clusterID: clusterID, isVideo: true, isSelected: hasMedia(selected, mediaID),
+				mediaID:    mediaID, clusterID: clusterID, semanticTerms: videoSegmentSemanticTerms(segment), isVideo: true, isSelected: hasMedia(selected, mediaID),
 			})
 		}
 	}

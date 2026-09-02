@@ -14,6 +14,7 @@ export interface StoryPlan {
   title_text?: string;
   ending_text?: string;
   moments: StoryMoment[];
+  broll?: StoryBRoll[];
   captions?: StoryCaption[];
   caption_style?: CaptionStyle;
   audio?: StoryAudio;
@@ -39,6 +40,30 @@ export interface StoryMoment {
   score?: number;
   speed?: number;
   volume?: number;
+}
+
+export interface StoryBRoll {
+  broll_id?: string;
+  asset_id: string;
+  media_id?: string;
+  media_type?: MediaType;
+  video_analysis_version?: string;
+  source_start_micros?: number;
+  source_end_micros?: number;
+  start_ms: number;
+  duration_ms: number;
+  anchor?: StoryBRollAnchor;
+  crop_intent?: CropIntent;
+  reason?: string;
+  confidence?: number;
+  score?: number;
+}
+
+export interface StoryBRollAnchor {
+  type: string;
+  moment_id?: string;
+  start_ms?: number;
+  end_ms?: number;
 }
 
 export interface StoryCaption {
@@ -147,6 +172,21 @@ export interface TimelineClip {
   speed: number;
 }
 
+export interface TimelineBRoll {
+  broll_id: string;
+  asset_id: string;
+  media_type: MediaType;
+  source_path: string;
+  prepared_path: string;
+  start_frame: number;
+  duration_frames: number;
+  duration_ms: number;
+  source_start_micros?: number;
+  source_end_micros?: number;
+  crop_intent: string;
+  transform: KenBurnsTransform | VideoTransform;
+}
+
 export interface KenBurnsTransform {
   kind: 'photo';
   from_scale: number;
@@ -175,6 +215,7 @@ export interface CompositionSpec {
   title_text?: string;
   ending_text?: string;
   clips: TimelineClip[];
+  broll: TimelineBRoll[];
   captions: StoryCaption[];
   caption_style?: CaptionStyle;
   audio: ResolvedAudio;

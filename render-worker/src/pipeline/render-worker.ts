@@ -1,6 +1,6 @@
 import {mkdir, writeFile} from 'node:fs/promises';
 import path from 'node:path';
-import {DEFAULT_FPS, ensureRenderDirs, renderFingerprint, stableClipId} from '../determinism.js';
+import {DEFAULT_FPS, ensureRenderDirs, renderFingerprint, stableBRollClipId, stableClipId} from '../determinism.js';
 import type {FfmpegClient} from '../ffmpeg/client.js';
 import type {RemotionRenderer} from '../remotion/renderer.js';
 import type {ObjectStore} from '../storage/object-store.js';
@@ -22,7 +22,7 @@ export class DeterministicRenderWorker {
 
   async render(input: RenderInput): Promise<RenderResult> {
     const rendererVersion = input.renderer_version ?? RENDER_VERSION;
-    console.info(JSON.stringify({level: 'info', msg: 'render job started', job_id: input.job_id, project_id: input.project_id, media_count: input.media_assets.length, moment_count: input.story_plan.moments.length, caption_count: input.story_plan.captions?.length ?? 0, output_s3_key: input.output_s3_key, renderer_version: rendererVersion}));
+    console.info(JSON.stringify({level: 'info', msg: 'render job started', job_id: input.job_id, project_id: input.project_id, media_count: input.media_assets.length, moment_count: input.story_plan.moments.length, broll_count: input.story_plan.broll?.length ?? 0, caption_count: input.story_plan.captions?.length ?? 0, output_s3_key: input.output_s3_key, renderer_version: rendererVersion}));
     validateInput(input, rendererVersion);
     const fingerprint = renderFingerprint(input, rendererVersion);
     const paths = await ensureRenderDirs(this.dependencies.workRoot, fingerprint);
@@ -34,7 +34,7 @@ export class DeterministicRenderWorker {
     console.info(JSON.stringify({level: 'info', msg: 'render clips prepared', job_id: input.job_id, project_id: input.project_id, prepared_count: preparedPaths.size}));
     const composition = buildComposition(input.story_plan, input.media_assets, assetPaths, preparedPaths, paths, {rendererVersion, fps: DEFAULT_FPS});
     await writeFile(paths.composition_file, JSON.stringify(composition, null, 2), 'utf8');
-    console.info(JSON.stringify({level: 'info', msg: 'render composition built', job_id: input.job_id, project_id: input.project_id, duration_ms: composition.duration_ms, width: composition.resolution.width, height: composition.resolution.height, clip_count: composition.clips.length, caption_count: composition.captions.length}));
+    console.info(JSON.stringify({level: 'info', msg: 'render composition built', job_id: input.job_id, project_id: input.project_id, duration_ms: composition.duration_ms, width: composition.resolution.width, height: composition.resolution.height, clip_count: composition.clips.length, broll_count: composition.broll.length, caption_count: composition.captions.length}));
     const remotionIntermediate = path.join(paths.work_dir, 'remotion-output.mp4');
     await this.dependencies.remotion.renderComposition(composition, remotionIntermediate);
     console.info(JSON.stringify({level: 'info', msg: 'remotion render completed', job_id: input.job_id, project_id: input.project_id}));
@@ -70,7 +70,10 @@ export class DeterministicRenderWorker {
   private async downloadRequiredAssets(input: RenderInput, assetsByID: Map<string, SourceMediaAsset>, assetsDir: string): Promise<Map<string, string>> {
     await mkdir(assetsDir, {recursive: true});
     const downloaded = new Map<string, string>();
-    const requiredIDs = [...new Set(input.story_plan.moments.map((moment) => moment.asset_id))];
+    const requiredIDs = [...new Set([
+      ...input.story_plan.moments.map((moment) => moment.asset_id),
+      ...(input.story_plan.broll ?? []).map((overlay) => overlay.asset_id),
+    ])];
     for (const assetID of requiredIDs) {
       const asset = assetsByID.get(assetID);
       if (!asset) {
@@ -122,6 +125,32 @@ export class DeterministicRenderWorker {
       });
       prepared.set(clipID, destination);
     }
+    for (const [index, overlay] of (input.story_plan.broll ?? []).entries()) {
+      const asset = assetsByID.get(overlay.asset_id);
+      if (!asset) {
+        throw new RenderInputError(`missing asset for b-roll: ${overlay.asset_id}`);
+      }
+      if (asset.media_type !== 'video') {
+        continue;
+      }
+      const sourcePath = assetPaths.get(asset.id);
+      if (!sourcePath) {
+        throw new RenderInputError(`b-roll video source was not downloaded: ${asset.id}`);
+      }
+      const startMicros = overlay.source_start_micros ?? 0;
+      const endMicros = overlay.source_end_micros ?? Math.round((asset.duration_seconds ?? overlay.duration_ms / 1000) * 1_000_000);
+      const clipID = stableBRollClipId(overlay, index);
+      const destination = path.join(clipsDir, `${clipID}.mp4`);
+      await this.dependencies.ffmpeg.trimVideo({
+        inputPath: sourcePath,
+        outputPath: destination,
+        startMicros,
+        endMicros,
+        speed: 1,
+        keepAudio: false,
+      });
+      prepared.set(clipID, destination);
+    }
     return prepared;
   }
 
@@ -145,6 +174,17 @@ function validateInput(input: RenderInput, rendererVersion: string): void {
   }
   if (input.story_plan.moments.length === 0) {
     throw new RenderInputError('story plan must include at least one moment');
+  }
+  for (const [index, overlay] of (input.story_plan.broll ?? []).entries()) {
+    if (!overlay.asset_id || overlay.start_ms < 0 || overlay.duration_ms <= 0) {
+      throw new RenderInputError(`invalid b-roll overlay at index ${index}`);
+    }
+    if (overlay.start_ms + overlay.duration_ms > (input.story_plan.total_duration_ms ?? Number.MAX_SAFE_INTEGER)) {
+      throw new RenderInputError(`b-roll overlay exceeds story duration at index ${index}`);
+    }
+    if (overlay.media_type === 'video' && ((overlay.source_start_micros ?? -1) < 0 || (overlay.source_end_micros ?? 0) <= (overlay.source_start_micros ?? -1))) {
+      throw new RenderInputError(`invalid b-roll source segment at index ${index}`);
+    }
   }
 }
 

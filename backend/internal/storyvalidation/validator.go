@@ -63,6 +63,12 @@ func New(store store.Store, objectStorage storage.ObjectStorage, config Config) 
 	if config.MaxTransitionLength == 0 {
 		config.MaxTransitionLength = DefaultConfig().MaxTransitionLength
 	}
+	if config.MaxBRollReasonLength == 0 {
+		config.MaxBRollReasonLength = DefaultConfig().MaxBRollReasonLength
+	}
+	if config.MaxBRollAnchorTypeLength == 0 {
+		config.MaxBRollAnchorTypeLength = DefaultConfig().MaxBRollAnchorTypeLength
+	}
 	if config.MaxPresetLength == 0 {
 		config.MaxPresetLength = DefaultConfig().MaxPresetLength
 	}
@@ -250,6 +256,7 @@ func (v *Validator) Validate(ctx context.Context, userID string, plan models.Sto
 	if plan.RequestedDurationMS > 0 && sumDurationMS > plan.RequestedDurationMS {
 		problems.Add("total_duration_ms", "out_of_range", "total duration exceeds the requested duration")
 	}
+	validateBRoll(ctx, v, userID, plan, projectMedia, momentIDs, sumDurationMS, problems)
 
 	if len(plan.Captions) > 0 {
 		seenCaptions := make(map[string]struct{}, len(plan.Captions))
@@ -377,6 +384,12 @@ func (v *Validator) config() Config {
 	if config.MaxTransitionLength == 0 {
 		config.MaxTransitionLength = defaults.MaxTransitionLength
 	}
+	if config.MaxBRollReasonLength == 0 {
+		config.MaxBRollReasonLength = defaults.MaxBRollReasonLength
+	}
+	if config.MaxBRollAnchorTypeLength == 0 {
+		config.MaxBRollAnchorTypeLength = defaults.MaxBRollAnchorTypeLength
+	}
 	if config.MaxPresetLength == 0 {
 		config.MaxPresetLength = defaults.MaxPresetLength
 	}
@@ -419,6 +432,103 @@ func (v *Validator) allowedCaptionFont(font string) bool {
 func (v *Validator) allowedCaptionPosition(position string) bool {
 	_, ok := v.config().AllowedCaptionPositions[strings.ToLower(strings.TrimSpace(position))]
 	return ok
+}
+
+func validateBRoll(ctx context.Context, v *Validator, userID string, plan models.StoryPlan, projectMedia map[string]struct{}, momentIDs map[string]struct{}, totalDurationMS int, problems *ValidationError) {
+	if len(plan.BRoll) == 0 {
+		return
+	}
+	config := v.config()
+	seen := make(map[string]struct{}, len(plan.BRoll))
+	brollDurationMS := 0
+	for index, overlay := range plan.BRoll {
+		field := fmt.Sprintf("broll[%d]", index)
+		assetID := strings.TrimSpace(firstNonEmpty(overlay.AssetID, overlay.MediaID))
+		if assetID == "" {
+			problems.Add(field+".asset_id", "required", "b-roll asset id is required")
+			continue
+		}
+		if len(projectMedia) > 0 {
+			if _, belongs := projectMedia[assetID]; !belongs {
+				problems.Add(field+".asset_id", "not_in_project", "b-roll references media outside the project")
+			}
+		}
+		if overlay.StartMS < 0 || overlay.DurationMS <= 0 || overlay.StartMS+overlay.DurationMS > totalDurationMS {
+			problems.Add(field+".timing", "invalid_timing", "b-roll timing must fit within story duration")
+		}
+		if len(overlay.CropIntent) > config.MaxCropIntentLength {
+			problems.Add(field+".crop_intent", "too_long", fmt.Sprintf("crop intent must be at most %d characters", config.MaxCropIntentLength))
+		}
+		if len(overlay.Reason) > config.MaxBRollReasonLength {
+			problems.Add(field+".reason", "too_long", fmt.Sprintf("b-roll reason must be at most %d characters", config.MaxBRollReasonLength))
+		}
+		if overlay.Confidence < 0 || overlay.Confidence > 1 || overlay.Score < 0 || overlay.Score > 1 {
+			problems.Add(field+".score", "out_of_range", "b-roll confidence and score must be between 0 and 1")
+		}
+		key := fmt.Sprintf("%s:%s:%d:%d:%d:%d", assetID, overlay.VideoAnalysisVersion, overlay.SourceStartMicros, overlay.SourceEndMicros, overlay.StartMS, overlay.DurationMS)
+		if _, exists := seen[key]; exists {
+			problems.Add(field+".asset_id", "duplicate_reference", "story plan contains a duplicate b-roll reference")
+		} else {
+			seen[key] = struct{}{}
+		}
+		media, err := v.Store.GetMedia(ctx, userID, assetID)
+		if err != nil {
+			problems.Add(field+".asset_id", "missing_asset", "b-roll references a media asset that does not exist")
+			continue
+		}
+		if overlay.MediaType != "" && overlay.MediaType != media.Type {
+			problems.Add(field+".media_type", "mismatch", "b-roll media type does not match the referenced asset")
+		}
+		switch media.Type {
+		case models.MediaTypeVideo:
+			if media.DurationSeconds == nil || *media.DurationSeconds <= 0 {
+				problems.Add(field+".duration_ms", "invalid_source_duration", "video b-roll asset is missing a valid source duration")
+			} else {
+				sourceDurationMicros := int64(math.Round(*media.DurationSeconds * 1_000_000))
+				if overlay.SourceStartMicros < 0 || overlay.SourceEndMicros <= overlay.SourceStartMicros || overlay.SourceEndMicros > sourceDurationMicros {
+					problems.Add(field+".source_segment", "out_of_range", "video b-roll source segment must be within the source duration")
+				}
+				if overlay.DurationMS > 0 && overlay.SourceEndMicros > overlay.SourceStartMicros && !durationMatchesVideoRange(overlay.DurationMS, overlay.SourceStartMicros, overlay.SourceEndMicros) && overlay.DurationMS > int((overlay.SourceEndMicros-overlay.SourceStartMicros)/1000) {
+					problems.Add(field+".duration_ms", "range_mismatch", "video b-roll duration must not exceed its source segment")
+				}
+			}
+			if strings.TrimSpace(overlay.VideoAnalysisVersion) == "" {
+				problems.Add(field+".video_analysis_version", "required", "video analysis version is required for video b-roll")
+			} else if _, err := v.Store.GetVideoAnalysis(ctx, userID, media.ID, overlay.VideoAnalysisVersion); err != nil {
+				problems.Add(field+".video_analysis_version", "missing_analysis", "video analysis version does not exist for the referenced b-roll asset")
+			}
+		case models.MediaTypePhoto, models.MediaTypeLivePhoto:
+			if overlay.SourceStartMicros != 0 || overlay.SourceEndMicros != 0 {
+				problems.Add(field+".source_segment", "invalid_timestamps", "photo b-roll must not define source timestamps")
+			}
+		default:
+			problems.Add(field+".media_type", "unsupported_media_type", "b-roll references an unsupported media type")
+		}
+		if strings.TrimSpace(media.S3Key) == "" {
+			problems.Add(field+".s3_key", "missing_object", "referenced b-roll media is missing its S3 object key")
+		} else if exists, err := v.ObjectStorage.ObjectExists(ctx, media.S3Key); err != nil {
+			problems.Add(field+".s3_key", "missing_object", "unable to verify referenced b-roll media object")
+		} else if !exists {
+			problems.Add(field+".s3_key", "missing_object", "referenced b-roll media object does not exist")
+		}
+		if overlay.Anchor != nil {
+			if len(overlay.Anchor.Type) > config.MaxBRollAnchorTypeLength {
+				problems.Add(field+".anchor.type", "too_long", fmt.Sprintf("b-roll anchor type must be at most %d characters", config.MaxBRollAnchorTypeLength))
+			}
+			if strings.TrimSpace(overlay.Anchor.MomentID) != "" {
+				if _, exists := momentIDs[overlay.Anchor.MomentID]; !exists {
+					problems.Add(field+".anchor.moment_id", "unknown_moment", "b-roll anchor references an unknown moment")
+				}
+			}
+			if overlay.Anchor.StartMS < 0 || overlay.Anchor.EndMS <= overlay.Anchor.StartMS || overlay.Anchor.EndMS > totalDurationMS {
+				problems.Add(field+".anchor.timing", "invalid_timing", "b-roll anchor timing must fit within story duration")
+			}
+		}
+		brollDurationMS += overlay.DurationMS
+	}
+	if totalDurationMS > 0 && float64(brollDurationMS) > float64(totalDurationMS)*0.40+1 {
+		problems.Add("broll", "too_much_broll", "b-roll must not dominate the story duration")
+	}
 }
 
 func isHexColor(value string) bool {

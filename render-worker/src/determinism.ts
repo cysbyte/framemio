@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {mkdir} from 'node:fs/promises';
 import path from 'node:path';
-import type {AspectRatio, RenderInput, Resolution, StoryMoment} from './types.js';
+import type {AspectRatio, RenderInput, Resolution, StoryBRoll, StoryMoment} from './types.js';
 
 export const DEFAULT_FPS = 30;
 
@@ -49,6 +49,10 @@ export function millisecondsFromFrames(frames: number, fps = DEFAULT_FPS): numbe
 
 export function stableClipId(moment: StoryMoment, index: number): string {
   return stableHash({index, moment}).slice(0, 20);
+}
+
+export function stableBRollClipId(overlay: StoryBRoll, index: number): string {
+  return stableHash({index, overlay}).slice(0, 20);
 }
 
 export function deterministicUnit(seed: string, salt: string): number {

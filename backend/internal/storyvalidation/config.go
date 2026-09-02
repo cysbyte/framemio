@@ -16,6 +16,8 @@ type Config struct {
 	MaxReasonLength           int
 	MaxCropIntentLength       int
 	MaxTransitionLength       int
+	MaxBRollReasonLength      int
+	MaxBRollAnchorTypeLength  int
 	MaxPresetLength           int
 	MaxAudioSourceLength      int
 	MaxCaptionFontSize        int
@@ -61,6 +63,8 @@ func DefaultConfig() Config {
 		MaxReasonLength:           240,
 		MaxCropIntentLength:       32,
 		MaxTransitionLength:       32,
+		MaxBRollReasonLength:      120,
+		MaxBRollAnchorTypeLength:  32,
 		MaxPresetLength:           64,
 		MaxAudioSourceLength:      32,
 		MaxCaptionFontSize:        96,

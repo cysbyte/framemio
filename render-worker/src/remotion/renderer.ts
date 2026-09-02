@@ -2,7 +2,7 @@ import {spawn} from 'node:child_process';
 import {mkdir, open, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import type {CaptionStyle, CompositionSpec, KenBurnsTransform, StoryCaption, TimelineClip} from '../types.js';
+import type {CaptionStyle, CompositionSpec, KenBurnsTransform, StoryCaption, TimelineBRoll, TimelineClip} from '../types.js';
 import {canonicalJson, stableHash} from '../determinism.js';
 
 export interface RemotionRenderer {
@@ -50,6 +50,7 @@ export class RemotionCliRenderer implements RemotionRenderer {
 }
 
 type PhotoTimelineClip = TimelineClip & {transform: KenBurnsTransform};
+type PhotoTimelineBRoll = TimelineBRoll & {transform: KenBurnsTransform};
 
 interface ConcatFilter {
   filter: string;
@@ -113,7 +114,9 @@ function concatFilter(composition: CompositionSpec, captions: CaptionOverlay[] =
     : sourceVideoFilter(clip, index, composition, transitionEffects(composition.clips, index)));
   const videoInputs = composition.clips.map((_, index) => `[v${index}]`).join('');
   const filters = [...videoFilters, `${videoInputs}concat=n=${composition.clips.length}:v=1:a=0,format=yuv420p[basev]`];
-  filters.push(captionVideoFilter(captions, composition.caption_style));
+  const brollFilters = brollVideoFilters(composition);
+  filters.push(...brollFilters.filters);
+  filters.push(captionVideoFilter(captions, composition.caption_style, brollFilters.outputLabel));
 
   const audioOutputs: string[] = [];
   if (composition.audio.original_audio) {
@@ -140,13 +143,33 @@ function isPhotoTimelineClip(clip: TimelineClip): clip is PhotoTimelineClip {
   return clip.transform.kind === 'photo';
 }
 
-function captionVideoFilter(captions: CaptionOverlay[], requestedStyle?: CaptionStyle): string {
+function isPhotoTimelineBRoll(overlay: TimelineBRoll): overlay is PhotoTimelineBRoll {
+  return overlay.transform.kind === 'photo';
+}
+
+function brollVideoFilters(composition: CompositionSpec): {filters: string[]; outputLabel: string} {
+  const filters: string[] = [];
+  let baseInput = 'basev';
+  composition.broll.forEach((overlay, index) => {
+    const sourceLabel = `bv${index}`;
+    const outputLabel = `basev_broll_${index}`;
+    const inputIndex = composition.clips.length + index;
+    filters.push(isPhotoTimelineBRoll(overlay)
+      ? brollPhotoVideoFilter(overlay, inputIndex, sourceLabel, composition)
+      : brollSourceVideoFilter(overlay, inputIndex, sourceLabel, composition));
+    filters.push(`[${baseInput}][${sourceLabel}]overlay=0:0:enable='between(t,${secondsFromFrames(overlay.start_frame, composition.fps)},${secondsFromFrames(overlay.start_frame + overlay.duration_frames, composition.fps)})'[${outputLabel}]`);
+    baseInput = outputLabel;
+  });
+  return {filters, outputLabel: baseInput};
+}
+
+function captionVideoFilter(captions: CaptionOverlay[], requestedStyle?: CaptionStyle, inputLabel = 'basev'): string {
   if (captions.length === 0) {
-    return '[basev]format=yuv420p[outv]';
+    return `[${inputLabel}]format=yuv420p[outv]`;
   }
   const style = resolveCaptionStyle(requestedStyle);
   const filters: string[] = [];
-  let input = 'basev';
+  let input = inputLabel;
   captions.forEach((caption, index) => {
     const output = index === captions.length - 1 ? 'outv' : `captionv${index}`;
     filters.push(`[${input}]drawtext=${drawtextOptions(caption, style)},format=yuv420p[${output}]`);
@@ -269,6 +292,29 @@ function photoVideoFilter(clip: PhotoTimelineClip, index: number, composition: C
   return `[${index}:v]scale=${composition.resolution.width}:${composition.resolution.height}:force_original_aspect_ratio=increase,crop=${composition.resolution.width}:${composition.resolution.height},setsar=1,fps=${composition.fps},zoompan=z='${zoom}':x='${x}':y='${y}':d=1:s=${composition.resolution.width}x${composition.resolution.height}:fps=${composition.fps},trim=duration=${clipDurationSeconds(clip)},setpts=PTS-STARTPTS${videoFadeFilters(clip, effects)}[v${index}]`;
 }
 
+function brollSourceVideoFilter(overlay: TimelineBRoll, inputIndex: number, outputLabel: string, composition: CompositionSpec): string {
+  const scaleAndCrop = overlay.transform.kind === 'video' && overlay.transform.crop === 'fit'
+    ? `scale=${composition.resolution.width}:${composition.resolution.height}:force_original_aspect_ratio=decrease,pad=${composition.resolution.width}:${composition.resolution.height}:(ow-iw)/2:(oh-ih)/2`
+    : `scale=${composition.resolution.width}:${composition.resolution.height}:force_original_aspect_ratio=increase,crop=${composition.resolution.width}:${composition.resolution.height}`;
+  return `[${inputIndex}:v]${scaleAndCrop},setsar=1,fps=${composition.fps},trim=duration=${clipDurationSeconds(overlay)},setpts=PTS-STARTPTS+${secondsFromFrames(overlay.start_frame, composition.fps)}/TB[${outputLabel}]`;
+}
+
+function brollPhotoVideoFilter(overlay: PhotoTimelineBRoll, inputIndex: number, outputLabel: string, composition: CompositionSpec): string {
+  const transform = overlay.transform;
+  const denominator = Math.max(1, overlay.duration_frames - 1);
+  const progress = `on/${denominator}`;
+  const fromScale = ffmpegNumber(transform.from_scale);
+  const toScale = ffmpegNumber(transform.to_scale);
+  const fromX = ffmpegNumber(transform.from_x);
+  const toX = ffmpegNumber(transform.to_x);
+  const fromY = ffmpegNumber(transform.from_y);
+  const toY = ffmpegNumber(transform.to_y);
+  const zoom = `${fromScale}+(${toScale}-${fromScale})*${progress}`;
+  const x = `iw/2-(iw/zoom/2)+(${fromX}+(${toX}-${fromX})*${progress})*iw`;
+  const y = `ih/2-(ih/zoom/2)+(${fromY}+(${toY}-${fromY})*${progress})*ih`;
+  return `[${inputIndex}:v]scale=${composition.resolution.width}:${composition.resolution.height}:force_original_aspect_ratio=increase,crop=${composition.resolution.width}:${composition.resolution.height},setsar=1,fps=${composition.fps},zoompan=z='${zoom}':x='${x}':y='${y}':d=1:s=${composition.resolution.width}x${composition.resolution.height}:fps=${composition.fps},trim=duration=${clipDurationSeconds(overlay)},setpts=PTS-STARTPTS+${secondsFromFrames(overlay.start_frame, composition.fps)}/TB[${outputLabel}]`;
+}
+
 function transitionEffects(clips: TimelineClip[], index: number): ClipTransitionEffects {
   const clip = clips[index];
   return {
@@ -313,6 +359,14 @@ function fadeOutStartSeconds(clip: {duration_ms: number}, fadeSeconds: number): 
 
 function clipDurationSeconds(clip: {duration_ms: number}): string {
   return Math.max(0.001, clip.duration_ms / 1000).toFixed(3);
+}
+
+function brollDurationSeconds(overlay: TimelineBRoll): string {
+  return clipDurationSeconds(overlay);
+}
+
+function secondsFromFrames(frames: number, fps: number): string {
+  return (frames / fps).toFixed(3);
 }
 
 function ffmpegNumber(value: number): string {
@@ -450,6 +504,15 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
       }
       args.push('-i', inputPath);
     }
+    for (const overlay of composition.broll) {
+      const inputPath = overlay.media_type === 'video'
+        ? overlay.prepared_path
+        : await this.prepareStillImageInput(overlay, outputPath);
+      if (overlay.media_type !== 'video') {
+        args.push('-loop', '1', '-t', brollDurationSeconds(overlay));
+      }
+      args.push('-i', inputPath);
+    }
     const captions = await this.prepareCaptionOverlays(composition, outputPath);
     console.info(JSON.stringify({level: 'info', msg: 'ffmpeg caption overlays prepared', project_id: composition.project_id, story_plan_id: composition.story_plan_id, input_caption_count: composition.captions.length, overlay_count: captions.length}));
     const filter = concatFilter(composition, captions);
@@ -502,20 +565,21 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
     return overlays;
   }
 
-  private async prepareStillImageInput(clip: TimelineClip, outputPath: string): Promise<string> {
+  private async prepareStillImageInput(clip: {source_path: string; clip_id?: string; broll_id?: string}, outputPath: string): Promise<string> {
     if (!isHeifImagePath(clip.source_path)) {
       return clip.source_path;
     }
+    const clipID = clip.clip_id ?? clip.broll_id ?? stableHash(clip.source_path).slice(0, 20);
     if (await isJpegImage(clip.source_path)) {
-      console.warn(JSON.stringify({level: 'warn', msg: 'HEIC extension contains JPEG bytes; using source image directly', clip_id: clip.clip_id, source_path: clip.source_path}));
+      console.warn(JSON.stringify({level: 'warn', msg: 'HEIC extension contains JPEG bytes; using source image directly', clip_id: clipID, source_path: clip.source_path}));
       return clip.source_path;
     }
-    const convertedPath = path.join(path.dirname(outputPath), `${clip.clip_id}.jpg`);
+    const convertedPath = path.join(path.dirname(outputPath), `${clipID}.jpg`);
     try {
       await run(this.heifConvertBinary, [clip.source_path, convertedPath], 60 * 1000);
     } catch (error) {
       if (error instanceof Error && error.message.includes('is a JPEG image')) {
-        console.warn(JSON.stringify({level: 'warn', msg: 'HEIC converter reported JPEG bytes; using source image directly', clip_id: clip.clip_id, source_path: clip.source_path}));
+        console.warn(JSON.stringify({level: 'warn', msg: 'HEIC converter reported JPEG bytes; using source image directly', clip_id: clipID, source_path: clip.source_path}));
         return clip.source_path;
       }
       throw error;

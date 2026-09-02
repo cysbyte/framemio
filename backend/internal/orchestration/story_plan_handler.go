@@ -73,7 +73,7 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		h.logger().Error("story planner failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Any("error", err))
 		return err
 	}
-	h.logger().Info("story planner output ready", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.Int("moment_count", len(plan.Moments)), slog.Int("caption_count", len(plan.Captions)), slog.Int("video_moment_count", videoMomentCount(plan.Moments)), slog.String("caption_style_preset", storyPlanCaptionStylePreset(plan)))
+	h.logger().Info("story planner output ready", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.Int("candidate_count", len(photoAnalyses)+totalVideoSegments(videoAnalyses)), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.String("broll_scores", brollScores(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)), slog.Int("video_moment_count", videoMomentCount(plan.Moments)), slog.String("caption_style_preset", storyPlanCaptionStylePreset(plan)))
 	if err := h.Store.SaveStoryPlan(ctx, job.UserID, plan); err != nil {
 		h.logger().Error("save story plan failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("caption_count", len(plan.Captions)), slog.Any("error", err))
 		return err
@@ -455,6 +455,26 @@ func totalTranscriptSegments(videoAnalyses []models.VideoAnalysis) int {
 		total += len(analysis.Transcript.Segments)
 	}
 	return total
+}
+
+func totalVideoSegments(videoAnalyses []models.VideoAnalysis) int {
+	total := 0
+	for _, analysis := range videoAnalyses {
+		total += len(analysis.Segments)
+	}
+	return total
+}
+
+func brollScores(overlays []models.StoryBRoll) string {
+	if len(overlays) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(overlays))
+	for _, overlay := range overlays {
+		parts = append(parts, fmt.Sprintf("%s:%s:%.3f", overlay.BrollID, overlay.AssetID, overlay.Score))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ",")
 }
 
 func videoMomentCount(moments []models.StoryMoment) int {

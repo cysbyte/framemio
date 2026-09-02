@@ -210,6 +210,12 @@ func makePersistentAnalysis(request Request, response domain.VideoUnderstandingR
 			EmotionalValue: candidate.EmotionalValueScore, StoryRelevance: candidate.StoryRelevanceScore,
 			Recommended:      candidate.RecommendedUsage != domain.RecommendedUsageExclude,
 			RecommendedUsage: candidate.RecommendedUsage, Reasons: []string{candidate.Reason},
+			People: candidate.People, Activities: candidate.Activities, Interactions: candidate.Interactions,
+			Expressions: candidate.Expressions, Objects: candidate.Objects, Food: candidate.Food,
+			Locations: candidate.Locations, Scenery: candidate.Scenery, Events: candidate.Events,
+			InterestingActions: candidate.InterestingActions, Speech: candidate.Speech,
+			MeaningfulAudio: candidate.MeaningfulAudio,
+			Labels:          normalizedLabels(append(append(append(append([]string{}, candidate.Objects...), candidate.Food...), candidate.Scenery...), candidate.Events...)),
 		})
 		people = append(people, candidate.People...)
 		activities = append(activities, candidate.Activities...)

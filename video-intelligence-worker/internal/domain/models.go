@@ -290,19 +290,32 @@ type Scene struct {
 }
 
 type Segment struct {
-	SegmentID        string   `json:"segment_id"`
-	SceneID          string   `json:"scene_id"`
-	StartMicros      int64    `json:"start_micros"`
-	EndMicros        int64    `json:"end_micros"`
-	Description      string   `json:"description"`
-	Importance       float64  `json:"importance"`
-	VisualQuality    float64  `json:"visual_quality"`
-	MemoryValue      float64  `json:"memory_value"`
-	EmotionalValue   float64  `json:"emotional_value"`
-	StoryRelevance   float64  `json:"story_relevance"`
-	Recommended      bool     `json:"recommended"`
-	RecommendedUsage string   `json:"recommended_usage"`
-	Reasons          []string `json:"reasons"`
+	SegmentID          string   `json:"segment_id"`
+	SceneID            string   `json:"scene_id"`
+	StartMicros        int64    `json:"start_micros"`
+	EndMicros          int64    `json:"end_micros"`
+	Description        string   `json:"description"`
+	Importance         float64  `json:"importance"`
+	VisualQuality      float64  `json:"visual_quality"`
+	MemoryValue        float64  `json:"memory_value"`
+	EmotionalValue     float64  `json:"emotional_value"`
+	StoryRelevance     float64  `json:"story_relevance"`
+	Recommended        bool     `json:"recommended"`
+	RecommendedUsage   string   `json:"recommended_usage"`
+	Reasons            []string `json:"reasons"`
+	People             []string `json:"people,omitempty"`
+	Activities         []string `json:"activities,omitempty"`
+	Interactions       []string `json:"interactions,omitempty"`
+	Expressions        []string `json:"expressions,omitempty"`
+	Objects            []string `json:"objects,omitempty"`
+	Food               []string `json:"food,omitempty"`
+	Locations          []string `json:"locations,omitempty"`
+	Scenery            []string `json:"scenery,omitempty"`
+	Events             []string `json:"events,omitempty"`
+	InterestingActions []string `json:"interesting_actions,omitempty"`
+	Speech             []string `json:"speech,omitempty"`
+	MeaningfulAudio    []string `json:"meaningful_audio,omitempty"`
+	Labels             []string `json:"labels,omitempty"`
 }
 
 type VideoAnalysis struct {

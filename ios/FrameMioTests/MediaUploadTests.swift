@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 @testable import FrameMio
 
@@ -245,6 +246,22 @@ final class MediaUploadTests: XCTestCase {
         XCTAssertEqual(materializationCount, 2)
         XCTAssertEqual(requestCount, 2)
         XCTAssertEqual(createSessionCallCount, 2)
+    }
+
+    func testStoryThumbnailCacheRoundTripsImageData() {
+        let fileManager = FileManager.default
+        if let cacheDirectory = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("FrameMio", isDirectory: true)
+            .appendingPathComponent("story-thumbnails-v1", isDirectory: true) {
+            try? fileManager.removeItem(at: cacheDirectory)
+            defer { try? fileManager.removeItem(at: cacheDirectory) }
+        }
+
+        let image = UIImage(systemName: "photo") ?? UIImage()
+        StoryThumbnailCache.save(image, storyID: "story-1", storyAssetID: "moment-1", fileManager: fileManager)
+
+        let restored = StoryThumbnailCache.load(storyID: "story-1", storyAssetID: "moment-1", fileManager: fileManager)
+        XCTAssertNotNil(restored)
     }
 
     func testLargeVideoUsesMultipartPartSizedFiles() async throws {
