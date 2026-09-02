@@ -267,13 +267,13 @@ function sourceVideoFilter(clip: TimelineClip, index: number, composition: Compo
   return `[${index}:v]${scaleAndCrop},setsar=1,fps=${composition.fps},trim=duration=${clipDurationSeconds(clip)},setpts=PTS-STARTPTS${videoFadeFilters(clip, effects)}[v${index}]`;
 }
 
-function sourceAudioFilter(clip: TimelineClip, index: number, composition: CompositionSpec, _effects: ClipTransitionEffects): string {
+function sourceAudioFilter(clip: TimelineClip, index: number, composition: CompositionSpec, effects: ClipTransitionEffects): string {
   const volume = ffmpegNumber(clip.volume * composition.audio.original_volume);
-  return `[${index}:a]atrim=duration=${clipDurationSeconds(clip)},asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=${volume}[a${index}]`;
+  return `[${index}:a]atrim=duration=${clipDurationSeconds(clip)},asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=${volume}${audioFadeFilters(clip, effects)}[a${index}]`;
 }
 
-function silentAudioFilter(clip: TimelineClip, index: number, _effects: ClipTransitionEffects): string {
-  return `anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration=${clipDurationSeconds(clip)},asetpts=PTS-STARTPTS,aformat=sample_fmts=fltp:channel_layouts=stereo[a${index}]`;
+function silentAudioFilter(clip: TimelineClip, index: number, effects: ClipTransitionEffects): string {
+  return `anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration=${clipDurationSeconds(clip)},asetpts=PTS-STARTPTS,aformat=sample_fmts=fltp:channel_layouts=stereo${audioFadeFilters(clip, effects)}[a${index}]`;
 }
 
 function photoVideoFilter(clip: PhotoTimelineClip, index: number, composition: CompositionSpec, effects: ClipTransitionEffects): string {
