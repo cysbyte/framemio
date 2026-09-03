@@ -35,7 +35,8 @@ type Request struct {
 }
 
 type Planner struct {
-	Now func() time.Time
+	Now               func() time.Time
+	TypographyPlanner TypographyPlanner
 }
 
 const maxVideoMomentDuration = 5 * time.Second
@@ -133,6 +134,7 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 	visualStyle := normalizeVisualStyle(request.VisualStyle)
 	titleText := titleFor(storyType, request, moments)
 	endingText := endingFor(storyType, request, moments)
+	moments = p.applyTypography(ctx, request, moments, titleText)
 	captionStyle := captionStyleFor(storyType, visualStyle)
 	if preset := strings.TrimSpace(request.CaptionStylePreset); preset != "" {
 		captionStyle = captionStylePreset(preset, storyType, visualStyle)
@@ -164,6 +166,49 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 		return models.StoryPlan{}, err
 	}
 	return plan, nil
+}
+
+func (p *Planner) applyTypography(ctx context.Context, request Request, moments []models.StoryMoment, titleText string) []models.StoryMoment {
+	planner := TypographyPlanner(DefaultTypographyPlanner{})
+	if p != nil && p.TypographyPlanner != nil {
+		planner = p.TypographyPlanner
+	}
+	contexts := make([]TypographyMomentContext, 0, len(moments))
+	for index, moment := range moments {
+		contexts = append(contexts, TypographyMomentContext{
+			MomentID: moment.MomentID, AssetID: firstNonEmpty(moment.AssetID, moment.MediaID), MediaType: moment.MediaType,
+			Narrative: moment.Narrative, Caption: moment.Caption, Reason: moment.Reason,
+			DurationMS: moment.DurationMS, Score: moment.Score, Index: index,
+		})
+	}
+	typographyPlan, err := planner.Generate(ctx, TypographyPlanningInput{
+		ProjectID:         request.ProjectID,
+		StoryPlanID:       planID(request, moments),
+		StoryPlanVersion:  versionFor(request.Version),
+		TypographyVersion: TypographyPromptVersion,
+		StoryTitle:        titleText,
+		StoryType:         normalizeStoryType(request.StoryType),
+		VisualStyle:       normalizeVisualStyle(request.VisualStyle),
+		NarrativeSummary:  titleText,
+		UserInstructions:  strings.TrimSpace(request.UserInstructions),
+		Moments:           contexts,
+	})
+	if err != nil || len(typographyPlan.Overlays) == 0 {
+		return moments
+	}
+	updated := append([]models.StoryMoment(nil), moments...)
+	for index := range updated {
+		overlay, ok := typographyPlan.Overlays[updated[index].MomentID]
+		if !ok {
+			continue
+		}
+		normalized, err := NormalizeTextOverlay(overlay, updated[index].DurationMS)
+		if err != nil {
+			continue
+		}
+		updated[index].Typography = &normalized
+	}
+	return updated
 }
 
 func captionStyleFor(storyType models.StoryType, visualStyle models.VisualStyle) *models.CaptionStyle {
@@ -261,6 +306,11 @@ func ValidateStoryPlan(plan models.StoryPlan) error {
 		if moment.MediaType == models.MediaTypeVideo {
 			if strings.TrimSpace(moment.VideoAnalysisVersion) == "" || moment.StartMicros < 0 || moment.EndMicros <= moment.StartMicros {
 				return fmt.Errorf("video moment %s is missing valid analysis references", mediaID)
+			}
+		}
+		if moment.Typography != nil {
+			if err := ValidTextOverlay(*moment.Typography, moment.DurationMS); err != nil {
+				return fmt.Errorf("moment %s typography is invalid: %w", mediaID, err)
 			}
 		}
 		if strings.TrimSpace(moment.CropIntent) == "" || strings.TrimSpace(moment.Transition) == "" {

@@ -40,6 +40,37 @@ export interface StoryMoment {
   score?: number;
   speed?: number;
   volume?: number;
+  typography?: TextOverlay;
+}
+
+export type TextOverlayType = 'moment_title' | 'moment_caption' | 'location' | 'date' | 'chapter_title' | 'story_intro' | 'story_outro' | string;
+export type TypographyStyle = 'cinematic' | 'minimal' | 'editorial' | 'memory' | 'location' | string;
+export type TextPlacement = 'top_left' | 'top_center' | 'top_right' | 'center_left' | 'center' | 'center_right' | 'bottom_left' | 'bottom_center' | 'bottom_right' | string;
+export type TextAnimation = 'fade' | 'fade_up' | 'fade_down' | 'subtle_scale' | 'none' | string;
+export type TextSource = 'ai' | 'user' | 'system' | string;
+
+export interface SafeArea {
+  top?: number;
+  right?: number;
+  bottom?: number;
+  left?: number;
+}
+
+export interface TextOverlay {
+  enabled: boolean;
+  type?: TextOverlayType;
+  title?: string;
+  subtitle?: string;
+  style?: TypographyStyle;
+  placement?: TextPlacement;
+  start_ms?: number;
+  duration_ms?: number;
+  max_width?: number;
+  safe_area?: SafeArea;
+  animation?: TextAnimation;
+  source?: TextSource;
+  reason?: string;
+  confidence?: number;
 }
 
 export interface StoryBRoll {
@@ -170,6 +201,7 @@ export interface TimelineClip {
   transition: TransitionType;
   volume: number;
   speed: number;
+  typography?: TextOverlay;
 }
 
 export interface TimelineBRoll {

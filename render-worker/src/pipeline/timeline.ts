@@ -73,6 +73,7 @@ export function buildComposition(
       transition: transitionFor(moment),
       volume: clamp(moment.volume ?? 1, 0, 1),
       speed: speedFor(moment),
+      typography: normalizeTypography(moment.typography, moment.duration_ms),
     };
     nextFrame += durationFrames;
     return clip;
@@ -121,6 +122,63 @@ export function buildComposition(
     caption_style: storyPlan.caption_style,
     audio: resolveAudio(storyPlan, paths, fps),
   };
+}
+
+function normalizeTypography(typography: StoryMoment['typography'], momentDurationMs: number): StoryMoment['typography'] | undefined {
+  if (!typography?.enabled) {
+    return undefined;
+  }
+  const title = cleanTypographyText(typography.title).slice(0, 40);
+  const subtitle = cleanTypographyText(typography.subtitle).slice(0, 100);
+  if (!title && !subtitle) {
+    return undefined;
+  }
+  const startMs = clamp(Math.round(typography.start_ms ?? 350), 0, Math.max(0, momentDurationMs - 250));
+  const durationMs = clamp(Math.round(typography.duration_ms ?? momentDurationMs - startMs - 250), 250, Math.max(250, momentDurationMs - startMs));
+  return {
+    enabled: true,
+    type: supportedTypographyType(typography.type),
+    title,
+    subtitle,
+    style: supportedTypographyStyle(typography.style),
+    placement: supportedTextPlacement(typography.placement),
+    start_ms: startMs,
+    duration_ms: durationMs,
+    max_width: clampNumber(typography.max_width ?? 0.72, 0.2, 0.95),
+    safe_area: {
+      top: clampNumber(typography.safe_area?.top ?? 0.08, 0, 0.5),
+      right: clampNumber(typography.safe_area?.right ?? 0.08, 0, 0.5),
+      bottom: clampNumber(typography.safe_area?.bottom ?? 0.08, 0, 0.5),
+      left: clampNumber(typography.safe_area?.left ?? 0.08, 0, 0.5),
+    },
+    animation: supportedTextAnimation(typography.animation),
+    source: typography.source === 'user' || typography.source === 'system' ? typography.source : 'ai',
+    confidence: clampNumber(typography.confidence ?? 0, 0, 1),
+  };
+}
+
+function cleanTypographyText(value: unknown): string {
+  return typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim() : '';
+}
+
+function supportedTypographyType(value: unknown): string {
+  return typeof value === 'string' && ['moment_title', 'moment_caption', 'location', 'date', 'chapter_title', 'story_intro', 'story_outro'].includes(value) ? value : 'moment_title';
+}
+
+function supportedTypographyStyle(value: unknown): string {
+  return typeof value === 'string' && ['cinematic', 'minimal', 'editorial', 'memory', 'location'].includes(value) ? value : 'cinematic';
+}
+
+function supportedTextPlacement(value: unknown): string {
+  return typeof value === 'string' && ['top_left', 'top_center', 'top_right', 'center_left', 'center', 'center_right', 'bottom_left', 'bottom_center', 'bottom_right'].includes(value) ? value : 'bottom_left';
+}
+
+function supportedTextAnimation(value: unknown): string {
+  return typeof value === 'string' && ['fade', 'fade_up', 'fade_down', 'subtle_scale', 'none'].includes(value) ? value : 'fade_up';
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Number.isFinite(value) ? value : min));
 }
 
 export function mediaExtension(asset: SourceMediaAsset): string {

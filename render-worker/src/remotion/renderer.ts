@@ -2,7 +2,7 @@ import {spawn} from 'node:child_process';
 import {mkdir, open, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import type {CaptionStyle, CompositionSpec, KenBurnsTransform, StoryCaption, TimelineBRoll, TimelineClip} from '../types.js';
+import type {CaptionStyle, CompositionSpec, KenBurnsTransform, StoryCaption, TextOverlay, TimelineBRoll, TimelineClip} from '../types.js';
 import {canonicalJson, stableHash} from '../determinism.js';
 
 export interface RemotionRenderer {
@@ -63,6 +63,21 @@ interface CaptionOverlay {
   endSeconds: string;
 }
 
+interface TypographyOverlay {
+  textFilePath: string;
+  startSeconds: string;
+  endSeconds: string;
+  placement: string;
+  style: string;
+  kind: 'title' | 'subtitle';
+  safeArea: Required<NonNullable<TextOverlay['safe_area']>>;
+  maxWidth: number;
+  lineCount: number;
+  groupHeight: number;
+  offsetY: number;
+  animation: string;
+}
+
 interface ResolvedCaptionStyle {
   fontFamily?: string;
   fontSize: number;
@@ -76,6 +91,20 @@ interface ResolvedCaptionStyle {
   bottomOffset: number;
   maxLines: number;
   maxCharactersPerLine: number;
+}
+
+interface ResolvedTypographyStyle {
+  fontFamily: string;
+  titleFontSize: number;
+  subtitleFontSize: number;
+  textColor: string;
+  subtitleColor: string;
+  shadowColor: string;
+  shadowOpacity: number;
+  strokeWidth: number;
+  backgroundEnabled: boolean;
+  backgroundColor: string;
+  backgroundOpacity: number;
 }
 
 const DEFAULT_CAPTION_STYLE: ResolvedCaptionStyle = {
@@ -101,6 +130,28 @@ const FONT_FAMILY_MAP = new Map<string, string>([
   ['noto-sans-bold', 'DejaVu Sans Bold'],
 ]);
 
+const TYPOGRAPHY_FONT_FAMILY_MAP = new Map<string, string>([
+  ['cinematic', 'Liberation Serif'],
+  ['minimal', 'Liberation Sans'],
+  ['editorial', 'Liberation Serif'],
+  ['memory', 'Liberation Sans'],
+  ['location', 'Liberation Sans'],
+]);
+
+const DEFAULT_TYPOGRAPHY_STYLE: ResolvedTypographyStyle = {
+  fontFamily: 'Liberation Sans',
+  titleFontSize: 62,
+  subtitleFontSize: 34,
+  textColor: 'white',
+  subtitleColor: 'white',
+  shadowColor: 'black',
+  shadowOpacity: 0.54,
+  strokeWidth: 1,
+  backgroundEnabled: false,
+  backgroundColor: 'black',
+  backgroundOpacity: 0.22,
+};
+
 const SCENE_FADE_SECONDS = 0.45;
 
 interface ClipTransitionEffects {
@@ -108,7 +159,7 @@ interface ClipTransitionEffects {
   fadeOutSeconds: number;
 }
 
-function concatFilter(composition: CompositionSpec, captions: CaptionOverlay[] = []): ConcatFilter {
+function concatFilter(composition: CompositionSpec, captions: CaptionOverlay[] = [], typography: TypographyOverlay[] = []): ConcatFilter {
   const videoFilters = composition.clips.map((clip, index) => isPhotoTimelineClip(clip)
     ? photoVideoFilter(clip, index, composition, transitionEffects(composition.clips, index))
     : sourceVideoFilter(clip, index, composition, transitionEffects(composition.clips, index)));
@@ -116,7 +167,11 @@ function concatFilter(composition: CompositionSpec, captions: CaptionOverlay[] =
   const filters = [...videoFilters, `${videoInputs}concat=n=${composition.clips.length}:v=1:a=0,format=yuv420p[basev]`];
   const brollFilters = brollVideoFilters(composition);
   filters.push(...brollFilters.filters);
-  filters.push(captionVideoFilter(captions, composition.caption_style, brollFilters.outputLabel));
+  const typographyFilters = typographyVideoFilter(typography, brollFilters.outputLabel);
+  if (typographyFilters.filter) {
+    filters.push(typographyFilters.filter);
+  }
+  filters.push(captionVideoFilter(captions, composition.caption_style, typographyFilters.outputLabel));
 
   const audioOutputs: string[] = [];
   if (composition.audio.original_audio) {
@@ -137,6 +192,20 @@ function concatFilter(composition: CompositionSpec, captions: CaptionOverlay[] =
     filters.push(`${audioOutputs.join('')}amix=inputs=${audioOutputs.length}:duration=first:normalize=0[outa]`);
   }
   return {filter: filters.join(';'), hasAudio: true};
+}
+
+function typographyVideoFilter(overlays: TypographyOverlay[], inputLabel = 'basev'): {filter: string; outputLabel: string} {
+  if (overlays.length === 0) {
+    return {filter: '', outputLabel: inputLabel};
+  }
+  const filters: string[] = [];
+  let input = inputLabel;
+  overlays.forEach((overlay, index) => {
+    const output = index === overlays.length - 1 ? 'typographyv' : `typographyv${index}`;
+    filters.push(`[${input}]drawtext=${typographyDrawtextOptions(overlay)},format=yuv420p[${output}]`);
+    input = output;
+  });
+  return {filter: filters.join(';'), outputLabel: 'typographyv'};
 }
 
 function isPhotoTimelineClip(clip: TimelineClip): clip is PhotoTimelineClip {
@@ -204,6 +273,136 @@ function drawtextOptions(caption: CaptionOverlay, style: ResolvedCaptionStyle): 
     `enable='between(t,${caption.startSeconds},${caption.endSeconds})'`,
   );
   return options.join(':');
+}
+
+function typographyDrawtextOptions(overlay: TypographyOverlay): string {
+  const style = resolveTypographyStyle(overlay.style);
+  const fontSize = overlay.kind === 'title' ? style.titleFontSize : style.subtitleFontSize;
+  const color = overlay.kind === 'title' ? style.textColor : style.subtitleColor;
+  const options = [`textfile='${escapeFilterPath(overlay.textFilePath)}'`];
+  options.push(
+    `font='${style.fontFamily}'`,
+    `fontcolor=${color}`,
+    `fontsize=${fontSize}`,
+    `borderw=${style.strokeWidth}`,
+    `bordercolor=${style.shadowColor}@0.34`,
+    `shadowcolor=${style.shadowColor}@${ffmpegNumber(style.shadowOpacity)}`,
+    `shadowx=${Math.max(1, Math.round(fontSize * 0.035))}`,
+    `shadowy=${Math.max(2, Math.round(fontSize * 0.045))}`,
+  );
+  if (style.backgroundEnabled) {
+    options.push('box=1', `boxcolor=${style.backgroundColor}@${ffmpegNumber(style.backgroundOpacity)}`, `boxborderw=${Math.round(fontSize * 0.38)}`);
+  } else {
+    options.push('box=0');
+  }
+  options.push(
+    `x=${typographyXExpression(overlay)}`,
+    `y=${typographyYExpression(overlay, fontSize)}`,
+    `alpha='${typographyAlphaExpression(overlay)}'`,
+    `enable='between(t,${overlay.startSeconds},${overlay.endSeconds})'`,
+  );
+  return options.join(':');
+}
+
+function resolveTypographyStyle(value: string): ResolvedTypographyStyle {
+  const style = value === 'cinematic' || value === 'minimal' || value === 'editorial' || value === 'memory' || value === 'location' ? value : 'cinematic';
+  if (style === 'cinematic') {
+    return {...DEFAULT_TYPOGRAPHY_STYLE, fontFamily: 'Liberation Serif', titleFontSize: 78, subtitleFontSize: 34, strokeWidth: 1, backgroundEnabled: false};
+  }
+  if (style === 'minimal') {
+    return {...DEFAULT_TYPOGRAPHY_STYLE, fontFamily: 'Liberation Sans', titleFontSize: 50, subtitleFontSize: 30, shadowOpacity: 0.42, strokeWidth: 0};
+  }
+  if (style === 'editorial') {
+    return {...DEFAULT_TYPOGRAPHY_STYLE, fontFamily: 'Liberation Serif', titleFontSize: 86, subtitleFontSize: 36, backgroundEnabled: true, backgroundOpacity: 0.18};
+  }
+  if (style === 'location') {
+    return {...DEFAULT_TYPOGRAPHY_STYLE, fontFamily: 'Liberation Sans', titleFontSize: 34, subtitleFontSize: 26, shadowOpacity: 0.46, strokeWidth: 0};
+  }
+  return {...DEFAULT_TYPOGRAPHY_STYLE, fontFamily: TYPOGRAPHY_FONT_FAMILY_MAP.get(style) ?? DEFAULT_TYPOGRAPHY_STYLE.fontFamily, titleFontSize: 58, subtitleFontSize: 32, textColor: '0xFFF7EE', subtitleColor: '0xFFF7EE'};
+}
+
+function typographyXExpression(overlay: TypographyOverlay): string {
+  const leftMargin = `w*${ffmpegNumber(overlay.safeArea.left)}`;
+  const rightMargin = `w*${ffmpegNumber(overlay.safeArea.right)}`;
+  if (overlay.placement.endsWith('_center') || overlay.placement === 'center') {
+    return '(w-text_w)/2';
+  }
+  if (overlay.placement.endsWith('_right') || overlay.placement === 'center_right') {
+    return `w-text_w-${rightMargin}`;
+  }
+  return leftMargin;
+}
+
+function typographyYExpression(overlay: TypographyOverlay, _fontSize: number): string {
+  const base = typographyBaseYExpression(overlay);
+  const offset = ffmpegNumber(overlay.offsetY);
+  const entranceOffset = typographyEntranceOffsetExpression(overlay);
+  return `${base}+${offset}${entranceOffset}`;
+}
+
+function typographyBaseYExpression(overlay: TypographyOverlay): string {
+  const topMargin = `h*${ffmpegNumber(overlay.safeArea.top)}`;
+  const bottomMargin = `h*${ffmpegNumber(overlay.safeArea.bottom)}`;
+  const groupHeight = ffmpegNumber(overlay.groupHeight);
+  if (overlay.placement.startsWith('top_')) {
+    return topMargin;
+  }
+  if (overlay.placement.startsWith('center') || overlay.placement === 'center') {
+    return `(h-${groupHeight})/2`;
+  }
+  return `h-${groupHeight}-${bottomMargin}`;
+}
+
+function typographyEntranceOffsetExpression(overlay: TypographyOverlay): string {
+  if (overlay.animation === 'none' || overlay.animation === 'fade') {
+    return '';
+  }
+  const distance = overlay.animation === 'subtle_scale' ? 8 : 18;
+  const sign = overlay.animation === 'fade_down' ? '-' : '+';
+  return `${sign}if(lt(t\,${overlay.startSeconds}+0.350)\,(${ffmpegNumber(distance)}*(1-((t-${overlay.startSeconds})/0.350)))\,0)`;
+}
+
+function typographyAlphaExpression(overlay: TypographyOverlay): string {
+  if (overlay.animation === 'none') {
+    return '1';
+  }
+  return `if(lt(t\,${overlay.startSeconds}+0.350)\,(t-${overlay.startSeconds})/0.350\,if(gt(t\,${overlay.endSeconds}-0.250)\,(${overlay.endSeconds}-t)/0.250\,1))`;
+}
+
+function typographyTiming(clip: TimelineClip, typography: TextOverlay, composition: CompositionSpec): {startSeconds: string; endSeconds: string} | undefined {
+  const clipStartMs = Math.round((clip.start_frame / composition.fps) * 1000);
+  const startMs = clampNumber(clipStartMs + Math.round(typography.start_ms ?? 0), clipStartMs, clipStartMs + clip.duration_ms);
+  const requestedDurationMs = Math.round(typography.duration_ms ?? Math.max(0, clip.duration_ms - (startMs - clipStartMs)));
+  const endMs = clampNumber(startMs + requestedDurationMs, startMs, Math.min(composition.duration_ms, clipStartMs + clip.duration_ms));
+  if (endMs - startMs < 250) {
+    return undefined;
+  }
+  return {startSeconds: (startMs / 1000).toFixed(3), endSeconds: (endMs / 1000).toFixed(3)};
+}
+
+function resolveTypographySafeArea(value?: TextOverlay['safe_area']): Required<NonNullable<TextOverlay['safe_area']>> {
+  return {
+    top: clampNumber(value?.top ?? 0.08, 0, 0.5),
+    right: clampNumber(value?.right ?? 0.08, 0, 0.5),
+    bottom: clampNumber(value?.bottom ?? 0.08, 0, 0.5),
+    left: clampNumber(value?.left ?? 0.08, 0, 0.5),
+  };
+}
+
+function supportedTypographyPlacement(value: unknown): string {
+  return typeof value === 'string' && ['top_left', 'top_center', 'top_right', 'center_left', 'center', 'center_right', 'bottom_left', 'bottom_center', 'bottom_right'].includes(value) ? value : 'bottom_left';
+}
+
+function supportedTypographyAnimation(value: unknown): string {
+  return typeof value === 'string' && ['fade', 'fade_up', 'fade_down', 'subtle_scale', 'none'].includes(value) ? value : 'fade_up';
+}
+
+function normalizeTypographyText(value: string, maxLineLength: number, maxLines: number): string {
+  return wrapCaptionText(value.trim().replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' '), maxLineLength, maxLines);
+}
+
+function countLines(value: string): number {
+  return value ? value.split('\n').length : 0;
 }
 
 function resolveCaptionStyle(style?: CaptionStyle): ResolvedCaptionStyle {
@@ -514,8 +713,9 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
       args.push('-i', inputPath);
     }
     const captions = await this.prepareCaptionOverlays(composition, outputPath);
-    console.info(JSON.stringify({level: 'info', msg: 'ffmpeg caption overlays prepared', project_id: composition.project_id, story_plan_id: composition.story_plan_id, input_caption_count: composition.captions.length, overlay_count: captions.length}));
-    const filter = concatFilter(composition, captions);
+    const typography = await this.prepareTypographyOverlays(composition, outputPath);
+    console.info(JSON.stringify({level: 'info', msg: 'ffmpeg overlays prepared', project_id: composition.project_id, story_plan_id: composition.story_plan_id, input_caption_count: composition.captions.length, caption_overlay_count: captions.length, typography_overlay_count: typography.length}));
+    const filter = concatFilter(composition, captions, typography);
     args.push(
       '-filter_complex',
       filter.filter,
@@ -561,6 +761,46 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
       const textFilePath = path.join(captionsDir, `caption-${index}-${stableHash({text, timing}).slice(0, 12)}.txt`);
       await writeFile(textFilePath, text, 'utf8');
       overlays.push({textFilePath, startSeconds: timing.startSeconds, endSeconds: timing.endSeconds});
+    }
+    return overlays;
+  }
+
+  private async prepareTypographyOverlays(composition: CompositionSpec, outputPath: string): Promise<TypographyOverlay[]> {
+    const overlays: TypographyOverlay[] = [];
+    const outputDir = path.dirname(outputPath);
+    for (const [clipIndex, clip] of composition.clips.entries()) {
+      const typography = clip.typography;
+      if (!typography?.enabled) {
+        continue;
+      }
+      const timing = typographyTiming(clip, typography, composition);
+      if (!timing) {
+        console.info(JSON.stringify({level: 'info', msg: 'skipping typography overlay with invalid timing', project_id: composition.project_id, story_plan_id: composition.story_plan_id, clip_id: clip.clip_id}));
+        continue;
+      }
+      const safeArea = resolveTypographySafeArea(typography.safe_area);
+      const style = resolveTypographyStyle(String(typography.style ?? 'cinematic'));
+      const maxWidth = clampNumber(typography.max_width ?? 0.72, 0.2, 0.95);
+      const placement = supportedTypographyPlacement(typography.placement);
+      const animation = supportedTypographyAnimation(typography.animation);
+      const title = normalizeTypographyText(typography.title ?? '', Math.max(12, Math.floor((composition.resolution.width * maxWidth) / (style.titleFontSize * 0.52))), 2);
+      const subtitle = normalizeTypographyText(typography.subtitle ?? '', Math.max(18, Math.floor((composition.resolution.width * maxWidth) / (style.subtitleFontSize * 0.54))), 2);
+      const titleLines = countLines(title);
+      const subtitleLines = countLines(subtitle);
+      const titleHeight = titleLines * style.titleFontSize * 1.08;
+      const subtitleHeight = subtitleLines * style.subtitleFontSize * 1.18;
+      const gap = titleLines > 0 && subtitleLines > 0 ? Math.round(style.subtitleFontSize * 0.42) : 0;
+      const groupHeight = titleHeight + gap + subtitleHeight;
+      if (title) {
+        const textFilePath = path.join(outputDir, `typography-${clipIndex}-title-${stableHash({title, timing}).slice(0, 12)}.txt`);
+        await writeFile(textFilePath, title, 'utf8');
+        overlays.push({textFilePath, startSeconds: timing.startSeconds, endSeconds: timing.endSeconds, placement, style: String(typography.style ?? 'cinematic'), kind: 'title', safeArea, maxWidth, lineCount: titleLines, groupHeight, offsetY: 0, animation});
+      }
+      if (subtitle) {
+        const textFilePath = path.join(outputDir, `typography-${clipIndex}-subtitle-${stableHash({subtitle, timing}).slice(0, 12)}.txt`);
+        await writeFile(textFilePath, subtitle, 'utf8');
+        overlays.push({textFilePath, startSeconds: timing.startSeconds, endSeconds: timing.endSeconds, placement, style: String(typography.style ?? 'cinematic'), kind: 'subtitle', safeArea, maxWidth, lineCount: subtitleLines, groupHeight, offsetY: titleHeight + gap, animation});
+      }
     }
     return overlays;
   }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/framemio/backend/internal/models"
 	"github.com/framemio/backend/internal/storage"
@@ -39,6 +40,21 @@ func New(store store.Store, objectStorage storage.ObjectStorage, config Config) 
 	if config.AllowedCaptionPositions == nil {
 		config.AllowedCaptionPositions = DefaultConfig().AllowedCaptionPositions
 	}
+	if config.AllowedTextOverlayTypes == nil {
+		config.AllowedTextOverlayTypes = DefaultConfig().AllowedTextOverlayTypes
+	}
+	if config.AllowedTypographyStyles == nil {
+		config.AllowedTypographyStyles = DefaultConfig().AllowedTypographyStyles
+	}
+	if config.AllowedTextPlacements == nil {
+		config.AllowedTextPlacements = DefaultConfig().AllowedTextPlacements
+	}
+	if config.AllowedTextAnimations == nil {
+		config.AllowedTextAnimations = DefaultConfig().AllowedTextAnimations
+	}
+	if config.AllowedTextSources == nil {
+		config.AllowedTextSources = DefaultConfig().AllowedTextSources
+	}
 	if config.MaxTitleLength == 0 {
 		config.MaxTitleLength = DefaultConfig().MaxTitleLength
 	}
@@ -50,6 +66,18 @@ func New(store store.Store, objectStorage storage.ObjectStorage, config Config) 
 	}
 	if config.MaxCaptionLength == 0 {
 		config.MaxCaptionLength = DefaultConfig().MaxCaptionLength
+	}
+	if config.MaxTypographyTitleLength == 0 {
+		config.MaxTypographyTitleLength = DefaultConfig().MaxTypographyTitleLength
+	}
+	if config.MaxTypographySubtitleLength == 0 {
+		config.MaxTypographySubtitleLength = DefaultConfig().MaxTypographySubtitleLength
+	}
+	if config.MaxTypographyReasonLength == 0 {
+		config.MaxTypographyReasonLength = DefaultConfig().MaxTypographyReasonLength
+	}
+	if config.MaxTypographyLines == 0 {
+		config.MaxTypographyLines = DefaultConfig().MaxTypographyLines
 	}
 	if config.MaxNarrativeLength == 0 {
 		config.MaxNarrativeLength = DefaultConfig().MaxNarrativeLength
@@ -207,6 +235,9 @@ func (v *Validator) Validate(ctx context.Context, userID string, plan models.Sto
 		if len(moment.Reason) > config.MaxReasonLength {
 			problems.Add(field+".reason", "too_long", fmt.Sprintf("reason must be at most %d characters", config.MaxReasonLength))
 		}
+		if moment.Typography != nil {
+			validateTypography(field+".typography", *moment.Typography, moment.DurationMS, config, problems)
+		}
 		media, err := v.Store.GetMedia(ctx, userID, assetID)
 		if err != nil {
 			problems.Add(field+".asset_id", "missing_asset", "story plan references a media asset that does not exist")
@@ -360,6 +391,21 @@ func (v *Validator) config() Config {
 	if config.AllowedCaptionPositions == nil {
 		config.AllowedCaptionPositions = defaults.AllowedCaptionPositions
 	}
+	if config.AllowedTextOverlayTypes == nil {
+		config.AllowedTextOverlayTypes = defaults.AllowedTextOverlayTypes
+	}
+	if config.AllowedTypographyStyles == nil {
+		config.AllowedTypographyStyles = defaults.AllowedTypographyStyles
+	}
+	if config.AllowedTextPlacements == nil {
+		config.AllowedTextPlacements = defaults.AllowedTextPlacements
+	}
+	if config.AllowedTextAnimations == nil {
+		config.AllowedTextAnimations = defaults.AllowedTextAnimations
+	}
+	if config.AllowedTextSources == nil {
+		config.AllowedTextSources = defaults.AllowedTextSources
+	}
 	if config.MaxTitleLength == 0 {
 		config.MaxTitleLength = defaults.MaxTitleLength
 	}
@@ -371,6 +417,18 @@ func (v *Validator) config() Config {
 	}
 	if config.MaxCaptionLength == 0 {
 		config.MaxCaptionLength = defaults.MaxCaptionLength
+	}
+	if config.MaxTypographyTitleLength == 0 {
+		config.MaxTypographyTitleLength = defaults.MaxTypographyTitleLength
+	}
+	if config.MaxTypographySubtitleLength == 0 {
+		config.MaxTypographySubtitleLength = defaults.MaxTypographySubtitleLength
+	}
+	if config.MaxTypographyReasonLength == 0 {
+		config.MaxTypographyReasonLength = defaults.MaxTypographyReasonLength
+	}
+	if config.MaxTypographyLines == 0 {
+		config.MaxTypographyLines = defaults.MaxTypographyLines
 	}
 	if config.MaxNarrativeLength == 0 {
 		config.MaxNarrativeLength = defaults.MaxNarrativeLength
@@ -432,6 +490,83 @@ func (v *Validator) allowedCaptionFont(font string) bool {
 func (v *Validator) allowedCaptionPosition(position string) bool {
 	_, ok := v.config().AllowedCaptionPositions[strings.ToLower(strings.TrimSpace(position))]
 	return ok
+}
+
+func validateTypography(field string, overlay models.TextOverlay, momentDurationMS int, config Config, problems *ValidationError) {
+	if !overlay.Enabled {
+		return
+	}
+	if strings.TrimSpace(overlay.Title) == "" && strings.TrimSpace(overlay.Subtitle) == "" {
+		problems.Add(field+".text", "required", "enabled typography requires title or subtitle")
+	}
+	if overlay.Type == "" {
+		problems.Add(field+".type", "required", "typography type is required")
+	} else if _, ok := config.AllowedTextOverlayTypes[overlay.Type]; !ok {
+		problems.Add(field+".type", "unsupported_type", "typography type is unsupported")
+	}
+	if overlay.Style == "" {
+		problems.Add(field+".style", "required", "typography style is required")
+	} else if _, ok := config.AllowedTypographyStyles[overlay.Style]; !ok {
+		problems.Add(field+".style", "unsupported_style", "typography style is unsupported")
+	}
+	if overlay.Placement == "" {
+		problems.Add(field+".placement", "required", "typography placement is required")
+	} else if _, ok := config.AllowedTextPlacements[overlay.Placement]; !ok {
+		problems.Add(field+".placement", "unsupported_placement", "typography placement is unsupported")
+	}
+	if overlay.Animation == "" {
+		problems.Add(field+".animation", "required", "typography animation is required")
+	} else if _, ok := config.AllowedTextAnimations[overlay.Animation]; !ok {
+		problems.Add(field+".animation", "unsupported_animation", "typography animation is unsupported")
+	}
+	if overlay.Source == "" {
+		problems.Add(field+".source", "required", "typography source is required")
+	} else if _, ok := config.AllowedTextSources[overlay.Source]; !ok {
+		problems.Add(field+".source", "unsupported_source", "typography source is unsupported")
+	}
+	if utf8.RuneCountInString(overlay.Title) > config.MaxTypographyTitleLength {
+		problems.Add(field+".title", "too_long", fmt.Sprintf("typography title must be at most %d characters", config.MaxTypographyTitleLength))
+	}
+	if utf8.RuneCountInString(overlay.Subtitle) > config.MaxTypographySubtitleLength {
+		problems.Add(field+".subtitle", "too_long", fmt.Sprintf("typography subtitle must be at most %d characters", config.MaxTypographySubtitleLength))
+	}
+	if utf8.RuneCountInString(overlay.Reason) > config.MaxTypographyReasonLength {
+		problems.Add(field+".reason", "too_long", fmt.Sprintf("typography reason must be at most %d characters", config.MaxTypographyReasonLength))
+	}
+	if typographyLineCount(overlay) > config.MaxTypographyLines {
+		problems.Add(field+".text", "too_many_lines", fmt.Sprintf("typography must fit within %d lines", config.MaxTypographyLines))
+	}
+	if overlay.StartMS < 0 || overlay.DurationMS <= 0 || overlay.StartMS+overlay.DurationMS > momentDurationMS {
+		problems.Add(field+".timing", "invalid_timing", "typography timing must fit within the owning moment")
+	}
+	if overlay.MaxWidth < 0 || overlay.MaxWidth > 1 {
+		problems.Add(field+".max_width", "out_of_range", "typography max width must be between 0 and 1")
+	}
+	if overlay.Confidence < 0 || overlay.Confidence > 1 {
+		problems.Add(field+".confidence", "out_of_range", "typography confidence must be between 0 and 1")
+	}
+	validateSafeArea(field+".safe_area", overlay.SafeArea, problems)
+}
+
+func typographyLineCount(overlay models.TextOverlay) int {
+	lines := 0
+	if strings.TrimSpace(overlay.Title) != "" {
+		lines++
+	}
+	if strings.TrimSpace(overlay.Subtitle) != "" {
+		lines += 2
+	}
+	return lines
+}
+
+func validateSafeArea(field string, area models.SafeArea, problems *ValidationError) {
+	if !validNormalizedMargin(area.Top) || !validNormalizedMargin(area.Right) || !validNormalizedMargin(area.Bottom) || !validNormalizedMargin(area.Left) {
+		problems.Add(field, "out_of_range", "typography safe-area margins must be normalized values between 0 and 0.5")
+	}
+}
+
+func validNormalizedMargin(value float64) bool {
+	return value >= 0 && value <= 0.5
 }
 
 func validateBRoll(ctx context.Context, v *Validator, userID string, plan models.StoryPlan, projectMedia map[string]struct{}, momentIDs map[string]struct{}, totalDurationMS int, problems *ValidationError) {

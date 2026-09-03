@@ -246,21 +246,100 @@ type StoryPlan struct {
 	CreatedAt           time.Time      `json:"created_at"`
 }
 
+type TextOverlayType string
+
+const (
+	TextOverlayMomentTitle   TextOverlayType = "moment_title"
+	TextOverlayMomentCaption TextOverlayType = "moment_caption"
+	TextOverlayLocation      TextOverlayType = "location"
+	TextOverlayDate          TextOverlayType = "date"
+	TextOverlayChapterTitle  TextOverlayType = "chapter_title"
+	TextOverlayStoryIntro    TextOverlayType = "story_intro"
+	TextOverlayStoryOutro    TextOverlayType = "story_outro"
+)
+
+type TypographyStyle string
+
+const (
+	TypographyStyleCinematic TypographyStyle = "cinematic"
+	TypographyStyleMinimal   TypographyStyle = "minimal"
+	TypographyStyleEditorial TypographyStyle = "editorial"
+	TypographyStyleMemory    TypographyStyle = "memory"
+	TypographyStyleLocation  TypographyStyle = "location"
+)
+
+type TextPlacement string
+
+const (
+	TextPlacementTopLeft      TextPlacement = "top_left"
+	TextPlacementTopCenter    TextPlacement = "top_center"
+	TextPlacementTopRight     TextPlacement = "top_right"
+	TextPlacementCenterLeft   TextPlacement = "center_left"
+	TextPlacementCenter       TextPlacement = "center"
+	TextPlacementCenterRight  TextPlacement = "center_right"
+	TextPlacementBottomLeft   TextPlacement = "bottom_left"
+	TextPlacementBottomCenter TextPlacement = "bottom_center"
+	TextPlacementBottomRight  TextPlacement = "bottom_right"
+)
+
+type TextAnimation string
+
+const (
+	TextAnimationFade        TextAnimation = "fade"
+	TextAnimationFadeUp      TextAnimation = "fade_up"
+	TextAnimationFadeDown    TextAnimation = "fade_down"
+	TextAnimationSubtleScale TextAnimation = "subtle_scale"
+	TextAnimationNone        TextAnimation = "none"
+)
+
+type TextSource string
+
+const (
+	TextSourceAI     TextSource = "ai"
+	TextSourceUser   TextSource = "user"
+	TextSourceSystem TextSource = "system"
+)
+
+type SafeArea struct {
+	Top    float64 `json:"top,omitempty"`
+	Right  float64 `json:"right,omitempty"`
+	Bottom float64 `json:"bottom,omitempty"`
+	Left   float64 `json:"left,omitempty"`
+}
+
+type TextOverlay struct {
+	Enabled    bool            `json:"enabled"`
+	Type       TextOverlayType `json:"type,omitempty"`
+	Title      string          `json:"title,omitempty"`
+	Subtitle   string          `json:"subtitle,omitempty"`
+	Style      TypographyStyle `json:"style,omitempty"`
+	Placement  TextPlacement   `json:"placement,omitempty"`
+	StartMS    int             `json:"start_ms,omitempty"`
+	DurationMS int             `json:"duration_ms,omitempty"`
+	MaxWidth   float64         `json:"max_width,omitempty"`
+	SafeArea   SafeArea        `json:"safe_area,omitempty"`
+	Animation  TextAnimation   `json:"animation,omitempty"`
+	Source     TextSource      `json:"source,omitempty"`
+	Reason     string          `json:"reason,omitempty"`
+	Confidence float64         `json:"confidence,omitempty"`
+}
+
 type StoryMoment struct {
-	MomentID             string    `json:"moment_id,omitempty"`
-	AssetID              string    `json:"asset_id"`
-	MediaID              string    `json:"media_id,omitempty"`
-	MediaType            MediaType `json:"media_type,omitempty"`
-	VideoAnalysisVersion string    `json:"video_analysis_version,omitempty"`
-	StartMicros          int64     `json:"start_micros,omitempty"`
-	EndMicros            int64     `json:"end_micros,omitempty"`
-	Narrative            string    `json:"narrative,omitempty"`
-	Caption              string    `json:"caption,omitempty"`
-	DurationMS           int       `json:"duration_ms"`
-	CropIntent           string    `json:"crop_intent,omitempty"`
-	Transition           string    `json:"transition,omitempty"`
-	Reason               string    `json:"reason,omitempty"`
-	Score                float64   `json:"score,omitempty"`
+	MomentID             string       `json:"moment_id,omitempty"`
+	AssetID              string       `json:"asset_id"`
+	MediaID              string       `json:"media_id,omitempty"`
+	MediaType            MediaType    `json:"media_type,omitempty"`
+	VideoAnalysisVersion string       `json:"video_analysis_version,omitempty"`
+	StartMicros          int64        `json:"start_micros,omitempty"`
+	EndMicros            int64        `json:"end_micros,omitempty"`
+	Narrative            string       `json:"narrative,omitempty"`
+	Caption              string       `json:"caption,omitempty"`
+	DurationMS           int          `json:"duration_ms"`
+	CropIntent           string       `json:"crop_intent,omitempty"`
+	Transition           string       `json:"transition,omitempty"`
+	Reason               string       `json:"reason,omitempty"`
+	Score                float64      `json:"score,omitempty"`
+	Typography           *TextOverlay `json:"typography,omitempty"`
 }
 
 type StoryBRoll struct {

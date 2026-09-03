@@ -116,6 +116,61 @@ func TestValidateStoryPlanAcceptsCaptionStyle(t *testing.T) {
 	}
 }
 
+func TestValidateStoryPlanAcceptsTypography(t *testing.T) {
+	t.Parallel()
+	validator, plan := validStoryPlanFixture(t)
+	plan.Moments[0].Typography = &models.TextOverlay{
+		Enabled: true, Type: models.TextOverlayMomentTitle, Title: "Golden Hour", Subtitle: "Somewhere between the sea and the sky.",
+		Style: models.TypographyStyleCinematic, Placement: models.TextPlacementBottomLeft, StartMS: 350, DurationMS: 2200, MaxWidth: 0.72,
+		SafeArea: models.SafeArea{Top: 0.08, Right: 0.08, Bottom: 0.08, Left: 0.08}, Animation: models.TextAnimationFadeUp, Source: models.TextSourceAI, Reason: "low-detail lower-left area", Confidence: 0.91,
+	}
+
+	if err := validator.Validate(context.Background(), "user-1", plan); err != nil {
+		t.Fatalf("validate typography: %v", err)
+	}
+}
+
+func TestValidateStoryPlanRejectsInvalidTypography(t *testing.T) {
+	t.Parallel()
+	valid := models.TextOverlay{
+		Enabled: true, Type: models.TextOverlayMomentTitle, Title: "Golden Hour", Style: models.TypographyStyleCinematic,
+		Placement: models.TextPlacementBottomLeft, StartMS: 350, DurationMS: 2200, MaxWidth: 0.72,
+		SafeArea: models.SafeArea{Top: 0.08, Right: 0.08, Bottom: 0.08, Left: 0.08}, Animation: models.TextAnimationFadeUp, Source: models.TextSourceAI, Confidence: 0.91,
+	}
+	cases := []struct {
+		name   string
+		mutate func(*models.TextOverlay)
+		field  string
+		code   string
+	}{
+		{name: "invalid style", mutate: func(overlay *models.TextOverlay) { overlay.Style = "neon" }, field: "moments[0].typography.style", code: "unsupported_style"},
+		{name: "invalid placement", mutate: func(overlay *models.TextOverlay) { overlay.Placement = "over_face" }, field: "moments[0].typography.placement", code: "unsupported_placement"},
+		{name: "title too long", mutate: func(overlay *models.TextOverlay) { overlay.Title = makeString("A", 41) }, field: "moments[0].typography.title", code: "too_long"},
+		{name: "subtitle too long", mutate: func(overlay *models.TextOverlay) { overlay.Subtitle = makeString("B", 101) }, field: "moments[0].typography.subtitle", code: "too_long"},
+		{name: "timing outside moment", mutate: func(overlay *models.TextOverlay) { overlay.StartMS = 2500; overlay.DurationMS = 900 }, field: "moments[0].typography.timing", code: "invalid_timing"},
+		{name: "unsafe margin", mutate: func(overlay *models.TextOverlay) { overlay.SafeArea.Left = 0.8 }, field: "moments[0].typography.safe_area", code: "out_of_range"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			validator, plan := validStoryPlanFixture(t)
+			overlay := valid
+			tc.mutate(&overlay)
+			plan.Moments[0].Typography = &overlay
+			err := validator.Validate(context.Background(), "user-1", plan)
+			if err == nil {
+				t.Fatalf("expected validation error")
+			}
+			validationErr, ok := AsValidationError(err)
+			if !ok {
+				t.Fatalf("unexpected error type: %T %v", err, err)
+			}
+			assertFieldError(t, validationErr, tc.field, tc.code)
+		})
+	}
+}
+
 func TestValidateStoryPlanRejectsInvalidInputs(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

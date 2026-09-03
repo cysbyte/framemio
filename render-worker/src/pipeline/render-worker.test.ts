@@ -173,6 +173,55 @@ test('applies deterministic cinematic motion to photo clips', () => {
   assert.equal(composition.clips[0].media_type, 'photo');
 });
 
+test('normalizes typography into timeline clips', () => {
+  const basePlan = fixtureStoryPlan();
+  const plan = fixtureStoryPlan({
+    moments: [{
+      ...basePlan.moments[0],
+      typography: {
+        enabled: true,
+        type: 'moment_title',
+        title: 'A very long title that should be deterministically shortened before rendering',
+        subtitle: 'Quiet light by the sea',
+        style: 'neon',
+        placement: 'over_face',
+        animation: 'spin',
+        start_ms: -50,
+        duration_ms: 9000,
+        max_width: 2,
+        safe_area: {top: -1, right: 0.7, bottom: 0.08, left: 0.08},
+        source: 'remote',
+        confidence: 2,
+      },
+    }],
+    captions: [],
+    audio: {source: 'none'},
+    total_duration_ms: 3000,
+  });
+  const [photo] = fixtureMediaAssets();
+  const composition = buildComposition(plan, [photo], new Map([[photo.id, '/asset/photo.jpg']]), new Map(), {
+    work_dir: '/work',
+    assets_dir: '/work/assets',
+    clips_dir: '/work/clips',
+    output_file: '/work/story.mp4',
+    composition_file: '/work/composition.json',
+  });
+
+  const typography = composition.clips[0].typography;
+  assert.equal(typography?.enabled, true);
+  assert.equal(typography?.style, 'cinematic');
+  assert.equal(typography?.placement, 'bottom_left');
+  assert.equal(typography?.animation, 'fade_up');
+  assert.equal(typography?.start_ms, 0);
+  assert.equal(typography?.duration_ms, 3000);
+  assert.equal(typography?.max_width, 0.95);
+  assert.equal(typography?.safe_area?.top, 0);
+  assert.equal(typography?.safe_area?.right, 0.5);
+  assert.equal(typography?.source, 'ai');
+  assert.equal(typography?.confidence, 1);
+  assert.equal((typography?.title ?? '').length, 40);
+});
+
 test('normalizes transitions and resolves audio deterministically', () => {
   const plan = fixtureStoryPlan();
   const assets = fixtureMediaAssets();
@@ -318,6 +367,72 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
     assert.match(filterComplex, /bordercolor=0x101010@0\.72/);
     assert.match(filterComplex, /box=0/);
     assert.match(filterComplex, /y=42/);
+  } finally {
+    if (previousArgsPath === undefined) {
+      delete process.env.FRAMEMIO_FFMPEG_ARGS_PATH;
+    } else {
+      process.env.FRAMEMIO_FFMPEG_ARGS_PATH = previousArgsPath;
+    }
+  }
+});
+
+test('ffmpeg fallback renderer renders typography before captions', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'framemio-typography-render-test-'));
+  const fakeFfmpeg = path.join(root, 'fake-ffmpeg.cjs');
+  const argsPath = path.join(root, 'ffmpeg-args.json');
+  const outputPath = path.join(root, 'story.mp4');
+  await writeFile(fakeFfmpeg, `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.writeFileSync(process.env.FRAMEMIO_FFMPEG_ARGS_PATH, JSON.stringify(args));
+fs.writeFileSync(args[args.length - 1], 'fake mp4');
+`, 'utf8');
+  await chmod(fakeFfmpeg, 0o755);
+
+  const previousArgsPath = process.env.FRAMEMIO_FFMPEG_ARGS_PATH;
+  process.env.FRAMEMIO_FFMPEG_ARGS_PATH = argsPath;
+  try {
+    const assets = fixtureMediaAssets();
+    const assetPaths = new Map(assets.map((asset) => [asset.id, `/asset/${asset.file_name}`]));
+    const basePlan = fixtureStoryPlan();
+    const composition = buildComposition(fixtureStoryPlan({
+      moments: [{
+        ...basePlan.moments[0],
+        typography: {
+          enabled: true,
+          type: 'moment_title',
+          title: 'Golden Hour',
+          subtitle: 'Somewhere between the sea and the sky.',
+          style: 'cinematic',
+          placement: 'bottom_left',
+          start_ms: 350,
+          duration_ms: 2200,
+          max_width: 0.72,
+          safe_area: {top: 0.08, right: 0.08, bottom: 0.08, left: 0.08},
+          animation: 'fade_up',
+          source: 'ai',
+          confidence: 0.91,
+        },
+      }, basePlan.moments[1]],
+    }), assets, assetPaths, new Map(), {
+      work_dir: root,
+      assets_dir: path.join(root, 'assets'),
+      clips_dir: path.join(root, 'clips'),
+      output_file: outputPath,
+      composition_file: path.join(root, 'composition.json'),
+    });
+
+    await new FfmpegCompositionRenderer({ffmpegBinary: fakeFfmpeg}).renderComposition(composition, outputPath);
+
+    const args = JSON.parse(await readFile(argsPath, 'utf8')) as string[];
+    const filterComplex = args[args.indexOf('-filter_complex') + 1];
+    assert.match(filterComplex, /typography-0-title-/);
+    assert.match(filterComplex, /typography-0-subtitle-/);
+    assert.match(filterComplex, /font='Liberation Serif'/);
+    assert.match(filterComplex, /fontsize=78/);
+    assert.match(filterComplex, /x=w\*0\.0800/);
+    assert.match(filterComplex, /enable='between\(t,0\.350,2\.550\)'/);
+    assert.ok(filterComplex.indexOf('typography-0-title-') < filterComplex.indexOf('caption-0-'));
   } finally {
     if (previousArgsPath === undefined) {
       delete process.env.FRAMEMIO_FFMPEG_ARGS_PATH;
