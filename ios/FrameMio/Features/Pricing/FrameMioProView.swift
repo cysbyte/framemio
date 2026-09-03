@@ -116,6 +116,7 @@ final class FrameMioProViewModel: ObservableObject {
 
     private let source: PricingEntryPoint
     private let creditService: CreditService?
+    private let onPurchaseCompleted: () -> Void
     private let onBalanceUpdated: () -> Void
     private var loadTask: Task<Void, Never>?
     private var updatesTask: Task<Void, Never>?
@@ -123,10 +124,12 @@ final class FrameMioProViewModel: ObservableObject {
     init(
         source: PricingEntryPoint,
         creditService: CreditService?,
+        onPurchaseCompleted: @escaping () -> Void,
         onBalanceUpdated: @escaping () -> Void
     ) {
         self.source = source
         self.creditService = creditService
+        self.onPurchaseCompleted = onPurchaseCompleted
         self.onBalanceUpdated = onBalanceUpdated
         startTransactionUpdates()
     }
@@ -184,6 +187,8 @@ final class FrameMioProViewModel: ObservableObject {
                     async let productsTask = Product.products(for: FrameMioProCatalog.productIDs)
                     async let balanceTask: Void = fetchBalance()
                     let products = try await productsTask
+                    let loadedProductIDs = products.map(\.id).sorted()
+                    pricingDebugLog("load_products_requested ids=\(FrameMioProCatalog.productIDs.joined(separator: ",")) returned=\(loadedProductIDs.joined(separator: ",")) count=\(products.count)")
                     monthlyProduct = products.first { $0.id == FrameMioProCatalog.monthlyProductID }
                     yearlyProduct = products.first { $0.id == FrameMioProCatalog.yearlyProductID }
                     pricingDebugLog("load_products_loaded monthly=\(monthlyProduct != nil) yearly=\(yearlyProduct != nil)")
@@ -228,7 +233,12 @@ final class FrameMioProViewModel: ObservableObject {
                 )
             } else {
                 guard let product = product(for: selectedPlan) else {
+                    pricingDebugLog("purchase_missing_product selected=\(selectedPlan.rawValue) product_id=\(selectedPlan.productID) monthly_loaded=\(monthlyProduct != nil) yearly_loaded=\(yearlyProduct != nil)")
+#if DEBUG
+                    errorMessage = "Missing StoreKit product: \(selectedPlan.productID)"
+#else
                     errorMessage = "Loading plans..."
+#endif
                     statusMessage = nil
                     return
                 }
@@ -377,6 +387,7 @@ final class FrameMioProViewModel: ObservableObject {
         onBalanceUpdated()
         errorMessage = nil
         self.statusMessage = statusMessage
+        onPurchaseCompleted()
         pricingDebugLog("complete_purchase_success_complete subscribed=\(isSubscribed) balance=\(balance.map(String.init) ?? "nil")")
     }
 
@@ -401,6 +412,7 @@ final class FrameMioProViewModel: ObservableObject {
                 await refreshEntitlements()
                 await fetchBalance()
                 onBalanceUpdated()
+                onPurchaseCompleted()
                 pricingDebugLog("transaction_update_applied product=\(transaction.productID)")
             }
         }
@@ -417,12 +429,14 @@ struct FrameMioProView: View {
         source: PricingEntryPoint,
         creditService: CreditService?,
         onClose: @escaping () -> Void,
+        onPurchaseCompleted: @escaping () -> Void,
         onBalanceUpdated: @escaping () -> Void
     ) {
         _viewModel = StateObject(
             wrappedValue: FrameMioProViewModel(
                 source: source,
                 creditService: creditService,
+                onPurchaseCompleted: onPurchaseCompleted,
                 onBalanceUpdated: onBalanceUpdated
             )
         )
@@ -692,6 +706,7 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
     @Published var errorMessage: String?
 
     private let creditService: CreditService?
+    private let onPurchaseCompleted: () -> Void
     private let onBalanceUpdated: () -> Void
     private var loadTask: Task<Void, Never>?
     private var updatesTask: Task<Void, Never>?
@@ -701,8 +716,13 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
         return environment == "1" || environment == "true" || environment == "yes"
     }
 
-    init(creditService: CreditService?, onBalanceUpdated: @escaping () -> Void) {
+    init(
+        creditService: CreditService?,
+        onPurchaseCompleted: @escaping () -> Void,
+        onBalanceUpdated: @escaping () -> Void
+    ) {
         self.creditService = creditService
+        self.onPurchaseCompleted = onPurchaseCompleted
         self.onBalanceUpdated = onBalanceUpdated
         startTransactionUpdates()
     }
@@ -803,6 +823,7 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
                     }
                 }
                 onBalanceUpdated()
+                onPurchaseCompleted()
             } catch {
                 statusMessage = nil
                 errorMessage = AppError.from(error).localizedDescription
@@ -824,6 +845,7 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
                     balance = try await creditService?.grantPurchasedCredits(packID: purchase.packID, purchaseID: String(transaction.id))
                     await transaction.finish()
                     onBalanceUpdated()
+                    onPurchaseCompleted()
                 } catch {
                     errorMessage = AppError.from(error).localizedDescription
                     statusMessage = nil
@@ -850,16 +872,22 @@ struct FrameMioCreditPacksView: View {
     init(
         creditService: CreditService?,
         onClose: @escaping () -> Void,
+        onPurchaseCompleted: @escaping () -> Void,
         onBalanceUpdated: @escaping () -> Void
     ) {
-        _viewModel = StateObject(wrappedValue: FrameMioCreditPacksViewModel(creditService: creditService, onBalanceUpdated: onBalanceUpdated))
+        _viewModel = StateObject(
+            wrappedValue: FrameMioCreditPacksViewModel(
+                creditService: creditService,
+                onPurchaseCompleted: onPurchaseCompleted,
+                onBalanceUpdated: onBalanceUpdated
+            )
+        )
         self.onClose = onClose
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
-                header
                 balanceCard
                 packsSection
                 PrimaryButton(
@@ -910,19 +938,6 @@ struct FrameMioCreditPacksView: View {
         .task { viewModel.load() }
         .refreshable { viewModel.load() }
     }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            Text("Extra Credits")
-                .font(FrameMioTypography.screenTitle)
-                .foregroundStyle(FrameMioColors.ink)
-            Text("Purchased credits carry over and are used after your monthly credits.")
-                .font(FrameMioTypography.body)
-                .foregroundStyle(FrameMioColors.secondaryInk)
-        }
-        .accessibilityElement(children: .combine)
-    }
-
     private var balanceCard: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.xs) {
             Text("Available Credits")

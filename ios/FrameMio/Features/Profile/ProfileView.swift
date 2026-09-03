@@ -17,7 +17,7 @@ struct ProfileView: View {
                 header
                 creditCard
                 buyCreditsButton
-                subscriptionCard
+                belowBuyCreditsCard
             }
             .padding(FrameMioSpacing.lg)
             .padding(.bottom, FrameMioSpacing.xxxl)
@@ -106,11 +106,63 @@ struct ProfileView: View {
     }
 
     private var planTitle: String {
-        viewModel.isSubscribed || (creditStore.balance?.displaySubscriptionCredits ?? 0) > 0 ? "FrameMio Pro" : "Free Plan"
+        hasActiveSubscription ? "FrameMio Pro" : "Free Plan"
+    }
+
+    private var hasActiveSubscription: Bool {
+        viewModel.isSubscribed || creditStore.balance?.hasActiveSubscriptionCycle == true || (creditStore.balance?.displaySubscriptionCredits ?? 0) > 0
     }
 
     private var subscriptionSubtitle: String {
         planTitle == "FrameMio Pro" ? "Active" : "Upgrade when you need more credits"
+    }
+
+    @ViewBuilder
+    private var belowBuyCreditsCard: some View {
+        if hasActiveSubscription {
+            purchasedCreditsInfoCard
+        } else {
+            subscriptionCard
+        }
+    }
+
+    private var purchasedCreditsInfoCard: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            SectionHeader(title: "Purchased Credits", subtitle: "Extra credits for Pro members")
+            HStack(spacing: FrameMioSpacing.md) {
+                Image(systemName: "plus.circle.fill")
+                    .foregroundStyle(FrameMioColors.accent)
+                    .frame(width: 44, height: 44)
+                    .background(FrameMioColors.accentMuted.opacity(0.7), in: Circle())
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
+                    Text("Add credits anytime")
+                        .font(FrameMioTypography.headline)
+                        .foregroundStyle(FrameMioColors.ink)
+                    if let balance = creditStore.balance {
+                        Text("You have \(balance.displayPurchasedCredits.formatted()) purchased credits. They carry over and are used after monthly Pro credits.")
+                            .font(FrameMioTypography.footnote)
+                            .foregroundStyle(FrameMioColors.secondaryInk)
+                    } else {
+                        Text("Purchased credits carry over and are used after monthly Pro credits.")
+                            .font(FrameMioTypography.footnote)
+                            .foregroundStyle(FrameMioColors.secondaryInk)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .accessibilityElement(children: .combine)
+        }
+        .padding(FrameMioSpacing.lg)
+        .background(
+            FrameMioColors.surface.opacity(0.82),
+            in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+        }
+        .frameMioElevation(.subtle)
     }
 
     private var subscriptionCard: some View {

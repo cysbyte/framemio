@@ -68,12 +68,14 @@ struct AppRootView: View {
                         source: source,
                         creditService: dependencies.creditService,
                         onClose: { purchaseDestination = nil },
+                        onPurchaseCompleted: completePurchaseFlow,
                         onBalanceUpdated: refreshCredits
                     )
                 case .creditPacks:
                     FrameMioCreditPacksView(
                         creditService: dependencies.creditService,
                         onClose: { purchaseDestination = nil },
+                        onPurchaseCompleted: completePurchaseFlow,
                         onBalanceUpdated: refreshCredits
                     )
                 }
@@ -115,11 +117,19 @@ struct AppRootView: View {
     }
 
     private func openPricing(_ source: PricingEntryPoint) {
-        guard source == .insufficientCredits else {
+        guard source == .insufficientCredits || source == .homeCreditButton else {
             purchaseDestination = .pro(source)
             return
         }
 
+        openPurchaseDestination(source)
+    }
+
+    private func openBuyCredits(_ source: PricingEntryPoint) {
+        openPurchaseDestination(source)
+    }
+
+    private func openPurchaseDestination(_ source: PricingEntryPoint) {
         if let balance = creditStore.balance, balance.hasActiveSubscriptionCycle {
             purchaseDestination = .creditPacks(source)
             return
@@ -135,21 +145,15 @@ struct AppRootView: View {
         }
     }
 
-    private func openBuyCredits(_ source: PricingEntryPoint) {
-        if let balance = creditStore.balance {
-            purchaseDestination = balance.hasActiveSubscriptionCycle ? .creditPacks(source) : .pro(source)
-            return
-        }
-
-        Task { @MainActor in
-            let balance = (try? await dependencies.creditService.balance()) ?? creditStore.balance
-            purchaseDestination = (balance?.hasActiveSubscriptionCycle == true) ? .creditPacks(source) : .pro(source)
-        }
-    }
-
     private func refreshCredits() {
         homeViewModel.refreshCreditBalance()
         creditStore.refresh()
+    }
+
+    private func completePurchaseFlow() {
+        refreshCredits()
+        selectedTab = .profile
+        purchaseDestination = nil
     }
 
     @ViewBuilder
