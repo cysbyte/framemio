@@ -372,9 +372,9 @@ final class MockCreditService: CreditService, @unchecked Sendable {
 
     func creditPacks() async throws -> [CreditPack] {
         [
-            CreditPack(id: "small", title: "Small Pack", subtitle: "A few more story moments", productID: nil, credits: 100),
-            CreditPack(id: "medium", title: "Medium Pack", subtitle: "More room for memories", productID: nil, credits: 300),
-            CreditPack(id: "large", title: "Large Pack", subtitle: "Keep creating all week", productID: nil, credits: 700)
+            CreditPack(id: "small", title: "Small Pack", subtitle: "A few more story moments", productID: FrameMioCreditPackCatalog.smallProductID, credits: 100),
+            CreditPack(id: "medium", title: "Medium Pack", subtitle: "More room for memories", productID: FrameMioCreditPackCatalog.mediumProductID, credits: 300),
+            CreditPack(id: "large", title: "Large Pack", subtitle: "Keep creating all week", productID: FrameMioCreditPackCatalog.largeProductID, credits: 700)
         ]
     }
 

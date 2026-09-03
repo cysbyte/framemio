@@ -298,6 +298,25 @@ struct FrameMioProCatalog {
     static let productIDs = [monthlyProductID, yearlyProductID]
 }
 
+struct FrameMioCreditPackCatalog {
+    static let smallProductID = "com.framemio.credits.small"
+    static let mediumProductID = "com.framemio.credits.medium"
+    static let largeProductID = "com.framemio.credits.large"
+
+    static func productID(for packID: String) -> String? {
+        switch packID {
+        case "small":
+            smallProductID
+        case "medium":
+            mediumProductID
+        case "large":
+            largeProductID
+        default:
+            nil
+        }
+    }
+}
+
 struct CreditPricing {
     static let createStory = 40
     static let regenerateStory = 40
@@ -331,6 +350,16 @@ struct CreditPricing {
         case .preview:
             return preview
         }
+    }
+}
+
+struct CreditPreflight {
+    static func issue(for action: CreditAction, balance: CreditBalance) -> CreditIssue? {
+        let required = CreditPricing.price(for: action)
+        guard required > 0 else { return nil }
+        let available = balance.spendableCredits
+        guard available < required else { return nil }
+        return CreditIssue(action: action, required: required, available: available)
     }
 }
 

@@ -83,9 +83,13 @@ struct StoryCreationView: View {
                 } else if let story = viewModel.story {
                     processingStartedCard(story)
                 } else {
-                    PrimaryButton(title: "Create Story (\(viewModel.createStoryCreditCost) credits)", systemImage: "sparkles") {
-                        onCreate()
-                    }
+                    PrimaryButton(
+                        title: "Create Story (\(viewModel.createStoryCreditCost) credits)",
+                        systemImage: "sparkles",
+                        action: { viewModel.requestCreateStory(onReady: onCreate) },
+                        isDisabled: viewModel.isCheckingCredits,
+                        isLoading: viewModel.isCheckingCredits
+                    )
                 }
 
                 if let errorMessage = viewModel.errorMessage {

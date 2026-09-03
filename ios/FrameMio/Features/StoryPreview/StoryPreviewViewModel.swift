@@ -1368,6 +1368,7 @@ final class StoryPreviewViewModel: ObservableObject {
             errorMessage = nil
             defer { activeAction = nil }
             do {
+                try await verifyCredits(for: action.creditAction)
                 let operationStory = try await operation()
                 let updatedStory = mapResult?(operationStory) ?? operationStory
                 try await cacheUploadAssets(for: updatedStory)
@@ -1394,6 +1395,15 @@ final class StoryPreviewViewModel: ObservableObject {
                     errorMessage = appError.localizedDescription
                 }
             }
+        }
+    }
+
+    private func verifyCredits(for action: CreditAction) async throws {
+        guard let creditService else { return }
+        let balance = try await creditService.balance()
+        creditBalance = balance.displayCredits
+        if let issue = CreditPreflight.issue(for: action, balance: balance) {
+            throw AppError.insufficientCredits(required: issue.required, available: issue.available)
         }
     }
 

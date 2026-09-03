@@ -79,17 +79,20 @@ final class StoryLaunchCoordinator: ObservableObject {
     private let analysisService: MediaAnalysisService
     private let mediaUploadService: MediaUploadService
     private let storyService: StoryService
+    private let creditService: CreditService?
     private var launchTask: Task<Void, Never>?
     private var activeLaunchID: UUID?
 
     init(
         analysisService: MediaAnalysisService,
         mediaUploadService: MediaUploadService,
-        storyService: StoryService
+        storyService: StoryService,
+        creditService: CreditService? = nil
     ) {
         self.analysisService = analysisService
         self.mediaUploadService = mediaUploadService
         self.storyService = storyService
+        self.creditService = creditService
     }
 
     func start(context: MomentContext, assets: [MediaAsset], launchID: UUID) {
@@ -116,6 +119,7 @@ final class StoryLaunchCoordinator: ObservableObject {
             defer { isPreparing = false }
 
             do {
+                try await verifyCredits(for: .createStory)
                 let selection = MediaSelection(explicitlySelectedAssetIDs: assets.map(\.id))
                 phaseTitle = "Uploading your photos and videos..."
                 storyLaunchDebugLog("phase=upload_start progress=\(progress)")
@@ -173,6 +177,14 @@ final class StoryLaunchCoordinator: ObservableObject {
                     phaseTitle = "Something went wrong"
                 }
             }
+        }
+    }
+
+    private func verifyCredits(for action: CreditAction) async throws {
+        guard let creditService else { return }
+        let balance = try await creditService.balance()
+        if let issue = CreditPreflight.issue(for: action, balance: balance) {
+            throw AppError.insufficientCredits(required: issue.required, available: issue.available)
         }
     }
 

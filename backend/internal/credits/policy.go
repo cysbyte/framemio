@@ -68,9 +68,9 @@ func DefaultPolicy() Policy {
 		MonthlySubscriptionCycleCredits: 300,
 		YearlySubscriptionCycleCredits:  360,
 		CreditPacks: []CreditPack{
-			{ID: "small", Title: "Small Pack", Subtitle: "A few more story moments", Credits: 100},
-			{ID: "medium", Title: "Medium Pack", Subtitle: "More room for memories", Credits: 300},
-			{ID: "large", Title: "Large Pack", Subtitle: "Keep creating all week", Credits: 700},
+			{ID: "small", Title: "Small Pack", Subtitle: "A few more story moments", ProductID: "com.framemio.credits.small", Credits: 100},
+			{ID: "medium", Title: "Medium Pack", Subtitle: "More room for memories", ProductID: "com.framemio.credits.medium", Credits: 300},
+			{ID: "large", Title: "Large Pack", Subtitle: "Keep creating all week", ProductID: "com.framemio.credits.large", Credits: 700},
 		},
 	}
 }

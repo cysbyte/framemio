@@ -18,7 +18,8 @@ struct AppRootView: View {
             wrappedValue: StoryLaunchCoordinator(
                 analysisService: dependencies.mediaAnalysis,
                 mediaUploadService: dependencies.mediaUploadService,
-                storyService: dependencies.storyService
+                storyService: dependencies.storyService,
+                creditService: dependencies.creditService
             )
         )
         _creditStore = StateObject(wrappedValue: CreditBalanceStore(creditService: dependencies.creditService))

@@ -18,6 +18,7 @@ final class StoryCreationViewModel: ObservableObject {
     @Published private(set) var progress: Double = 0
     @Published private(set) var phaseTitle = "Preparing your memories..."
     @Published private(set) var isCreating = false
+    @Published private(set) var isCheckingCredits = false
     @Published private(set) var story: Story?
     @Published private(set) var thumbnails: [String: UIImage] = [:]
     @Published private(set) var creditBalance: Int?
@@ -99,6 +100,36 @@ final class StoryCreationViewModel: ObservableObject {
         CreditPricing.price(for: .createStory)
     }
 
+    func requestCreateStory(onReady: @escaping @MainActor () -> Void) {
+        guard !isCreating, !isCheckingCredits else { return }
+        guard let creditService else {
+            onReady()
+            return
+        }
+
+        isCheckingCredits = true
+        insufficientCredits = nil
+        errorMessage = nil
+        Task { [weak self] in
+            guard let self else { return }
+            defer { isCheckingCredits = false }
+            do {
+                let balance = try await creditService.balance()
+                creditBalance = balance.displayCredits
+                if let issue = CreditPreflight.issue(for: .createStory, balance: balance) {
+                    storyCreationDebugLog("createStory preflight_insufficient_credits required=\(issue.required) available=\(issue.available)")
+                    insufficientCredits = issue
+                    phaseTitle = "Not enough credits"
+                    return
+                }
+                storyCreationDebugLog("createStory preflight_ok balance=\(balance.displayCredits)")
+                onReady()
+            } catch {
+                errorMessage = AppError.from(error).localizedDescription
+            }
+        }
+    }
+
     func createStory() {
         guard !isCreating else {
             storyCreationDebugLog("ignored duplicate create request while already creating")
@@ -116,6 +147,7 @@ final class StoryCreationViewModel: ObservableObject {
             defer { isCreating = false }
 
             do {
+                try await verifyCredits(for: .createStory)
                 storyCreationDebugLog("phase=upload_start progress=\(progress)")
                 phaseTitle = "Uploading your photos and videos..."
                 let selection = MediaSelection(explicitlySelectedAssetIDs: assets.map(\.id))
@@ -215,6 +247,15 @@ final class StoryCreationViewModel: ObservableObject {
             return try await storyService.createStory(
                 request: CreateStoryRequest(context: context, assets: assets, analyses: analyses)
             )
+        }
+    }
+
+    private func verifyCredits(for action: CreditAction) async throws {
+        guard let creditService else { return }
+        let balance = try await creditService.balance()
+        creditBalance = balance.displayCredits
+        if let issue = CreditPreflight.issue(for: action, balance: balance) {
+            throw AppError.insufficientCredits(required: issue.required, available: issue.available)
         }
     }
 

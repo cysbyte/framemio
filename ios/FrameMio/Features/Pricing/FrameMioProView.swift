@@ -12,6 +12,17 @@ enum FrameMioProPlanKind: String, CaseIterable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
+    init?(productID: String) {
+        switch productID {
+        case FrameMioProCatalog.yearlyProductID:
+            self = .yearly
+        case FrameMioProCatalog.monthlyProductID:
+            self = .monthly
+        default:
+            return nil
+        }
+    }
+
     var title: String {
         switch self {
         case .yearly:
@@ -67,6 +78,26 @@ enum FrameMioProPlanKind: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+private struct FrameMioCreditPackPurchase: Sendable {
+    let packID: String
+    let productID: String
+
+    init?(pack: CreditPack) {
+        guard let productID = pack.productID ?? FrameMioCreditPackCatalog.productID(for: pack.id) else {
+            return nil
+        }
+        self.packID = pack.id
+        self.productID = productID
+    }
+
+    init?(productID: String, packs: [CreditPack]) {
+        guard let pack = packs.first(where: { ($0.productID ?? FrameMioCreditPackCatalog.productID(for: $0.id)) == productID }) else {
+            return nil
+        }
+        self.init(pack: pack)
+    }
+}
+
 @MainActor
 final class FrameMioProViewModel: ObservableObject {
     @Published private(set) var monthlyProduct: Product?
@@ -102,14 +133,7 @@ final class FrameMioProViewModel: ObservableObject {
 
     private var shouldSimulatePurchaseSuccess: Bool {
         let environment = ProcessInfo.processInfo.environment["FRAMEMIO_SIMULATE_PURCHASE_SUCCESS"]?.lowercased()
-        if environment == "1" || environment == "true" || environment == "yes" {
-            return true
-        }
-#if DEBUG
-        return true
-#else
-        return false
-#endif
+        return environment == "1" || environment == "true" || environment == "yes"
     }
 
     deinit {
@@ -196,13 +220,13 @@ final class FrameMioProViewModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             defer { isPurchasing = false }
-            #if DEBUG
+            if shouldSimulatePurchaseSuccess {
                 pricingDebugLog("simulate_purchase_success plan=\(selectedPlan.rawValue) source=\(source.rawValue) simulated=\(shouldSimulatePurchaseSuccess)")
                 await completePurchaseSuccess(
                     purchaseID: "debug-\(selectedPlan.rawValue)",
                     statusMessage: "Debug purchase completed."
                 )
-            #else
+            } else {
                 guard let product = product(for: selectedPlan) else {
                     errorMessage = "Loading plans..."
                     statusMessage = nil
@@ -213,11 +237,13 @@ final class FrameMioProViewModel: ObservableObject {
                     switch result {
                     case let .success(verificationResult):
                         let transaction = try verifiedTransaction(from: verificationResult)
-                        await transaction.finish()
                         await completePurchaseSuccess(
+                            plan: selectedPlan,
                             purchaseID: String(transaction.id),
+                            expiresAt: transaction.expirationDate,
                             statusMessage: isSubscribed ? "FrameMio Pro is active." : "Purchase completed."
                         )
+                        await transaction.finish()
                     case .pending:
                         statusMessage = "Purchase pending approval."
                     case .userCancelled:
@@ -229,7 +255,7 @@ final class FrameMioProViewModel: ObservableObject {
                     errorMessage = AppError.from(error).localizedDescription
                     statusMessage = nil
                 }
-            #endif
+            }
         }
     }
 
@@ -316,22 +342,31 @@ final class FrameMioProViewModel: ObservableObject {
         }
     }
 
-    private func grantPurchasedCredits(purchaseID: String) async throws {
+    private func grantSubscriptionCycle(plan: FrameMioProPlanKind, purchaseID: String, expiresAt: Date?) async throws {
         guard let creditService else { return }
-        pricingDebugLog("grant_subscription_cycle_start plan=\(selectedPlan.rawValue) purchase_id=\(purchaseID)")
+        pricingDebugLog("grant_subscription_cycle_start plan=\(plan.rawValue) purchase_id=\(purchaseID)")
         do {
-            try await creditService.grantSubscriptionCycle(plan: selectedPlan.rawValue, purchaseID: purchaseID, expiresAt: renewalDate)
-            pricingDebugLog("grant_subscription_cycle_complete plan=\(selectedPlan.rawValue) purchase_id=\(purchaseID)")
+            try await creditService.grantSubscriptionCycle(plan: plan.rawValue, purchaseID: purchaseID, expiresAt: expiresAt)
+            pricingDebugLog("grant_subscription_cycle_complete plan=\(plan.rawValue) purchase_id=\(purchaseID)")
         } catch {
-            pricingDebugLog("grant_subscription_cycle_failed plan=\(selectedPlan.rawValue) purchase_id=\(purchaseID) error=\(error.localizedDescription)")
+            pricingDebugLog("grant_subscription_cycle_failed plan=\(plan.rawValue) purchase_id=\(purchaseID) error=\(error.localizedDescription)")
             throw error
         }
     }
 
-    private func completePurchaseSuccess(purchaseID: String, statusMessage: String) async {
+    private func completePurchaseSuccess(
+        plan: FrameMioProPlanKind? = nil,
+        purchaseID: String,
+        expiresAt: Date? = nil,
+        statusMessage: String
+    ) async {
         pricingDebugLog("complete_purchase_success_start")
         do {
-            try await grantPurchasedCredits(purchaseID: purchaseID)
+            try await grantSubscriptionCycle(
+                plan: plan ?? selectedPlan,
+                purchaseID: purchaseID,
+                expiresAt: expiresAt ?? renewalDate
+            )
         } catch {
             self.errorMessage = AppError.from(error).localizedDescription
             self.statusMessage = nil
@@ -352,10 +387,17 @@ final class FrameMioProViewModel: ObservableObject {
             pricingDebugLog("transaction_updates_listener_started")
             for await result in Transaction.updates {
                 guard let transaction = try? verifiedTransaction(from: result) else { continue }
-                guard FrameMioProCatalog.productIDs.contains(transaction.productID), transaction.revocationDate == nil else {
+                guard let plan = FrameMioProPlanKind(productID: transaction.productID), transaction.revocationDate == nil else {
                     continue
                 }
-                await transaction.finish()
+                do {
+                    try await grantSubscriptionCycle(plan: plan, purchaseID: String(transaction.id), expiresAt: transaction.expirationDate)
+                    await transaction.finish()
+                } catch {
+                    errorMessage = AppError.from(error).localizedDescription
+                    statusMessage = nil
+                    continue
+                }
                 await refreshEntitlements()
                 await fetchBalance()
                 onBalanceUpdated()
@@ -652,14 +694,22 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
     private let creditService: CreditService?
     private let onBalanceUpdated: () -> Void
     private var loadTask: Task<Void, Never>?
+    private var updatesTask: Task<Void, Never>?
+
+    private var shouldSimulatePurchaseSuccess: Bool {
+        let environment = ProcessInfo.processInfo.environment["FRAMEMIO_SIMULATE_PURCHASE_SUCCESS"]?.lowercased()
+        return environment == "1" || environment == "true" || environment == "yes"
+    }
 
     init(creditService: CreditService?, onBalanceUpdated: @escaping () -> Void) {
         self.creditService = creditService
         self.onBalanceUpdated = onBalanceUpdated
+        startTransactionUpdates()
     }
 
     deinit {
         loadTask?.cancel()
+        updatesTask?.cancel()
     }
 
     var selectedPack: CreditPack? {
@@ -672,14 +722,17 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
     }
 
     func displayPrice(for pack: CreditPack) -> String {
-        guard let productID = pack.productID, let product = products[productID] else {
-#if DEBUG
-            return "Debug"
-#else
+        guard let productID = productID(for: pack), let product = products[productID] else {
+            if shouldSimulatePurchaseSuccess {
+                return "Debug"
+            }
             return "Unavailable"
-#endif
         }
         return product.displayPrice
+    }
+
+    private func productID(for pack: CreditPack) -> String? {
+        pack.productID ?? FrameMioCreditPackCatalog.productID(for: pack.id)
     }
 
     func load() {
@@ -698,11 +751,13 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
                     selectedPackID = loadedPacks.first?.id
                 }
                 balance = try await balanceTask
-#if !DEBUG
-                let productIDs = loadedPacks.compactMap(\.productID)
-                let loadedProducts = try await Product.products(for: productIDs)
-                products = Dictionary(uniqueKeysWithValues: loadedProducts.map { ($0.id, $0) })
-#endif
+                if shouldSimulatePurchaseSuccess {
+                    products = [:]
+                } else {
+                    let productIDs = loadedPacks.compactMap { self.productID(for: $0) }
+                    let loadedProducts = try await Product.products(for: productIDs)
+                    products = Dictionary(uniqueKeysWithValues: loadedProducts.map { ($0.id, $0) })
+                }
                 errorMessage = nil
             } catch {
                 errorMessage = AppError.from(error).localizedDescription
@@ -719,38 +774,60 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
             guard let self else { return }
             defer { isPurchasing = false }
             do {
-#if DEBUG
-                let purchaseID = "debug-credit-pack-\(pack.id)"
-                balance = try await creditService?.grantPurchasedCredits(packID: pack.id, purchaseID: purchaseID)
-                statusMessage = "Debug credit purchase completed."
-#else
-                guard let productID = pack.productID, let product = products[productID] else {
-                    statusMessage = nil
-                    errorMessage = "Credit pack products are not configured yet."
-                    return
+                if shouldSimulatePurchaseSuccess {
+                    let purchaseID = "debug-credit-pack-\(pack.id)"
+                    balance = try await creditService?.grantPurchasedCredits(packID: pack.id, purchaseID: purchaseID)
+                    statusMessage = "Debug credit purchase completed."
+                } else {
+                    guard let productID = productID(for: pack), let product = products[productID] else {
+                        statusMessage = nil
+                        errorMessage = "Credit pack products are not configured yet."
+                        return
+                    }
+                    let result = try await product.purchase()
+                    switch result {
+                    case let .success(verificationResult):
+                        let transaction = try verifiedTransaction(from: verificationResult)
+                        balance = try await creditService?.grantPurchasedCredits(packID: pack.id, purchaseID: String(transaction.id))
+                        await transaction.finish()
+                        statusMessage = "Credits added."
+                    case .pending:
+                        statusMessage = "Purchase pending approval."
+                        return
+                    case .userCancelled:
+                        statusMessage = nil
+                        return
+                    @unknown default:
+                        statusMessage = "Purchase could not be completed."
+                        return
+                    }
                 }
-                let result = try await product.purchase()
-                switch result {
-                case let .success(verificationResult):
-                    let transaction = try verifiedTransaction(from: verificationResult)
-                    await transaction.finish()
-                    balance = try await creditService?.grantPurchasedCredits(packID: pack.id, purchaseID: String(transaction.id))
-                    statusMessage = "Credits added."
-                case .pending:
-                    statusMessage = "Purchase pending approval."
-                    return
-                case .userCancelled:
-                    statusMessage = nil
-                    return
-                @unknown default:
-                    statusMessage = "Purchase could not be completed."
-                    return
-                }
-#endif
                 onBalanceUpdated()
             } catch {
                 statusMessage = nil
                 errorMessage = AppError.from(error).localizedDescription
+            }
+        }
+    }
+
+    private func startTransactionUpdates() {
+        updatesTask?.cancel()
+        updatesTask = Task { [weak self] in
+            guard let self else { return }
+            for await result in Transaction.updates {
+                guard let transaction = try? verifiedTransaction(from: result) else { continue }
+                guard transaction.revocationDate == nil,
+                      let purchase = FrameMioCreditPackPurchase(productID: transaction.productID, packs: packs) else {
+                    continue
+                }
+                do {
+                    balance = try await creditService?.grantPurchasedCredits(packID: purchase.packID, purchaseID: String(transaction.id))
+                    await transaction.finish()
+                    onBalanceUpdated()
+                } catch {
+                    errorMessage = AppError.from(error).localizedDescription
+                    statusMessage = nil
+                }
             }
         }
     }
