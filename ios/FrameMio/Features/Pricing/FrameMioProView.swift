@@ -163,7 +163,14 @@ final class FrameMioProViewModel: ObservableObject {
         if isSubscribed {
             return "Manage Subscription"
         }
+        guard canPurchaseSelectedPlan else {
+            return isLoading ? "Loading FrameMio Pro…" : "Plans unavailable"
+        }
         return "Start FrameMio Pro — \(selectedPlan.displayPrice(using: product(for: selectedPlan), fallback: selectedPlan.fallbackPrice))"
+    }
+
+    var canPurchaseSelectedPlan: Bool {
+        isSubscribed || product(for: selectedPlan) != nil || shouldSimulatePurchaseSuccess
     }
 
     func load() {
@@ -205,6 +212,11 @@ final class FrameMioProViewModel: ObservableObject {
                 }
             } catch {
                 statusMessage = nil
+                if isCancellationLikeError(error) {
+                    errorMessage = nil
+                    pricingDebugLog("load_cancelled error=\(error.localizedDescription)")
+                    return
+                }
 #if DEBUG
                 errorMessage = nil
                 pricingDebugLog("load_failed_debug suppressed_alert error=\(error.localizedDescription) mapped=\(AppError.from(error).localizedDescription)")
@@ -262,8 +274,14 @@ final class FrameMioProViewModel: ObservableObject {
                         statusMessage = "Purchase could not be completed."
                     }
                 } catch {
-                    errorMessage = AppError.from(error).localizedDescription
                     statusMessage = nil
+                    if isCancellationLikeError(error) {
+                        errorMessage = nil
+                        pricingDebugLog("purchase_cancelled error=\(error.localizedDescription)")
+                        return
+                    }
+                    errorMessage = AppError.from(error).localizedDescription
+                    pricingDebugLog("purchase_failed error=\(error.localizedDescription) mapped=\(AppError.from(error).localizedDescription)")
                 }
             }
         }
@@ -286,8 +304,13 @@ final class FrameMioProViewModel: ObservableObject {
                 statusMessage = "Purchases restored."
                 pricingDebugLog("restore_complete subscribed=\(isSubscribed) balance=\(balance.map(String.init) ?? "nil")")
             } catch {
-                errorMessage = AppError.from(error).localizedDescription
                 statusMessage = nil
+                if isCancellationLikeError(error) {
+                    errorMessage = nil
+                    pricingDebugLog("restore_cancelled error=\(error.localizedDescription)")
+                    return
+                }
+                errorMessage = AppError.from(error).localizedDescription
                 pricingDebugLog("restore_failed error=\(error.localizedDescription) mapped=\(AppError.from(error).localizedDescription)")
             }
         }
@@ -296,6 +319,21 @@ final class FrameMioProViewModel: ObservableObject {
     func manageSubscription() {
         guard let url = URL(string: "https://apps.apple.com/account/subscriptions") else { return }
         UIApplication.shared.open(url)
+    }
+
+    private func isCancellationLikeError(_ error: Error) -> Bool {
+        if error is CancellationError {
+            return true
+        }
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled {
+            return true
+        }
+        if nsError.domain == SKError.errorDomain, nsError.code == SKError.paymentCancelled.rawValue {
+            return true
+        }
+        let description = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return description == "request canceled" || description == "request cancelled"
     }
 
     private func product(for plan: FrameMioProPlanKind) -> Product? {
@@ -499,7 +537,7 @@ struct FrameMioProView: View {
         .task {
             viewModel.load()
         }
-        .alert("Couldn’t load plans", isPresented: errorBinding) {
+        .alert("FrameMio Pro", isPresented: errorBinding) {
             Button("Dismiss", role: .cancel) { viewModel.errorMessage = nil }
         } message: {
             Text(viewModel.errorMessage ?? "")
@@ -630,7 +668,7 @@ struct FrameMioProView: View {
                     viewModel.purchaseSelectedPlan()
                 }
             }
-            .disabled(viewModel.isPurchasing || viewModel.isRestoring)
+            .disabled(viewModel.isPurchasing || viewModel.isRestoring || !viewModel.canPurchaseSelectedPlan)
 
             if viewModel.isPurchasing {
                 Text("Processing your purchase…")

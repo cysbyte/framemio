@@ -420,6 +420,25 @@ final class MediaUploadTests: XCTestCase {
         XCTAssertEqual(backgroundFlags, [true])
     }
 
+    func testDefaultUploadOptionUsesForegroundSession() async throws {
+        let asset = makeAsset(id: "foreground-video", kind: .video)
+        let source = makeSource(asset: asset, byteCount: 256 * 1_024)
+        let authorizer = MockMediaUploadAuthorizer()
+        let storage = MockDirectObjectStorageClient()
+        let store = MockMediaUploadStore()
+        let service = makeService(source: source, authorizer: authorizer, storage: storage, store: store)
+
+        _ = try await service.upload(
+            selection: selection(for: [asset]),
+            assets: [asset],
+            options: MediaUploadOptions(),
+            progress: { _ in }
+        )
+
+        let backgroundFlags = await storage.requests.map(\.usesBackgroundSession)
+        XCTAssertEqual(backgroundFlags, [false])
+    }
+
     private func makeService(
         source: MockOriginalMediaSource,
         authorizer: MockMediaUploadAuthorizer,

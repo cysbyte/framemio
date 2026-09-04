@@ -46,7 +46,6 @@ export const FrameMioStory: React.FC<StoryProps> = ({composition}) => {
       {composition.clips.map((clip) => (
         <Sequence key={clip.clip_id} from={clip.start_frame} durationInFrames={clip.duration_frames}>
           <MomentLayer clip={clip} />
-          {clip.typography?.enabled ? <TypographyLayer typography={clip.typography} durationFrames={clip.duration_frames} fps={fps} /> : null}
         </Sequence>
       ))}
       {composition.broll.map((overlay) => (

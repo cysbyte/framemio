@@ -73,7 +73,7 @@ async function prepareRemotionStaticAssets(composition: CompositionSpec, publicD
 
   return {
     ...composition,
-    clips: await Promise.all(composition.clips.map(async (clip) => ({...clip, prepared_path: await toStaticAsset(clip.prepared_path)}))),
+    clips: await Promise.all(composition.clips.map(async (clip) => ({...clip, typography: undefined, prepared_path: await toStaticAsset(clip.prepared_path)}))),
     broll: await Promise.all(composition.broll.map(async (overlay) => ({...overlay, prepared_path: await toStaticAsset(overlay.prepared_path)}))),
   };
 }
@@ -742,8 +742,8 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
       args.push('-i', inputPath);
     }
     const captions = await this.prepareCaptionOverlays(composition, outputPath);
-    const typography = await this.prepareTypographyOverlays(composition, outputPath);
-    console.info(JSON.stringify({level: 'info', msg: 'ffmpeg overlays prepared', project_id: composition.project_id, story_plan_id: composition.story_plan_id, input_caption_count: composition.captions.length, caption_overlay_count: captions.length, typography_overlay_count: typography.length}));
+    const typography: TypographyOverlay[] = [];
+    console.info(JSON.stringify({level: 'info', msg: 'ffmpeg overlays prepared', project_id: composition.project_id, story_plan_id: composition.story_plan_id, input_caption_count: composition.captions.length, caption_overlay_count: captions.length, typography_overlay_count: typography.length, typography_disabled: true}));
     const filter = concatFilter(composition, captions, typography);
     args.push(
       '-filter_complex',

@@ -73,7 +73,7 @@ export function buildComposition(
       transition: transitionFor(moment),
       volume: clamp(moment.volume ?? 1, 0, 1),
       speed: speedFor(moment),
-      typography: normalizeTypography(moment.typography, moment.duration_ms),
+      typography: undefined,
     };
     nextFrame += durationFrames;
     return clip;

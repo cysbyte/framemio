@@ -17,10 +17,14 @@ final class URLSessionDirectObjectStorageClient: DirectObjectStorageClient, @unc
         let backgroundDelegate = DirectUploadSessionDelegate()
         let foregroundConfiguration = URLSessionConfiguration.default
         foregroundConfiguration.waitsForConnectivity = true
+        foregroundConfiguration.timeoutIntervalForRequest = 60
+        foregroundConfiguration.timeoutIntervalForResource = 60 * 60
         let backgroundConfiguration = URLSessionConfiguration.background(withIdentifier: backgroundIdentifier)
         backgroundConfiguration.sessionSendsLaunchEvents = true
         backgroundConfiguration.isDiscretionary = false
         backgroundConfiguration.waitsForConnectivity = true
+        backgroundConfiguration.timeoutIntervalForRequest = 60
+        backgroundConfiguration.timeoutIntervalForResource = 60 * 60
 
         self.foregroundDelegate = foregroundDelegate
         self.backgroundDelegate = backgroundDelegate

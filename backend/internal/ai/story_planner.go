@@ -136,7 +136,6 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 	visualStyle := normalizeVisualStyle(request.VisualStyle)
 	titleText := titleFor(storyType, request, moments)
 	endingText := endingFor(storyType, request, moments)
-	moments = p.applyTypography(ctx, request, moments, titleText)
 	captionStyle := captionStyleFor(storyType, visualStyle)
 	if preset := strings.TrimSpace(request.CaptionStylePreset); preset != "" {
 		captionStyle = captionStylePreset(preset, storyType, visualStyle)

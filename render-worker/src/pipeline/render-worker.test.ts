@@ -173,7 +173,7 @@ test('applies deterministic cinematic motion to photo clips', () => {
   assert.equal(composition.clips[0].media_type, 'photo');
 });
 
-test('normalizes typography into timeline clips', () => {
+test('defers typography on timeline clips for first release', () => {
   const basePlan = fixtureStoryPlan();
   const plan = fixtureStoryPlan({
     moments: [{
@@ -181,17 +181,9 @@ test('normalizes typography into timeline clips', () => {
       typography: {
         enabled: true,
         type: 'moment_title',
-        title: 'A very long title that should be deterministically shortened before rendering',
-        subtitle: 'Quiet light by the sea',
-        style: 'neon',
-        placement: 'over_face',
-        animation: 'spin',
-        start_ms: -50,
-        duration_ms: 9000,
-        max_width: 2,
-        safe_area: {top: -1, right: 0.7, bottom: 0.08, left: 0.08},
-        source: 'remote',
-        confidence: 2,
+        title: 'Golden Hour',
+        style: 'cinematic',
+        placement: 'bottom_left',
       },
     }],
     captions: [],
@@ -207,19 +199,7 @@ test('normalizes typography into timeline clips', () => {
     composition_file: '/work/composition.json',
   });
 
-  const typography = composition.clips[0].typography;
-  assert.equal(typography?.enabled, true);
-  assert.equal(typography?.style, 'cinematic');
-  assert.equal(typography?.placement, 'bottom_left');
-  assert.equal(typography?.animation, 'fade_up');
-  assert.equal(typography?.start_ms, 0);
-  assert.equal(typography?.duration_ms, 3000);
-  assert.equal(typography?.max_width, 0.95);
-  assert.equal(typography?.safe_area?.top, 0);
-  assert.equal(typography?.safe_area?.right, 0.5);
-  assert.equal(typography?.source, 'ai');
-  assert.equal(typography?.confidence, 1);
-  assert.equal((typography?.title ?? '').length, 40);
+  assert.equal(composition.clips[0].typography, undefined);
 });
 
 test('normalizes transitions and resolves audio deterministically', () => {
@@ -376,7 +356,7 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
   }
 });
 
-test('ffmpeg fallback renderer renders typography before captions', async () => {
+test('ffmpeg fallback renderer ignores typography for first release', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'framemio-typography-render-test-'));
   const fakeFfmpeg = path.join(root, 'fake-ffmpeg.cjs');
   const argsPath = path.join(root, 'ffmpeg-args.json');
@@ -426,15 +406,9 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
 
     const args = JSON.parse(await readFile(argsPath, 'utf8')) as string[];
     const filterComplex = args[args.indexOf('-filter_complex') + 1];
-    assert.match(filterComplex, /typography-0-title-/);
-    assert.match(filterComplex, /typography-0-subtitle-/);
-    assert.match(filterComplex, /font='Liberation Serif'/);
-    assert.match(filterComplex, /fontsize=78/);
-    assert.match(filterComplex, /x=w\*0\.0800/);
-    assert.match(filterComplex, /enable='between\(t,0\.350,2\.550\)'/);
-    assert.match(filterComplex, /alpha='if\(lt\(t\\,0\.350\+0\.350\)\\,/);
-    assert.match(filterComplex, /y=h-.*\+if\(lt\(t\\,0\.350\+0\.350\)\\,/);
-    assert.ok(filterComplex.indexOf('typography-0-title-') < filterComplex.indexOf('caption-0-'));
+    assert.doesNotMatch(filterComplex, /typography-0-title-/);
+    assert.doesNotMatch(filterComplex, /typography-0-subtitle-/);
+    assert.match(filterComplex, /caption-0-/);
   } finally {
     if (previousArgsPath === undefined) {
       delete process.env.FRAMEMIO_FFMPEG_ARGS_PATH;

@@ -1926,12 +1926,12 @@ func iosStoryProgressForJob(job models.ProcessingJob) iosStoryProgress {
 		if job.Status == models.JobStatusQueued {
 			return iosStoryProgress{Title: "Preparing video clips...", Detail: "Your media is waiting for the next worker.", Value: iosProgressValue(0.22)}
 		}
-		return iosStoryProgress{Title: "Preparing video clips...", Detail: "Reading your photos and videos before choosing moments.", Value: iosProgressValue(0.25 + progress*0.10)}
+		return iosStoryProgress{Title: "Preparing video clips...", Detail: "Reading photos and videos before choosing moments.", Value: iosProgressValue(0.25 + progress*0.10)}
 	case models.JobTypeTranscribe:
 		if job.Status == models.JobStatusQueued {
 			return iosStoryProgress{Title: "Listening for voices...", Detail: "Audio transcription is queued for this story.", Value: iosProgressValue(0.36)}
 		}
-		return iosStoryProgress{Title: "Listening for voices...", Detail: "Capturing spoken moments from your video clips.", Value: iosProgressValue(0.40 + progress*0.10)}
+		return iosStoryProgress{Title: "Listening for voices...", Detail: "Capturing spoken moments from video clips.", Value: iosProgressValue(0.40 + progress*0.10)}
 	case models.JobTypeVideoUnderstand:
 		if job.Status == models.JobStatusQueued {
 			return iosStoryProgress{Title: "Finding the best parts...", Detail: "Visual understanding is queued; longer videos can take a bit.", Value: iosProgressValue(0.50)}
@@ -1939,9 +1939,9 @@ func iosStoryProgressForJob(job models.ProcessingJob) iosStoryProgress {
 		return iosStoryProgress{Title: "Finding the best parts...", Detail: "Scanning scenes, motion, faces, and meaningful highlights.", Value: iosProgressValue(0.55 + progress*0.13)}
 	case models.JobTypeStoryPlan:
 		if job.Status == models.JobStatusQueued {
-			return iosStoryProgress{Title: "Writing your story...", Detail: "The story planner is waiting for the analyzed moments.", Value: iosProgressValue(0.68)}
+			return iosStoryProgress{Title: "Writing story...", Detail: "The story planner is waiting for the analyzed moments.", Value: iosProgressValue(0.68)}
 		}
-		return iosStoryProgress{Title: "Writing your story...", Detail: "Choosing the rhythm, captions, and moment order.", Value: iosProgressValue(0.72 + progress*0.08)}
+		return iosStoryProgress{Title: "Writing story...", Detail: "Choosing the rhythm, captions, and moment order.", Value: iosProgressValue(0.72 + progress*0.08)}
 	case models.JobTypeStoryValidate:
 		if job.Status == models.JobStatusQueued {
 			return iosStoryProgress{Title: "Checking the story flow...", Detail: "FrameMio is preparing the render plan.", Value: iosProgressValue(0.80)}
@@ -1949,9 +1949,9 @@ func iosStoryProgressForJob(job models.ProcessingJob) iosStoryProgress {
 		return iosStoryProgress{Title: "Checking the story flow...", Detail: "Making sure the planned story is ready to render.", Value: iosProgressValue(0.82 + progress*0.04)}
 	case models.JobTypeVideoRender:
 		if job.Status == models.JobStatusQueued {
-			return iosStoryProgress{Title: "Creating your film...", Detail: "The render worker is queued; first renders can take a moment to start.", Value: iosProgressValue(0.86)}
+			return iosStoryProgress{Title: "Creating film...", Detail: "The render worker is queued; first renders can take a moment to start.", Value: iosProgressValue(0.86)}
 		}
-		return iosStoryProgress{Title: "Creating your film...", Detail: "Rendering the final video with timing, motion, and captions.", Value: iosProgressValue(0.88 + progress*0.10)}
+		return iosStoryProgress{Title: "Creating film...", Detail: "Rendering the final video with timing, motion, and captions.", Value: iosProgressValue(0.88 + progress*0.10)}
 	default:
 		return iosStoryFallbackProgress(models.ProjectStatusAnalyzing)
 	}
@@ -1960,17 +1960,17 @@ func iosStoryProgressForJob(job models.ProcessingJob) iosStoryProgress {
 func iosStoryFallbackProgress(status models.ProjectStatus) iosStoryProgress {
 	switch status {
 	case models.ProjectStatusDraft:
-		return iosStoryProgress{Title: "Preparing your memories...", Detail: "FrameMio is getting your story ready.", Value: iosProgressValue(0.12)}
+		return iosStoryProgress{Title: "Preparing memories...", Detail: "FrameMio is getting story ready.", Value: iosProgressValue(0.12)}
 	case models.ProjectStatusAnalyzing, models.ProjectStatusStoryReady:
 		return iosStoryProgress{Title: "Finding meaningful moments...", Detail: "This can take longer for video-heavy stories.", Value: iosProgressValue(0.58)}
 	case models.ProjectStatusRendering:
-		return iosStoryProgress{Title: "Creating your film...", Detail: "Rendering the final video now.", Value: iosProgressValue(0.86)}
+		return iosStoryProgress{Title: "Creating film...", Detail: "Rendering the final video now.", Value: iosProgressValue(0.86)}
 	case models.ProjectStatusReady:
 		return iosStoryProgress{Title: "Ready to watch.", Detail: "Your story is ready.", Value: iosProgressValue(1)}
 	case models.ProjectStatusFailed:
 		return iosStoryProgress{Title: "This story needs another try.", Detail: "Something interrupted the last render.", Value: iosProgressValue(0)}
 	default:
-		return iosStoryProgress{Title: "Preparing your memories...", Detail: "FrameMio is getting your story ready.", Value: iosProgressValue(0.08)}
+		return iosStoryProgress{Title: "Preparing memories...", Detail: "FrameMio is getting your story ready.", Value: iosProgressValue(0.08)}
 	}
 }
 

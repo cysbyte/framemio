@@ -98,7 +98,7 @@ Story Planner
   = decide which meaningful moments form a coherent story
 
 Typography Planner
-  = optional AI/rule-based photo text overlay decisions from StoryPlan context
+  = deferred first-release feature; model/validation may remain, but active StoryPlan generation/rendering is disabled
 
 StoryPlan Validator
   = deterministic validation
@@ -1174,34 +1174,32 @@ A stronger narrative may justify a different order.
 
 ## 15.3 Photo typography planning
 
-Photo typography is part of Story planning, not a separate rendering timeline. The implemented flow is:
+Photo typography is a deferred post-first-publish feature. The repository may retain the domain model, validation helpers, and provider abstractions, but active first-release behavior is:
 
 ```text
 PhotoAnalysis + VideoAnalysis + Story context
     ↓
 Story Planner selects ordered moments
     ↓
-Typography Planner receives the StoryPlan-shaped moment context
+StoryPlan is written without moments[].typography
     ↓
-TextOverlay is attached to StoryPlan.moments[].typography
+Render Worker strips/ignores any legacy typography fields
     ↓
-StoryPlan Validator validates the overlay deterministically
-    ↓
-Render Worker executes the validated StoryPlan
+Final MP4 renders photos, videos, captions, B-roll, audio, credits, and export policy only
 ```
 
-The Typography Planner may be local/rule-based or an external OpenAI-compatible provider selected by backend configuration. It must return structured JSON only. Backend validation owns enum support, text length limits, timing clamping, safe margins, max width, source metadata, and confidence bounds. AI output must never become renderer code, CSS, font paths, ImageMagick commands, FFmpeg arguments, or a second timeline.
+Do not re-enable typography during first-release stabilization. The Story Planner must not invoke a typography planner, must not attach `TextOverlay` values to `StoryPlan.moments[]`, and the render worker must not render legacy `typography` fields if an older plan contains them. Typography must also not be rasterized with ImageMagick or injected as FFmpeg `drawtext` overlays for the first publish.
 
-Typography is optional. The planner should not add text to every photo and should prefer short cinematic/editorial language only when it improves the memory film. It must avoid invented locations, dates, names, events, hashtags, memes, and literal duplicate captions. If typography planning fails or returns invalid output, Story generation continues without typography. The local rule-based fallback can also derive conservative titles from reliable photo metadata such as cluster label, location, or bounded analysis labels, so photos without captions/descriptions can still receive typography when their metadata is meaningful.
+When the feature is reintroduced after first publish, the Typography Planner may be local/rule-based or an external OpenAI-compatible provider selected by backend configuration. It must return structured JSON only. Backend validation must own enum support, text length limits, timing clamping, safe margins, max width, source metadata, and confidence bounds. AI output must never become renderer code, CSS, font paths, ImageMagick commands, FFmpeg arguments, or a second timeline.
 
-Current backend configuration:
+Deferred backend configuration, for future reactivation only:
 
 ```text
-TYPOGRAPHY_ENABLED=true|false              default true
-TYPOGRAPHY_PROVIDER=local|disabled|openai  default local
-TYPOGRAPHY_BASE_URL=...                    defaults to OPENAI_BASE_URL or https://api.openai.com
-TYPOGRAPHY_API_KEY=...                     defaults to OPENAI_API_KEY for external providers
-TYPOGRAPHY_MODEL=...                       required for external providers
+TYPOGRAPHY_ENABLED=true|false
+TYPOGRAPHY_PROVIDER=local|disabled|openai
+TYPOGRAPHY_BASE_URL=...
+TYPOGRAPHY_API_KEY=...
+TYPOGRAPHY_MODEL=...
 TYPOGRAPHY_WIRE_API=responses|chat_completions
 TYPOGRAPHY_MAX_OUTPUT_TOKENS=1400
 TYPOGRAPHY_TIMEOUT=12s
@@ -1284,12 +1282,12 @@ crop_intent
 transition
 reason
 score
-typography
+typography              deferred; should be omitted in first-release StoryPlans
 ```
 
 Photo moments must have positive `duration_ms` and no source timestamps. Video moments must have `start_micros`, `end_micros`, a matching `duration_ms`, and a valid `video_analysis_version`.
 
-`moments[].typography` is an optional renderer-stable `TextOverlay` for cinematic photo typography. It is separate from speech captions/transcript subtitles and should normally be attached only to photo/live-photo moments. Current fields are:
+`moments[].typography` is a deferred renderer-stable `TextOverlay` extension for future cinematic photo typography. It is separate from speech captions/transcript subtitles and should normally be omitted in first-release StoryPlans. Reserved fields are:
 
 ```text
 enabled
@@ -1308,7 +1306,7 @@ reason
 confidence
 ```
 
-The backend clamps V1 typography text and layout using centralized domain limits: title max 40 characters, subtitle max 100 characters, reason max 240 characters, default max width 0.72, default safe margin 0.08, and default start time 350 ms. Unsupported enum values or unusable timings are rejected before rendering.
+The backend retains V1 typography validation for future compatibility, but first-release planning should not emit typography and first-release rendering should ignore any legacy typography values.
 
 `caption_style` is optional renderer-safe styling metadata for captions/subtitles. It may include whitelisted presets such as `bold_social`, `cinematic_subtitle`, `clean_minimal`, and `playful_pop`, plus validated fields for font family, font size, text/stroke/background colors, background opacity, position, bottom offset, max lines, and max characters per line. It must not contain raw FFmpeg/Remotion commands, arbitrary font file paths, provider information, or transcript source details.
 

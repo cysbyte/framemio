@@ -166,7 +166,7 @@ struct MediaUploadOptions: Hashable, Sendable {
     init(
         optimization: MediaUploadOptimization = .original,
         allowsNetworkAccessToPhotos: Bool = true,
-        usesBackgroundURLSession: Bool = true,
+        usesBackgroundURLSession: Bool = false,
         maximumConcurrentUploads: Int = 2,
         maximumPartRetries: Int = 3,
         partSizeBytes: Int64 = 8 * 1_024 * 1_024,
