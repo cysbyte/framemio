@@ -9,7 +9,7 @@ import (
 	"github.com/framemio/backend/internal/queue"
 )
 
-func TestWorkerRunOnceReleasesNonTargetMessage(t *testing.T) {
+func TestWorkerRunOnceDefersNonTargetUnsupportedMessage(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	memoryStore, _, coordinator, project, _ := setupProject(t, models.MediaTypePhoto)
@@ -38,8 +38,8 @@ func TestWorkerRunOnceReleasesNonTargetMessage(t *testing.T) {
 	if len(consumer.deleted) != 1 || consumer.deleted[0] != "receipt-target" {
 		t.Fatalf("target message was not deleted after processing: %+v", consumer.deleted)
 	}
-	if len(consumer.extended) == 0 || consumer.extended[0] != 0 {
-		t.Fatalf("non-target message was not released immediately: %+v", consumer.extended)
+	if len(consumer.extended) == 0 || consumer.extended[0] != 2*time.Second {
+		t.Fatalf("non-target message was not deferred briefly: %+v", consumer.extended)
 	}
 	otherAfter, err := memoryStore.GetJob(ctx, project.UserID, otherJob.ID)
 	if err != nil {

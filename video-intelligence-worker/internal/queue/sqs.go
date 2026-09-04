@@ -120,8 +120,7 @@ func (c *Consumer) RunOnce(ctx context.Context, handler Handler, targetJobID str
 				continue
 			}
 			if !isVideoAnalysisJobType(jobMessage.JobType) {
-				c.logger.Info("release non-video-analysis message", slog.String("job_id", jobMessage.JobID), slog.String("job_type", jobMessage.JobType))
-				c.release(ctx, message)
+				c.deferUnsupported(ctx, message, jobMessage)
 				continue
 			}
 			if targetJobID != "" && jobMessage.JobID != targetJobID {
@@ -158,8 +157,7 @@ func (c *Consumer) handleMessage(ctx context.Context, handler Handler, received 
 		return
 	}
 	if !isVideoAnalysisJobType(message.JobType) {
-		c.logger.Info("release non-video-analysis message", slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID), slog.String("job_type", message.JobType))
-		c.release(ctx, received)
+		c.deferUnsupported(ctx, received, message)
 		return
 	}
 	receiveCount := 1
@@ -262,16 +260,18 @@ func (c *Consumer) decodeMessage(ctx context.Context, received types.Message) (d
 	return message, true
 }
 
-func (c *Consumer) release(ctx context.Context, received types.Message) {
+func (c *Consumer) deferUnsupported(ctx context.Context, received types.Message, message domain.JobMessage) {
 	if received.ReceiptHandle == nil {
 		return
 	}
+	c.logger.Info("defer non-video-analysis message", slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID), slog.String("job_type", message.JobType))
 	_, err := c.client.ChangeMessageVisibility(ctx, &sqs.ChangeMessageVisibilityInput{
-		QueueUrl: aws.String(c.queueURL), ReceiptHandle: received.ReceiptHandle, VisibilityTimeout: 0,
+		QueueUrl: aws.String(c.queueURL), ReceiptHandle: received.ReceiptHandle, VisibilityTimeout: 2,
 	})
 	if err != nil && ctx.Err() == nil {
-		c.logger.Warn("release unmatched video analysis message", slog.Any("error", err))
+		c.logger.Warn("defer unmatched video analysis message", slog.Any("error", err))
 	}
+	_ = sleep(ctx, 1500*time.Millisecond)
 }
 
 func (c *Consumer) delete(ctx context.Context, receiptHandle string) {

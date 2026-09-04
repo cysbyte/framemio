@@ -105,8 +105,9 @@ async function handleMessage(received: ReceivedJobMessage, dependencies: {
   const {queue, backend, worker, config} = dependencies;
   const message = received.message;
   if (message.jobType !== 'VIDEO_RENDER') {
-    console.info(JSON.stringify({level: 'info', msg: 'render worker releasing non-render message', target_job_id: config.jobID ?? '', job_id: message.jobId, job_type: message.jobType}));
-    await queue.release(received.receiptHandle);
+    console.info(JSON.stringify({level: 'info', msg: 'render worker deferring non-render message', target_job_id: config.jobID ?? '', job_id: message.jobId, job_type: message.jobType}));
+    await queue.defer(received.receiptHandle, 2);
+    await sleep(1500);
     return false;
   }
   if (config.jobID && message.jobId !== config.jobID) {

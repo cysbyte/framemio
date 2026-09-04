@@ -58,7 +58,11 @@ export class AwsCliQueue {
   }
 
   async release(receiptHandle: string): Promise<void> {
-    await run(this.awsBinary, ['sqs', 'change-message-visibility', '--queue-url', this.options.queueURL, '--receipt-handle', receiptHandle, '--visibility-timeout', '0']);
+    await this.defer(receiptHandle, 0);
+  }
+
+  async defer(receiptHandle: string, visibilityTimeoutSeconds: number): Promise<void> {
+    await run(this.awsBinary, ['sqs', 'change-message-visibility', '--queue-url', this.options.queueURL, '--receipt-handle', receiptHandle, '--visibility-timeout', String(Math.max(0, Math.floor(visibilityTimeoutSeconds)))]);
   }
 }
 

@@ -388,14 +388,14 @@ function typographyEntranceOffsetExpression(overlay: TypographyOverlay): string 
   }
   const distance = overlay.animation === 'subtle_scale' ? 8 : 18;
   const sign = overlay.animation === 'fade_down' ? '-' : '+';
-  return `${sign}if(lt(t\,${overlay.startSeconds}+0.350)\,(${ffmpegNumber(distance)}*(1-((t-${overlay.startSeconds})/0.350)))\,0)`;
+  return `${sign}if(lt(t\\,${overlay.startSeconds}+0.350)\\,(${ffmpegNumber(distance)}*(1-((t-${overlay.startSeconds})/0.350)))\\,0)`;
 }
 
 function typographyAlphaExpression(overlay: TypographyOverlay): string {
   if (overlay.animation === 'none') {
     return '1';
   }
-  return `if(lt(t\,${overlay.startSeconds}+0.350)\,(t-${overlay.startSeconds})/0.350\,if(gt(t\,${overlay.endSeconds}-0.250)\,(${overlay.endSeconds}-t)/0.250\,1))`;
+  return `if(lt(t\\,${overlay.startSeconds}+0.350)\\,(t-${overlay.startSeconds})/0.350\\,if(gt(t\\,${overlay.endSeconds}-0.250)\\,(${overlay.endSeconds}-t)/0.250\\,1))`;
 }
 
 function typographyTiming(clip: TimelineClip, typography: TextOverlay, composition: CompositionSpec): {startSeconds: string; endSeconds: string} | undefined {

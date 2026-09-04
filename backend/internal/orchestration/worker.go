@@ -52,8 +52,11 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 		for _, received := range receivedMessages {
 			logger(w).Info("orchestration worker run-once inspecting message", slog.String("target_job_id", w.TargetJobID), slog.String("job_id", received.Message.JobID), slog.String("job_type", string(received.Message.JobType)), slog.String("project_id", received.Message.ProjectID), slog.String("media_id", received.Message.MediaID), slog.Int("receive_count", received.ApproximateReceiveCount), slog.Bool("is_target", w.TargetJobID != "" && received.Message.JobID == w.TargetJobID))
 			if w.TargetJobID != "" && received.Message.JobID != w.TargetJobID && w.Handlers[received.Message.JobType] == nil {
-				logger(w).Info("orchestration worker run-once releasing unsupported message", slog.String("target_job_id", w.TargetJobID), slog.String("job_id", received.Message.JobID), slog.String("job_type", string(received.Message.JobType)))
-				if err := w.Consumer.ExtendVisibility(ctx, received.ReceiptHandle, 0); err != nil {
+				logger(w).Info("orchestration worker run-once deferring unsupported message", slog.String("target_job_id", w.TargetJobID), slog.String("job_id", received.Message.JobID), slog.String("job_type", string(received.Message.JobType)))
+				if err := w.Consumer.ExtendVisibility(ctx, received.ReceiptHandle, 2*time.Second); err != nil {
+					return err
+				}
+				if err := sleep(ctx, 1500*time.Millisecond); err != nil {
 					return err
 				}
 				continue
@@ -160,6 +163,17 @@ func (w *Worker) handleReceived(ctx context.Context, received queue.ReceivedJobM
 		return true, err
 	}
 	return true, nil
+}
+
+func sleep(ctx context.Context, duration time.Duration) error {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func logger(w *Worker) *slog.Logger {

@@ -432,6 +432,8 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
     assert.match(filterComplex, /fontsize=78/);
     assert.match(filterComplex, /x=w\*0\.0800/);
     assert.match(filterComplex, /enable='between\(t,0\.350,2\.550\)'/);
+    assert.match(filterComplex, /alpha='if\(lt\(t\\,0\.350\+0\.350\)\\,/);
+    assert.match(filterComplex, /y=h-.*\+if\(lt\(t\\,0\.350\+0\.350\)\\,/);
     assert.ok(filterComplex.indexOf('typography-0-title-') < filterComplex.indexOf('caption-0-'));
   } finally {
     if (previousArgsPath === undefined) {
