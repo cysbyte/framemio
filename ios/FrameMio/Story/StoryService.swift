@@ -192,6 +192,41 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
     }
 }
 
+
+final class RemotePromptTranscriptionService: PromptTranscriptionService, @unchecked Sendable {
+    private let apiClient: APIClient
+    private let decoder: JSONDecoder
+
+    init(apiClient: APIClient) {
+        self.apiClient = apiClient
+        decoder = FrameMioJSONCoding.apiDecoder()
+    }
+
+    func transcribePromptAudio(_ recording: PromptAudioRecording) async throws -> String {
+        let data = try await apiClient.data(
+            for: APIRequest(
+                method: .post,
+                path: "/v1/transcriptions",
+                body: recording.data,
+                headers: [
+                    "Content-Type": recording.contentType,
+                    "X-File-Name": recording.fileName
+                ]
+            )
+        )
+        do {
+            let response = try decoder.decode(PromptTranscriptionResponse.self, from: data)
+            return response.transcript
+        } catch {
+            throw AppError.invalidResponse
+        }
+    }
+}
+
+private struct PromptTranscriptionResponse: Decodable {
+    let transcript: String
+}
+
 final class MockStoryService: StoryService, @unchecked Sendable {
     private let persistence: StoryPersistence
 
@@ -328,5 +363,12 @@ final class MockStoryService: StoryService, @unchecked Sendable {
     private func deduplicated(_ assetIDs: [String]) -> [String] {
         var seen = Set<String>()
         return assetIDs.filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+}
+
+final class MockPromptTranscriptionService: PromptTranscriptionService, @unchecked Sendable {
+    func transcribePromptAudio(_ recording: PromptAudioRecording) async throws -> String {
+        try await Task.sleep(nanoseconds: 300_000_000)
+        return "Make it warm and emotional, with a slower pace and more focus on smiling faces."
     }
 }

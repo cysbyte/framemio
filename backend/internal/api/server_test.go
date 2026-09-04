@@ -1637,6 +1637,13 @@ func TestIOSStoryPresentationSuppressesGenericNames(t *testing.T) {
 	if got := iosStoryDescription(plan); got != "Everyone laughing by the lake" {
 		t.Fatalf("story description = %q", got)
 	}
+	promptPlan := models.StoryPlan{
+		UserInstructions: "Make it slower and more emotional, focus on the sunset, lake, and people laughing",
+		Moments:          []models.StoryMoment{{Narrative: "A warm lakeside picnic with people laughing at sunset"}},
+	}
+	if got := iosStoryDescription(promptPlan); strings.Contains(strings.ToLower(got), "make it slower") || got != "A warm lakeside picnic with people laughing at sunset" {
+		t.Fatalf("story prompt leaked into description: %q", got)
+	}
 	pollutedPlan := models.StoryPlan{
 		Moments: []models.StoryMoment{{
 			Caption:   "Look at the ducks by the lake This is my favorite part",
@@ -1673,8 +1680,8 @@ func TestIOSStoryPresentationSuppressesGenericNames(t *testing.T) {
 	}
 	longMoment := strings.Repeat("lake picnic with friends ", 16)
 	longPlan := models.StoryPlan{Moments: []models.StoryMoment{{Narrative: longMoment}}}
-	if got := iosStoryDescription(longPlan); len(got) <= 120 || len(got) > iosStoryDescriptionMaxLength || strings.HasSuffix(got, "...") || strings.HasSuffix(got, "…") {
-		t.Fatalf("story description = %q, want concise text within max length", got)
+	if got := iosStoryDescription(longPlan); len(got) <= 120 || len(got) > iosStoryDescriptionMaxLength || !strings.HasSuffix(got, "…") {
+		t.Fatalf("story description = %q, want concise truncated text within max length", got)
 	}
 }
 
@@ -1826,4 +1833,69 @@ func latestJobOfType(t *testing.T, jobs []models.ProcessingJob, jobType models.J
 
 func completeProjectPhotoPreprocessJobs(t *testing.T, server *Server, memoryStore *store.MemoryStore, projectID string) {
 	t.Helper()
+}
+
+func TestTranscribePromptAudio(t *testing.T) {
+	t.Parallel()
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	server := newTestServer(memoryStore, publisher)
+	transcriber := &mockPromptTranscriber{transcript: "Make this slower and focus on the sunset."}
+	server.PromptTranscriber = transcriber
+	handler := server.Handler()
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/transcriptions", strings.NewReader("audio-bytes"))
+	request.Header.Set("Authorization", "Bearer test-token")
+	request.Header.Set("Content-Type", "audio/mp4")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("transcription status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Transcript string `json:"transcript"`
+	}
+	decodeResponse(t, response, &body)
+	if body.Transcript != transcriber.transcript {
+		t.Fatalf("transcript = %q, want %q", body.Transcript, transcriber.transcript)
+	}
+	if string(transcriber.audio) != "audio-bytes" || transcriber.contentType != "audio/mp4" {
+		t.Fatalf("transcriber input = %q %q", string(transcriber.audio), transcriber.contentType)
+	}
+}
+
+func TestTranscribePromptAudioRejectsNonAudio(t *testing.T) {
+	t.Parallel()
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	server := newTestServer(memoryStore, publisher)
+	server.PromptTranscriber = &mockPromptTranscriber{transcript: "unused"}
+	handler := server.Handler()
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/transcriptions", strings.NewReader("not-audio"))
+	request.Header.Set("Authorization", "Bearer test-token")
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("transcription status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
+type mockPromptTranscriber struct {
+	transcript    string
+	audio         []byte
+	contentType   string
+	transcribeErr error
+}
+
+func (m *mockPromptTranscriber) TranscribePrompt(_ context.Context, audio []byte, contentType string) (string, error) {
+	m.audio = append([]byte(nil), audio...)
+	m.contentType = contentType
+	if m.transcribeErr != nil {
+		return "", m.transcribeErr
+	}
+	return m.transcript, nil
 }

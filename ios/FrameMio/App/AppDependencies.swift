@@ -17,6 +17,7 @@ struct AppDependencies {
     let directObjectStorage: DirectObjectStorageClient
     let mediaUploadService: MediaUploadService
     let creditService: CreditService
+    let promptTranscriptionService: PromptTranscriptionService
 
     static func live() -> AppDependencies {
         let persistence = UserDefaultsStoryPersistence()
@@ -55,7 +56,8 @@ struct AppDependencies {
             mediaUploadAuthorizer: uploadAuthorizer,
             directObjectStorage: objectStorage,
             mediaUploadService: uploadService,
-            creditService: RemoteCreditService(apiClient: apiClient)
+            creditService: RemoteCreditService(apiClient: apiClient),
+            promptTranscriptionService: RemotePromptTranscriptionService(apiClient: apiClient)
         )
     }
 
@@ -90,7 +92,8 @@ struct AppDependencies {
             mediaUploadAuthorizer: uploadAuthorizer,
             directObjectStorage: objectStorage,
             mediaUploadService: uploadService,
-            creditService: MockCreditService()
+            creditService: MockCreditService(),
+            promptTranscriptionService: MockPromptTranscriptionService()
         )
     }
 }

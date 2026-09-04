@@ -161,6 +161,16 @@ protocol APIClient: Sendable {
     func data(for request: APIRequest) async throws -> Data
 }
 
+struct PromptAudioRecording: Sendable {
+    let data: Data
+    let contentType: String
+    let fileName: String
+}
+
+protocol PromptTranscriptionService: Sendable {
+    func transcribePromptAudio(_ recording: PromptAudioRecording) async throws -> String
+}
+
 enum CreditAction: String, Codable, Hashable, Sendable {
     case createStory = "CREATE_STORY"
     case regenerateStory = "REGENERATE_STORY"

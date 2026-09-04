@@ -96,6 +96,7 @@ final class StoryPreviewViewModel: ObservableObject {
     private let mediaUploadStore: MediaUploadStore
     private let mediaUploadService: MediaUploadService
     private let analysisService: MediaAnalysisService
+    let promptTranscriptionService: PromptTranscriptionService?
     private var loadTask: Task<Void, Never>?
     private var actionTask: Task<Void, Never>?
     private var thumbnailTasks: [String: Task<Void, Never>] = [:]
@@ -111,6 +112,7 @@ final class StoryPreviewViewModel: ObservableObject {
         mediaUploadService: MediaUploadService,
         analysisService: MediaAnalysisService,
         creditService: CreditService? = nil,
+        promptTranscriptionService: PromptTranscriptionService? = nil,
         onCreditsUpdated: (() -> Void)? = nil
     ) {
         self.story = story
@@ -126,6 +128,7 @@ final class StoryPreviewViewModel: ObservableObject {
         self.mediaUploadStore = mediaUploadStore
         self.mediaUploadService = mediaUploadService
         self.analysisService = analysisService
+        self.promptTranscriptionService = promptTranscriptionService
     }
 
     init(
@@ -136,6 +139,7 @@ final class StoryPreviewViewModel: ObservableObject {
         mediaUploadService: MediaUploadService,
         analysisService: MediaAnalysisService,
         creditService: CreditService? = nil,
+        promptTranscriptionService: PromptTranscriptionService? = nil,
         onCreditsUpdated: (() -> Void)? = nil
     ) {
         self.storyID = storyID
@@ -150,6 +154,7 @@ final class StoryPreviewViewModel: ObservableObject {
         self.mediaUploadStore = mediaUploadStore
         self.mediaUploadService = mediaUploadService
         self.analysisService = analysisService
+        self.promptTranscriptionService = promptTranscriptionService
     }
 
     init(
@@ -163,6 +168,7 @@ final class StoryPreviewViewModel: ObservableObject {
         mediaUploadService: MediaUploadService,
         analysisService: MediaAnalysisService,
         creditService: CreditService? = nil,
+        promptTranscriptionService: PromptTranscriptionService? = nil,
         onCreditsUpdated: (() -> Void)? = nil
     ) {
         storyID = nil
@@ -177,6 +183,7 @@ final class StoryPreviewViewModel: ObservableObject {
         self.mediaUploadStore = mediaUploadStore
         self.mediaUploadService = mediaUploadService
         self.analysisService = analysisService
+        self.promptTranscriptionService = promptTranscriptionService
         launchCancellable = storyLaunchCoordinator.objectWillChange.sink { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.objectWillChange.send()

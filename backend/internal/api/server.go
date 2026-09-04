@@ -37,6 +37,7 @@ type Server struct {
 	Now                func() time.Time
 	InternalToken      string
 	ExpensiveLimiter   ExpensiveOperationLimiter
+	PromptTranscriber  PromptTranscriber
 }
 
 func NewServer(dependencies Server) *Server {
@@ -57,6 +58,9 @@ func NewServer(dependencies Server) *Server {
 	}
 	if dependencies.ExpensiveLimiter == nil {
 		dependencies.ExpensiveLimiter = NewInMemoryExpensiveOperationLimiter(ExpensiveOperationLimits{})
+	}
+	if dependencies.PromptTranscriber == nil {
+		dependencies.PromptTranscriber = NewDeepgramPromptTranscriberFromEnv()
 	}
 	return &dependencies
 }
@@ -144,6 +148,10 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 			return
 		}
 		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if request.URL.Path == "/v1/transcriptions" {
+		s.transcribePromptAudio(response, request)
 		return
 	}
 	if request.URL.Path == "/v1/credit-packs" {

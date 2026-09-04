@@ -1,0 +1,192 @@
+package api
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+	"time"
+)
+
+const maxPromptAudioBytes int64 = 25 * 1024 * 1024
+
+type PromptTranscriber interface {
+	TranscribePrompt(ctx context.Context, audio []byte, contentType string) (string, error)
+}
+
+type DeepgramPromptTranscriber struct {
+	APIKey   string
+	Endpoint string
+	Model    string
+	Language string
+	Client   *http.Client
+}
+
+func NewDeepgramPromptTranscriberFromEnv() PromptTranscriber {
+	apiKey := strings.TrimSpace(os.Getenv("DEEPGRAM_API_KEY"))
+	if apiKey == "" {
+		return nil
+	}
+	endpoint := strings.TrimSpace(os.Getenv("DEEPGRAM_LISTEN_ENDPOINT"))
+	if endpoint == "" {
+		endpoint = "https://api.deepgram.com/v1/listen"
+	}
+	model := strings.TrimSpace(os.Getenv("DEEPGRAM_MODEL"))
+	if model == "" {
+		model = "nova-3"
+	}
+	language := strings.TrimSpace(os.Getenv("DEEPGRAM_LANGUAGE"))
+	return DeepgramPromptTranscriber{
+		APIKey:   apiKey,
+		Endpoint: endpoint,
+		Model:    model,
+		Language: language,
+		Client:   &http.Client{Timeout: 30 * time.Second},
+	}
+}
+
+func (t DeepgramPromptTranscriber) TranscribePrompt(ctx context.Context, audio []byte, contentType string) (string, error) {
+	if strings.TrimSpace(t.APIKey) == "" {
+		return "", errors.New("deepgram api key is not configured")
+	}
+	if len(audio) == 0 {
+		return "", errors.New("audio is empty")
+	}
+	endpoint := strings.TrimSpace(t.Endpoint)
+	if endpoint == "" {
+		endpoint = "https://api.deepgram.com/v1/listen"
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return "", fmt.Errorf("parse deepgram endpoint: %w", err)
+	}
+	query := parsed.Query()
+	if model := strings.TrimSpace(t.Model); model != "" {
+		query.Set("model", model)
+	}
+	if language := strings.TrimSpace(t.Language); language != "" {
+		query.Set("language", language)
+	}
+	query.Set("smart_format", "true")
+	parsed.RawQuery = query.Encode()
+
+	client := t.Client
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, parsed.String(), bytes.NewReader(audio))
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Authorization", "Token "+strings.TrimSpace(t.APIKey))
+	request.Header.Set("Content-Type", contentTypeOrDefault(contentType))
+	request.Header.Set("Accept", "application/json")
+
+	response, err := client.Do(request)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return "", fmt.Errorf("deepgram returned status %d", response.StatusCode)
+	}
+	var output deepgramListenResponse
+	if err := json.Unmarshal(data, &output); err != nil {
+		return "", err
+	}
+	transcript := strings.TrimSpace(output.bestTranscript())
+	if transcript == "" {
+		return "", errors.New("deepgram returned an empty transcript")
+	}
+	return transcript, nil
+}
+
+func (s *Server) transcribePromptAudio(response http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if s.PromptTranscriber == nil {
+		s.writeError(response, http.StatusServiceUnavailable, "transcription_not_configured", "voice prompt transcription is not configured")
+		return
+	}
+	rawContentType := strings.TrimSpace(request.Header.Get("Content-Type"))
+	if rawContentType == "" {
+		s.writeError(response, http.StatusBadRequest, "invalid_audio", "audio content type is required")
+		return
+	}
+	contentType := contentTypeOrDefault(rawContentType)
+	if !strings.HasPrefix(strings.ToLower(contentType), "audio/") {
+		s.writeError(response, http.StatusBadRequest, "invalid_audio", "audio content type is required")
+		return
+	}
+	request.Body = http.MaxBytesReader(response, request.Body, maxPromptAudioBytes)
+	data, err := io.ReadAll(request.Body)
+	if err != nil {
+		s.writeError(response, http.StatusRequestEntityTooLarge, "audio_too_large", "audio recording is too large")
+		return
+	}
+	if len(data) == 0 {
+		s.writeError(response, http.StatusBadRequest, "invalid_audio", "audio recording is required")
+		return
+	}
+	transcript, err := s.PromptTranscriber.TranscribePrompt(request.Context(), data, contentType)
+	if err != nil {
+		s.Logger.Warn("voice prompt transcription failed", "user_id", authenticatedUserIDForLog(request), "error", err)
+		s.writeError(response, http.StatusBadGateway, "transcription_failed", "voice prompt could not be transcribed")
+		return
+	}
+	transcript = truncateIOSConfigValue(sanitizeIOSStoryText(transcript), 480)
+	if transcript == "" {
+		s.writeError(response, http.StatusBadGateway, "empty_transcription", "voice prompt transcription was empty")
+		return
+	}
+	s.Logger.Info("voice prompt transcription complete", "user_id", authenticatedUserIDForLog(request), "audio_bytes", len(data), "transcript_length", len(transcript))
+	s.writeJSON(response, http.StatusOK, map[string]string{"transcript": transcript})
+}
+
+func contentTypeOrDefault(contentType string) string {
+	contentType = strings.TrimSpace(strings.Split(contentType, ";")[0])
+	if contentType == "" {
+		return "audio/mp4"
+	}
+	return contentType
+}
+
+func authenticatedUserIDForLog(request *http.Request) string {
+	if user, ok := authenticatedUserFromContext(request.Context()); ok {
+		return user.ID
+	}
+	return "unknown"
+}
+
+type deepgramListenResponse struct {
+	Results struct {
+		Channels []struct {
+			Alternatives []struct {
+				Transcript string `json:"transcript"`
+			} `json:"alternatives"`
+		} `json:"channels"`
+	} `json:"results"`
+}
+
+func (r deepgramListenResponse) bestTranscript() string {
+	for _, channel := range r.Results.Channels {
+		for _, alternative := range channel.Alternatives {
+			if transcript := strings.TrimSpace(alternative.Transcript); transcript != "" {
+				return transcript
+			}
+		}
+	}
+	return ""
+}

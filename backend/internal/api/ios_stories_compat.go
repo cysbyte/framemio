@@ -19,7 +19,7 @@ import (
 
 const iosMaxStoryUploadBytes int64 = 1_000_000_000
 const iosStoryVideoURLExpiry = 2 * time.Hour
-const iosStoryDescriptionMaxLength = 180
+const iosStoryDescriptionMaxLength = 240
 
 type iosStory struct {
 	ID               string           `json:"id"`
@@ -1368,9 +1368,6 @@ func (s *Server) makeIOSStory(request *http.Request, userID string, project mode
 func iosStoryDescription(plan models.StoryPlan) string {
 	parts := make([]string, 0, 3)
 	captionTexts := iosCaptionTextMatchers(plan.Captions)
-	if text := firstHumanIOSPresentationText(captionTexts, plan.UserInstructions); text != "" {
-		parts = append(parts, text)
-	}
 	for _, moment := range plan.Moments {
 		text := firstHumanIOSPresentationText(captionTexts, moment.Narrative, moment.Caption, moment.Reason)
 		if text != "" {
@@ -1380,10 +1377,62 @@ func iosStoryDescription(plan models.StoryPlan) string {
 			break
 		}
 	}
-	if len(parts) == 0 {
+	return joinIOSStoryDescriptionParts(parts, iosStoryDescriptionMaxLength)
+}
+
+func joinIOSStoryDescriptionParts(parts []string, maxLength int) string {
+	if maxLength <= 0 {
 		return ""
 	}
-	return truncateIOSConfigValue(strings.Join(parts, ". "), iosStoryDescriptionMaxLength)
+	joined := ""
+	for _, part := range parts {
+		part = strings.TrimSpace(strings.TrimRight(part, ".…"))
+		if part == "" {
+			continue
+		}
+		candidate := part
+		if joined != "" {
+			candidate = joined + ". " + part
+		}
+		if len(candidate) > maxLength {
+			if joined != "" {
+				return joined
+			}
+			return truncateIOSDescriptionText(part, maxLength)
+		}
+		joined = candidate
+	}
+	return joined
+}
+
+func truncateIOSDescriptionText(value string, maxLength int) string {
+	if maxLength <= 0 {
+		return ""
+	}
+	value = strings.TrimSpace(value)
+	if len(value) <= maxLength {
+		return value
+	}
+	suffix := "…"
+	if maxLength <= len(suffix) {
+		return suffix[:maxLength]
+	}
+	limit := maxLength - len(suffix)
+	truncated := make([]rune, 0, limit)
+	currentLength := 0
+	for _, char := range value {
+		charText := string(char)
+		if currentLength+len(charText) > limit {
+			break
+		}
+		truncated = append(truncated, char)
+		currentLength += len(charText)
+	}
+	text := strings.TrimSpace(string(truncated))
+	if cut := strings.LastIndexAny(text, " .,!?:;"); cut >= limit-32 {
+		text = strings.TrimSpace(text[:cut])
+	}
+	return strings.TrimRight(text, " .,!?:;…") + suffix
 }
 
 func (s *Server) iosStoryMoments(request *http.Request, plan models.StoryPlan, mediaByID map[string]models.MediaAsset, videoAnalysesByMediaID map[string]models.VideoAnalysis) []iosStoryMoment {

@@ -683,7 +683,7 @@
 				INFOPLIST_KEY_CFBundleShortVersionString = 1.0;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photo-video";
 				INFOPLIST_KEY_NSCameraUsageDescription = "FrameMio uses the camera to capture new moments for memory stories.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "FrameMio uses audio in your videos to understand the feeling of a moment.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "FrameMio uses the microphone for voice prompts and video audio to understand memory stories.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "FrameMio saves new photos and videos so they can be selected for memory stories.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "FrameMio needs access to your photos and videos to create personal memory stories.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -721,7 +721,7 @@
 				INFOPLIST_KEY_CFBundleShortVersionString = 1.0;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photo-video";
 				INFOPLIST_KEY_NSCameraUsageDescription = "FrameMio uses the camera to capture new moments for memory stories.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "FrameMio uses audio in your videos to understand the feeling of a moment.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "FrameMio uses the microphone for voice prompts and video audio to understand memory stories.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "FrameMio saves new photos and videos so they can be selected for memory stories.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "FrameMio needs access to your photos and videos to create personal memory stories.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

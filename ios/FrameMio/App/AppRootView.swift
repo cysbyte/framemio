@@ -210,6 +210,7 @@ struct AppRootView: View {
                     mediaUploadService: dependencies.mediaUploadService,
                     analysisService: dependencies.mediaAnalysis,
                     creditService: dependencies.creditService,
+                    promptTranscriptionService: dependencies.promptTranscriptionService,
                     onCreditsUpdated: refreshCredits
                 ),
                 onOpenPricing: openPricing
@@ -224,6 +225,7 @@ struct AppRootView: View {
                     mediaUploadService: dependencies.mediaUploadService,
                     analysisService: dependencies.mediaAnalysis,
                     creditService: dependencies.creditService,
+                    promptTranscriptionService: dependencies.promptTranscriptionService,
                     onCreditsUpdated: refreshCredits
                 ),
                 onOpenPricing: openPricing

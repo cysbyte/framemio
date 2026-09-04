@@ -137,6 +137,10 @@ MEDIA_CDN_BASE_URL                    # backwards-compatible alias if MEDIA_DOWN
 AWS_REGION / standard AWS credentials # consumed by AWS SDK default configuration
 DATABASE_AUTH_MODE                    # iam for production RDS, password for Neon/static-password Postgres
 DATABASE_PROVIDER                     # deployment hint: rds or neon
+DEEPGRAM_API_KEY                      # enables /v1/transcriptions voice prompt transcription
+DEEPGRAM_MODEL                        # default: nova-3
+DEEPGRAM_LANGUAGE                     # optional language hint for prompt transcription
+DEEPGRAM_LISTEN_ENDPOINT              # default: https://api.deepgram.com/v1/listen
 ```
 
 Production RDS uses IAM database authentication with `DATABASE_AUTH_MODE=iam` and a no-password `DATABASE_URL`. Neon uses `DATABASE_AUTH_MODE=password` with a password-bearing Postgres URL, preferably injected into ECS via `DATABASE_URL_SECRET_ARN`. The ECS and GitHub Actions deployment runbook is maintained in `../docs/DB_ECS_DEPLOYMENT_SCALING.md`.

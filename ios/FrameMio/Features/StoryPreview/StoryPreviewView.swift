@@ -19,7 +19,6 @@ struct StoryPreviewView: View {
     @State private var isShowingDeleteConfirmation = false
 
     private let generatedVideoAspectRatio: CGFloat = 9.0 / 16.0
-    private let storyDescriptionMaxLength = 180
     private let onOpenPricing: (PricingEntryPoint) -> Void
 
     init(viewModel: StoryPreviewViewModel, onOpenPricing: @escaping (PricingEntryPoint) -> Void) {
@@ -97,6 +96,7 @@ struct StoryPreviewView: View {
                     activeAction: viewModel.activeAction,
                     isPerformingAction: viewModel.isPerformingAction,
                     creditBalance: viewModel.creditBalance,
+                    promptTranscriptionService: viewModel.promptTranscriptionService,
                     imageProvider: { viewModel.image(forStoryAssetID: $0) },
                     videoURLProvider: { assetID in
                         await viewModel.playableMomentVideoURL(forStoryAssetID: assetID)
@@ -340,7 +340,7 @@ struct StoryPreviewView: View {
                     .font(FrameMioTypography.title)
                     .foregroundStyle(FrameMioColors.ink)
 
-                Text(displayStoryDescription(description))
+                Text(description)
                     .font(FrameMioTypography.body)
                     .foregroundStyle(FrameMioColors.secondaryInk)
                     .fixedSize(horizontal: false, vertical: true)
@@ -626,14 +626,6 @@ struct StoryPreviewView: View {
             return nil
         }
         return trimmed
-    }
-
-    private func displayStoryDescription(_ value: String) -> String {
-        guard value.count > storyDescriptionMaxLength else {
-            return value
-        }
-        return String(value.prefix(storyDescriptionMaxLength))
-            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".…")))
     }
 
     private func actionTitle(_ action: StoryPreviewAction, fallback: String) -> String {
@@ -987,6 +979,7 @@ private struct EditStorySheet: View {
     let activeAction: StoryPreviewAction?
     let isPerformingAction: Bool
     let creditBalance: Int?
+    let promptTranscriptionService: PromptTranscriptionService?
     let imageProvider: (String) -> Image?
     let videoURLProvider: (String) async -> URL?
     let onAppearMoment: (String) -> Void
@@ -1000,6 +993,7 @@ private struct EditStorySheet: View {
     @State private var isShowingAddMoment = false
     @State private var importedMoments: [StoryMomentPresentation] = []
     @State private var draggedMomentAssetID: String?
+    @StateObject private var voicePromptRecorder = VoicePromptRecorder()
 
     private let styleOptions = ["Natural", "Cinematic", "Warm", "Playful"]
     private let subtitleStyleOptions = ["Bold", "Cinematic", "Minimal", "Playful"]
@@ -1370,11 +1364,92 @@ private struct EditStorySheet: View {
             .padding(FrameMioSpacing.md)
             .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
             .accessibilityLabel("Tell FrameMio what you want")
+            voicePromptControl
             PrimaryButton(title: "Regenerate Story (\(draft.regenerationCreditCost) credits)", systemImage: "sparkles") {
                 storyPreviewUIDebugLog("edit sheet regenerate tapped has_changes=\(draft.request.hasChanges) added=\(draft.addedMediaIDs.sorted().joined(separator: ",")) ordered=\(draft.orderedMediaIDs.joined(separator: ",")) visible=\(displayedMoments.map(\.assetID).joined(separator: ",")) required_credits=\(draft.regenerationCreditCost)")
                 onRegenerate(draft.request)
             }
             .disabled(isPerformingAction)
+        }
+    }
+
+    private var voicePromptControl: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.xs) {
+            HStack(spacing: FrameMioSpacing.sm) {
+                Button {
+                    FrameMioHaptics.secondaryAction()
+                    Task { await toggleVoicePromptRecording() }
+                } label: {
+                    Label(voicePromptButtonTitle, systemImage: voicePromptButtonIcon)
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(voicePromptRecorder.isRecording ? .white : FrameMioColors.accent)
+                        .padding(.horizontal, FrameMioSpacing.md)
+                        .frame(minHeight: FrameMioMetrics.compactButtonHeight)
+                        .background(
+                            voicePromptRecorder.isRecording ? FrameMioColors.accent : FrameMioColors.surface.opacity(0.78),
+                            in: Capsule()
+                        )
+                        .overlay {
+                            Capsule()
+                                .stroke(FrameMioColors.accent.opacity(0.35), lineWidth: FrameMioMetrics.borderWidth)
+                        }
+                }
+                .buttonStyle(FrameMioPressButtonStyle())
+                .disabled(isPerformingAction || voicePromptRecorder.isTranscribing || promptTranscriptionService == nil)
+
+                if voicePromptRecorder.isTranscribing {
+                    ProgressView()
+                        .tint(FrameMioColors.accent)
+                    Text("Transcribing…")
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                } else if voicePromptRecorder.isRecording {
+                    Text("Listening… tap Done when finished.")
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                }
+            }
+
+            if promptTranscriptionService == nil {
+                Text("Voice prompt is unavailable in this build.")
+                    .font(FrameMioTypography.caption)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+            } else if let error = voicePromptRecorder.errorMessage {
+                Text(error)
+                    .font(FrameMioTypography.caption)
+                    .foregroundStyle(.red)
+            } else {
+                Text("Speak your edit request and FrameMio will place the transcript into the prompt.")
+                    .font(FrameMioTypography.caption)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+            }
+        }
+    }
+
+    private var voicePromptButtonTitle: String {
+        if voicePromptRecorder.isRecording {
+            return "Done"
+        }
+        if voicePromptRecorder.isTranscribing {
+            return "Transcribing"
+        }
+        return "Voice Prompt"
+    }
+
+    private var voicePromptButtonIcon: String {
+        voicePromptRecorder.isRecording ? "stop.fill" : "mic.fill"
+    }
+
+    @MainActor
+    private func toggleVoicePromptRecording() async {
+        if voicePromptRecorder.isRecording {
+            guard let promptTranscriptionService else { return }
+            if let transcript = await voicePromptRecorder.stopAndTranscribe(using: promptTranscriptionService) {
+                draft.instruction = transcript
+                storyPreviewUIDebugLog("voice prompt applied transcript_length=\(transcript.count)")
+            }
+        } else {
+            await voicePromptRecorder.startRecording()
         }
     }
 
@@ -2256,6 +2331,102 @@ private extension StoryStatus {
             true
         case .ready, .failed:
             false
+        }
+    }
+}
+
+@MainActor
+private final class VoicePromptRecorder: ObservableObject {
+    @Published private(set) var isRecording = false
+    @Published private(set) var isTranscribing = false
+    @Published var errorMessage: String?
+
+    private var recorder: AVAudioRecorder?
+    private var recordingURL: URL?
+
+    func startRecording() async {
+        guard !isRecording, !isTranscribing else { return }
+        errorMessage = nil
+        guard await requestRecordPermission() else {
+            errorMessage = "Microphone access is needed for voice prompts."
+            return
+        }
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("voice-prompt-\(UUID().uuidString)")
+            .appendingPathExtension("m4a")
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVSampleRateKey: 44_100,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+        ]
+
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.allowBluetooth, .defaultToSpeaker])
+            try session.setActive(true)
+            let recorder = try AVAudioRecorder(url: url, settings: settings)
+            guard recorder.record() else {
+                throw AppError.message("Recording could not start.")
+            }
+            self.recorder = recorder
+            recordingURL = url
+            isRecording = true
+            storyPreviewUIDebugLog("voice prompt recording start file=\(url.lastPathComponent)")
+        } catch {
+            cleanupRecording(at: url)
+            errorMessage = "Couldn’t start voice recording. Try again."
+            storyPreviewUIDebugLog("voice prompt recording failed error=\(error.localizedDescription)")
+        }
+    }
+
+    func stopAndTranscribe(using service: PromptTranscriptionService) async -> String? {
+        guard isRecording, let recordingURL else { return nil }
+        recorder?.stop()
+        recorder = nil
+        isRecording = false
+        isTranscribing = true
+        errorMessage = nil
+        defer {
+            isTranscribing = false
+            cleanupRecording(at: recordingURL)
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
+
+        do {
+            let data = try Data(contentsOf: recordingURL)
+            let transcript = try await service.transcribePromptAudio(
+                PromptAudioRecording(
+                    data: data,
+                    contentType: "audio/mp4",
+                    fileName: recordingURL.lastPathComponent
+                )
+            )
+            let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                errorMessage = "No speech was detected. Please try again."
+                return nil
+            }
+            storyPreviewUIDebugLog("voice prompt transcription complete audio_bytes=\(data.count) transcript_length=\(trimmed.count)")
+            return trimmed
+        } catch {
+            errorMessage = AppError.from(error).localizedDescription
+            storyPreviewUIDebugLog("voice prompt transcription failed error=\(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func requestRecordPermission() async -> Bool {
+        await AVAudioApplication.requestRecordPermission()
+    }
+
+    private func cleanupRecording(at url: URL) {
+        if FileManager.default.fileExists(atPath: url.path) {
+            try? FileManager.default.removeItem(at: url)
+        }
+        if recordingURL == url {
+            recordingURL = nil
         }
     }
 }
