@@ -32,6 +32,19 @@ type PromptTranscriptionToken struct {
 	Language     string `json:"language,omitempty"`
 }
 
+type deepgramGrantError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e deepgramGrantError) Error() string {
+	body := strings.TrimSpace(e.Body)
+	if body == "" {
+		return fmt.Sprintf("deepgram auth grant returned status %d", e.StatusCode)
+	}
+	return fmt.Sprintf("deepgram auth grant returned status %d: %s", e.StatusCode, body)
+}
+
 type DeepgramPromptTranscriber struct {
 	APIKey        string
 	Endpoint      string
@@ -115,7 +128,7 @@ func (t DeepgramPromptTranscriber) GrantPromptToken(ctx context.Context, ttlSeco
 		return PromptTranscriptionToken{}, err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return PromptTranscriptionToken{}, fmt.Errorf("deepgram auth grant returned status %d", response.StatusCode)
+		return PromptTranscriptionToken{}, deepgramGrantError{StatusCode: response.StatusCode, Body: string(data)}
 	}
 	var output deepgramAuthGrantResponse
 	if err := json.Unmarshal(data, &output); err != nil {
@@ -215,6 +228,11 @@ func (s *Server) grantPromptTranscriptionToken(response http.ResponseWriter, req
 	token, err := granter.GrantPromptToken(request.Context(), 60)
 	if err != nil {
 		s.Logger.Warn("voice prompt token grant failed", "user_id", authenticatedUserIDForLog(request), "error", err)
+		var grantErr deepgramGrantError
+		if errors.As(err, &grantErr) && grantErr.StatusCode == http.StatusForbidden {
+			s.writeError(response, http.StatusServiceUnavailable, "transcription_token_forbidden", "Voice prompt is not configured correctly. The Deepgram API key cannot grant live transcription tokens.")
+			return
+		}
 		s.writeError(response, http.StatusBadGateway, "transcription_token_failed", "voice prompt transcription could not start")
 		return
 	}

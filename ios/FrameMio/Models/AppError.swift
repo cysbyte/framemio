@@ -73,7 +73,7 @@ enum AppError: LocalizedError, Hashable, Sendable {
         case "story_too_large":
             return .message(response.reason ?? response.message ?? "This story is too large for this action.")
         default:
-            if let message = response.message, !message.isEmpty, statusCode < 500 {
+            if let message = response.message, !message.isEmpty, statusCode < 500 || response.error.hasPrefix("transcription_") {
                 return .message(message)
             }
             return nil

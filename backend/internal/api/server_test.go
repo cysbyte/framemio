@@ -1863,14 +1863,40 @@ func TestGrantPromptTranscriptionToken(t *testing.T) {
 	}
 }
 
+func TestGrantPromptTranscriptionTokenForbidden(t *testing.T) {
+	t.Parallel()
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	server := newTestServer(memoryStore, publisher)
+	server.PromptTranscriber = &mockPromptTokenTranscriber{
+		mockPromptTranscriber: mockPromptTranscriber{transcript: "unused"},
+		err: deepgramGrantError{StatusCode: http.StatusForbidden, Body: "forbidden"},
+	}
+	handler := server.Handler()
+
+	response := performJSON(t, handler, http.MethodPost, "/v1/transcriptions/token", nil, "", true, nil)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("token status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var payload map[string]string
+	decodeResponse(t, response, &payload)
+	if payload["error"] != "transcription_token_forbidden" {
+		t.Fatalf("error = %q, body = %s", payload["error"], response.Body.String())
+	}
+}
+
 type mockPromptTokenTranscriber struct {
 	mockPromptTranscriber
 	token PromptTranscriptionToken
+	err   error
 }
 
 func (m *mockPromptTokenTranscriber) GrantPromptToken(_ context.Context, ttlSeconds int) (PromptTranscriptionToken, error) {
 	if ttlSeconds != 60 {
 		return PromptTranscriptionToken{}, errors.New("unexpected ttl")
+	}
+	if m.err != nil {
+		return PromptTranscriptionToken{}, m.err
 	}
 	return m.token, nil
 }
