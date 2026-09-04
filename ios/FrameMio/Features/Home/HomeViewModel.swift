@@ -57,7 +57,6 @@ final class HomeViewModel: ObservableObject {
                     updateStories(loadedStories)
                 }
                 errorMessage = nil
-                refreshCreditBalance()
             } catch is CancellationError {
             } catch {
                 errorMessage = AppError.from(error).localizedDescription

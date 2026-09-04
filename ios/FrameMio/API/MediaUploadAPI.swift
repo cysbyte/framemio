@@ -134,7 +134,7 @@ actor MockMediaUploadAuthorizer: MediaUploadAuthorizer {
                     partNumber: partNumber,
                     offsetBytes: offset,
                     lengthBytes: length,
-                    presignedURL: URL(string: "https://s3.example.test/\(uploadID)/part/\(partNumber)")!,
+                    presignedURL: URL(string: "https://s3.example.test/\(uploadID)/part/\(partNumber)?X-Amz-SignedHeaders=host")!,
                     status: .pending,
                     attempts: 0,
                     eTag: nil,

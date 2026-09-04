@@ -152,6 +152,27 @@ func TestDefaultTypographyPlannerChoosesOnlyMeaningfulPhotos(t *testing.T) {
 	}
 }
 
+func TestDefaultTypographyPlannerUsesPhotoMetadataWhenCaptionMissing(t *testing.T) {
+	t.Parallel()
+	plan, err := DefaultTypographyPlanner{}.Generate(context.Background(), TypographyPlanningInput{
+		ProjectID: "project-typography-labels", StoryPlanID: "story-plan-1", StoryPlanVersion: 1, TypographyVersion: TypographyPromptVersion,
+		StoryTitle: "Weekend by the Sea", VisualStyle: models.VisualStyleCinematic,
+		Moments: []TypographyMomentContext{
+			{MomentID: "photo-sunset", AssetID: "photo-sunset", MediaType: models.MediaTypePhoto, DurationMS: 3500, Score: 0.76, Index: 0, Labels: []string{"people", "adult", "outdoor"}},
+			{MomentID: "photo-table", AssetID: "photo-table", MediaType: models.MediaTypePhoto, DurationMS: 3500, Score: 0.58, Index: 1, Labels: []string{"structure", "wood_processed", "furniture"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Overlays) == 0 {
+		t.Fatal("expected metadata-only photos to receive typography")
+	}
+	if overlay := plan.Overlays["photo-sunset"]; overlay.Title != "Outside Together" || overlay.Enabled != true || overlay.Source != models.TextSourceAI {
+		t.Fatalf("expected label-derived typography, got %+v", overlay)
+	}
+}
+
 type failingTypographyPlanner struct{}
 
 func (failingTypographyPlanner) Generate(context.Context, TypographyPlanningInput) (TypographyPlan, error) {

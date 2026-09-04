@@ -301,6 +301,7 @@ final class RemoteCreditService: CreditService, @unchecked Sendable {
     private let apiClient: APIClient
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
+    private let balanceCache = RemoteCreditBalanceCache(ttlSeconds: 2)
 
     init(apiClient: APIClient) {
         self.apiClient = apiClient
@@ -309,8 +310,10 @@ final class RemoteCreditService: CreditService, @unchecked Sendable {
     }
 
     func balance() async throws -> CreditBalance {
-        let data = try await apiClient.data(for: APIRequest(method: .get, path: "/v1/me/credits"))
-        return try decoder.decode(CreditBalance.self, from: data)
+        try await balanceCache.balance {
+            let data = try await self.apiClient.data(for: APIRequest(method: .get, path: "/v1/me/credits"))
+            return try FrameMioJSONCoding.apiDecoder().decode(CreditBalance.self, from: data)
+        }
     }
 
     func creditPacks() async throws -> [CreditPack] {
@@ -337,6 +340,7 @@ final class RemoteCreditService: CreditService, @unchecked Sendable {
 
         let body = try encoder.encode(Request(plan: plan, purchaseID: purchaseID, expiresAt: expiresAt))
         _ = try await apiClient.data(for: APIRequest(method: .post, path: "/v1/me/credits/subscription-cycle", body: body))
+        await balanceCache.invalidate()
     }
 
     func grantPurchasedCredits(packID: String, purchaseID: String) async throws -> CreditBalance {
@@ -355,7 +359,52 @@ final class RemoteCreditService: CreditService, @unchecked Sendable {
 
         let body = try encoder.encode(Request(packID: packID, purchaseID: purchaseID))
         let data = try await apiClient.data(for: APIRequest(method: .post, path: "/v1/me/credits/purchased", body: body))
-        return try decoder.decode(Response.self, from: data).balance
+        let balance = try decoder.decode(Response.self, from: data).balance
+        await balanceCache.store(balance)
+        return balance
+    }
+}
+
+private actor RemoteCreditBalanceCache {
+    private let ttlSeconds: TimeInterval
+    private var cached: CreditBalance?
+    private var fetchedAt: Date?
+    private var inFlight: Task<CreditBalance, Error>?
+
+    init(ttlSeconds: TimeInterval) {
+        self.ttlSeconds = ttlSeconds
+    }
+
+    func balance(load: @escaping @Sendable () async throws -> CreditBalance) async throws -> CreditBalance {
+        if let inFlight {
+            return try await inFlight.value
+        }
+        if let cached, let fetchedAt, Date().timeIntervalSince(fetchedAt) < ttlSeconds {
+            return cached
+        }
+
+        let task = Task { try await load() }
+        inFlight = task
+        do {
+            let balance = try await task.value
+            store(balance)
+            return balance
+        } catch {
+            inFlight = nil
+            throw error
+        }
+    }
+
+    func store(_ balance: CreditBalance) {
+        cached = balance
+        fetchedAt = Date()
+        inFlight = nil
+    }
+
+    func invalidate() {
+        cached = nil
+        fetchedAt = nil
+        inFlight = nil
     }
 }
 

@@ -1192,7 +1192,7 @@ Render Worker executes the validated StoryPlan
 
 The Typography Planner may be local/rule-based or an external OpenAI-compatible provider selected by backend configuration. It must return structured JSON only. Backend validation owns enum support, text length limits, timing clamping, safe margins, max width, source metadata, and confidence bounds. AI output must never become renderer code, CSS, font paths, ImageMagick commands, FFmpeg arguments, or a second timeline.
 
-Typography is optional. The planner should not add text to every photo and should prefer short cinematic/editorial language only when it improves the memory film. It must avoid invented locations, dates, names, events, hashtags, memes, and literal duplicate captions. If typography planning fails or returns invalid output, Story generation continues without typography.
+Typography is optional. The planner should not add text to every photo and should prefer short cinematic/editorial language only when it improves the memory film. It must avoid invented locations, dates, names, events, hashtags, memes, and literal duplicate captions. If typography planning fails or returns invalid output, Story generation continues without typography. The local rule-based fallback can also derive conservative titles from reliable photo metadata such as cluster label, location, or bounded analysis labels, so photos without captions/descriptions can still receive typography when their metadata is meaningful.
 
 Current backend configuration:
 

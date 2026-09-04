@@ -101,6 +101,7 @@ final class StoryPreviewViewModel: ObservableObject {
     private var thumbnailTasks: [String: Task<Void, Never>] = [:]
     private var momentVideoURLs: [String: URL] = [:]
     private var launchCancellable: AnyCancellable?
+    private var cachedUploadAssetSignature: String?
 
     init(
         story: Story,
@@ -1184,11 +1185,17 @@ final class StoryPreviewViewModel: ObservableObject {
                 + (story.availableMoments ?? []).map(\.mediaID)
         )
         guard !storyMediaIDs.isEmpty else { return }
+        let signature = ([story.id] + storyMediaIDs.sorted()).joined(separator: "|")
+        if cachedUploadAssetSignature == signature,
+           storyMediaIDs.allSatisfy({ momentAssets[$0] != nil }) {
+            return
+        }
 
         let uploads = try await mediaUploadStore.allUploads()
         var cachedCount = 0
         for upload in uploads {
             guard let mediaID = upload.mediaID, storyMediaIDs.contains(mediaID) else { continue }
+            let isNewCacheEntry = momentAssets[mediaID] == nil
             momentAssets[mediaID] = MediaAsset(
                 id: mediaID,
                 localIdentifier: upload.localIdentifier,
@@ -1198,8 +1205,11 @@ final class StoryPreviewViewModel: ObservableObject {
                 pixelWidth: upload.pixelWidth,
                 pixelHeight: upload.pixelHeight
             )
-            cachedCount += 1
+            if isNewCacheEntry {
+                cachedCount += 1
+            }
         }
+        cachedUploadAssetSignature = signature
         if cachedCount > 0 {
             storyPreviewDebugLog("cached upload source assets story=\(story.id) count=\(cachedCount)")
         }

@@ -42,6 +42,21 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         }
         let preparedAssets = try await prepareUploads(eligibleAssets, options: options)
         mediaUploadDebugLog("prepared uploads count=\(preparedAssets.count)")
+        if let completedUploads = try await completedUploadsIfAllCompleted(preparedAssets, options: options) {
+            let totalBytes = completedUploads.reduce(Int64(0)) { $0 + max(0, $1.fileSizeBytes) }
+            if let representative = completedUploads.first {
+                mediaUploadDebugLog("upload skipped all completed uploads=\(completedUploads.count)")
+                progress(MediaUploadProgress(
+                    uploadID: representative.id,
+                    assetID: representative.assetID,
+                    uploadedBytes: totalBytes,
+                    totalBytes: totalBytes,
+                    completedUploads: completedUploads.count,
+                    totalUploads: completedUploads.count
+                ))
+            }
+            return completedUploads
+        }
         return try await uploadInBatches(
             preparedAssets,
             options: options,
@@ -126,6 +141,23 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
             await removeNewMaterializations(prepared)
             throw error
         }
+    }
+
+    private func completedUploadsIfAllCompleted(
+        _ assets: [MediaAsset],
+        options: MediaUploadOptions
+    ) async throws -> [MediaUpload]? {
+        guard !assets.isEmpty else { return nil }
+        var uploads: [MediaUpload] = []
+        uploads.reserveCapacity(assets.count)
+        for asset in assets {
+            let uploadID = MediaUpload.makeID(for: asset.id, optimization: options.optimization)
+            guard let upload = try await store.upload(for: uploadID), upload.status == .completed else {
+                return nil
+            }
+            uploads.append(upload)
+        }
+        return uploads
     }
 
     private func makeUploadRecord(
@@ -372,14 +404,16 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
             )
             return record
         } catch is CancellationError {
-            if var record {
+            let latestRecord = (try? await store.upload(for: uploadID)) ?? record
+            if var record = latestRecord {
                 record.status = .paused
                 record.updatedAt = Date()
                 try? await store.save(record)
             }
             throw CancellationError()
         } catch {
-            if var record {
+            let latestRecord = (try? await store.upload(for: uploadID)) ?? record
+            if var record = latestRecord {
                 record.status = .failed
                 record.lastError = error.localizedDescription
                 record.updatedAt = Date()

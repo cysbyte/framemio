@@ -93,13 +93,13 @@ resolve_user_id() {
 
 show_database_summary() {
   echo "Database records for $USER_ID:"
-  psql_query -v user_id="$USER_ID" -c "
-    SELECT kind, count(*) AS records
-    FROM framemio_domain_records
-    WHERE user_id = :'user_id'
-    GROUP BY kind
-    ORDER BY kind;
-  "
+  psql_query -v user_id="$USER_ID" <<'SQL'
+SELECT kind, count(*) AS records
+FROM framemio_domain_records
+WHERE user_id = :'user_id'
+GROUP BY kind
+ORDER BY kind;
+SQL
 }
 
 show_s3_summary() {

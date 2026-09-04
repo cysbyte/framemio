@@ -146,7 +146,6 @@ struct AppRootView: View {
     }
 
     private func refreshCredits() {
-        homeViewModel.refreshCreditBalance()
         creditStore.refresh()
     }
 
