@@ -441,8 +441,8 @@ final class StoryPreviewViewModel: ObservableObject {
     }
 
     var progressDetail: String? {
-        if storyLaunchCoordinator != nil, story == nil {
-            return "Uploading and local analysis happen first; server rendering starts right after."
+        if let storyLaunchCoordinator, story == nil {
+            return nonEmptyProgressText(storyLaunchCoordinator.phaseDetail)
         }
         return nonEmptyProgressText(story?.progressDetail)
     }
@@ -1160,6 +1160,7 @@ final class StoryPreviewViewModel: ObservableObject {
             defer { activeAction = nil }
             do {
                 try await storyService.deleteStory(id: storyID)
+                await invalidateUploadCacheAfterStoryDelete(storyID: storyID)
                 story = nil
                 didDeleteStory = true
                 FrameMioHaptics.success()
@@ -1167,6 +1168,17 @@ final class StoryPreviewViewModel: ObservableObject {
             } catch {
                 errorMessage = AppError.from(error).localizedDescription
             }
+        }
+    }
+
+    private func invalidateUploadCacheAfterStoryDelete(storyID: String) async {
+        guard !launchAssets.isEmpty else { return }
+        do {
+            try await mediaUploadService.invalidateCompletedUploads(for: launchAssets, optimization: .original)
+            cachedUploadAssetSignature = nil
+            storyPreviewDebugLog("delete invalidated upload cache story=\(storyID) assets=\(launchAssets.count)")
+        } catch {
+            storyPreviewDebugLog("delete upload cache invalidation failed story=\(storyID) error=\(error.localizedDescription)")
         }
     }
 

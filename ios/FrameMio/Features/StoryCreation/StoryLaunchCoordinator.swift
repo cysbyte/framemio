@@ -69,6 +69,7 @@ private final class StoryLaunchAnalysisRace: @unchecked Sendable {
 final class StoryLaunchCoordinator: ObservableObject {
     /// Local preparation stage, before the server knows about the story.
     @Published private(set) var phaseTitle = "Preparing your memories..."
+    @Published private(set) var phaseDetail = "Uploading and local analysis happen first; server rendering starts right after."
     @Published private(set) var progress: Double = 0
     @Published private(set) var isPreparing = false
     /// Set once the server accepts the story; the view then polls it.
@@ -114,6 +115,7 @@ final class StoryLaunchCoordinator: ObservableObject {
         insufficientCredits = nil
         errorMessage = nil
         phaseTitle = "Preparing your memories..."
+        phaseDetail = "Preparing selected media before upload starts."
         launchTask = Task { [weak self] in
             guard let self else { return }
             defer { isPreparing = false }
@@ -122,6 +124,7 @@ final class StoryLaunchCoordinator: ObservableObject {
                 try await verifyCredits(for: .createStory)
                 let selection = MediaSelection(explicitlySelectedAssetIDs: assets.map(\.id))
                 phaseTitle = "Uploading your photos and videos..."
+                phaseDetail = "Uploading originals to FrameMio. Large videos and iCloud downloads can take longer."
                 storyLaunchDebugLog("phase=upload_start progress=\(progress)")
                 _ = try await mediaUploadService.upload(
                     selection: selection,
@@ -143,11 +146,13 @@ final class StoryLaunchCoordinator: ObservableObject {
                 try Task.checkCancellation()
 
                 phaseTitle = "Finding meaningful moments..."
+                phaseDetail = "Scanning media locally so the server can build the story."
                 storyLaunchDebugLog("phase=analysis_start assets=\(assets.count)")
                 let analyses = try await analyzeAssets(assets)
                 try Task.checkCancellation()
 
                 phaseTitle = "Building your story..."
+                phaseDetail = "Sending analyzed moments to FrameMio before server-side planning starts."
                 progress = max(progress, 0.86)
                 storyLaunchDebugLog("phase=story_create_start app_percent=\(Int(progress * 100)) analyses=\(analyses.count)")
                 let story = try await createStoryWithUploadRefreshRetry(
@@ -159,11 +164,13 @@ final class StoryLaunchCoordinator: ObservableObject {
                 storyID = story.id
                 progress = 1
                 phaseTitle = "Story is processing."
+                phaseDetail = "Server-side planning and rendering will continue next."
                 storyLaunchDebugLog("phase=story_create_complete story=\(story.id) status=\(story.status.rawValue)")
                 FrameMioHaptics.success()
             } catch is CancellationError {
                 storyLaunchDebugLog("phase=cancelled progress=\(progress)")
                 phaseTitle = "Preparing your memories..."
+                phaseDetail = "Preparing selected media before upload starts."
             } catch {
                 let appError = AppError.from(error)
                 storyLaunchDebugLog("phase=failed progress=\(progress) error=\(appError.localizedDescription) raw=\(error.localizedDescription)")
@@ -212,6 +219,7 @@ final class StoryLaunchCoordinator: ObservableObject {
             }
             storyLaunchDebugLog("phase=story_create_conflict action=refresh_upload_cache_and_retry")
             phaseTitle = "Refreshing uploaded media..."
+            phaseDetail = "Previous server media references expired, so FrameMio is refreshing them before creating the story."
             try await mediaUploadService.invalidateCompletedUploads(for: assets, optimization: .original)
             _ = try await mediaUploadService.upload(
                 selection: selection,
@@ -220,12 +228,14 @@ final class StoryLaunchCoordinator: ObservableObject {
                 progress: { [weak self] uploadProgress in
                     Task { @MainActor [weak self] in
                         guard let self else { return }
-                        progress = max(progress, min(0.28, uploadProgress.fractionCompleted * 0.28))
+                        let refreshProgress = 0.86 + min(0.015, uploadProgress.fractionCompleted * 0.015)
+                        progress = max(progress, refreshProgress)
                     }
                 }
             )
             try Task.checkCancellation()
             phaseTitle = "Building your story..."
+            phaseDetail = "Retrying story creation with refreshed media references."
             progress = max(progress, 0.86)
             return try await storyService.createStory(
                 request: CreateStoryRequest(context: context, assets: assets, analyses: analyses)

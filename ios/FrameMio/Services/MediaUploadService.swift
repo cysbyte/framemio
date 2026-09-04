@@ -152,10 +152,33 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         uploads.reserveCapacity(assets.count)
         for asset in assets {
             let uploadID = MediaUpload.makeID(for: asset.id, optimization: options.optimization)
-            guard let upload = try await store.upload(for: uploadID), upload.status == .completed else {
+            guard var upload = try await store.upload(for: uploadID), upload.status == .completed else {
                 return nil
             }
-            uploads.append(upload)
+
+            let session = try await authorizer.createUploadSession(
+                metadata: uploadMetadata(from: upload, options: options),
+                idempotencyKey: upload.effectiveAuthorizationIdempotencyKey
+            )
+            upload.session = session
+            upload.mediaID = session.mediaID
+            upload.updatedAt = Date()
+
+            if session.isAlreadyUploaded {
+                upload.status = .completed
+                upload.uploadedBytes = upload.fileSizeBytes
+                try await store.save(upload)
+                mediaUploadDebugLog("validated completed upload cache upload=\(upload.id) asset=\(asset.id) media=\(session.mediaID) session=\(session.uploadID)")
+                uploads.append(upload)
+                continue
+            }
+
+            mediaUploadDebugLog("completed upload cache stale upload=\(upload.id) asset=\(asset.id) old_media=\(upload.mediaID ?? "nil") new_media=\(session.mediaID) session=\(session.uploadID)")
+            upload.status = .queued
+            upload.uploadedBytes = 0
+            upload.lastError = nil
+            try await store.save(upload)
+            return nil
         }
         return uploads
     }
