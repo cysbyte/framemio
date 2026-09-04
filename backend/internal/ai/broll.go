@@ -380,12 +380,16 @@ func tokenizeSemanticText(value string) []string {
 
 func semanticAliases(token string) []string {
 	switch token {
-	case "beach", "ocean", "sea", "water", "waves", "coast", "shore", "sand":
-		return []string{token, "beach", "water", "outdoor", "scenery"}
+	case "beach", "ocean", "sea", "water", "waves", "coast", "shore", "sand", "lake", "lakeside", "river", "pond":
+		return []string{token, "beach", "water", "outdoor", "scenery", "lake"}
 	case "dinner", "restaurant", "cafe", "food", "meal", "table":
 		return []string{token, "food", "dinner", "restaurant"}
 	case "sunset", "sunrise", "golden", "evening":
-		return []string{token, "sky", "scenery", "closing"}
+		return []string{token, "sky", "scenery", "closing", "warm"}
+	case "people", "person", "family", "friends", "friend", "adult", "child", "children", "kids", "kid":
+		return []string{token, "people", "family", "portrait"}
+	case "laugh", "laughing", "smile", "smiling", "reaction", "reactions", "emotion", "emotional", "meaningful":
+		return []string{token, "people", "emotion", "warm", "memory"}
 	case "walk", "walking", "stroll":
 		return []string{token, "walking", "movement"}
 	case "city", "street", "building", "urban":

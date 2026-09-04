@@ -998,8 +998,8 @@ final class StoryPreviewViewModel: ObservableObject {
 
     func saveStoryEdits(_ request: StoryEditRequest) {
         guard let storyID, request.hasChanges, story?.status.shouldPoll != true else { return }
-        storyPreviewDebugLog("edit save requested story=\(storyID) add=\(request.addMediaIDs.joined(separator: ",")) remove_media=\(request.removeMediaIDs.joined(separator: ",")) remove_moments=\(request.removeMomentIDs.joined(separator: ",")) ordered=\(request.orderedMediaIDs.joined(separator: ",")) replace=\(request.replace.count) analyses=\(request.analyses.count) has_instruction=\(request.instruction?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)")
-        perform(.editStory, mapResult: { [weak self] updatedStory in
+        storyPreviewDebugLog("edit save requested story=\(storyID) add=\(request.addMediaIDs.joined(separator: ",")) remove_media=\(request.removeMediaIDs.joined(separator: ",")) remove_moments=\(request.removeMomentIDs.joined(separator: ",")) ordered=\(request.orderedMediaIDs.joined(separator: ",")) replace=\(request.replace.count) analyses=\(request.analyses.count) has_instruction=\(request.instruction?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) credit_actions=\(request.regenerationCreditActions.map(\.rawValue).joined(separator: ",")) required_credits=\(request.regenerationCreditCost)")
+        perform(.editStory, creditActions: request.regenerationCreditActions, mapResult: { [weak self] updatedStory in
             self?.storyPreviewDebugLogEditResult(updatedStory, request: request)
             return self?.storyWithPendingEdit(request, appliedTo: updatedStory) ?? updatedStory
         }) { [storyService] in
@@ -1370,6 +1370,7 @@ final class StoryPreviewViewModel: ObservableObject {
 
     private func perform(
         _ action: StoryPreviewAction,
+        creditActions: [CreditAction]? = nil,
         mapResult: (@MainActor (Story) -> Story)? = nil,
         operation: @escaping @Sendable () async throws -> Story
     ) {
@@ -1381,7 +1382,8 @@ final class StoryPreviewViewModel: ObservableObject {
             errorMessage = nil
             defer { activeAction = nil }
             do {
-                try await verifyCredits(for: action.creditAction)
+                let requiredCreditActions = creditActions ?? action.creditActions
+                try await verifyCredits(for: requiredCreditActions, issueAction: action.creditAction)
                 let operationStory = try await operation()
                 let updatedStory = mapResult?(operationStory) ?? operationStory
                 try await cacheUploadAssets(for: updatedStory)
@@ -1412,10 +1414,14 @@ final class StoryPreviewViewModel: ObservableObject {
     }
 
     private func verifyCredits(for action: CreditAction) async throws {
+        try await verifyCredits(for: [action], issueAction: action)
+    }
+
+    private func verifyCredits(for actions: [CreditAction], issueAction: CreditAction) async throws {
         guard let creditService else { return }
         let balance = try await creditService.balance()
         creditBalance = balance.displayCredits
-        if let issue = CreditPreflight.issue(for: action, balance: balance) {
+        if let issue = CreditPreflight.issue(for: actions, issueAction: issueAction, balance: balance) {
             throw AppError.insufficientCredits(required: issue.required, available: issue.available)
         }
     }
@@ -1459,15 +1465,21 @@ enum StoryPreviewAction: Hashable, Sendable {
     }
 
     var creditAction: CreditAction {
+        creditActions.first ?? .preview
+    }
+
+    var creditActions: [CreditAction] {
         switch self {
         case .regenerate:
-            .regenerateStory
-        case .editStory, .replaceMoment:
-            .aiEditStory
+            [.regenerateStory]
+        case .editStory:
+            [.regenerateStory]
+        case .replaceMoment:
+            [.regenerateStory, .addMoment]
         case .removeMoment:
-            .removeMoment
+            [.removeMoment]
         case .retry, .renderAgain, .saveVideo, .deleteStory:
-            .preview
+            [.preview]
         }
     }
 }

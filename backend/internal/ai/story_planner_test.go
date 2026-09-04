@@ -565,6 +565,40 @@ func TestValidateStoryPlanRejectsBrokenReferences(t *testing.T) {
 	}
 }
 
+func TestApplyInstructionPreferencesBoostsMatchingCandidates(t *testing.T) {
+	t.Parallel()
+	candidates := []candidate{
+		{mediaID: "lake", score: 0.45, semanticTerms: semanticTermsFromText("lake sunset warm scenery"), moment: models.StoryMoment{MediaType: models.MediaTypePhoto, Score: 0.45, DurationMS: 3000}},
+		{mediaID: "kitchen", score: 0.52, semanticTerms: semanticTermsFromText("kitchen breakfast indoor"), moment: models.StoryMoment{MediaType: models.MediaTypePhoto, Score: 0.52, DurationMS: 3000}},
+	}
+
+	applyInstructionPreferences(candidates, "focus on the lake and sunset reactions")
+
+	if candidates[0].score <= candidates[1].score {
+		t.Fatalf("expected matching lake/sunset candidate to outrank unrelated candidate: %+v", candidates)
+	}
+	if candidates[0].moment.Score != candidates[0].score {
+		t.Fatalf("expected moment score to stay in sync with candidate score: %+v", candidates[0])
+	}
+}
+
+func TestApplyInstructionPreferencesAdjustsPhotoPacing(t *testing.T) {
+	t.Parallel()
+	candidates := []candidate{
+		{mediaID: "photo", score: 0.8, semanticTerms: semanticTermsFromText("family"), moment: models.StoryMoment{MediaType: models.MediaTypePhoto, Score: 0.8, DurationMS: 3000}},
+		{mediaID: "video", score: 0.8, semanticTerms: semanticTermsFromText("family"), moment: models.StoryMoment{MediaType: models.MediaTypeVideo, Score: 0.8, DurationMS: 3000}},
+	}
+
+	applyInstructionPreferences(candidates, "use slower pacing for meaningful moments")
+
+	if candidates[0].moment.DurationMS <= 3000 {
+		t.Fatalf("expected slow prompt to lengthen photo duration: %+v", candidates[0].moment)
+	}
+	if candidates[1].moment.DurationMS != 3000 {
+		t.Fatalf("expected video duration to remain bounded by source segment: %+v", candidates[1].moment)
+	}
+}
+
 func storyPlannerRequest() Request {
 	selected := []string{"video-1", "photo-2"}
 	return Request{

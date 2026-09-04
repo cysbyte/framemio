@@ -65,6 +65,8 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		slog.Int("excluded_moment_count", len(request.ExcludedMomentIDs)),
 		slog.String("excluded_moment_ids", strings.Join(request.ExcludedMomentIDs, ",")),
 		slog.String("visual_style", string(request.VisualStyle)),
+		slog.Bool("instruction_present", strings.TrimSpace(request.UserInstructions) != "" && strings.TrimSpace(request.UserInstructions) != strings.TrimSpace(project.Context)),
+		slog.Int("instruction_length", len(strings.TrimSpace(request.UserInstructions))),
 		slog.String("subtitles_enabled", boolPointerLogValue(request.SubtitlesEnabled)),
 		slog.String("caption_style_preset", valueOrUnset(request.CaptionStylePreset)),
 	)

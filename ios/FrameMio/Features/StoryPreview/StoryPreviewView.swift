@@ -1346,7 +1346,7 @@ private struct EditStorySheet: View {
     private var anotherVersionSection: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
             SectionHeader(title: "Make Another Version", subtitle: "Tell FrameMio what to change")
-            Text("This will use \(CreditPricing.regenerateStory) credits.")
+            Text("This will use \(draft.regenerationCreditCost) credits.")
                 .font(FrameMioTypography.footnote)
                 .foregroundStyle(FrameMioColors.secondaryInk)
             if let creditBalance {
@@ -1370,8 +1370,8 @@ private struct EditStorySheet: View {
             .padding(FrameMioSpacing.md)
             .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
             .accessibilityLabel("Tell FrameMio what you want")
-            PrimaryButton(title: "Regenerate Story (\(CreditPricing.regenerateStory) credits)", systemImage: "sparkles") {
-                storyPreviewUIDebugLog("edit sheet regenerate tapped has_changes=\(draft.request.hasChanges) added=\(draft.addedMediaIDs.sorted().joined(separator: ",")) ordered=\(draft.orderedMediaIDs.joined(separator: ",")) visible=\(displayedMoments.map(\.assetID).joined(separator: ","))")
+            PrimaryButton(title: "Regenerate Story (\(draft.regenerationCreditCost) credits)", systemImage: "sparkles") {
+                storyPreviewUIDebugLog("edit sheet regenerate tapped has_changes=\(draft.request.hasChanges) added=\(draft.addedMediaIDs.sorted().joined(separator: ",")) ordered=\(draft.orderedMediaIDs.joined(separator: ",")) visible=\(displayedMoments.map(\.assetID).joined(separator: ",")) required_credits=\(draft.regenerationCreditCost)")
                 onRegenerate(draft.request)
             }
             .disabled(isPerformingAction)
@@ -1426,6 +1426,10 @@ private struct EditStoryDraft {
     var instruction: String?
 
     var hasChanges: Bool { request.hasChanges }
+
+    var regenerationCreditCost: Int {
+        request.regenerationCreditCost
+    }
 
     var request: StoryEditRequest {
         StoryEditRequest(
@@ -2113,9 +2117,9 @@ private struct AddMomentSelectionSheet: View {
     private var addButtonTitle: String {
         if !allowsMultipleSelection { return "Replace Moment" }
         switch selectedCount {
-        case 0: return "Add Moment (\(CreditPricing.addMoment) credits)"
-        case 1: return "Add Moment (\(CreditPricing.addMoment) credits)"
-        default: return "Add \(selectedCount) Moments (\(CreditPricing.addMoment) credits)"
+        case 0: return "Add Moment (+\(CreditPricing.addMoment) credits)"
+        case 1: return "Add Moment (+\(CreditPricing.addMoment) credits)"
+        default: return "Add \(selectedCount) Moments (+\(CreditPricing.addMoment) credits)"
         }
     }
 

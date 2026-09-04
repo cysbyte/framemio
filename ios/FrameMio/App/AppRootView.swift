@@ -23,7 +23,7 @@ struct AppRootView: View {
             )
         )
         _creditStore = StateObject(wrappedValue: CreditBalanceStore(creditService: dependencies.creditService))
-        _settingsViewModel = StateObject(wrappedValue: SettingsViewModel(photoLibrary: dependencies.photoLibrary))
+        _settingsViewModel = StateObject(wrappedValue: SettingsViewModel(photoLibrary: dependencies.photoLibrary, creditService: dependencies.creditService))
     }
 
     var body: some View {

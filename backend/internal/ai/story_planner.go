@@ -89,6 +89,7 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 	}
 	clusterByMedia := buildClusterIndex(request.MediaClusters)
 	candidates := filterExcludedCandidates(buildCandidates(request, selected, clusterByMedia), excludedMedia, excludedMoments)
+	applyInstructionPreferences(candidates, request.UserInstructions)
 	if len(candidates) == 0 {
 		return models.StoryPlan{}, errors.New("story planner requires at least one usable analysis")
 	}
@@ -646,6 +647,36 @@ func sortCandidatesForStory(candidates []candidate, preferredMediaOrder []string
 		}
 		return candidates[left].sourceTime < candidates[right].sourceTime
 	})
+}
+
+func applyInstructionPreferences(candidates []candidate, instructions string) {
+	instructionTerms := semanticTermsFromText(instructions)
+	if len(instructionTerms) == 0 {
+		return
+	}
+	pacingMultiplier := instructionPacingMultiplier(instructions)
+	for index := range candidates {
+		match := semanticMatch(instructionTerms, candidates[index].semanticTerms)
+		if match > 0 {
+			boost := 0.08 + 0.22*match
+			candidates[index].score = math.Min(1, candidates[index].score+boost)
+			candidates[index].moment.Score = math.Min(1, candidates[index].moment.Score+boost)
+		}
+		if pacingMultiplier != 1 && candidates[index].moment.MediaType == models.MediaTypePhoto {
+			candidates[index].moment.DurationMS = clampInt(int(math.Round(float64(candidates[index].moment.DurationMS)*pacingMultiplier)), 1800, 5200)
+		}
+	}
+}
+
+func instructionPacingMultiplier(instructions string) float64 {
+	text := strings.ToLower(instructions)
+	if strings.Contains(text, "slow") || strings.Contains(text, "slower") || strings.Contains(text, "calm") || strings.Contains(text, "gentle") || strings.Contains(text, "emotional") || strings.Contains(text, "meaningful") {
+		return 1.18
+	}
+	if strings.Contains(text, "fast") || strings.Contains(text, "faster") || strings.Contains(text, "quick") || strings.Contains(text, "upbeat") || strings.Contains(text, "energetic") || strings.Contains(text, "fun") {
+		return 0.88
+	}
+	return 1
 }
 
 func selectCandidates(candidates []candidate, desired time.Duration) []candidate {

@@ -355,11 +355,44 @@ struct CreditPricing {
 
 struct CreditPreflight {
     static func issue(for action: CreditAction, balance: CreditBalance) -> CreditIssue? {
-        let required = CreditPricing.price(for: action)
+        issue(for: [action], issueAction: action, balance: balance)
+    }
+
+    static func issue(for actions: [CreditAction], issueAction: CreditAction, balance: CreditBalance) -> CreditIssue? {
+        let required = CreditPricing.price(for: actions)
         guard required > 0 else { return nil }
         let available = balance.spendableCredits
         guard available < required else { return nil }
-        return CreditIssue(action: action, required: required, available: available)
+        return CreditIssue(action: issueAction, required: required, available: available)
+    }
+}
+
+extension CreditPricing {
+    static var addMomentAndRegenerateStory: Int {
+        addMoment + regenerateStory
+    }
+
+    static func price(for actions: [CreditAction]) -> Int {
+        actions.reduce(0) { total, action in
+            total + price(for: action)
+        }
+    }
+}
+
+extension StoryEditRequest {
+    var regenerationCreditActions: [CreditAction] {
+        var actions: [CreditAction] = [.regenerateStory]
+        if !addMediaIDs.isEmpty || !replace.isEmpty {
+            actions.append(.addMoment)
+        }
+        if instruction?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            actions.append(.aiEditStory)
+        }
+        return actions
+    }
+
+    var regenerationCreditCost: Int {
+        CreditPricing.price(for: regenerationCreditActions)
     }
 }
 
