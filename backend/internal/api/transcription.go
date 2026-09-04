@@ -20,12 +20,26 @@ type PromptTranscriber interface {
 	TranscribePrompt(ctx context.Context, audio []byte, contentType string) (string, error)
 }
 
+type PromptTranscriptionTokenGranter interface {
+	GrantPromptToken(ctx context.Context, ttlSeconds int) (PromptTranscriptionToken, error)
+}
+
+type PromptTranscriptionToken struct {
+	AccessToken  string `json:"accessToken"`
+	ExpiresIn    int    `json:"expiresIn"`
+	WebsocketURL string `json:"websocketUrl"`
+	Model        string `json:"model"`
+	Language     string `json:"language,omitempty"`
+}
+
 type DeepgramPromptTranscriber struct {
-	APIKey   string
-	Endpoint string
-	Model    string
-	Language string
-	Client   *http.Client
+	APIKey        string
+	Endpoint      string
+	GrantEndpoint string
+	WebsocketURL  string
+	Model         string
+	Language      string
+	Client        *http.Client
 }
 
 func NewDeepgramPromptTranscriberFromEnv() PromptTranscriber {
@@ -37,18 +51,95 @@ func NewDeepgramPromptTranscriberFromEnv() PromptTranscriber {
 	if endpoint == "" {
 		endpoint = "https://api.deepgram.com/v1/listen"
 	}
+	grantEndpoint := strings.TrimSpace(os.Getenv("DEEPGRAM_AUTH_GRANT_ENDPOINT"))
+	if grantEndpoint == "" {
+		grantEndpoint = "https://api.deepgram.com/v1/auth/grant"
+	}
+	websocketURL := strings.TrimSpace(os.Getenv("DEEPGRAM_LISTEN_WEBSOCKET_URL"))
+	if websocketURL == "" {
+		websocketURL = "wss://api.deepgram.com/v1/listen"
+	}
 	model := strings.TrimSpace(os.Getenv("DEEPGRAM_MODEL"))
 	if model == "" {
 		model = "nova-3"
 	}
 	language := strings.TrimSpace(os.Getenv("DEEPGRAM_LANGUAGE"))
 	return DeepgramPromptTranscriber{
-		APIKey:   apiKey,
-		Endpoint: endpoint,
-		Model:    model,
-		Language: language,
-		Client:   &http.Client{Timeout: 30 * time.Second},
+		APIKey:        apiKey,
+		Endpoint:      endpoint,
+		GrantEndpoint: grantEndpoint,
+		WebsocketURL:  websocketURL,
+		Model:         model,
+		Language:      language,
+		Client:        &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+func (t DeepgramPromptTranscriber) GrantPromptToken(ctx context.Context, ttlSeconds int) (PromptTranscriptionToken, error) {
+	if strings.TrimSpace(t.APIKey) == "" {
+		return PromptTranscriptionToken{}, errors.New("deepgram api key is not configured")
+	}
+	if ttlSeconds <= 0 {
+		ttlSeconds = 60
+	}
+	if ttlSeconds > 3600 {
+		ttlSeconds = 3600
+	}
+	endpoint := strings.TrimSpace(t.GrantEndpoint)
+	if endpoint == "" {
+		endpoint = "https://api.deepgram.com/v1/auth/grant"
+	}
+	body, err := json.Marshal(map[string]int{"ttl_seconds": ttlSeconds})
+	if err != nil {
+		return PromptTranscriptionToken{}, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return PromptTranscriptionToken{}, err
+	}
+	request.Header.Set("Authorization", "Token "+strings.TrimSpace(t.APIKey))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json")
+
+	client := t.Client
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return PromptTranscriptionToken{}, err
+	}
+	defer response.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return PromptTranscriptionToken{}, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return PromptTranscriptionToken{}, fmt.Errorf("deepgram auth grant returned status %d", response.StatusCode)
+	}
+	var output deepgramAuthGrantResponse
+	if err := json.Unmarshal(data, &output); err != nil {
+		return PromptTranscriptionToken{}, err
+	}
+	accessToken := strings.TrimSpace(output.AccessToken)
+	if accessToken == "" {
+		return PromptTranscriptionToken{}, errors.New("deepgram returned an empty access token")
+	}
+	websocketURL := strings.TrimSpace(t.WebsocketURL)
+	if websocketURL == "" {
+		websocketURL = "wss://api.deepgram.com/v1/listen"
+	}
+	model := strings.TrimSpace(t.Model)
+	if model == "" {
+		model = "nova-3"
+	}
+	return PromptTranscriptionToken{
+		AccessToken:  accessToken,
+		ExpiresIn:    ttlSeconds,
+		WebsocketURL: websocketURL,
+		Model:        model,
+		Language:     strings.TrimSpace(t.Language),
+	}, nil
 }
 
 func (t DeepgramPromptTranscriber) TranscribePrompt(ctx context.Context, audio []byte, contentType string) (string, error) {
@@ -111,6 +202,26 @@ func (t DeepgramPromptTranscriber) TranscribePrompt(ctx context.Context, audio [
 	return transcript, nil
 }
 
+func (s *Server) grantPromptTranscriptionToken(response http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	granter, ok := s.PromptTranscriber.(PromptTranscriptionTokenGranter)
+	if !ok || granter == nil {
+		s.writeError(response, http.StatusServiceUnavailable, "transcription_not_configured", "voice prompt transcription is not configured")
+		return
+	}
+	token, err := granter.GrantPromptToken(request.Context(), 60)
+	if err != nil {
+		s.Logger.Warn("voice prompt token grant failed", "user_id", authenticatedUserIDForLog(request), "error", err)
+		s.writeError(response, http.StatusBadGateway, "transcription_token_failed", "voice prompt transcription could not start")
+		return
+	}
+	s.Logger.Info("voice prompt token granted", "user_id", authenticatedUserIDForLog(request), "expires_in", token.ExpiresIn, "model", token.Model)
+	s.writeJSON(response, http.StatusOK, token)
+}
+
 func (s *Server) transcribePromptAudio(response http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost {
 		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
@@ -168,6 +279,10 @@ func authenticatedUserIDForLog(request *http.Request) string {
 		return user.ID
 	}
 	return "unknown"
+}
+
+type deepgramAuthGrantResponse struct {
+	AccessToken string `json:"access_token"`
 }
 
 type deepgramListenResponse struct {

@@ -167,8 +167,17 @@ struct PromptAudioRecording: Sendable {
     let fileName: String
 }
 
+struct PromptLiveTranscriptionConfiguration: Decodable, Sendable {
+    let accessToken: String
+    let expiresIn: Int
+    let websocketURL: URL
+    let model: String
+    let language: String?
+}
+
 protocol PromptTranscriptionService: Sendable {
     func transcribePromptAudio(_ recording: PromptAudioRecording) async throws -> String
+    func livePromptConfiguration() async throws -> PromptLiveTranscriptionConfiguration
 }
 
 enum CreditAction: String, Codable, Hashable, Sendable {

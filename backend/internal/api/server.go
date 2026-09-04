@@ -150,6 +150,10 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
+	if request.URL.Path == "/v1/transcriptions/token" {
+		s.grantPromptTranscriptionToken(response, request)
+		return
+	}
 	if request.URL.Path == "/v1/transcriptions" {
 		s.transcribePromptAudio(response, request)
 		return

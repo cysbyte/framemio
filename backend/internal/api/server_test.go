@@ -1835,6 +1835,46 @@ func completeProjectPhotoPreprocessJobs(t *testing.T, server *Server, memoryStor
 	t.Helper()
 }
 
+func TestGrantPromptTranscriptionToken(t *testing.T) {
+	t.Parallel()
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	server := newTestServer(memoryStore, publisher)
+	server.PromptTranscriber = &mockPromptTokenTranscriber{
+		mockPromptTranscriber: mockPromptTranscriber{transcript: "unused"},
+		token: PromptTranscriptionToken{
+			AccessToken:  "temporary-token",
+			ExpiresIn:    60,
+			WebsocketURL: "wss://api.deepgram.com/v1/listen",
+			Model:        "nova-3",
+			Language:     "en",
+		},
+	}
+	handler := server.Handler()
+
+	response := performJSON(t, handler, http.MethodPost, "/v1/transcriptions/token", nil, "", true, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("token status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var token PromptTranscriptionToken
+	decodeResponse(t, response, &token)
+	if token.AccessToken != "temporary-token" || token.Model != "nova-3" || token.ExpiresIn != 60 {
+		t.Fatalf("token = %+v", token)
+	}
+}
+
+type mockPromptTokenTranscriber struct {
+	mockPromptTranscriber
+	token PromptTranscriptionToken
+}
+
+func (m *mockPromptTokenTranscriber) GrantPromptToken(_ context.Context, ttlSeconds int) (PromptTranscriptionToken, error) {
+	if ttlSeconds != 60 {
+		return PromptTranscriptionToken{}, errors.New("unexpected ttl")
+	}
+	return m.token, nil
+}
+
 func TestTranscribePromptAudio(t *testing.T) {
 	t.Parallel()
 	memoryStore := store.NewMemoryStore()

@@ -210,7 +210,7 @@ struct StoryPreviewView: View {
                     StoryVideoPlayer(
                         url: videoURL,
                         autoplays: true,
-                        isPlaybackEnabled: fullScreenVideo == nil,
+                        isPlaybackEnabled: fullScreenVideo == nil && !isShowingEditStory,
                         accessibilityTitle: "Play \(storyDisplayTitle(story))"
                     )
                     .aspectRatio(generatedVideoAspectRatio, contentMode: .fit)
@@ -1365,91 +1365,132 @@ private struct EditStorySheet: View {
             .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
             .accessibilityLabel("Tell FrameMio what you want")
             voicePromptControl
+                .onChange(of: voicePromptRecorder.currentTranscript) { _, transcript in
+                    let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        draft.instruction = trimmed
+                    }
+                }
             PrimaryButton(title: "Regenerate Story (\(draft.regenerationCreditCost) credits)", systemImage: "sparkles") {
                 storyPreviewUIDebugLog("edit sheet regenerate tapped has_changes=\(draft.request.hasChanges) added=\(draft.addedMediaIDs.sorted().joined(separator: ",")) ordered=\(draft.orderedMediaIDs.joined(separator: ",")) visible=\(displayedMoments.map(\.assetID).joined(separator: ",")) required_credits=\(draft.regenerationCreditCost)")
-                onRegenerate(draft.request)
+                Task {
+                    await stopVoicePromptRecording()
+                    onRegenerate(draft.request)
+                }
             }
             .disabled(isPerformingAction)
         }
     }
 
     private var voicePromptControl: some View {
-        VStack(alignment: .leading, spacing: FrameMioSpacing.xs) {
+        VStack(alignment: .center, spacing: FrameMioSpacing.xs) {
             HStack(spacing: FrameMioSpacing.sm) {
-                Button {
-                    FrameMioHaptics.secondaryAction()
-                    Task { await toggleVoicePromptRecording() }
-                } label: {
-                    Label(voicePromptButtonTitle, systemImage: voicePromptButtonIcon)
-                        .font(FrameMioTypography.footnote)
-                        .foregroundStyle(voicePromptRecorder.isRecording ? .white : FrameMioColors.accent)
-                        .padding(.horizontal, FrameMioSpacing.md)
-                        .frame(minHeight: FrameMioMetrics.compactButtonHeight)
-                        .background(
-                            voicePromptRecorder.isRecording ? FrameMioColors.accent : FrameMioColors.surface.opacity(0.78),
-                            in: Capsule()
-                        )
-                        .overlay {
-                            Capsule()
-                                .stroke(FrameMioColors.accent.opacity(0.35), lineWidth: FrameMioMetrics.borderWidth)
-                        }
-                }
-                .buttonStyle(FrameMioPressButtonStyle())
-                .disabled(isPerformingAction || voicePromptRecorder.isTranscribing || promptTranscriptionService == nil)
+                voicePromptButton
 
-                if voicePromptRecorder.isTranscribing {
-                    ProgressView()
-                        .tint(FrameMioColors.accent)
-                    Text("Transcribing…")
-                        .font(FrameMioTypography.footnote)
-                        .foregroundStyle(FrameMioColors.secondaryInk)
-                } else if voicePromptRecorder.isRecording {
-                    Text("Listening… tap Done when finished.")
-                        .font(FrameMioTypography.footnote)
-                        .foregroundStyle(FrameMioColors.secondaryInk)
+                if voicePromptRecorder.isListening {
+                    VoicePromptListeningIndicator()
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .center)
 
-            if promptTranscriptionService == nil {
-                Text("Voice prompt is unavailable in this build.")
-                    .font(FrameMioTypography.caption)
-                    .foregroundStyle(FrameMioColors.secondaryInk)
-            } else if let error = voicePromptRecorder.errorMessage {
-                Text(error)
-                    .font(FrameMioTypography.caption)
-                    .foregroundStyle(.red)
-            } else {
-                Text("Speak your edit request and FrameMio will place the transcript into the prompt.")
-                    .font(FrameMioTypography.caption)
-                    .foregroundStyle(FrameMioColors.secondaryInk)
+            voicePromptStatusText
+                .font(FrameMioTypography.caption)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private var voicePromptButton: some View {
+        Label(voicePromptButtonTitle, systemImage: voicePromptButtonIcon)
+            .font(FrameMioTypography.footnote)
+            .foregroundStyle(voicePromptRecorder.isListening ? .white : FrameMioColors.accent)
+            .padding(.horizontal, FrameMioSpacing.lg)
+            .frame(minHeight: FrameMioMetrics.compactButtonHeight)
+            .background(
+                voicePromptRecorder.isListening ? FrameMioColors.accent : FrameMioColors.surface.opacity(0.78),
+                in: Capsule()
+            )
+            .overlay {
+                Capsule()
+                    .stroke(FrameMioColors.accent.opacity(0.35), lineWidth: FrameMioMetrics.borderWidth)
             }
+            .scaleEffect(voicePromptRecorder.isListening ? 1.04 : 1)
+            .opacity(voicePromptButtonDisabled ? 0.55 : 1)
+            .animation(.easeInOut(duration: 0.18), value: voicePromptRecorder.isListening)
+            .contentShape(Capsule())
+            .onTapGesture {
+                guard !voicePromptButtonDisabled else { return }
+                FrameMioHaptics.secondaryAction()
+                Task { await toggleVoicePromptRecording() }
+            }
+            .accessibilityLabel("Voice prompt")
+            .accessibilityHint("Tap to start live transcription. Tap again to stop.")
+    }
+
+    @ViewBuilder
+    private var voicePromptStatusText: some View {
+        if promptTranscriptionService == nil {
+            Text("Voice prompt is unavailable in this build.")
+                .foregroundStyle(FrameMioColors.secondaryInk)
+        } else if let error = voicePromptRecorder.errorMessage {
+            Text(error)
+                .foregroundStyle(.red)
+        } else if voicePromptRecorder.didAutoStopForSilence {
+            Text("Stopped after a few quiet seconds.")
+                .foregroundStyle(FrameMioColors.secondaryInk)
+        } else if voicePromptRecorder.isPreparing {
+            Text("Connecting… tap again to stop.")
+                .foregroundStyle(FrameMioColors.secondaryInk)
+        } else if voicePromptRecorder.isRecording {
+            Text("Listening live… auto-stops after silence.")
+                .foregroundStyle(FrameMioColors.secondaryInk)
+        } else {
+            Text("Tap Voice Prompt and speak; the text field updates live.")
+                .foregroundStyle(FrameMioColors.secondaryInk)
         }
     }
 
+    private var voicePromptButtonDisabled: Bool {
+        isPerformingAction || voicePromptRecorder.isTranscribing || promptTranscriptionService == nil
+    }
+
     private var voicePromptButtonTitle: String {
-        if voicePromptRecorder.isRecording {
-            return "Done"
+        if voicePromptRecorder.isPreparing {
+            return "Connecting"
         }
-        if voicePromptRecorder.isTranscribing {
-            return "Transcribing"
+        if voicePromptRecorder.isRecording {
+            return "Stop Voice Prompt"
         }
         return "Voice Prompt"
     }
 
     private var voicePromptButtonIcon: String {
-        voicePromptRecorder.isRecording ? "stop.fill" : "mic.fill"
+        voicePromptRecorder.isListening ? "waveform" : "mic.fill"
+    }
+
+    @MainActor
+    private func startVoicePromptRecording() async {
+        guard let promptTranscriptionService else { return }
+        await voicePromptRecorder.startRecording(using: promptTranscriptionService)
     }
 
     @MainActor
     private func toggleVoicePromptRecording() async {
-        if voicePromptRecorder.isRecording {
-            guard let promptTranscriptionService else { return }
-            if let transcript = await voicePromptRecorder.stopAndTranscribe(using: promptTranscriptionService) {
-                draft.instruction = transcript
-                storyPreviewUIDebugLog("voice prompt applied transcript_length=\(transcript.count)")
-            }
+        if voicePromptRecorder.isListening {
+            await stopVoicePromptRecording()
         } else {
-            await voicePromptRecorder.startRecording()
+            await startVoicePromptRecording()
+        }
+    }
+
+    @MainActor
+    private func stopVoicePromptRecording() async {
+        await voicePromptRecorder.stopRecording()
+        let transcript = voicePromptRecorder.currentTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !transcript.isEmpty {
+            draft.instruction = transcript
+            storyPreviewUIDebugLog("voice prompt applied transcript_length=\(transcript.count)")
         }
     }
 
@@ -2338,95 +2379,336 @@ private extension StoryStatus {
 @MainActor
 private final class VoicePromptRecorder: ObservableObject {
     @Published private(set) var isRecording = false
+    @Published private(set) var isPreparing = false
     @Published private(set) var isTranscribing = false
+    @Published private(set) var currentTranscript = ""
+    @Published private(set) var didAutoStopForSilence = false
+
+    var isListening: Bool {
+        isPreparing || isRecording
+    }
     @Published var errorMessage: String?
 
-    private var recorder: AVAudioRecorder?
-    private var recordingURL: URL?
+    private var audioEngine: AVAudioEngine?
+    private var webSocketTask: URLSessionWebSocketTask?
+    private var receiveTask: Task<Void, Never>?
+    private var silenceMonitorTask: Task<Void, Never>?
+    private var lastVoiceInputAt = ContinuousClock.now
+    private var stopRequestedAfterStart = false
+    private var finalTranscript = ""
+    private var interimTranscript = ""
+    private let silenceAutoStopDelay: Duration = .seconds(8)
+    private let voiceActivityThreshold: Float = 0.012
 
-    func startRecording() async {
-        guard !isRecording, !isTranscribing else { return }
+    func startRecording(using service: PromptTranscriptionService) async {
+        guard !isRecording, !isPreparing, !isTranscribing else { return }
+        isPreparing = true
+        stopRequestedAfterStart = false
         errorMessage = nil
+        didAutoStopForSilence = false
+        currentTranscript = ""
+        finalTranscript = ""
+        interimTranscript = ""
         guard await requestRecordPermission() else {
+            isPreparing = false
             errorMessage = "Microphone access is needed for voice prompts."
             return
         }
-
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("voice-prompt-\(UUID().uuidString)")
-            .appendingPathExtension("m4a")
-        let settings: [String: Any] = [
-            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-            AVSampleRateKey: 44_100,
-            AVNumberOfChannelsKey: 1,
-            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
-        ]
 
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.allowBluetooth, .defaultToSpeaker])
             try session.setActive(true)
-            let recorder = try AVAudioRecorder(url: url, settings: settings)
-            guard recorder.record() else {
-                throw AppError.message("Recording could not start.")
+
+            let engine = AVAudioEngine()
+            let inputNode = engine.inputNode
+            let inputFormat = inputNode.outputFormat(forBus: 0)
+            let sampleRate = max(8_000, Int(inputFormat.sampleRate.rounded()))
+            let channels = max(1, Int(inputFormat.channelCount))
+            let configuration = try await service.livePromptConfiguration()
+            let task = try makeWebSocketTask(configuration: configuration, sampleRate: sampleRate, channels: channels)
+            webSocketTask = task
+            task.resume()
+            startReceiving(from: task)
+            lastVoiceInputAt = .now
+            startSilenceMonitor()
+
+            inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self, weak task] buffer, _ in
+                guard let task, let data = Self.linearPCMData(from: buffer), !data.isEmpty else { return }
+                if Self.containsVoiceActivity(in: buffer, threshold: self?.voiceActivityThreshold ?? 0.012) {
+                    Task { @MainActor [weak self] in
+                        self?.lastVoiceInputAt = .now
+                    }
+                }
+                task.send(.data(data)) { error in
+                    if let error {
+                        Task { @MainActor [weak self] in
+                            self?.handleStreamingError(error)
+                        }
+                    }
+                }
             }
-            self.recorder = recorder
-            recordingURL = url
+            try engine.start()
+            audioEngine = engine
+            isPreparing = false
             isRecording = true
-            storyPreviewUIDebugLog("voice prompt recording start file=\(url.lastPathComponent)")
-        } catch {
-            cleanupRecording(at: url)
-            errorMessage = "Couldn’t start voice recording. Try again."
-            storyPreviewUIDebugLog("voice prompt recording failed error=\(error.localizedDescription)")
+            storyPreviewUIDebugLog("voice prompt live transcription start sample_rate=\(sampleRate) channels=\(channels)")
+            if stopRequestedAfterStart {
+                stopRequestedAfterStart = false
+                await stopRecording()
+        }
+    } catch {
+            cleanupActiveRecording()
+            isPreparing = false
+            stopRequestedAfterStart = false
+            errorMessage = AppError.from(error).localizedDescription
+            storyPreviewUIDebugLog("voice prompt live transcription start failed error=\(error.localizedDescription)")
         }
     }
 
-    func stopAndTranscribe(using service: PromptTranscriptionService) async -> String? {
-        guard isRecording, let recordingURL else { return nil }
-        recorder?.stop()
-        recorder = nil
+    func stopRecording() async {
+        if isPreparing {
+            stopRequestedAfterStart = true
+            return
+        }
+        guard isRecording || isTranscribing || audioEngine != nil || webSocketTask != nil else { return }
         isRecording = false
+        isPreparing = false
         isTranscribing = true
-        errorMessage = nil
-        defer {
-            isTranscribing = false
-            cleanupRecording(at: recordingURL)
-            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        if let webSocketTask {
+            webSocketTask.send(.string("{\"type\":\"CloseStream\"}")) { _ in }
+            try? await Task.sleep(nanoseconds: 500_000_000)
         }
+        cleanupActiveRecording()
+        isTranscribing = false
+    }
 
-        do {
-            let data = try Data(contentsOf: recordingURL)
-            let transcript = try await service.transcribePromptAudio(
-                PromptAudioRecording(
-                    data: data,
-                    contentType: "audio/mp4",
-                    fileName: recordingURL.lastPathComponent
-                )
-            )
-            let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else {
-                errorMessage = "No speech was detected. Please try again."
-                return nil
+    private func stopRecordingForSilence() async {
+        didAutoStopForSilence = true
+        storyPreviewUIDebugLog("voice prompt auto-stopped after silence")
+        await stopRecording()
+    }
+
+    private func cleanupActiveRecording() {
+        audioEngine?.inputNode.removeTap(onBus: 0)
+        audioEngine?.stop()
+        audioEngine = nil
+        webSocketTask?.cancel(with: .normalClosure, reason: nil)
+        webSocketTask = nil
+        receiveTask?.cancel()
+        receiveTask = nil
+        silenceMonitorTask?.cancel()
+        silenceMonitorTask = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    private func startSilenceMonitor() {
+        silenceMonitorTask?.cancel()
+        silenceMonitorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard let self, self.isRecording else { continue }
+                if .now - self.lastVoiceInputAt >= self.silenceAutoStopDelay {
+                    await self.stopRecordingForSilence()
+                    return
+                }
             }
-            storyPreviewUIDebugLog("voice prompt transcription complete audio_bytes=\(data.count) transcript_length=\(trimmed.count)")
-            return trimmed
-        } catch {
-            errorMessage = AppError.from(error).localizedDescription
-            storyPreviewUIDebugLog("voice prompt transcription failed error=\(error.localizedDescription)")
-            return nil
         }
+    }
+
+    private func makeWebSocketTask(
+        configuration: PromptLiveTranscriptionConfiguration,
+        sampleRate: Int,
+        channels: Int
+    ) throws -> URLSessionWebSocketTask {
+        guard var components = URLComponents(url: configuration.websocketURL, resolvingAgainstBaseURL: false) else {
+            throw AppError.invalidConfiguration
+        }
+        var items = components.queryItems ?? []
+        items.append(contentsOf: [
+            URLQueryItem(name: "model", value: configuration.model),
+            URLQueryItem(name: "encoding", value: "linear16"),
+            URLQueryItem(name: "sample_rate", value: String(sampleRate)),
+            URLQueryItem(name: "channels", value: String(channels)),
+            URLQueryItem(name: "interim_results", value: "true"),
+            URLQueryItem(name: "smart_format", value: "true"),
+            URLQueryItem(name: "endpointing", value: "300")
+        ])
+        if let language = configuration.language?.trimmingCharacters(in: .whitespacesAndNewlines), !language.isEmpty {
+            items.append(URLQueryItem(name: "language", value: language))
+        }
+        components.queryItems = items
+        guard let url = components.url else {
+            throw AppError.invalidConfiguration
+        }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(configuration.accessToken)", forHTTPHeaderField: "Authorization")
+        return URLSession.shared.webSocketTask(with: request)
+    }
+
+    private func startReceiving(from task: URLSessionWebSocketTask) {
+        receiveTask?.cancel()
+        receiveTask = Task { [weak self, weak task] in
+            while !Task.isCancelled {
+                guard let task else { return }
+                do {
+                    let message = try await task.receive()
+                    switch message {
+                    case let .string(text):
+                        self?.handleLiveMessage(Data(text.utf8))
+                    case let .data(data):
+                        self?.handleLiveMessage(data)
+                    @unknown default:
+                        break
+                    }
+                } catch is CancellationError {
+                    return
+                } catch {
+                    self?.handleStreamingError(error)
+                    return
+                }
+            }
+        }
+    }
+
+    private func handleLiveMessage(_ data: Data) {
+        guard let message = try? JSONDecoder().decode(DeepgramLiveTranscriptionMessage.self, from: data),
+              let transcript = message.channel?.alternatives.first?.transcript.trimmingCharacters(in: .whitespacesAndNewlines),
+              !transcript.isEmpty else {
+            return
+        }
+        lastVoiceInputAt = .now
+        if message.isFinal == true {
+            if !finalTranscript.isEmpty {
+                finalTranscript += " "
+            }
+            finalTranscript += transcript
+            interimTranscript = ""
+        } else {
+            interimTranscript = transcript
+        }
+        currentTranscript = [finalTranscript, interimTranscript]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    private func handleStreamingError(_ error: Error) {
+        guard isRecording || isTranscribing else { return }
+        errorMessage = AppError.from(error).localizedDescription
+        storyPreviewUIDebugLog("voice prompt live transcription failed error=\(error.localizedDescription)")
     }
 
     private func requestRecordPermission() async -> Bool {
         await AVAudioApplication.requestRecordPermission()
     }
 
-    private func cleanupRecording(at url: URL) {
-        if FileManager.default.fileExists(atPath: url.path) {
-            try? FileManager.default.removeItem(at: url)
+    nonisolated private static func linearPCMData(from buffer: AVAudioPCMBuffer) -> Data? {
+        let frameLength = Int(buffer.frameLength)
+        guard frameLength > 0 else { return nil }
+        let channelCount = max(1, Int(buffer.format.channelCount))
+        var data = Data(capacity: frameLength * channelCount * MemoryLayout<Int16>.size)
+
+        if let floatChannels = buffer.floatChannelData {
+            for frame in 0..<frameLength {
+                for channel in 0..<channelCount {
+                    let sample = floatChannels[min(channel, Int(buffer.format.channelCount) - 1)][frame]
+                    appendInt16Sample(sample, to: &data)
+                }
+            }
+            return data
         }
-        if recordingURL == url {
-            recordingURL = nil
+        if let int16Channels = buffer.int16ChannelData {
+            for frame in 0..<frameLength {
+                for channel in 0..<channelCount {
+                    var sample = int16Channels[min(channel, Int(buffer.format.channelCount) - 1)][frame].littleEndian
+                    data.append(Data(bytes: &sample, count: MemoryLayout<Int16>.size))
+                }
+            }
+            return data
         }
+        return nil
+    }
+
+    nonisolated private static func containsVoiceActivity(in buffer: AVAudioPCMBuffer, threshold: Float) -> Bool {
+        let frameLength = Int(buffer.frameLength)
+        guard frameLength > 0 else { return false }
+        let channelCount = max(1, Int(buffer.format.channelCount))
+        var squareSum: Float = 0
+        var sampleCount = 0
+
+        if let floatChannels = buffer.floatChannelData {
+            for channel in 0..<channelCount {
+                let samples = floatChannels[min(channel, Int(buffer.format.channelCount) - 1)]
+                for frame in 0..<frameLength {
+                    let sample = samples[frame]
+                    squareSum += sample * sample
+                    sampleCount += 1
+                }
+            }
+        } else if let int16Channels = buffer.int16ChannelData {
+            for channel in 0..<channelCount {
+                let samples = int16Channels[min(channel, Int(buffer.format.channelCount) - 1)]
+                for frame in 0..<frameLength {
+                    let sample = Float(samples[frame]) / Float(Int16.max)
+                    squareSum += sample * sample
+                    sampleCount += 1
+                }
+            }
+        }
+
+        guard sampleCount > 0 else { return false }
+        return sqrt(squareSum / Float(sampleCount)) >= threshold
+    }
+
+    nonisolated private static func appendInt16Sample(_ value: Float, to data: inout Data) {
+        let clamped = min(1, max(-1, value))
+        var sample = Int16(clamped * Float(Int16.max)).littleEndian
+        data.append(Data(bytes: &sample, count: MemoryLayout<Int16>.size))
+    }
+}
+
+private struct DeepgramLiveTranscriptionMessage: Decodable {
+    let type: String?
+    let isFinal: Bool?
+    let channel: Channel?
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case isFinal = "is_final"
+        case channel
+    }
+
+    struct Channel: Decodable {
+        let alternatives: [Alternative]
+    }
+
+    struct Alternative: Decodable {
+        let transcript: String
+    }
+}
+
+
+private struct VoicePromptListeningIndicator: View {
+    @State private var isAnimating = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<3, id: \.self) { index in
+                Capsule()
+                    .fill(FrameMioColors.accent.opacity(0.78))
+                    .frame(width: 4, height: isAnimating ? 18 : 8)
+                    .animation(
+                        .easeInOut(duration: 0.42)
+                            .repeatForever(autoreverses: true)
+                            .delay(Double(index) * 0.12),
+                        value: isAnimating
+                    )
+            }
+        }
+        .frame(height: 22)
+        .onAppear { isAnimating = true }
+        .onDisappear { isAnimating = false }
+        .accessibilityHidden(true)
     }
 }

@@ -221,6 +221,20 @@ final class RemotePromptTranscriptionService: PromptTranscriptionService, @unche
             throw AppError.invalidResponse
         }
     }
+
+    func livePromptConfiguration() async throws -> PromptLiveTranscriptionConfiguration {
+        let data = try await apiClient.data(
+            for: APIRequest(
+                method: .post,
+                path: "/v1/transcriptions/token"
+            )
+        )
+        do {
+            return try decoder.decode(PromptLiveTranscriptionConfiguration.self, from: data)
+        } catch {
+            throw AppError.invalidResponse
+        }
+    }
 }
 
 private struct PromptTranscriptionResponse: Decodable {
@@ -370,5 +384,15 @@ final class MockPromptTranscriptionService: PromptTranscriptionService, @uncheck
     func transcribePromptAudio(_ recording: PromptAudioRecording) async throws -> String {
         try await Task.sleep(nanoseconds: 300_000_000)
         return "Make it warm and emotional, with a slower pace and more focus on smiling faces."
+    }
+
+    func livePromptConfiguration() async throws -> PromptLiveTranscriptionConfiguration {
+        PromptLiveTranscriptionConfiguration(
+            accessToken: "preview-token",
+            expiresIn: 60,
+            websocketURL: URL(string: "wss://api.deepgram.com/v1/listen")!,
+            model: "nova-3",
+            language: "en"
+        )
     }
 }
