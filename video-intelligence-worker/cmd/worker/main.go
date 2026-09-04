@@ -33,7 +33,7 @@ func main() {
 		os.Exit(1)
 	}
 	tools := ffmpeg.Toolchain{
-		FFmpegPath: configuration.FFmpegPath, FFprobePath: configuration.FFprobePath, MagickPath: configuration.MagickPath,
+		FFmpegPath: configuration.FFmpegPath, FFprobePath: configuration.FFprobePath,
 		FrameWidth: configuration.FrameWidth, Runner: ffmpeg.CommandRunner{},
 	}
 	if err := tools.Validate(); err != nil {

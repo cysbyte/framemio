@@ -57,21 +57,17 @@ func TestEndToEndMemoryVideoPipelineReusesCompletedStages(t *testing.T) {
 	}
 	var analysisJobs jobsResponse
 	decodeResponse(t, analysisResponse, &analysisJobs)
-	if len(analysisJobs.Jobs) != 2 {
+	if len(analysisJobs.Jobs) != 1 {
 		t.Fatalf("analysis jobs = %+v", analysisJobs)
 	}
 
-	var photoAnalysisJobs []string
 	var videoPreprocessJobID string
 	for _, job := range analysisJobs.Jobs {
-		if job.MediaID == photo.ID {
-			photoAnalysisJobs = append(photoAnalysisJobs, job.ID)
-		}
 		if job.MediaID == video.ID && job.Type == models.JobTypeMediaPreprocess {
 			videoPreprocessJobID = job.ID
 		}
 	}
-	if len(photoAnalysisJobs) != 1 || videoPreprocessJobID == "" {
+	if videoPreprocessJobID == "" {
 		t.Fatalf("unexpected initial jobs: %+v", analysisJobs.Jobs)
 	}
 
@@ -80,11 +76,6 @@ func TestEndToEndMemoryVideoPipelineReusesCompletedStages(t *testing.T) {
 	if err := memoryStore.SaveAnalysis(ctx, userID, photoAnalysisRecord); err != nil {
 		t.Fatal(err)
 	}
-	photoPreprocessKey := "users/user-1/projects/" + createdProject.ID + "/photo-preprocess/photo-1/photo.jpg"
-	if _, err := server.Orchestrator.UpdateJobStatus(ctx, photoAnalysisJobs[0], models.JobStatusCompleted, 1, "", "", photoPreprocessKey, "image/jpeg"); err != nil {
-		t.Fatal(err)
-	}
-
 	if _, err := server.Orchestrator.UpdateJobStatus(ctx, videoPreprocessJobID, models.JobStatusCompleted, 1, "", "", "", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -253,8 +244,8 @@ func TestEndToEndMemoryVideoPipelineReusesCompletedStages(t *testing.T) {
 			renderedPhotoKey = asset.S3Key
 		}
 	}
-	if renderedPhotoKey != photoPreprocessKey {
-		t.Fatalf("render photo source = %q, want preprocessed artifact %q", renderedPhotoKey, photoPreprocessKey)
+	if renderedPhotoKey != photo.S3Key {
+		t.Fatalf("render photo source = %q, want original source %q", renderedPhotoKey, photo.S3Key)
 	}
 	if renderInput.OutputS3Key == "" || renderInput.OutputS3Key != renderJob.Configuration["output_s3_key"] {
 		t.Fatalf("render output key = %q, job config = %+v", renderInput.OutputS3Key, renderJob.Configuration)

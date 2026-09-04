@@ -25,7 +25,6 @@ type MediaToolchain interface {
 	DetectScenes(ctx context.Context, sourcePath string, threshold float64, maxBoundaries int) ([]domain.SceneBoundary, error)
 	ExtractFrame(ctx context.Context, sourcePath string, timestampMicros int64, destinationPath string) error
 	ExtractAudio(ctx context.Context, sourcePath, destinationPath string) error
-	NormalizePhoto(ctx context.Context, sourcePath, destinationPath string) error
 }
 
 type Config struct {
@@ -155,95 +154,15 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 }
 
 func (p *Processor) processPhoto(ctx context.Context, jobContext domain.JobContext, version, sourceETag string, force bool) (Result, error) {
-	if !force {
-		if artifactKey, ok := p.cachedPhotoArtifact(ctx, jobContext, version, sourceETag); ok {
-			if err := p.completePhotoJob(ctx, jobContext.Job, artifactKey, "image/jpeg"); err != nil {
-				return Result{}, err
-			}
-			return Result{Reused: true}, nil
-		}
-	}
 	if _, err := p.Repository.StartJobAttempt(ctx, jobContext.Job.ID); err != nil {
 		p.logger().Error("start photo job attempt failed", slog.String("job_id", jobContext.Job.ID), slog.Any("error", err))
 		return Result{}, err
 	}
-	p.logger().Info("started photo job attempt", slog.String("job_id", jobContext.Job.ID), slog.Int("attempt", jobContext.Job.Attempt+1))
-	artifactKey, err := p.preprocessPhoto(ctx, jobContext, version, sourceETag)
-	if err != nil {
-		p.logger().Warn("photo ImageMagick preprocessing failed; completing with source image", slog.String("job_id", jobContext.Job.ID), slog.String("project_id", jobContext.Project.ID), slog.String("media_id", jobContext.Media.ID), slog.Any("error", err))
-		if err := p.completePhotoJob(ctx, jobContext.Job, jobContext.Media.S3Key, photoContentType(jobContext.Media)); err != nil {
-			return Result{}, err
-		}
-		return Result{}, nil
-	}
-	if err := p.completePhotoJob(ctx, jobContext.Job, artifactKey, "image/jpeg"); err != nil {
+	p.logger().Info("photo preprocessing skipped; completing with source image", slog.String("job_id", jobContext.Job.ID), slog.String("project_id", jobContext.Project.ID), slog.String("media_id", jobContext.Media.ID), slog.String("source_s3_key", jobContext.Media.S3Key), slog.String("version", version), slog.String("source_etag", sourceETag), slog.Bool("force", force))
+	if err := p.completePhotoJob(ctx, jobContext.Job, jobContext.Media.S3Key, photoContentType(jobContext.Media)); err != nil {
 		return Result{}, err
 	}
 	return Result{}, nil
-}
-
-func (p *Processor) cachedPhotoArtifact(ctx context.Context, jobContext domain.JobContext, version, sourceETag string) (string, bool) {
-	artifact, err := p.Repository.GetPreprocessing(ctx, jobContext.Job.UserID, jobContext.Project.ID, jobContext.Media.ID, version, sourceETag)
-	if err != nil {
-		if !errors.Is(err, domain.ErrNotFound) {
-			p.logger().Warn("cached photo preprocessing lookup failed; rebuilding", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Any("error", err))
-		}
-		return "", false
-	}
-	if strings.TrimSpace(artifact.EvidenceS3Key) == "" || artifact.EvidenceS3Key == jobContext.Media.S3Key {
-		return "", false
-	}
-	if _, err := p.Objects.Head(ctx, artifact.EvidenceS3Key); err != nil {
-		p.logger().Warn("cached photo preprocessing artifact missing; rebuilding", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.String("artifact_s3_key", artifact.EvidenceS3Key), slog.Any("error", err))
-		return "", false
-	}
-	p.logger().Info("reusing cached photo ImageMagick artifact", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.String("artifact_s3_key", artifact.EvidenceS3Key))
-	return artifact.EvidenceS3Key, true
-}
-
-func (p *Processor) preprocessPhoto(ctx context.Context, jobContext domain.JobContext, version, sourceETag string) (string, error) {
-	workspace, err := os.MkdirTemp(p.Config.WorkRoot, "job-"+safeComponent(jobContext.Job.ID)+"-")
-	if err != nil {
-		return "", err
-	}
-	p.logger().Info("photo preprocessing workspace created", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID))
-	defer os.RemoveAll(workspace)
-	sourcePath := filepath.Join(workspace, "source"+sourceExtensionOr(jobContext.Media.FileName, ".jpg"))
-	outputPath := filepath.Join(workspace, "photo-imagemagick.jpg")
-	p.logger().Info("downloading source photo", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Int64("expected_size_bytes", jobContext.Media.FileSizeBytes))
-	if err := retry(ctx, p.Config.StageRetries, func() error { return p.Objects.DownloadFile(ctx, jobContext.Media.S3Key, sourcePath) }); err != nil {
-		return "", fmt.Errorf("download source photo: %w", err)
-	}
-	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "RUNNING", 0.20, "", "", ""); err != nil {
-		return "", err
-	}
-	p.logger().Info("starting photo ImageMagick preprocessing", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID))
-	if err := retry(ctx, p.Config.StageRetries, func() error { return p.Tools.NormalizePhoto(ctx, sourcePath, outputPath) }); err != nil {
-		return "", fmt.Errorf("normalize photo with ImageMagick: %w", err)
-	}
-	frame, err := InspectFrame(outputPath)
-	if err != nil {
-		return "", fmt.Errorf("inspect normalized photo: %w", err)
-	}
-	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "RUNNING", 0.70, "", "", ""); err != nil {
-		return "", err
-	}
-	artifactKey := photoArtifactPrefix(jobContext.Job.UserID, jobContext.Project.ID, jobContext.Media.ID, version, sourceETag) + "/photo.jpg"
-	if err := retry(ctx, p.Config.StageRetries, func() error { return p.Objects.UploadFile(ctx, artifactKey, outputPath, "image/jpeg") }); err != nil {
-		return "", fmt.Errorf("upload normalized photo: %w", err)
-	}
-	metadata := domain.VideoMetadata{Width: jobContext.Media.PixelWidth, Height: jobContext.Media.PixelHeight, FileSizeBytes: jobContext.Media.FileSizeBytes, FormatName: "still-image"}
-	quality := domain.QualitySignals{OverallScore: frame.QualityScore, AverageSharpness: frame.Sharpness, AverageBrightness: frame.Brightness, LikelyStatic: true}
-	artifact := domain.PreprocessingArtifact{
-		ID: domain.NewID("preprocessing"), UserID: jobContext.Job.UserID, ProjectID: jobContext.Project.ID,
-		MediaID: jobContext.Media.ID, AnalysisVersion: version, SourceETag: sourceETag, EvidenceS3Key: artifactKey,
-		FrameCount: 1, Metadata: metadata, Quality: quality, CreatedAt: p.now().UTC(),
-	}
-	if _, err := p.Repository.SavePreprocessing(ctx, artifact); err != nil {
-		return "", err
-	}
-	p.logger().Info("photo ImageMagick preprocessing ready", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.String("artifact_s3_key", artifactKey), slog.Float64("quality_score", frame.QualityScore))
-	return artifactKey, nil
 }
 
 func (p *Processor) completePhotoJob(ctx context.Context, job domain.ProcessingJob, artifactS3Key, artifactContentType string) error {
@@ -605,11 +524,6 @@ func retry(ctx context.Context, attempts int, operation func() error) error {
 func artifactPrefix(userID, projectID, mediaID, version, sourceETag string) string {
 	hash := sha256.Sum256([]byte(sourceETag))
 	return fmt.Sprintf("users/%s/projects/%s/video-analysis/%s/%s/%s", safeComponent(userID), safeComponent(projectID), safeComponent(mediaID), safeComponent(version), hex.EncodeToString(hash[:8]))
-}
-
-func photoArtifactPrefix(userID, projectID, mediaID, version, sourceETag string) string {
-	hash := sha256.Sum256([]byte(sourceETag))
-	return fmt.Sprintf("users/%s/projects/%s/photo-preprocess/%s/%s/%s", safeComponent(userID), safeComponent(projectID), safeComponent(mediaID), safeComponent(version), hex.EncodeToString(hash[:8]))
 }
 
 func safeComponent(value string) string {

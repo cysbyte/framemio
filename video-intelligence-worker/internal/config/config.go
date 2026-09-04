@@ -16,7 +16,6 @@ type Config struct {
 	AWSRegion                         string
 	FFmpegPath                        string
 	FFprobePath                       string
-	MagickPath                        string
 	WorkRoot                          string
 	AnalysisVersion                   string
 	UnderstandingURL                  string
@@ -71,7 +70,6 @@ func Load() (Config, error) {
 		AWSRegion:                         os.Getenv("AWS_REGION"),
 		FFmpegPath:                        environment("FFMPEG_PATH", "ffmpeg"),
 		FFprobePath:                       environment("FFPROBE_PATH", "ffprobe"),
-		MagickPath:                        environment("MAGICK_PATH", "convert"),
 		WorkRoot:                          workRoot,
 		AnalysisVersion:                   environment("VIDEO_ANALYSIS_VERSION", "video-v2"),
 		UnderstandingURL:                  environmentFirst([]string{"VIDEO_UNDERSTANDING_API_URL", "MULTIMODAL_API_URL"}, ""),

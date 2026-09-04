@@ -1498,13 +1498,13 @@ The renderer must be resilient to common iPhone media realities:
 
 When a `.HEIC` or `.HEIF` source contains JPEG bytes, the renderer should use the source image directly rather than failing HEIC conversion.
 
-## 18.5 ImageMagick and photo derivatives
+## 18.5 Photo derivatives
 
-ImageMagick is used by the video-intelligence worker for deterministic photo preprocessing such as EXIF orientation normalization, resizing, colorspace normalization, interlace/strip metadata handling, and sharpening. The Go backend queues photo `MEDIA_PREPROCESS` work and waits for the completed artifact before StoryPlan/render input uses it.
+For the first public publish, server-side ImageMagick photo preprocessing is intentionally disabled. The Go backend does not queue photo `MEDIA_PREPROCESS` jobs, story planning does not wait for photo derivative artifacts, and render input uses the original uploaded photo S3 object.
 
-Original source photos remain immutable in S3. ImageMagick must write normalized derivatives/artifacts only; it must not burn AI typography into original photos. Final animated typography belongs to Remotion/renderer execution of `StoryPlan.moments[].typography`.
+Original source photos remain immutable in S3. Any future normalized derivative or static preview feature must write separate artifacts only and must not burn AI typography into source photos. Final animated typography belongs to Remotion/renderer execution of `StoryPlan.moments[].typography`.
 
-Current worker configuration uses `MAGICK_PATH` to locate ImageMagick. There is intentionally no production feature flag to skip required photo normalization, because render input depends on completed photo preprocess artifacts.
+The video-intelligence worker image no longer installs ImageMagick and no runtime `MAGICK_PATH` configuration is required. Reintroducing photo derivatives should be feature-flagged and must not block StoryPlan creation or final rendering if derivative generation fails.
 
 ---
 

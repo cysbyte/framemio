@@ -96,7 +96,7 @@ func TestProcessorCachesPreprocessingAndAnalysis(t *testing.T) {
 	}
 }
 
-func TestProcessorPreprocessesPhotoWithImageMagickArtifact(t *testing.T) {
+func TestProcessorSkipsPhotoPreprocessingAndCompletesWithSource(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.September, 4, 10, 0, 0, 0, time.UTC)
 	repository := newMemoryRepository(now)
@@ -117,30 +117,20 @@ func TestProcessorPreprocessesPhotoWithImageMagickArtifact(t *testing.T) {
 	if result.Reused {
 		t.Fatal("first photo preprocess should not be reused")
 	}
-	if tools.photoCalls != 1 {
-		t.Fatalf("NormalizePhoto calls = %d, want 1", tools.photoCalls)
-	}
-	if completion.calls != 1 || !strings.Contains(completion.artifactS3Key, "/photo-preprocess/") || !strings.HasSuffix(completion.artifactS3Key, "/photo.jpg") {
+	if completion.calls != 1 || completion.artifactS3Key != "users/user-1/media/media-photo/source.jpg" {
 		t.Fatalf("unexpected completion artifact: %+v", completion)
 	}
 	if completion.artifactContentType != "image/jpeg" {
 		t.Fatalf("artifact content type = %s, want image/jpeg", completion.artifactContentType)
 	}
-	objects.mu.Lock()
-	_, uploaded := objects.objects[completion.artifactS3Key]
-	objects.mu.Unlock()
-	if !uploaded {
-		t.Fatalf("normalized photo artifact was not uploaded: %s", completion.artifactS3Key)
-	}
-
 	second := &fakeCompletionReporter{}
 	processor.Completion = second
 	_, err = processor.Process(context.Background(), repository.addPhotoJob("job-photo-2", false))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tools.photoCalls != 1 || second.artifactS3Key != completion.artifactS3Key {
-		t.Fatalf("cached photo artifact was not reused: calls=%d first=%s second=%s", tools.photoCalls, completion.artifactS3Key, second.artifactS3Key)
+	if second.artifactS3Key != completion.artifactS3Key {
+		t.Fatalf("source photo artifact changed: first=%s second=%s", completion.artifactS3Key, second.artifactS3Key)
 	}
 }
 
@@ -685,7 +675,6 @@ type fakeTools struct {
 	boundaries []domain.SceneBoundary
 	frameCalls int
 	audioCalls int
-	photoCalls int
 }
 
 func (t *fakeTools) Probe(context.Context, string) (domain.VideoMetadata, error) {
@@ -717,21 +706,6 @@ func (t *fakeTools) ExtractFrame(_ context.Context, _ string, timestampMicros in
 func (t *fakeTools) ExtractAudio(_ context.Context, _, destinationPath string) error {
 	t.audioCalls++
 	return os.WriteFile(destinationPath, []byte("audio"), 0o600)
-}
-func (t *fakeTools) NormalizePhoto(_ context.Context, _, destinationPath string) error {
-	t.photoCalls++
-	value := image.NewRGBA(image.Rect(0, 0, 80, 120))
-	for y := 0; y < 120; y++ {
-		for x := 0; x < 80; x++ {
-			value.Set(x, y, color.RGBA{R: uint8(80 + x), G: uint8(90 + y), B: 160, A: 255})
-		}
-	}
-	file, err := os.Create(destinationPath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	return jpeg.Encode(file, value, &jpeg.Options{Quality: 92})
 }
 
 type fakeTranscriber struct {
