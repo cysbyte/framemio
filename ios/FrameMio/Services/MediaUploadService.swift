@@ -160,6 +160,7 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
                 metadata: uploadMetadata(from: upload, options: options),
                 idempotencyKey: upload.effectiveAuthorizationIdempotencyKey
             )
+            let previousMediaID = upload.mediaID
             upload.session = session
             upload.mediaID = session.mediaID
             upload.updatedAt = Date()
@@ -173,7 +174,7 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
                 continue
             }
 
-            mediaUploadDebugLog("completed upload cache stale upload=\(upload.id) asset=\(asset.id) old_media=\(upload.mediaID ?? "nil") new_media=\(session.mediaID) session=\(session.uploadID)")
+            mediaUploadDebugLog("completed upload cache stale upload=\(upload.id) asset=\(asset.id) old_media=\(previousMediaID ?? "nil") new_media=\(session.mediaID) session=\(session.uploadID)")
             upload.status = .queued
             upload.uploadedBytes = 0
             upload.lastError = nil
@@ -343,21 +344,28 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
             record.updatedAt = Date()
             try await store.save(record)
 
-            var session = record.session
-            if session == nil || session?.isUsable() == false || session?.requiresHeaderSafeRefresh == true {
-                mediaUploadDebugLog("authorizing session upload=\(record.id) asset=\(record.assetID) bytes=\(record.fileSizeBytes) header_safe_refresh=\(session?.requiresHeaderSafeRefresh == true)")
-                session = try await authorizer.createUploadSession(
-                    metadata: uploadMetadata(from: record, options: options),
-                    idempotencyKey: record.effectiveAuthorizationIdempotencyKey
-                )
-                mediaUploadDebugLog("authorized session upload=\(record.id) session=\(session?.uploadID ?? "nil") media=\(session?.mediaID ?? "nil") strategy=\(session?.strategy.rawValue ?? "nil") parts=\(session?.parts.count ?? 0) completed_parts=\(session?.parts.filter(\.isCompleted).count ?? 0) usable=\(session?.isUsable() ?? false)")
-                record.session = session
-                record.mediaID = session?.mediaID
-                record.updatedAt = Date()
-                try await store.save(record)
+            let previousSession = record.session
+            mediaUploadDebugLog("authorizing session upload=\(record.id) asset=\(record.assetID) bytes=\(record.fileSizeBytes) has_cached_session=\(previousSession != nil) header_safe_refresh=\(previousSession?.requiresHeaderSafeRefresh == true)")
+            var session = try await authorizer.createUploadSession(
+                metadata: uploadMetadata(from: record, options: options),
+                idempotencyKey: record.effectiveAuthorizationIdempotencyKey
+            )
+            if let previousSession,
+               previousSession.uploadID == session.uploadID,
+               previousSession.mediaID == session.mediaID,
+               previousSession.s3Key == session.s3Key {
+                session = mergeCompletedParts(from: previousSession, into: session)
+            } else if previousSession != nil {
+                mediaUploadDebugLog("replaced stale upload session upload=\(record.id) old_session=\(previousSession?.uploadID ?? "nil") old_media=\(previousSession?.mediaID ?? "nil") new_session=\(session.uploadID) new_media=\(session.mediaID)")
+                record.uploadedBytes = 0
             }
+            mediaUploadDebugLog("authorized session upload=\(record.id) session=\(session.uploadID) media=\(session.mediaID) strategy=\(session.strategy.rawValue) parts=\(session.parts.count) completed_parts=\(session.parts.filter(\.isCompleted).count) usable=\(session.isUsable()) completed=\(session.isAlreadyUploaded)")
+            record.session = session
+            record.mediaID = session.mediaID
+            record.updatedAt = Date()
+            try await store.save(record)
 
-            guard var session, !session.parts.isEmpty else {
+            guard !session.parts.isEmpty else {
                 mediaUploadDebugLog("invalid session upload=\(record.id) has_session=\(record.session != nil)")
                 throw AppError.invalidResponse
             }
