@@ -37,6 +37,7 @@ func (CommandRunner) Run(ctx context.Context, executable string, arguments ...st
 type Toolchain struct {
 	FFmpegPath  string
 	FFprobePath string
+	MagickPath  string
 	FrameWidth  int
 	Runner      Runner
 }
@@ -102,6 +103,28 @@ func (t Toolchain) ExtractAudio(ctx context.Context, sourcePath, destinationPath
 	_, _, err := t.runner().Run(ctx, t.FFmpegPath,
 		"-hide_banner", "-loglevel", "error", "-nostdin", "-i", sourcePath,
 		"-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000", "-c:a", "flac", "-y", destinationPath,
+	)
+	return err
+}
+
+func (t Toolchain) NormalizePhoto(ctx context.Context, sourcePath, destinationPath string) error {
+	magickPath := strings.TrimSpace(t.MagickPath)
+	if magickPath == "" {
+		magickPath = "convert"
+	}
+	_, _, err := t.runner().Run(ctx, magickPath,
+		sourcePath,
+		"-auto-orient",
+		"-colorspace", "sRGB",
+		"-filter", "Lanczos",
+		"-resize", "2160x2160>",
+		"-contrast-stretch", "0.5%x0.5%",
+		"-modulate", "102,108,100",
+		"-sigmoidal-contrast", "3x50%",
+		"-unsharp", "0x0.75+0.75+0.008",
+		"-strip",
+		"-quality", "92",
+		destinationPath,
 	)
 	return err
 }

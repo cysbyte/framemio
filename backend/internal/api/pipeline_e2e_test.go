@@ -80,7 +80,8 @@ func TestEndToEndMemoryVideoPipelineReusesCompletedStages(t *testing.T) {
 	if err := memoryStore.SaveAnalysis(ctx, userID, photoAnalysisRecord); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := server.Orchestrator.UpdateJobStatus(ctx, photoAnalysisJobs[0], models.JobStatusCompleted, 1, "", "", "", ""); err != nil {
+	photoPreprocessKey := "users/user-1/projects/" + createdProject.ID + "/photo-preprocess/photo-1/photo.jpg"
+	if _, err := server.Orchestrator.UpdateJobStatus(ctx, photoAnalysisJobs[0], models.JobStatusCompleted, 1, "", "", photoPreprocessKey, "image/jpeg"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -245,6 +246,15 @@ func TestEndToEndMemoryVideoPipelineReusesCompletedStages(t *testing.T) {
 	}
 	if len(renderInput.MediaAssets) != 2 || renderInput.MediaAssets[1].S3Key == "" {
 		t.Fatalf("render input media assets missing source references: %+v", renderInput.MediaAssets)
+	}
+	var renderedPhotoKey string
+	for _, asset := range renderInput.MediaAssets {
+		if asset.ID == photo.ID {
+			renderedPhotoKey = asset.S3Key
+		}
+	}
+	if renderedPhotoKey != photoPreprocessKey {
+		t.Fatalf("render photo source = %q, want preprocessed artifact %q", renderedPhotoKey, photoPreprocessKey)
 	}
 	if renderInput.OutputS3Key == "" || renderInput.OutputS3Key != renderJob.Configuration["output_s3_key"] {
 		t.Fatalf("render output key = %q, job config = %+v", renderInput.OutputS3Key, renderJob.Configuration)

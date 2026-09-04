@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"sort"
 	"strings"
@@ -37,6 +38,7 @@ type Request struct {
 type Planner struct {
 	Now               func() time.Time
 	TypographyPlanner TypographyPlanner
+	Logger            *slog.Logger
 }
 
 const maxVideoMomentDuration = 5 * time.Second
@@ -173,15 +175,7 @@ func (p *Planner) applyTypography(ctx context.Context, request Request, moments 
 	if p != nil && p.TypographyPlanner != nil {
 		planner = p.TypographyPlanner
 	}
-	contexts := make([]TypographyMomentContext, 0, len(moments))
-	for index, moment := range moments {
-		contexts = append(contexts, TypographyMomentContext{
-			MomentID: moment.MomentID, AssetID: firstNonEmpty(moment.AssetID, moment.MediaID), MediaType: moment.MediaType,
-			Narrative: moment.Narrative, Caption: moment.Caption, Reason: moment.Reason,
-			DurationMS: moment.DurationMS, Score: moment.Score, Index: index,
-		})
-	}
-	typographyPlan, err := planner.Generate(ctx, TypographyPlanningInput{
+	input := TypographyPlanningInput{
 		ProjectID:         request.ProjectID,
 		StoryPlanID:       planID(request, moments),
 		StoryPlanVersion:  versionFor(request.Version),
@@ -191,12 +185,21 @@ func (p *Planner) applyTypography(ctx context.Context, request Request, moments 
 		VisualStyle:       normalizeVisualStyle(request.VisualStyle),
 		NarrativeSummary:  titleText,
 		UserInstructions:  strings.TrimSpace(request.UserInstructions),
-		Moments:           contexts,
-	})
-	if err != nil || len(typographyPlan.Overlays) == 0 {
+		Moments:           typographyContexts(request, moments),
+	}
+	started := time.Now()
+	p.logger().Info("typography_planning_started", slog.String("project_id", request.ProjectID), slog.Int("story_plan_version", input.StoryPlanVersion), slog.String("provider", typographyPlannerName(planner)), slog.String("model", typographyPlannerModel(planner)), slog.Int("moment_count", len(input.Moments)))
+	typographyPlan, err := planner.Generate(ctx, input)
+	if err != nil {
+		p.logger().Warn("typography_planning_failed", slog.String("project_id", request.ProjectID), slog.Int("story_plan_version", input.StoryPlanVersion), slog.String("provider", typographyPlannerName(planner)), slog.String("model", typographyPlannerModel(planner)), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Any("error", err))
+		return moments
+	}
+	if len(typographyPlan.Overlays) == 0 {
+		p.logger().Info("typography_disabled", slog.String("project_id", request.ProjectID), slog.Int("story_plan_version", input.StoryPlanVersion), slog.String("provider", typographyPlannerName(planner)), slog.String("model", typographyPlannerModel(planner)), slog.Int64("latency_ms", time.Since(started).Milliseconds()))
 		return moments
 	}
 	updated := append([]models.StoryMoment(nil), moments...)
+	applied := 0
 	for index := range updated {
 		overlay, ok := typographyPlan.Overlays[updated[index].MomentID]
 		if !ok {
@@ -204,11 +207,107 @@ func (p *Planner) applyTypography(ctx context.Context, request Request, moments 
 		}
 		normalized, err := NormalizeTextOverlay(overlay, updated[index].DurationMS)
 		if err != nil {
+			p.logger().Warn("typography_validation_failed", slog.String("project_id", request.ProjectID), slog.Int("story_plan_version", input.StoryPlanVersion), slog.String("moment_id", updated[index].MomentID), slog.Any("error", err))
 			continue
 		}
 		updated[index].Typography = &normalized
+		applied++
 	}
+	p.logger().Info("typography_planning_completed", slog.String("project_id", request.ProjectID), slog.Int("story_plan_version", input.StoryPlanVersion), slog.String("provider", typographyPlannerName(planner)), slog.String("model", typographyPlannerModel(planner)), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Int("overlay_count", applied), slog.String("plan_hash", typographyPlanHash(typographyPlan)))
 	return updated
+}
+
+func (p *Planner) logger() *slog.Logger {
+	if p != nil && p.Logger != nil {
+		return p.Logger
+	}
+	return slog.Default()
+}
+
+type namedTypographyPlanner interface {
+	Name() string
+}
+
+type modeledTypographyPlanner interface {
+	Model() string
+}
+
+func typographyPlannerName(planner TypographyPlanner) string {
+	if named, ok := planner.(namedTypographyPlanner); ok {
+		if name := strings.TrimSpace(named.Name()); name != "" {
+			return name
+		}
+	}
+	return "unknown"
+}
+
+func typographyPlannerModel(planner TypographyPlanner) string {
+	if modeled, ok := planner.(modeledTypographyPlanner); ok {
+		if model := strings.TrimSpace(modeled.Model()); model != "" {
+			return model
+		}
+	}
+	return "unknown"
+}
+
+func typographyContexts(request Request, moments []models.StoryMoment) []TypographyMomentContext {
+	photoByID := make(map[string]models.PhotoAnalysis, len(request.PhotoAnalyses))
+	for _, photo := range request.PhotoAnalyses {
+		photoByID[photo.PhotoID] = photo
+	}
+	clusters := buildClusterIndex(request.MediaClusters)
+	contexts := make([]TypographyMomentContext, 0, len(moments))
+	for index, moment := range moments {
+		assetID := firstNonEmpty(moment.AssetID, moment.MediaID)
+		context := TypographyMomentContext{
+			MomentID: moment.MomentID, AssetID: assetID, MediaType: moment.MediaType,
+			Narrative: moment.Narrative, Caption: moment.Caption, Reason: moment.Reason,
+			DurationMS: moment.DurationMS, Score: moment.Score, Index: index,
+		}
+		if index > 0 {
+			context.PreviousNarrative = firstNonEmpty(moments[index-1].Narrative, moments[index-1].Caption, moments[index-1].Reason)
+		}
+		if index+1 < len(moments) {
+			context.NextNarrative = firstNonEmpty(moments[index+1].Narrative, moments[index+1].Caption, moments[index+1].Reason)
+		}
+		if photo, ok := photoByID[assetID]; ok {
+			context.Location = strings.TrimSpace(photo.Location)
+			if photo.TakenAt != nil {
+				context.TakenAt = photo.TakenAt.UTC().Format(time.RFC3339)
+			}
+			context.Labels = boundedStrings(photo.Labels, 12)
+			context.People = boundedStrings(photo.People, 8)
+		}
+		if cluster := clusterForMediaValue(clusters, assetID); cluster.ID != "" {
+			context.ClusterLabel = strings.TrimSpace(firstNonEmpty(cluster.Label, cluster.Location))
+		}
+		contexts = append(contexts, context)
+	}
+	return contexts
+}
+
+func boundedStrings(values []string, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
+	result := make([]string, 0, minInt(len(values), limit))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(trimmed)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, truncateText(trimmed, 40))
+		if len(result) >= limit {
+			break
+		}
+	}
+	return result
 }
 
 func captionStyleFor(storyType models.StoryType, visualStyle models.VisualStyle) *models.CaptionStyle {

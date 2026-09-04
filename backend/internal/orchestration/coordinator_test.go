@@ -376,7 +376,17 @@ func completeThroughStoryPlan(t *testing.T, memoryStore *store.MemoryStore, publ
 		t.Fatal(err)
 	}
 	for _, stage := range jobs {
-		if _, err := coordinator.UpdateJobStatus(ctx, stage.ID, models.JobStatusCompleted, 1, "", "", "", ""); err != nil {
+		artifactKey := ""
+		artifactType := ""
+		media, err := memoryStore.GetMedia(ctx, project.UserID, stage.MediaID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if media.Type == models.MediaTypePhoto || media.Type == models.MediaTypeLivePhoto {
+			artifactKey = "users/user-1/projects/" + project.ID + "/photo-preprocess/" + stage.MediaID + "/photo.jpg"
+			artifactType = "image/jpeg"
+		}
+		if _, err := coordinator.UpdateJobStatus(ctx, stage.ID, models.JobStatusCompleted, 1, "", "", artifactKey, artifactType); err != nil {
 			t.Fatal(err)
 		}
 	}

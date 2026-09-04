@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import {loadConfig} from './runner.js';
 
 test('loads render worker production config from shared processing queue env', () => {
@@ -24,6 +25,23 @@ test('loads render worker production config from shared processing queue env', (
   assert.equal(config.visibilityTimeoutSeconds, 900);
   assert.equal(config.maxReceiveCount, 7);
   assert.equal(config.rendererMode, 'ffmpeg');
+  assert.equal(config.remotionEntryPoint, path.join(process.cwd(), 'src/remotion/entry.tsx'));
+});
+
+test('loads remotion mode with default and explicit entry points', () => {
+  const base = {
+    SQS_PROCESSING_QUEUE_URL: 'queue',
+    BACKEND_INTERNAL_API_URL: 'https://api.framemio.com',
+    INTERNAL_API_TOKEN: 'internal-token-with-at-least-thirty-two-characters',
+    S3_MEDIA_BUCKET: 'framemio-media',
+    RENDERER_MODE: 'remotion',
+  };
+  const defaultConfig = loadConfig(base);
+  assert.equal(defaultConfig.rendererMode, 'remotion');
+  assert.equal(defaultConfig.remotionEntryPoint, path.join(process.cwd(), 'src/remotion/entry.tsx'));
+
+  const explicitConfig = loadConfig({...base, REMOTION_ENTRY_POINT: '/opt/render/remotion-entry.tsx'});
+  assert.equal(explicitConfig.remotionEntryPoint, '/opt/render/remotion-entry.tsx');
 });
 
 test('requires backend callback config', () => {

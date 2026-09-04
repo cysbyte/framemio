@@ -291,7 +291,7 @@ struct FrameMioProCatalog {
     static let monthlyProductID = "com.framemio.pro.monthly"
     static let yearlyProductID = "com.framemio.pro.yearly"
     static let monthlyFallbackDisplayPrice = "$9.99"
-    static let yearlyFallbackDisplayPrice = "$79.99"
+    static let yearlyFallbackDisplayPrice = "$89.99"
     static let monthlyCredits = AppConfiguration.monthlySubscriptionCycleCredits
     static let yearlyCredits = AppConfiguration.yearlySubscriptionCycleCredits
 

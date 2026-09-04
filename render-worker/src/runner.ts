@@ -20,7 +20,7 @@ interface RunnerConfig {
   visibilityTimeoutSeconds: number;
   maxReceiveCount: number;
   rendererMode: 'ffmpeg' | 'remotion';
-  remotionEntryPoint?: string;
+  remotionEntryPoint: string;
 }
 
 export async function runRenderWorker(config = loadConfig()): Promise<void> {
@@ -30,7 +30,7 @@ export async function runRenderWorker(config = loadConfig()): Promise<void> {
     objectStore: new AwsCliObjectStore({bucket: config.bucket}),
     ffmpeg: new ShellFfmpegClient(),
     remotion: config.rendererMode === 'remotion'
-      ? new RemotionCliRenderer({entryPoint: required(config.remotionEntryPoint, 'REMOTION_ENTRY_POINT')})
+      ? new RemotionCliRenderer({entryPoint: config.remotionEntryPoint})
       : new FfmpegCompositionRenderer(),
     workRoot: config.workRoot,
   });
@@ -147,7 +147,7 @@ export function loadConfig(environment = process.env): RunnerConfig {
     visibilityTimeoutSeconds: Math.round(durationMs(environment.SQS_VISIBILITY_TIMEOUT, 15 * 60 * 1000) / 1000),
     maxReceiveCount: number(environment.MAX_JOB_ATTEMPTS, 5),
     rendererMode,
-    remotionEntryPoint: environment.REMOTION_ENTRY_POINT,
+    remotionEntryPoint: environment.REMOTION_ENTRY_POINT ?? path.join(process.cwd(), 'src/remotion/entry.tsx'),
   };
 }
 

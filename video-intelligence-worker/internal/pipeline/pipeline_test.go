@@ -96,6 +96,54 @@ func TestProcessorCachesPreprocessingAndAnalysis(t *testing.T) {
 	}
 }
 
+func TestProcessorPreprocessesPhotoWithImageMagickArtifact(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.September, 4, 10, 0, 0, 0, time.UTC)
+	repository := newMemoryRepository(now)
+	objects := newMemoryObjects()
+	objects.objects["users/user-1/media/media-photo/source.jpg"] = []byte("source-photo")
+	tools := &fakeTools{}
+	completion := &fakeCompletionReporter{}
+	processor := &Processor{
+		Config:     Config{WorkRoot: t.TempDir(), AnalysisVersion: "photo-v1", StageRetries: 1},
+		Repository: repository, Objects: objects, Tools: tools, Completion: completion,
+		Now: func() time.Time { return now },
+	}
+
+	result, err := processor.Process(context.Background(), repository.addPhotoJob("job-photo-1", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Reused {
+		t.Fatal("first photo preprocess should not be reused")
+	}
+	if tools.photoCalls != 1 {
+		t.Fatalf("NormalizePhoto calls = %d, want 1", tools.photoCalls)
+	}
+	if completion.calls != 1 || !strings.Contains(completion.artifactS3Key, "/photo-preprocess/") || !strings.HasSuffix(completion.artifactS3Key, "/photo.jpg") {
+		t.Fatalf("unexpected completion artifact: %+v", completion)
+	}
+	if completion.artifactContentType != "image/jpeg" {
+		t.Fatalf("artifact content type = %s, want image/jpeg", completion.artifactContentType)
+	}
+	objects.mu.Lock()
+	_, uploaded := objects.objects[completion.artifactS3Key]
+	objects.mu.Unlock()
+	if !uploaded {
+		t.Fatalf("normalized photo artifact was not uploaded: %s", completion.artifactS3Key)
+	}
+
+	second := &fakeCompletionReporter{}
+	processor.Completion = second
+	_, err = processor.Process(context.Background(), repository.addPhotoJob("job-photo-2", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tools.photoCalls != 1 || second.artifactS3Key != completion.artifactS3Key {
+		t.Fatalf("cached photo artifact was not reused: calls=%d first=%s second=%s", tools.photoCalls, completion.artifactS3Key, second.artifactS3Key)
+	}
+}
+
 func TestProcessorRejectsCrossProjectPreprocessingCache(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.August, 29, 10, 0, 0, 0, time.UTC)
@@ -403,6 +451,27 @@ func (r *memoryRepository) addJob(jobID string, force bool) domain.JobMessage {
 	return domain.JobMessage{JobID: jobID, ProjectID: project.ID, MediaID: media.ID, JobType: "analysis", Configuration: configuration}
 }
 
+func (r *memoryRepository) addPhotoJob(jobID string, force bool) domain.JobMessage {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	configuration := map[string]string{"analysis_version": "photo-v1"}
+	if force {
+		configuration["force_reanalyze"] = "true"
+	}
+	job := domain.ProcessingJob{
+		ID: jobID, UserID: "user-1", ProjectID: "project-1", MediaID: "media-photo", Type: "MEDIA_PREPROCESS",
+		Status: "queued", Configuration: configuration, CreatedAt: r.now, UpdatedAt: r.now,
+	}
+	media := domain.MediaAsset{
+		ID: "media-photo", UserID: "user-1", Type: "photo", Status: "ready", FileName: "IMG_2001.JPG",
+		ContentType: "image/jpeg", FileSizeBytes: int64(len([]byte("source-photo"))), PixelWidth: 3024, PixelHeight: 4032,
+		S3Key: "users/user-1/media/media-photo/source.jpg", ETag: "etag-photo",
+	}
+	project := domain.StoryProject{ID: "project-1", UserID: "user-1", MediaIDs: []string{media.ID}, Status: "analyzing", CreatedAt: r.now, UpdatedAt: r.now}
+	r.contexts[jobID] = domain.JobContext{Job: job, Media: media, Project: project}
+	return domain.JobMessage{JobID: jobID, ProjectID: project.ID, MediaID: media.ID, JobType: "MEDIA_PREPROCESS", Configuration: configuration}
+}
+
 func (r *memoryRepository) LoadJobContext(_ context.Context, message domain.JobMessage) (domain.JobContext, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -550,7 +619,13 @@ func (s *memoryObjects) Head(_ context.Context, key string) (storage.SourceInfo,
 	if key == "users/user-1/media/media-1/source.mov" {
 		return storage.SourceInfo{SizeBytes: 1000, ETag: "etag-1"}, nil
 	}
-	return storage.SourceInfo{}, errors.New("not found")
+	s.mu.Lock()
+	data, ok := s.objects[key]
+	s.mu.Unlock()
+	if !ok {
+		return storage.SourceInfo{}, errors.New("not found")
+	}
+	return storage.SourceInfo{SizeBytes: int64(len(data)), ETag: "etag-" + filepath.Base(key)}, nil
 }
 
 func (s *memoryObjects) DownloadFile(_ context.Context, key, destinationPath string) error {
@@ -610,6 +685,7 @@ type fakeTools struct {
 	boundaries []domain.SceneBoundary
 	frameCalls int
 	audioCalls int
+	photoCalls int
 }
 
 func (t *fakeTools) Probe(context.Context, string) (domain.VideoMetadata, error) {
@@ -641,6 +717,21 @@ func (t *fakeTools) ExtractFrame(_ context.Context, _ string, timestampMicros in
 func (t *fakeTools) ExtractAudio(_ context.Context, _, destinationPath string) error {
 	t.audioCalls++
 	return os.WriteFile(destinationPath, []byte("audio"), 0o600)
+}
+func (t *fakeTools) NormalizePhoto(_ context.Context, _, destinationPath string) error {
+	t.photoCalls++
+	value := image.NewRGBA(image.Rect(0, 0, 80, 120))
+	for y := 0; y < 120; y++ {
+		for x := 0; x < 80; x++ {
+			value.Set(x, y, color.RGBA{R: uint8(80 + x), G: uint8(90 + y), B: 160, A: 255})
+		}
+	}
+	file, err := os.Create(destinationPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return jpeg.Encode(file, value, &jpeg.Options{Quality: 92})
 }
 
 type fakeTranscriber struct {
@@ -718,10 +809,14 @@ func (m *fakeUnderstandingProvider) Model() string { return "fake-model" }
 func cacheKey(values ...string) string { return filepath.Join(values...) }
 
 type fakeCompletionReporter struct {
-	calls int
+	calls               int
+	artifactS3Key       string
+	artifactContentType string
 }
 
-func (r *fakeCompletionReporter) CompleteJob(_ context.Context, _ domain.ProcessingJob, _ string) error {
+func (r *fakeCompletionReporter) CompleteJob(_ context.Context, _ domain.ProcessingJob, artifactS3Key, artifactContentType string) error {
 	r.calls++
+	r.artifactS3Key = artifactS3Key
+	r.artifactContentType = artifactContentType
 	return nil
 }

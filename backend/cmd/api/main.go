@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/framemio/backend/internal/ai"
 	"github.com/framemio/backend/internal/api"
 	"github.com/framemio/backend/internal/credits"
 	"github.com/framemio/backend/internal/models"
@@ -130,6 +132,14 @@ type configuration struct {
 	PartSizeBytes           int64
 	MultipartThresholdBytes int64
 	DeadLetterQueueURL      string
+	TypographyEnabled       bool
+	TypographyProvider      string
+	TypographyBaseURL       string
+	TypographyAPIKey        string
+	TypographyModel         string
+	TypographyWireAPI       string
+	TypographyMaxTokens     int
+	TypographyTimeout       time.Duration
 	WorkerRunOnce           bool
 	WorkerJobID             string
 	WorkerWaitTimeout       time.Duration
@@ -147,6 +157,14 @@ func loadConfiguration() (configuration, error) {
 		PartSizeBytes:           environmentInt64("UPLOAD_PART_SIZE_BYTES", 8*1024*1024),
 		MultipartThresholdBytes: environmentInt64("UPLOAD_MULTIPART_THRESHOLD_BYTES", 16*1024*1024),
 		DeadLetterQueueURL:      os.Getenv("SQS_DEAD_LETTER_QUEUE_URL"),
+		TypographyEnabled:       environmentBool("TYPOGRAPHY_ENABLED", true),
+		TypographyProvider:      environment("TYPOGRAPHY_PROVIDER", "local"),
+		TypographyBaseURL:       environment("TYPOGRAPHY_BASE_URL", os.Getenv("OPENAI_BASE_URL")),
+		TypographyAPIKey:        environment("TYPOGRAPHY_API_KEY", os.Getenv("OPENAI_API_KEY")),
+		TypographyModel:         os.Getenv("TYPOGRAPHY_MODEL"),
+		TypographyWireAPI:       environment("TYPOGRAPHY_WIRE_API", "responses"),
+		TypographyMaxTokens:     environmentInt("TYPOGRAPHY_MAX_OUTPUT_TOKENS", 1400),
+		TypographyTimeout:       environmentDuration("TYPOGRAPHY_TIMEOUT", 12*time.Second),
 		WorkerRunOnce:           environmentBool("WORKER_RUN_ONCE", false),
 		WorkerJobID:             os.Getenv("JOB_ID"),
 		WorkerWaitTimeout:       environmentDuration("WORKER_RUN_ONCE_WAIT_TIMEOUT", 2*time.Minute),
@@ -193,11 +211,17 @@ func runWorkerOnce(ctx context.Context, database store.Store, coordinator *orche
 		workerContext, cancel = context.WithTimeout(ctx, configuration.WorkerWaitTimeout)
 		defer cancel()
 	}
+	storyPlanner, err := configuredStoryPlanner(configuration, logger)
+	if err != nil {
+		return err
+	}
 	worker := orchestration.Worker{
-		Store:             database,
-		Consumer:          consumer,
-		Coordinator:       coordinator,
-		Handlers:          map[models.JobType]orchestration.JobHandler{models.JobTypeStoryPlan: orchestration.StoryPlanHandler{Store: database, Logger: logger}},
+		Store:       database,
+		Consumer:    consumer,
+		Coordinator: coordinator,
+		Handlers: map[models.JobType]orchestration.JobHandler{
+			models.JobTypeStoryPlan: orchestration.StoryPlanHandler{Store: database, Planner: storyPlanner, Logger: logger},
+		},
 		Logger:            logger,
 		TargetJobID:       configuration.WorkerJobID,
 		VisibilityTimeout: 2 * time.Minute,
@@ -205,6 +229,56 @@ func runWorkerOnce(ctx context.Context, database store.Store, coordinator *orche
 	}
 	logger.Info("backend worker run-once started", slog.String("job_id", configuration.WorkerJobID))
 	return worker.RunOnce(workerContext)
+}
+
+func configuredStoryPlanner(configuration configuration, logger *slog.Logger) (*ai.Planner, error) {
+	typographyPlanner, err := configuredTypographyPlanner(configuration)
+	if err != nil {
+		return nil, err
+	}
+	return &ai.Planner{TypographyPlanner: typographyPlanner, Logger: logger}, nil
+}
+
+func configuredTypographyPlanner(configuration configuration) (ai.TypographyPlanner, error) {
+	if !configuration.TypographyEnabled {
+		return ai.DisabledTypographyPlanner{}, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(configuration.TypographyProvider)) {
+	case "", "local", "default", "rules", "rule":
+		return ai.DefaultTypographyPlanner{}, nil
+	case "disabled", "off", "none":
+		return ai.DisabledTypographyPlanner{}, nil
+	case "openai", "openai-compatible", "ai-gateway", "ai_gateway":
+		if strings.TrimSpace(configuration.TypographyAPIKey) == "" {
+			return nil, errors.New("TYPOGRAPHY_API_KEY or OPENAI_API_KEY is required when TYPOGRAPHY_PROVIDER uses an external AI provider")
+		}
+		if strings.TrimSpace(configuration.TypographyModel) == "" {
+			return nil, errors.New("TYPOGRAPHY_MODEL is required when TYPOGRAPHY_PROVIDER uses an external AI provider")
+		}
+		return ai.OpenAICompatibleTypographyPlanner{
+			BaseURL:         configuration.TypographyBaseURL,
+			APIKey:          configuration.TypographyAPIKey,
+			ProviderName:    configuration.TypographyProvider,
+			ModelName:       configuration.TypographyModel,
+			WireAPI:         configuration.TypographyWireAPI,
+			MaxOutputTokens: configuration.TypographyMaxTokens,
+			Client:          &http.Client{Timeout: configuration.TypographyTimeout},
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported TYPOGRAPHY_PROVIDER %q", configuration.TypographyProvider)
+	}
+}
+
+func environmentInt(name string, fallback int) int {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
 }
 
 func environmentBool(name string, fallback bool) bool {

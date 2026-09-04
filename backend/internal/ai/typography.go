@@ -88,15 +88,22 @@ type TypographyPlanningInput struct {
 }
 
 type TypographyMomentContext struct {
-	MomentID   string
-	AssetID    string
-	MediaType  models.MediaType
-	Narrative  string
-	Caption    string
-	Reason     string
-	DurationMS int
-	Score      float64
-	Index      int
+	MomentID          string
+	AssetID           string
+	MediaType         models.MediaType
+	Narrative         string
+	Caption           string
+	Reason            string
+	DurationMS        int
+	Score             float64
+	Index             int
+	Location          string
+	TakenAt           string
+	Labels            []string
+	People            []string
+	ClusterLabel      string
+	PreviousNarrative string
+	NextNarrative     string
 }
 
 type TypographyPlan struct {
@@ -112,7 +119,24 @@ type typographyOverlayDocument struct {
 	models.TextOverlay
 }
 
+type DisabledTypographyPlanner struct{}
+
+func (DisabledTypographyPlanner) Generate(ctx context.Context, input TypographyPlanningInput) (TypographyPlan, error) {
+	if err := ctx.Err(); err != nil {
+		return TypographyPlan{}, err
+	}
+	return TypographyPlan{Overlays: map[string]models.TextOverlay{}}, nil
+}
+
+func (DisabledTypographyPlanner) Name() string { return "disabled" }
+
+func (DisabledTypographyPlanner) Model() string { return "none" }
+
 type DefaultTypographyPlanner struct{}
+
+func (DefaultTypographyPlanner) Name() string { return "local-rule" }
+
+func (DefaultTypographyPlanner) Model() string { return TypographyPromptVersion }
 
 type typographyCandidate struct {
 	context TypographyMomentContext

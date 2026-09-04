@@ -23,10 +23,11 @@ import (
 const PipelineVersion = "async-pipeline-v1"
 
 const (
-	defaultMaxAttempts  = 3
-	defaultBaseBackoff  = 2 * time.Second
-	defaultMaxBackoff   = 5 * time.Minute
-	defaultOutputPreset = "social"
+	defaultMaxAttempts           = 3
+	defaultBaseBackoff           = 2 * time.Second
+	defaultMaxBackoff            = 5 * time.Minute
+	defaultOutputPreset          = "social"
+	photoImageMagickPreprocessV1 = "photo-imagemagick-v1"
 )
 
 type Coordinator struct {
@@ -69,7 +70,11 @@ func (c *Coordinator) StartAnalysis(ctx context.Context, userID, projectID, idem
 	jobs := make([]models.ProcessingJob, 0, len(project.MediaIDs))
 	markAnalyzing := false
 	for _, mediaID := range project.MediaIDs {
-		job, err := c.createStageJob(ctx, userID, projectID, mediaID, models.JobTypeMediaPreprocess, map[string]string{"pipeline_version": PipelineVersion}, stableStageKey(projectID, mediaID, models.JobTypeMediaPreprocess), true)
+		media, err := c.Store.GetMedia(ctx, userID, mediaID)
+		if err != nil {
+			return nil, err
+		}
+		job, err := c.createStageJob(ctx, userID, projectID, mediaID, models.JobTypeMediaPreprocess, mediaPreprocessConfiguration(media.Type), mediaPreprocessStageKey(projectID, mediaID, media.Type), true)
 		if err != nil {
 			return nil, err
 		}
@@ -98,16 +103,11 @@ func (c *Coordinator) StartIOSAnalysis(ctx context.Context, userID, projectID, i
 		if err != nil {
 			return nil, err
 		}
-		job, err := c.createStageJob(ctx, userID, projectID, mediaID, models.JobTypeMediaPreprocess, map[string]string{"pipeline_version": PipelineVersion}, stableStageKey(projectID, mediaID, models.JobTypeMediaPreprocess), media.Type == models.MediaTypeVideo)
+		job, err := c.createStageJob(ctx, userID, projectID, mediaID, models.JobTypeMediaPreprocess, mediaPreprocessConfiguration(media.Type), mediaPreprocessStageKey(projectID, mediaID, media.Type), true)
 		if err != nil {
 			return nil, err
 		}
-		if media.Type != models.MediaTypeVideo && !models.IsTerminalJobStatus(job.Status) {
-			job, err = c.UpdateJobStatus(ctx, job.ID, models.JobStatusCompleted, 1, "", "", "", "")
-			if err != nil {
-				return nil, err
-			}
-		} else if job.Status == models.JobStatusCompleted {
+		if job.Status == models.JobStatusCompleted {
 			if err := c.AdvanceAfterJob(ctx, job); err != nil {
 				return nil, err
 			}
@@ -544,12 +544,15 @@ func (c *Coordinator) enqueueStoryPlanIfReady(ctx context.Context, userID, proje
 		if err != nil {
 			return err
 		}
-		requiredStage := models.JobTypeMediaPreprocess
 		if media.Type == models.MediaTypeVideo {
-			requiredStage = models.JobTypeVideoUnderstand
+			if !hasCompletedStage(jobs, mediaID, models.JobTypeVideoUnderstand) {
+				c.Logger.Info("story plan waiting for media stage", slog.String("project_id", projectID), slog.String("media_id", mediaID), slog.String("media_type", string(media.Type)), slog.String("required_stage", string(models.JobTypeVideoUnderstand)))
+				return nil
+			}
+			continue
 		}
-		if !hasCompletedStage(jobs, mediaID, requiredStage) {
-			c.Logger.Info("story plan waiting for media stage", slog.String("project_id", projectID), slog.String("media_id", mediaID), slog.String("media_type", string(media.Type)), slog.String("required_stage", string(requiredStage)))
+		if !hasCompletedPhotoPreprocessArtifact(jobs, mediaID) {
+			c.Logger.Info("story plan waiting for media stage", slog.String("project_id", projectID), slog.String("media_id", mediaID), slog.String("media_type", string(media.Type)), slog.String("required_stage", string(models.JobTypeMediaPreprocess)), slog.String("reason", "missing_photo_preprocess_artifact"))
 			return nil
 		}
 	}
@@ -573,6 +576,22 @@ func (c *Coordinator) activeRenderJob(ctx context.Context, userID, projectID str
 		}
 	}
 	return models.ProcessingJob{}, false, nil
+}
+
+func mediaPreprocessConfiguration(mediaType models.MediaType) map[string]string {
+	configuration := map[string]string{"pipeline_version": PipelineVersion}
+	if mediaType == models.MediaTypePhoto || mediaType == models.MediaTypeLivePhoto {
+		configuration["photo_preprocess_version"] = photoImageMagickPreprocessV1
+	}
+	return configuration
+}
+
+func mediaPreprocessStageKey(projectID, mediaID string, mediaType models.MediaType) string {
+	key := stableStageKey(projectID, mediaID, models.JobTypeMediaPreprocess)
+	if mediaType == models.MediaTypePhoto || mediaType == models.MediaTypeLivePhoto {
+		return key + ":" + photoImageMagickPreprocessV1
+	}
+	return key
 }
 
 func (c *Coordinator) createStageJob(ctx context.Context, userID, projectID, mediaID string, jobType models.JobType, configuration map[string]string, idempotencyKey string, publish bool) (models.ProcessingJob, error) {
@@ -624,13 +643,9 @@ func (c *Coordinator) revisionMediaReady(ctx context.Context, userID string, pro
 	if len(selected) == 0 {
 		selected = append([]string(nil), project.MediaIDs...)
 	}
-	photoAnalyses, videoAnalyses, err := c.Store.ListProjectAnalyses(ctx, userID, project.ID)
+	_, videoAnalyses, err := c.Store.ListProjectAnalyses(ctx, userID, project.ID)
 	if err != nil {
 		return false, err
-	}
-	photoReady := make(map[string]struct{}, len(photoAnalyses))
-	for _, analysis := range photoAnalyses {
-		photoReady[analysis.MediaID] = struct{}{}
 	}
 	videoReady := make(map[string]struct{}, len(videoAnalyses))
 	for _, analysis := range videoAnalyses {
@@ -651,7 +666,7 @@ func (c *Coordinator) revisionMediaReady(ctx context.Context, userID string, pro
 			}
 			return false, nil
 		}
-		if _, ok := photoReady[mediaID]; ok || hasCompletedStage(jobs, mediaID, models.JobTypeMediaPreprocess) {
+		if hasCompletedPhotoPreprocessArtifact(jobs, mediaID) {
 			continue
 		}
 		return false, nil
@@ -668,13 +683,9 @@ func (c *Coordinator) ensureRevisionMediaStages(ctx context.Context, userID stri
 	if err != nil {
 		return err
 	}
-	photoAnalyses, videoAnalyses, err := c.Store.ListProjectAnalyses(ctx, userID, project.ID)
+	_, videoAnalyses, err := c.Store.ListProjectAnalyses(ctx, userID, project.ID)
 	if err != nil {
 		return err
-	}
-	photoReady := make(map[string]struct{}, len(photoAnalyses))
-	for _, analysis := range photoAnalyses {
-		photoReady[analysis.MediaID] = struct{}{}
 	}
 	videoReady := make(map[string]struct{}, len(videoAnalyses))
 	for _, analysis := range videoAnalyses {
@@ -694,17 +705,11 @@ func (c *Coordinator) ensureRevisionMediaStages(ctx context.Context, userID stri
 			}
 			continue
 		}
-		if _, ok := photoReady[mediaID]; ok || hasCompletedStage(jobs, mediaID, models.JobTypeMediaPreprocess) {
+		if hasCompletedPhotoPreprocessArtifact(jobs, mediaID) || hasActiveStage(jobs, mediaID, models.JobTypeMediaPreprocess) {
 			continue
 		}
-		job, err := c.createStageJob(ctx, userID, project.ID, mediaID, models.JobTypeMediaPreprocess, map[string]string{"pipeline_version": PipelineVersion}, stableStageKey(project.ID, mediaID, models.JobTypeMediaPreprocess), false)
-		if err != nil {
+		if _, err := c.createStageJob(ctx, userID, project.ID, mediaID, models.JobTypeMediaPreprocess, mediaPreprocessConfiguration(media.Type), mediaPreprocessStageKey(project.ID, mediaID, media.Type), true); err != nil {
 			return err
-		}
-		if !models.IsTerminalJobStatus(job.Status) {
-			if _, err := c.Store.UpdateJob(ctx, job.ID, models.JobStatusCompleted, 1, "", "", "", ""); err != nil && !errors.Is(err, store.ErrConflict) {
-				return err
-			}
 		}
 	}
 	return nil
@@ -756,6 +761,15 @@ func (c *Coordinator) backoff(attempt int) time.Duration {
 		return c.MaxBackoff
 	}
 	return delay
+}
+
+func hasCompletedPhotoPreprocessArtifact(jobs []models.ProcessingJob, mediaID string) bool {
+	for _, job := range jobs {
+		if job.Type == models.JobTypeMediaPreprocess && job.MediaID == mediaID && job.Status == models.JobStatusCompleted && strings.TrimSpace(job.ArtifactS3Key) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func hasCompletedStage(jobs []models.ProcessingJob, mediaID string, jobType models.JobType) bool {

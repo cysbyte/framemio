@@ -132,8 +132,8 @@ final class StoryLaunchCoordinator: ObservableObject {
                             guard let self else { return }
                             let displayProgress = min(0.28, uploadProgress.fractionCompleted * 0.28)
                             let previousPercent = Int(progress * 100)
-                            progress = displayProgress
-                            let currentPercent = Int(displayProgress * 100)
+                            progress = max(progress, displayProgress)
+                            let currentPercent = Int(progress * 100)
                             if currentPercent != previousPercent || currentPercent >= 28 {
                                 storyLaunchDebugLog("phase=upload_progress app_percent=\(currentPercent) upload_fraction=\(uploadProgress.fractionCompleted) bytes=\(uploadProgress.uploadedBytes)/\(uploadProgress.totalBytes) completed_uploads=\(uploadProgress.completedUploads)/\(uploadProgress.totalUploads) asset=\(uploadProgress.assetID) upload=\(uploadProgress.uploadID)")
                             }
@@ -220,7 +220,7 @@ final class StoryLaunchCoordinator: ObservableObject {
                 progress: { [weak self] uploadProgress in
                     Task { @MainActor [weak self] in
                         guard let self else { return }
-                        progress = min(0.28, uploadProgress.fractionCompleted * 0.28)
+                        progress = max(progress, min(0.28, uploadProgress.fractionCompleted * 0.28))
                     }
                 }
             )

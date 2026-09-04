@@ -1,5 +1,5 @@
 import {spawn} from 'node:child_process';
-import {mkdir, open, writeFile} from 'node:fs/promises';
+import {copyFile, mkdir, open, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import type {CaptionStyle, CompositionSpec, KenBurnsTransform, StoryCaption, TextOverlay, TimelineBRoll, TimelineClip} from '../types.js';
@@ -39,14 +39,43 @@ export class RemotionCliRenderer implements RemotionRenderer {
 
   async renderComposition(composition: CompositionSpec, outputPath: string): Promise<void> {
     await mkdir(path.dirname(outputPath), {recursive: true});
-    const propsPath = path.join(tmpdir(), `framemio-remotion-${stableHash(composition).slice(0, 20)}.json`);
-    await writeFile(propsPath, canonicalJson({composition}), 'utf8');
+    const hash = stableHash(composition).slice(0, 20);
+    const publicDir = path.join(tmpdir(), `framemio-remotion-public-${hash}`);
+    const remotionComposition = await prepareRemotionStaticAssets(composition, publicDir);
+    const propsPath = path.join(tmpdir(), `framemio-remotion-${hash}.json`);
+    await writeFile(propsPath, canonicalJson({composition: remotionComposition}), 'utf8');
     const args = this.remotionBinary === 'npx'
       ? ['remotion', 'render', this.options.entryPoint, this.compositionID, outputPath]
       : ['render', this.options.entryPoint, this.compositionID, outputPath];
-    args.push('--props', propsPath, '--codec', 'h264', '--overwrite', '--concurrency', '1');
+    args.push('--props', propsPath, '--codec', 'h264', '--overwrite', '--concurrency', '1', '--public-dir', publicDir);
     await run(this.remotionBinary, args, this.timeoutMs);
   }
+}
+
+async function prepareRemotionStaticAssets(composition: CompositionSpec, publicDir: string): Promise<CompositionSpec> {
+  const copied = new Map<string, string>();
+  const toStaticAsset = async (sourcePath: string): Promise<string> => {
+    if (!sourcePath || /^[a-z]+:\/\//i.test(sourcePath) || sourcePath.startsWith('remotion-static:')) {
+      return sourcePath;
+    }
+    const existing = copied.get(sourcePath);
+    if (existing) {
+      return existing;
+    }
+    await mkdir(publicDir, {recursive: true});
+    const extension = path.extname(sourcePath) || '.bin';
+    const fileName = `asset-${copied.size}-${stableHash(sourcePath).slice(0, 16)}${extension}`;
+    await copyFile(sourcePath, path.join(publicDir, fileName));
+    const reference = `remotion-static:${fileName}`;
+    copied.set(sourcePath, reference);
+    return reference;
+  };
+
+  return {
+    ...composition,
+    clips: await Promise.all(composition.clips.map(async (clip) => ({...clip, prepared_path: await toStaticAsset(clip.prepared_path)}))),
+    broll: await Promise.all(composition.broll.map(async (overlay) => ({...overlay, prepared_path: await toStaticAsset(overlay.prepared_path)}))),
+  };
 }
 
 type PhotoTimelineClip = TimelineClip & {transform: KenBurnsTransform};

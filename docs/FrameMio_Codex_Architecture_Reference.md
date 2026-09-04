@@ -97,11 +97,14 @@ VideoAnalysis
 Story Planner
   = decide which meaningful moments form a coherent story
 
+Typography Planner
+  = optional AI/rule-based photo text overlay decisions from StoryPlan context
+
 StoryPlan Validator
   = deterministic validation
 
 Render Worker
-  = Remotion + FFmpeg, deterministic visual composition
+  = Remotion + FFmpeg, deterministic visual composition and text rendering
 
 PostgreSQL
   = durable application state and structured analysis/job metadata
@@ -1169,6 +1172,43 @@ Chronological ordering is the default for everyday memories, but it is not an ab
 
 A stronger narrative may justify a different order.
 
+## 15.3 Photo typography planning
+
+Photo typography is part of Story planning, not a separate rendering timeline. The implemented flow is:
+
+```text
+PhotoAnalysis + VideoAnalysis + Story context
+    ↓
+Story Planner selects ordered moments
+    ↓
+Typography Planner receives the StoryPlan-shaped moment context
+    ↓
+TextOverlay is attached to StoryPlan.moments[].typography
+    ↓
+StoryPlan Validator validates the overlay deterministically
+    ↓
+Render Worker executes the validated StoryPlan
+```
+
+The Typography Planner may be local/rule-based or an external OpenAI-compatible provider selected by backend configuration. It must return structured JSON only. Backend validation owns enum support, text length limits, timing clamping, safe margins, max width, source metadata, and confidence bounds. AI output must never become renderer code, CSS, font paths, ImageMagick commands, FFmpeg arguments, or a second timeline.
+
+Typography is optional. The planner should not add text to every photo and should prefer short cinematic/editorial language only when it improves the memory film. It must avoid invented locations, dates, names, events, hashtags, memes, and literal duplicate captions. If typography planning fails or returns invalid output, Story generation continues without typography.
+
+Current backend configuration:
+
+```text
+TYPOGRAPHY_ENABLED=true|false              default true
+TYPOGRAPHY_PROVIDER=local|disabled|openai  default local
+TYPOGRAPHY_BASE_URL=...                    defaults to OPENAI_BASE_URL or https://api.openai.com
+TYPOGRAPHY_API_KEY=...                     defaults to OPENAI_API_KEY for external providers
+TYPOGRAPHY_MODEL=...                       required for external providers
+TYPOGRAPHY_WIRE_API=responses|chat_completions
+TYPOGRAPHY_MAX_OUTPUT_TOKENS=1400
+TYPOGRAPHY_TIMEOUT=12s
+```
+
+These are server/worker-side settings only. Provider keys and model names must not be exposed to iOS.
+
 ---
 
 # 16. StoryPlan
@@ -1244,9 +1284,31 @@ crop_intent
 transition
 reason
 score
+typography
 ```
 
 Photo moments must have positive `duration_ms` and no source timestamps. Video moments must have `start_micros`, `end_micros`, a matching `duration_ms`, and a valid `video_analysis_version`.
+
+`moments[].typography` is an optional renderer-stable `TextOverlay` for cinematic photo typography. It is separate from speech captions/transcript subtitles and should normally be attached only to photo/live-photo moments. Current fields are:
+
+```text
+enabled
+type              moment_title | moment_caption | location | date | chapter_title | story_intro | story_outro
+title
+subtitle
+style             cinematic | minimal | editorial | memory | location
+placement         top_left | top_center | top_right | center_left | center | center_right | bottom_left | bottom_center | bottom_right
+start_ms
+duration_ms
+max_width
+safe_area         normalized top/right/bottom/left margins
+animation         fade | fade_up | fade_down | subtle_scale | none
+source            ai | user | system
+reason
+confidence
+```
+
+The backend clamps V1 typography text and layout using centralized domain limits: title max 40 characters, subtitle max 100 characters, reason max 240 characters, default max width 0.72, default safe margin 0.08, and default start time 350 ms. Unsupported enum values or unusable timings are rejected before rendering.
 
 `caption_style` is optional renderer-safe styling metadata for captions/subtitles. It may include whitelisted presets such as `bold_social`, `cinematic_subtitle`, `clean_minimal`, and `playful_pop`, plus validated fields for font family, font size, text/stroke/background colors, background opacity, position, bottom offset, max lines, and max characters per line. It must not contain raw FFmpeg/Remotion commands, arbitrary font file paths, provider information, or transcript source details.
 
@@ -1295,6 +1357,7 @@ Check:
 9. Text lengths are valid.
 10. Audio configuration is valid.
 11. Schema is valid.
+12. Optional typography overlays use supported enums, safe timing, safe margins, and bounded text.
 
 The validator must NOT use AI.
 
@@ -1310,6 +1373,7 @@ Current validator behavior includes:
 - video `duration_ms` must match `end_micros - start_micros`
 - video moments must reference an existing VideoAnalysis version
 - photo moments must not define video timestamps
+- optional moment typography is validated with the same deterministic `TextOverlay` rules used for AI output
 - referenced S3 objects must be resolvable before rendering
 
 ---
@@ -1396,8 +1460,13 @@ Text:
 
 - title
 - captions
+- optional photo typography from `moments[].typography`
 - optional chapter text
 - ending
+
+Photo typography is rendered by Remotion when `RENDERER_MODE=remotion` using the checked-in Remotion entrypoint. The renderer applies controlled typography presets, safe-area placement, restrained fade/fade-up/fade-down/subtle-scale animation, text wrapping, shadows, and subtle gradient readability treatments. The renderer must not call AI and must not decide text content.
+
+The FFmpeg fallback renderer keeps a deterministic `drawtext` path for environments not yet using Remotion mode, but `TextOverlay` remains the single source of truth in StoryPlan.
 
 
 ## 18.3 Current render-worker contract
@@ -1411,7 +1480,7 @@ The render worker currently:
 5. trims video moments to exact StoryPlan source ranges
 6. applies deterministic Ken Burns-style motion to photo moments
 7. builds a deterministic composition
-8. renders/encodes an MP4 with FFmpeg/Remotion-compatible composition logic
+8. renders/encodes an MP4 with FFmpeg/Remotion-compatible composition logic, including optional typography overlays
 9. uploads the final MP4 to the configured S3 key
 10. calls `POST /internal/jobs/:id/status` with `COMPLETED` and `artifact_s3_key`
 
@@ -1428,6 +1497,14 @@ The renderer must be resilient to common iPhone media realities:
 - photo-only, video-only, and mixed photo/video StoryPlans
 
 When a `.HEIC` or `.HEIF` source contains JPEG bytes, the renderer should use the source image directly rather than failing HEIC conversion.
+
+## 18.5 ImageMagick and photo derivatives
+
+ImageMagick is used by the video-intelligence worker for deterministic photo preprocessing such as EXIF orientation normalization, resizing, colorspace normalization, interlace/strip metadata handling, and sharpening. The Go backend queues photo `MEDIA_PREPROCESS` work and waits for the completed artifact before StoryPlan/render input uses it.
+
+Original source photos remain immutable in S3. ImageMagick must write normalized derivatives/artifacts only; it must not burn AI typography into original photos. Final animated typography belongs to Remotion/renderer execution of `StoryPlan.moments[].typography`.
+
+Current worker configuration uses `MAGICK_PATH` to locate ImageMagick. There is intentionally no production feature flag to skip required photo normalization, because render input depends on completed photo preprocess artifacts.
 
 ---
 

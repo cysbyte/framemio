@@ -284,11 +284,13 @@ func TestWorkerCallbacksPersistResultsIdempotently(t *testing.T) {
 	handler := newTestServer(memoryStore, queue.NewMemoryPublisher()).Handler()
 	headers := map[string]string{"X-FrameMio-Internal-Token": testInternalToken}
 
-	analysis := performJSON(t, handler, http.MethodPost, "/internal/jobs/job-worker/analysis", map[string]any{
-		"labels": []string{"birthday", "friends"}, "people_count": 3, "quality_score": 0.91,
-	}, "", false, headers)
-	if analysis.Code != http.StatusOK {
-		t.Fatalf("analysis callback = %d, body = %s", analysis.Code, analysis.Body.String())
+	for attempt := 0; attempt < 2; attempt++ {
+		artifactStatus := performJSON(t, handler, http.MethodPost, "/internal/jobs/job-worker/status", map[string]any{
+			"status": "COMPLETED", "progress": 1, "artifact_s3_key": "users/user-1/projects/project-worker/photo-preprocess/media-worker/photo.jpg", "artifact_content_type": "image/jpeg",
+		}, "", false, headers)
+		if artifactStatus.Code != http.StatusOK {
+			t.Fatalf("artifact status callback attempt %d = %d, body = %s", attempt+1, artifactStatus.Code, artifactStatus.Body.String())
+		}
 	}
 
 	storyPlanBody := map[string]any{
@@ -499,8 +501,8 @@ func TestIOSStoriesCompatibilityCreatesProjectAndFetchesStories(t *testing.T) {
 	}
 
 	messages := publisher.Messages()
-	if len(messages) != 1 || messages[0].JobType != models.JobTypeStoryPlan {
-		t.Fatalf("expected only a story-plan queue message for photo-only story, got %+v", messages)
+	if len(messages) != 1 || messages[0].JobType != models.JobTypeMediaPreprocess || messages[0].MediaID != uploadResponse.MediaID {
+		t.Fatalf("expected photo preprocess queue message for photo-only story, got %+v", messages)
 	}
 }
 
@@ -609,7 +611,8 @@ func TestIOSStoryEditQueuesStoryPlanRevisionWithoutReanalysis(t *testing.T) {
 
 	memoryStore := store.NewMemoryStore()
 	publisher := queue.NewMemoryPublisher()
-	handler := newTestServer(memoryStore, publisher).Handler()
+	server := newTestServer(memoryStore, publisher)
+	handler := server.Handler()
 
 	first := createReadyIOSMedia(t, handler, "asset-edit-photo-1", models.MediaTypePhoto)
 	second := createReadyIOSMedia(t, handler, "asset-edit-photo-2", models.MediaTypePhoto)
@@ -625,6 +628,7 @@ func TestIOSStoryEditQueuesStoryPlanRevisionWithoutReanalysis(t *testing.T) {
 	}
 	var story iosStory
 	decodeResponse(t, storyResponse, &story)
+	completeProjectPhotoPreprocessJobs(t, server, memoryStore, story.ID)
 
 	now := time.Date(2026, time.August, 19, 10, 0, 0, 0, time.UTC)
 	if err := memoryStore.SaveStoryPlan(context.Background(), "user-1", models.StoryPlan{
@@ -666,9 +670,6 @@ func TestIOSStoryEditQueuesStoryPlanRevisionWithoutReanalysis(t *testing.T) {
 	}
 
 	messages := publisher.Messages()
-	if len(messages) != 2 {
-		t.Fatalf("expected initial and revision story-plan messages, got %+v", messages)
-	}
 	last := messages[len(messages)-1]
 	if last.JobType != models.JobTypeStoryPlan || last.MediaID != "" {
 		t.Fatalf("edit should queue only a project-level story plan job, got %+v", last)
@@ -686,7 +687,8 @@ func TestIOSStoryEditQueuesPreferredMediaOrder(t *testing.T) {
 
 	memoryStore := store.NewMemoryStore()
 	publisher := queue.NewMemoryPublisher()
-	handler := newTestServer(memoryStore, publisher).Handler()
+	server := newTestServer(memoryStore, publisher)
+	handler := server.Handler()
 
 	first := createReadyIOSMedia(t, handler, "asset-order-photo-1", models.MediaTypePhoto)
 	second := createReadyIOSMedia(t, handler, "asset-order-photo-2", models.MediaTypePhoto)
@@ -702,6 +704,7 @@ func TestIOSStoryEditQueuesPreferredMediaOrder(t *testing.T) {
 	}
 	var story iosStory
 	decodeResponse(t, storyResponse, &story)
+	completeProjectPhotoPreprocessJobs(t, server, memoryStore, story.ID)
 
 	if err := memoryStore.SaveStoryPlan(context.Background(), "user-1", models.StoryPlan{
 		SchemaVersion:       models.StoryPlanSchemaVersionV1,
@@ -948,11 +951,19 @@ func TestIOSStoryEditAddsUploadedPhotoOutsideOriginalStory(t *testing.T) {
 	}
 	messages := publisher.Messages()
 	last := messages[len(messages)-1]
-	if last.JobType != models.JobTypeStoryPlan {
-		t.Fatalf("new analyzed photo should queue story plan revision, got %+v", last)
+	if last.JobType != models.JobTypeMediaPreprocess || last.MediaID != newPhoto.MediaID {
+		t.Fatalf("new analyzed photo should preprocess before story plan revision publishes, got %+v", last)
 	}
-	if !strings.Contains(last.Configuration["selected_media_ids"], original.MediaID) || !strings.Contains(last.Configuration["selected_media_ids"], newPhoto.MediaID) {
-		t.Fatalf("selected media should include original and new photo: %+v", last.Configuration)
+	jobs, err := memoryStore.ListProjectJobs(context.Background(), "user-1", story.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countType(jobs, models.JobTypeStoryPlan) != 1 {
+		t.Fatalf("expected one deferred story plan revision, got %+v", jobs)
+	}
+	deferred := latestJobOfType(t, jobs, models.JobTypeStoryPlan)
+	if !strings.Contains(deferred.Configuration["selected_media_ids"], original.MediaID) || !strings.Contains(deferred.Configuration["selected_media_ids"], newPhoto.MediaID) {
+		t.Fatalf("selected media should include original and new photo: %+v", deferred.Configuration)
 	}
 }
 
@@ -974,6 +985,7 @@ func TestIOSStoryEditDefersStoryPlanUntilNewVideoAnalysis(t *testing.T) {
 	}
 	var story iosStory
 	decodeResponse(t, storyResponse, &story)
+	completeProjectPhotoPreprocessJobs(t, server, memoryStore, story.ID)
 
 	newVideo := createReadyIOSMedia(t, handler, "asset-edit-new-video", models.MediaTypeVideo)
 	editResponse := performJSON(t, handler, http.MethodPost, "/v1/stories/"+story.ID+"/versions", map[string]any{
@@ -1798,5 +1810,41 @@ func TestGrantSubscriptionCycleCreditsIsIdempotent(t *testing.T) {
 	decodeResponse(t, balanceResponse, &balance)
 	if balance.SubscriptionCredits != server.Credits.Policy.MonthlySubscriptionCycleCredits {
 		t.Fatalf("subscription credits = %d, want %d", balance.SubscriptionCredits, server.Credits.Policy.MonthlySubscriptionCycleCredits)
+	}
+}
+
+func latestJobOfType(t *testing.T, jobs []models.ProcessingJob, jobType models.JobType) models.ProcessingJob {
+	t.Helper()
+	for index := len(jobs) - 1; index >= 0; index-- {
+		if jobs[index].Type == jobType {
+			return jobs[index]
+		}
+	}
+	t.Fatalf("missing job type %s in %+v", jobType, jobs)
+	return models.ProcessingJob{}
+}
+
+func completeProjectPhotoPreprocessJobs(t *testing.T, server *Server, memoryStore *store.MemoryStore, projectID string) {
+	t.Helper()
+	ctx := context.Background()
+	jobs, err := memoryStore.ListProjectJobs(ctx, "user-1", projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, job := range jobs {
+		if job.Type != models.JobTypeMediaPreprocess || job.Status == models.JobStatusCompleted {
+			continue
+		}
+		media, err := memoryStore.GetMedia(ctx, "user-1", job.MediaID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if media.Type != models.MediaTypePhoto && media.Type != models.MediaTypeLivePhoto {
+			continue
+		}
+		artifactKey := "users/user-1/projects/" + projectID + "/photo-preprocess/" + media.ID + "/photo.jpg"
+		if _, err := server.Orchestrator.UpdateJobStatus(ctx, job.ID, models.JobStatusCompleted, 1, "", "", artifactKey, "image/jpeg"); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

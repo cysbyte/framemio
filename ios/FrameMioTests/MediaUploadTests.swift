@@ -2,6 +2,23 @@ import UIKit
 import XCTest
 @testable import FrameMio
 
+private final class TestUploadProgressRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedProgresses: [MediaUploadProgress] = []
+
+    var progresses: [MediaUploadProgress] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedProgresses
+    }
+
+    func append(_ progress: MediaUploadProgress) {
+        lock.lock()
+        defer { lock.unlock() }
+        storedProgresses.append(progress)
+    }
+}
+
 final class MediaUploadTests: XCTestCase {
     private let mebibyte = 1_024 * 1_024
 
@@ -168,6 +185,40 @@ final class MediaUploadTests: XCTestCase {
         XCTAssertEqual(requestCount, 1)
         XCTAssertEqual(createSessionCallCount, 1)
         XCTAssertEqual(notificationCount, 1)
+    }
+
+    func testProgressAggregatesSkippedCompletedUploads() async throws {
+        let completedAsset = makeAsset(id: "cached-photo", kind: .image)
+        let newAsset = makeAsset(id: "new-photo", kind: .image)
+        let completedUpload = makeUploadRecord(asset: completedAsset, status: .completed)
+        let source = makeSource(asset: newAsset, byteCount: 512)
+        let authorizer = MockMediaUploadAuthorizer()
+        let storage = MockDirectObjectStorageClient()
+        let store = MockMediaUploadStore(uploads: [completedUpload])
+        let service = makeService(source: source, authorizer: authorizer, storage: storage, store: store)
+        let recorder = TestUploadProgressRecorder()
+
+        _ = try await service.upload(
+            selection: selection(for: [completedAsset, newAsset]),
+            assets: [completedAsset, newAsset],
+            options: makeOptions(maximumConcurrentUploads: 1),
+            progress: { progress in
+                recorder.append(progress)
+            }
+        )
+
+        let progresses = recorder.progresses
+        let requestCount = await storage.requests.count
+        XCTAssertFalse(progresses.isEmpty)
+        XCTAssertEqual(progresses.first?.completedUploads, 1)
+        XCTAssertEqual(progresses.first?.totalUploads, 2)
+        XCTAssertEqual(progresses.last?.completedUploads, 2)
+        XCTAssertEqual(progresses.last?.totalUploads, 2)
+        XCTAssertEqual(progresses.last?.fractionCompleted, 1)
+        XCTAssertEqual(requestCount, 1)
+
+        let fractions = progresses.map(\.fractionCompleted)
+        XCTAssertEqual(fractions, fractions.sorted())
     }
 
 

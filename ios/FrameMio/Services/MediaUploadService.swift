@@ -169,6 +169,22 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         }
     }
 
+    private func makeProgressAggregator(
+        for assets: [MediaAsset],
+        options: MediaUploadOptions
+    ) async throws -> MediaUploadProgressAggregator {
+        var records: [MediaUpload] = []
+        records.reserveCapacity(assets.count)
+        for asset in assets {
+            let uploadID = MediaUpload.makeID(for: asset.id, optimization: options.optimization)
+            guard let record = try await store.upload(for: uploadID) else {
+                throw AppError.persistenceFailure
+            }
+            records.append(record)
+        }
+        return MediaUploadProgressAggregator(records: records)
+    }
+
     private func uploadInBatches(
         _ assets: [MediaAsset],
         options: MediaUploadOptions,
@@ -178,6 +194,7 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         var firstError: AppError?
         var wasCancelled = false
         let batchSize = options.maximumConcurrentUploads
+        let progressAggregator = try await makeProgressAggregator(for: assets, options: options)
 
         for start in stride(from: 0, to: assets.count, by: batchSize) {
             let end = min(start + batchSize, assets.count)
@@ -192,6 +209,7 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
                                     asset: asset,
                                     options: options,
                                     totalUploads: assets.count,
+                                    progressAggregator: progressAggregator,
                                     progress: progress
                                 )
                             )
@@ -229,6 +247,7 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         asset: MediaAsset,
         options: MediaUploadOptions,
         totalUploads: Int,
+        progressAggregator: MediaUploadProgressAggregator,
         progress: @escaping @Sendable (MediaUploadProgress) -> Void
     ) async throws -> MediaUpload {
         let uploadID = MediaUpload.makeID(for: asset.id, optimization: options.optimization)
@@ -237,13 +256,12 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         if let record, record.status == .completed {
             mediaUploadDebugLog("uploadOne skipped completed upload=\(record.id) asset=\(record.assetID) media=\(record.mediaID ?? "nil") bytes=\(record.fileSizeBytes)")
             progress(
-                MediaUploadProgress(
+                progressAggregator.update(
                     uploadID: record.id,
                     assetID: record.assetID,
                     uploadedBytes: record.fileSizeBytes,
                     totalBytes: record.fileSizeBytes,
-                    completedUploads: 1,
-                    totalUploads: totalUploads
+                    completed: true
                 )
             )
             return record
@@ -306,6 +324,7 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
                     record: &record,
                     options: options,
                     totalUploads: totalUploads,
+                    progressAggregator: progressAggregator,
                     progress: progress
                 )
             }
@@ -343,13 +362,12 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
             try await store.save(record)
             await source.removeMaterializedMedia(at: mediaFile.url)
             progress(
-                MediaUploadProgress(
+                progressAggregator.update(
                     uploadID: record.id,
                     assetID: record.assetID,
                     uploadedBytes: record.fileSizeBytes,
                     totalBytes: record.fileSizeBytes,
-                    completedUploads: 1,
-                    totalUploads: totalUploads
+                    completed: true
                 )
             )
             return record
@@ -377,6 +395,7 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         record: inout MediaUpload,
         options: MediaUploadOptions,
         totalUploads: Int,
+        progressAggregator: MediaUploadProgressAggregator,
         progress: @escaping @Sendable (MediaUploadProgress) -> Void
     ) async throws {
         guard let fileURL = record.stagedFileURL else {
@@ -430,13 +449,12 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
                         usesBackgroundSession: options.usesBackgroundURLSession,
                         progress: { sent, expected in
                             progress(
-                                MediaUploadProgress(
+                                progressAggregator.update(
                                     uploadID: progressUploadID,
                                     assetID: progressAssetID,
                                     uploadedBytes: completedBefore + sent,
                                     totalBytes: progressTotalBytes,
-                                    completedUploads: 0,
-                                    totalUploads: totalUploads
+                                    completed: false
                                 )
                             )
                             _ = expected
@@ -660,6 +678,77 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         if asset.isVideo { return .video }
         if asset.isLivePhoto { return .livePhoto }
         return .photo
+    }
+}
+
+private final class MediaUploadProgressAggregator: @unchecked Sendable {
+    private let lock = NSLock()
+    private let totalUploads: Int
+    private var totalBytesByUploadID: [String: Int64]
+    private var uploadedBytesByUploadID: [String: Int64]
+    private var completedUploadIDs: Set<String>
+
+    init(records: [MediaUpload]) {
+        totalUploads = records.count
+        totalBytesByUploadID = [:]
+        uploadedBytesByUploadID = [:]
+        completedUploadIDs = []
+
+        for record in records {
+            totalBytesByUploadID[record.id] = max(0, record.fileSizeBytes)
+            uploadedBytesByUploadID[record.id] = Self.initialUploadedBytes(for: record)
+            if record.status == .completed {
+                completedUploadIDs.insert(record.id)
+            }
+        }
+    }
+
+    func update(
+        uploadID: String,
+        assetID: String,
+        uploadedBytes: Int64,
+        totalBytes: Int64,
+        completed: Bool
+    ) -> MediaUploadProgress {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let normalizedTotalBytes = max(0, totalBytes)
+        totalBytesByUploadID[uploadID] = normalizedTotalBytes
+
+        let clampedUploadedBytes = min(normalizedTotalBytes, max(0, uploadedBytes))
+        let previousUploadedBytes = uploadedBytesByUploadID[uploadID] ?? 0
+        uploadedBytesByUploadID[uploadID] = completed
+            ? normalizedTotalBytes
+            : max(previousUploadedBytes, clampedUploadedBytes)
+
+        if completed {
+            completedUploadIDs.insert(uploadID)
+        }
+
+        let aggregateUploadedBytes = uploadedBytesByUploadID.values.reduce(0, +)
+        let aggregateTotalBytes = totalBytesByUploadID.values.reduce(0, +)
+        return MediaUploadProgress(
+            uploadID: uploadID,
+            assetID: assetID,
+            uploadedBytes: aggregateUploadedBytes,
+            totalBytes: aggregateTotalBytes,
+            completedUploads: completedUploadIDs.count,
+            totalUploads: totalUploads
+        )
+    }
+
+    private static func initialUploadedBytes(for record: MediaUpload) -> Int64 {
+        if record.status == .completed {
+            return max(0, record.fileSizeBytes)
+        }
+        if let parts = record.session?.parts {
+            return min(
+                max(0, record.fileSizeBytes),
+                parts.filter(\.isCompleted).reduce(0) { $0 + max(0, $1.lengthBytes) }
+            )
+        }
+        return min(max(0, record.fileSizeBytes), max(0, record.uploadedBytes))
     }
 }
 

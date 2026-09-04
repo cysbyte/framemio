@@ -25,6 +25,7 @@ type MediaToolchain interface {
 	DetectScenes(ctx context.Context, sourcePath string, threshold float64, maxBoundaries int) ([]domain.SceneBoundary, error)
 	ExtractFrame(ctx context.Context, sourcePath string, timestampMicros int64, destinationPath string) error
 	ExtractAudio(ctx context.Context, sourcePath, destinationPath string) error
+	NormalizePhoto(ctx context.Context, sourcePath, destinationPath string) error
 }
 
 type Config struct {
@@ -47,7 +48,7 @@ type Result struct {
 }
 
 type CompletionReporter interface {
-	CompleteJob(ctx context.Context, job domain.ProcessingJob, artifactS3Key string) error
+	CompleteJob(ctx context.Context, job domain.ProcessingJob, artifactS3Key, artifactContentType string) error
 }
 
 type Processor struct {
@@ -71,12 +72,9 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 		p.logger().Error("load video job context failed", slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID), slog.String("media_id", message.MediaID), slog.Any("error", err))
 		return Result{}, err
 	}
-	p.logger().Info("loaded video job context", slog.String("job_id", jobContext.Job.ID), slog.String("project_id", jobContext.Project.ID), slog.String("media_id", jobContext.Media.ID), slog.String("media_status", jobContext.Media.Status), slog.Int64("file_size_bytes", jobContext.Media.FileSizeBytes), slog.String("s3_key", jobContext.Media.S3Key))
-	if jobContext.Media.Type != "video" || jobContext.Media.Status != "ready" {
+	p.logger().Info("loaded media job context", slog.String("job_id", jobContext.Job.ID), slog.String("project_id", jobContext.Project.ID), slog.String("media_id", jobContext.Media.ID), slog.String("media_type", jobContext.Media.Type), slog.String("media_status", jobContext.Media.Status), slog.Int64("file_size_bytes", jobContext.Media.FileSizeBytes), slog.String("s3_key", jobContext.Media.S3Key))
+	if jobContext.Media.Status != "ready" || !isSupportedMediaType(jobContext.Media.Type) {
 		return Result{}, domain.Permanent(fmt.Errorf("%w: media %s is %s/%s", domain.ErrUnsupportedMedia, jobContext.Media.ID, jobContext.Media.Type, jobContext.Media.Status))
-	}
-	if p.Understanding == nil {
-		return Result{}, domain.Permanent(fmt.Errorf("video understanding service is required"))
 	}
 	inputVersion := p.inputVersion(message)
 	analysisVersion := p.understandingVersion(message)
@@ -84,16 +82,22 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 	refreshCachedAnalysis := false
 	sourceInfo, err := p.Objects.Head(ctx, jobContext.Media.S3Key)
 	if err != nil {
-		p.logger().Error("head source video failed", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.String("s3_key", jobContext.Media.S3Key), slog.Any("error", err))
+		p.logger().Error("head source media failed", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.String("s3_key", jobContext.Media.S3Key), slog.Any("error", err))
 		return Result{}, err
 	}
-	p.logger().Info("source video found", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Int64("source_size_bytes", sourceInfo.SizeBytes), slog.String("source_etag", sourceInfo.ETag))
+	p.logger().Info("source media found", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.String("media_type", jobContext.Media.Type), slog.Int64("source_size_bytes", sourceInfo.SizeBytes), slog.String("source_etag", sourceInfo.ETag))
 	sourceETag := sourceInfo.ETag
 	if sourceETag == "" {
 		sourceETag = jobContext.Media.ETag
 	}
 	if jobContext.Media.FileSizeBytes > 0 && sourceInfo.SizeBytes > 0 && jobContext.Media.FileSizeBytes != sourceInfo.SizeBytes {
 		return Result{}, domain.Permanent(fmt.Errorf("source object size does not match media record"))
+	}
+	if isPhotoMediaType(jobContext.Media.Type) {
+		return p.processPhoto(ctx, jobContext, inputVersion, sourceETag, force)
+	}
+	if p.Understanding == nil {
+		return Result{}, domain.Permanent(fmt.Errorf("video understanding service is required"))
 	}
 	if !force {
 		cached, lookupErr := p.Understanding.FindCached(ctx, understanding.CacheRequest{
@@ -148,6 +152,110 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 		return Result{}, err
 	}
 	return Result{Analysis: analysis, Reused: understandingResult.Reused}, nil
+}
+
+func (p *Processor) processPhoto(ctx context.Context, jobContext domain.JobContext, version, sourceETag string, force bool) (Result, error) {
+	if !force {
+		if artifactKey, ok := p.cachedPhotoArtifact(ctx, jobContext, version, sourceETag); ok {
+			if err := p.completePhotoJob(ctx, jobContext.Job, artifactKey, "image/jpeg"); err != nil {
+				return Result{}, err
+			}
+			return Result{Reused: true}, nil
+		}
+	}
+	if _, err := p.Repository.StartJobAttempt(ctx, jobContext.Job.ID); err != nil {
+		p.logger().Error("start photo job attempt failed", slog.String("job_id", jobContext.Job.ID), slog.Any("error", err))
+		return Result{}, err
+	}
+	p.logger().Info("started photo job attempt", slog.String("job_id", jobContext.Job.ID), slog.Int("attempt", jobContext.Job.Attempt+1))
+	artifactKey, err := p.preprocessPhoto(ctx, jobContext, version, sourceETag)
+	if err != nil {
+		p.logger().Warn("photo ImageMagick preprocessing failed; completing with source image", slog.String("job_id", jobContext.Job.ID), slog.String("project_id", jobContext.Project.ID), slog.String("media_id", jobContext.Media.ID), slog.Any("error", err))
+		if err := p.completePhotoJob(ctx, jobContext.Job, jobContext.Media.S3Key, photoContentType(jobContext.Media)); err != nil {
+			return Result{}, err
+		}
+		return Result{}, nil
+	}
+	if err := p.completePhotoJob(ctx, jobContext.Job, artifactKey, "image/jpeg"); err != nil {
+		return Result{}, err
+	}
+	return Result{}, nil
+}
+
+func (p *Processor) cachedPhotoArtifact(ctx context.Context, jobContext domain.JobContext, version, sourceETag string) (string, bool) {
+	artifact, err := p.Repository.GetPreprocessing(ctx, jobContext.Job.UserID, jobContext.Project.ID, jobContext.Media.ID, version, sourceETag)
+	if err != nil {
+		if !errors.Is(err, domain.ErrNotFound) {
+			p.logger().Warn("cached photo preprocessing lookup failed; rebuilding", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Any("error", err))
+		}
+		return "", false
+	}
+	if strings.TrimSpace(artifact.EvidenceS3Key) == "" || artifact.EvidenceS3Key == jobContext.Media.S3Key {
+		return "", false
+	}
+	if _, err := p.Objects.Head(ctx, artifact.EvidenceS3Key); err != nil {
+		p.logger().Warn("cached photo preprocessing artifact missing; rebuilding", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.String("artifact_s3_key", artifact.EvidenceS3Key), slog.Any("error", err))
+		return "", false
+	}
+	p.logger().Info("reusing cached photo ImageMagick artifact", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.String("artifact_s3_key", artifact.EvidenceS3Key))
+	return artifact.EvidenceS3Key, true
+}
+
+func (p *Processor) preprocessPhoto(ctx context.Context, jobContext domain.JobContext, version, sourceETag string) (string, error) {
+	workspace, err := os.MkdirTemp(p.Config.WorkRoot, "job-"+safeComponent(jobContext.Job.ID)+"-")
+	if err != nil {
+		return "", err
+	}
+	p.logger().Info("photo preprocessing workspace created", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID))
+	defer os.RemoveAll(workspace)
+	sourcePath := filepath.Join(workspace, "source"+sourceExtensionOr(jobContext.Media.FileName, ".jpg"))
+	outputPath := filepath.Join(workspace, "photo-imagemagick.jpg")
+	p.logger().Info("downloading source photo", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Int64("expected_size_bytes", jobContext.Media.FileSizeBytes))
+	if err := retry(ctx, p.Config.StageRetries, func() error { return p.Objects.DownloadFile(ctx, jobContext.Media.S3Key, sourcePath) }); err != nil {
+		return "", fmt.Errorf("download source photo: %w", err)
+	}
+	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "RUNNING", 0.20, "", "", ""); err != nil {
+		return "", err
+	}
+	p.logger().Info("starting photo ImageMagick preprocessing", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID))
+	if err := retry(ctx, p.Config.StageRetries, func() error { return p.Tools.NormalizePhoto(ctx, sourcePath, outputPath) }); err != nil {
+		return "", fmt.Errorf("normalize photo with ImageMagick: %w", err)
+	}
+	frame, err := InspectFrame(outputPath)
+	if err != nil {
+		return "", fmt.Errorf("inspect normalized photo: %w", err)
+	}
+	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "RUNNING", 0.70, "", "", ""); err != nil {
+		return "", err
+	}
+	artifactKey := photoArtifactPrefix(jobContext.Job.UserID, jobContext.Project.ID, jobContext.Media.ID, version, sourceETag) + "/photo.jpg"
+	if err := retry(ctx, p.Config.StageRetries, func() error { return p.Objects.UploadFile(ctx, artifactKey, outputPath, "image/jpeg") }); err != nil {
+		return "", fmt.Errorf("upload normalized photo: %w", err)
+	}
+	metadata := domain.VideoMetadata{Width: jobContext.Media.PixelWidth, Height: jobContext.Media.PixelHeight, FileSizeBytes: jobContext.Media.FileSizeBytes, FormatName: "still-image"}
+	quality := domain.QualitySignals{OverallScore: frame.QualityScore, AverageSharpness: frame.Sharpness, AverageBrightness: frame.Brightness, LikelyStatic: true}
+	artifact := domain.PreprocessingArtifact{
+		ID: domain.NewID("preprocessing"), UserID: jobContext.Job.UserID, ProjectID: jobContext.Project.ID,
+		MediaID: jobContext.Media.ID, AnalysisVersion: version, SourceETag: sourceETag, EvidenceS3Key: artifactKey,
+		FrameCount: 1, Metadata: metadata, Quality: quality, CreatedAt: p.now().UTC(),
+	}
+	if _, err := p.Repository.SavePreprocessing(ctx, artifact); err != nil {
+		return "", err
+	}
+	p.logger().Info("photo ImageMagick preprocessing ready", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.String("artifact_s3_key", artifactKey), slog.Float64("quality_score", frame.QualityScore))
+	return artifactKey, nil
+}
+
+func (p *Processor) completePhotoJob(ctx context.Context, job domain.ProcessingJob, artifactS3Key, artifactContentType string) error {
+	if p.Completion == nil {
+		return fmt.Errorf("backend completion callback is required")
+	}
+	if err := p.Completion.CompleteJob(ctx, job, artifactS3Key, artifactContentType); err != nil {
+		p.logger().Error("complete photo job callback failed", slog.String("job_id", job.ID), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID), slog.Any("error", err))
+		return err
+	}
+	p.logger().Info("completed photo job through backend callback", slog.String("job_id", job.ID), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID), slog.String("artifact_s3_key", artifactS3Key))
+	return nil
 }
 
 func (p *Processor) cachedAnalysisUsable(ctx context.Context, analysis domain.VideoAnalysis, jobContext domain.JobContext, sourceETag string) bool {
@@ -218,7 +326,7 @@ func (p *Processor) completeJob(ctx context.Context, job domain.ProcessingJob, a
 	if p.Completion == nil {
 		return fmt.Errorf("backend completion callback is required")
 	}
-	if err := p.Completion.CompleteJob(ctx, job, artifactS3Key); err != nil {
+	if err := p.Completion.CompleteJob(ctx, job, artifactS3Key, "application/json"); err != nil {
 		p.logger().Error("complete video job callback failed", slog.String("job_id", job.ID), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID), slog.Any("error", err))
 		return err
 	}
@@ -499,6 +607,11 @@ func artifactPrefix(userID, projectID, mediaID, version, sourceETag string) stri
 	return fmt.Sprintf("users/%s/projects/%s/video-analysis/%s/%s/%s", safeComponent(userID), safeComponent(projectID), safeComponent(mediaID), safeComponent(version), hex.EncodeToString(hash[:8]))
 }
 
+func photoArtifactPrefix(userID, projectID, mediaID, version, sourceETag string) string {
+	hash := sha256.Sum256([]byte(sourceETag))
+	return fmt.Sprintf("users/%s/projects/%s/photo-preprocess/%s/%s/%s", safeComponent(userID), safeComponent(projectID), safeComponent(mediaID), safeComponent(version), hex.EncodeToString(hash[:8]))
+}
+
 func safeComponent(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -516,11 +629,30 @@ func safeComponent(value string) string {
 }
 
 func sourceExtension(fileName string) string {
+	return sourceExtensionOr(fileName, ".mov")
+}
+
+func sourceExtensionOr(fileName, fallback string) string {
 	extension := strings.ToLower(filepath.Ext(fileName))
 	if len(extension) > 10 || extension == "" {
-		return ".mov"
+		return fallback
 	}
 	return extension
+}
+
+func isSupportedMediaType(mediaType string) bool {
+	return mediaType == "video" || isPhotoMediaType(mediaType)
+}
+
+func isPhotoMediaType(mediaType string) bool {
+	return mediaType == "photo" || mediaType == "live_photo" || mediaType == "image"
+}
+
+func photoContentType(media domain.MediaAsset) string {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(media.ContentType)), "image/") {
+		return media.ContentType
+	}
+	return "image/jpeg"
 }
 
 func parseBool(value string) bool {

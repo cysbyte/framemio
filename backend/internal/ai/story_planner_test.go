@@ -11,6 +11,15 @@ import (
 	"github.com/framemio/backend/internal/models"
 )
 
+type capturingTypographyPlanner struct {
+	input TypographyPlanningInput
+}
+
+func (planner *capturingTypographyPlanner) Generate(_ context.Context, input TypographyPlanningInput) (TypographyPlan, error) {
+	planner.input = input
+	return TypographyPlan{Overlays: map[string]models.TextOverlay{}}, nil
+}
+
 func TestPlannerBuildsChronologicalCoherentStoryPlan(t *testing.T) {
 	t.Parallel()
 	planner := &Planner{Now: func() time.Time { return time.Date(2026, time.August, 21, 12, 0, 0, 0, time.UTC) }}
@@ -262,6 +271,57 @@ func TestPlannerUsesTranscriptTextForVideoCaptions(t *testing.T) {
 	}
 	if plan.Moments[0].Caption != "Family laughing near the lake" || plan.Moments[0].Narrative != "Family laughing near the lake" {
 		t.Fatalf("expected visual story prose to remain separate from subtitles, got %+v", plan.Moments[0])
+	}
+}
+
+func TestPlannerPassesPhotoAndStoryContextToTypographyPlanner(t *testing.T) {
+	t.Parallel()
+	takenAt := time.Date(2026, time.August, 25, 19, 30, 0, 0, time.FixedZone("PDT", -7*60*60))
+	capturing := &capturingTypographyPlanner{}
+	_, err := (&Planner{TypographyPlanner: capturing, Now: func() time.Time { return time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC) }}).Plan(context.Background(), Request{
+		ProjectID:        "project-typography-context",
+		DesiredDuration:  12 * time.Second,
+		StoryType:        models.StoryTypeTrip,
+		VisualStyle:      models.VisualStyleCinematic,
+		UserInstructions: "keep it reflective",
+		SelectedMediaIDs: []string{"video-before", "photo-sunset", "video-after"},
+		PhotoAnalyses: []models.PhotoAnalysis{{
+			ID: "photo-analysis-sunset", PhotoID: "photo-sunset", ProjectID: "project-typography-context", AnalysisVersion: "photo-v1",
+			TimestampMicros: 2_000_000, TakenAt: &takenAt, Location: "Santa Cruz", Caption: "Person near the ocean at sunset", Description: "Golden evening by the water",
+			Labels: []string{"person", "ocean", "sunset", "sky", "sand", "person"}, People: []string{"Alex", "Alex", ""},
+			MemoryValue: 0.94, EmotionalValue: 0.9, VisualQuality: 0.88, StoryRelevance: 0.95, ClusterID: "cluster-beach", Selected: true,
+		}},
+		VideoAnalyses: []models.VideoAnalysis{
+			{ID: "video-analysis-before", VideoID: "video-before", ProjectID: "project-typography-context", AnalysisVersion: "video-v1", DurationMicros: 5_000_000, QualitySignals: models.VideoQualitySignals{OverallScore: 0.8}, Segments: []models.VideoSegment{{SegmentID: "segment-before", SceneID: "scene-before", StartMicros: 0, EndMicros: 3_000_000, Description: "Arrival at the beach", Importance: 0.85, VisualQuality: 0.8, MemoryValue: 0.85, EmotionalValue: 0.82, StoryRelevance: 0.84, Recommended: true}}},
+			{ID: "video-analysis-after", VideoID: "video-after", ProjectID: "project-typography-context", AnalysisVersion: "video-v1", DurationMicros: 7_000_000, QualitySignals: models.VideoQualitySignals{OverallScore: 0.8}, Segments: []models.VideoSegment{{SegmentID: "segment-after", SceneID: "scene-after", StartMicros: 0, EndMicros: 3_500_000, Description: "Dinner with friends", Importance: 0.83, VisualQuality: 0.82, MemoryValue: 0.84, EmotionalValue: 0.8, StoryRelevance: 0.83, Recommended: true}}},
+		},
+		MediaClusters: []models.MediaCluster{{ID: "cluster-beach", ProjectID: "project-typography-context", Label: "beach evening", Location: "Santa Cruz", MediaIDs: []string{"photo-sunset"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if capturing.input.ProjectID != "project-typography-context" || capturing.input.StoryTitle == "" || capturing.input.UserInstructions != "keep it reflective" {
+		t.Fatalf("missing story context: %+v", capturing.input)
+	}
+	var photoContext TypographyMomentContext
+	for _, moment := range capturing.input.Moments {
+		if moment.AssetID == "photo-sunset" {
+			photoContext = moment
+			break
+		}
+	}
+	if photoContext.MomentID == "" {
+		t.Fatalf("photo moment context missing: %+v", capturing.input.Moments)
+	}
+	if photoContext.Location != "Santa Cruz" || photoContext.TakenAt != takenAt.UTC().Format(time.RFC3339) || photoContext.ClusterLabel != "beach evening" {
+		t.Fatalf("photo metadata not passed to typography planner: %+v", photoContext)
+	}
+	if !slices.Equal(photoContext.Labels, []string{"person", "ocean", "sunset", "sky", "sand"}) || !slices.Equal(photoContext.People, []string{"Alex"}) {
+		t.Fatalf("photo semantic labels not normalized: %+v", photoContext)
+	}
+	neighborContext := photoContext.PreviousNarrative + " " + photoContext.NextNarrative
+	if !strings.Contains(neighborContext, "Arrival") && !strings.Contains(neighborContext, "Dinner") {
+		t.Fatalf("neighbor story context missing: %+v", photoContext)
 	}
 }
 

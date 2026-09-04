@@ -841,6 +841,12 @@ func (s *Server) getRenderInput(response http.ResponseWriter, request *http.Requ
 		s.writeError(response, http.StatusConflict, "story_plan_version_mismatch", "render job targets a different story plan version")
 		return
 	}
+	jobs, err := s.Store.ListProjectJobs(request.Context(), job.UserID, job.ProjectID)
+	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	photoArtifacts := completedPhotoPreprocessArtifacts(jobs)
 	mediaIDs := renderInputMediaIDs(project.MediaIDs, plan)
 	assets := make([]renderInputMediaAsset, 0, len(mediaIDs))
 	for _, mediaID := range mediaIDs {
@@ -849,11 +855,17 @@ func (s *Server) getRenderInput(response http.ResponseWriter, request *http.Requ
 			s.mapStoreError(response, err)
 			return
 		}
+		s3Key := media.S3Key
+		contentType := media.ContentType
+		if artifact, ok := photoArtifacts[media.ID]; ok && isRenderPhotoType(media.Type) {
+			s3Key = artifact.ArtifactS3Key
+			contentType = renderPhotoArtifactContentType(artifact.ArtifactType)
+		}
 		assets = append(assets, renderInputMediaAsset{
 			ID:              media.ID,
 			MediaType:       media.Type,
-			S3Key:           media.S3Key,
-			ContentType:     media.ContentType,
+			S3Key:           s3Key,
+			ContentType:     contentType,
 			DurationSeconds: media.DurationSeconds,
 			Width:           media.PixelWidth,
 			Height:          media.PixelHeight,
@@ -873,6 +885,28 @@ func (s *Server) getRenderInput(response http.ResponseWriter, request *http.Requ
 		MediaAssets: assets,
 		OutputS3Key: outputKey,
 	})
+}
+
+func completedPhotoPreprocessArtifacts(jobs []models.ProcessingJob) map[string]models.ProcessingJob {
+	artifacts := make(map[string]models.ProcessingJob)
+	for _, job := range jobs {
+		if job.Type != models.JobTypeMediaPreprocess || job.Status != models.JobStatusCompleted || strings.TrimSpace(job.MediaID) == "" || strings.TrimSpace(job.ArtifactS3Key) == "" {
+			continue
+		}
+		artifacts[job.MediaID] = job
+	}
+	return artifacts
+}
+
+func isRenderPhotoType(mediaType models.MediaType) bool {
+	return mediaType == models.MediaTypePhoto || mediaType == models.MediaTypeLivePhoto
+}
+
+func renderPhotoArtifactContentType(contentType string) string {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "image/") {
+		return contentType
+	}
+	return "image/jpeg"
 }
 
 func renderInputMediaIDs(projectMediaIDs []string, plan models.StoryPlan) []string {

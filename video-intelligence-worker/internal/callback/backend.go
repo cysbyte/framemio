@@ -26,16 +26,19 @@ type completionRequest struct {
 	ArtifactContentType string  `json:"artifact_content_type,omitempty"`
 }
 
-func (r BackendReporter) CompleteJob(ctx context.Context, job domain.ProcessingJob, artifactS3Key string) error {
+func (r BackendReporter) CompleteJob(ctx context.Context, job domain.ProcessingJob, artifactS3Key, artifactContentType string) error {
 	baseURL := strings.TrimRight(strings.TrimSpace(r.BaseURL), "/")
 	if baseURL == "" || strings.TrimSpace(r.InternalToken) == "" {
 		return fmt.Errorf("backend callback requires base url and internal token")
+	}
+	if strings.TrimSpace(artifactContentType) == "" {
+		artifactContentType = "application/json"
 	}
 	body, err := json.Marshal(completionRequest{
 		Status:              "COMPLETED",
 		Progress:            1,
 		ArtifactS3Key:       artifactS3Key,
-		ArtifactContentType: "application/json",
+		ArtifactContentType: artifactContentType,
 	})
 	if err != nil {
 		return err

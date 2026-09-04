@@ -728,16 +728,7 @@ final class StoryPreviewViewModel: ObservableObject {
     }
 
     nonisolated private static func importProgressValue(for progress: MediaUploadProgress) -> Double {
-        guard progress.totalUploads > 0 else { return 0.42 }
-        let currentUploadFraction: Double
-        if progress.totalBytes > 0 {
-            currentUploadFraction = min(1, max(0, Double(progress.uploadedBytes) / Double(progress.totalBytes)))
-        } else {
-            currentUploadFraction = 0
-        }
-        let completedUploads = max(0, progress.completedUploads - (currentUploadFraction >= 1 ? 1 : 0))
-        let uploadFraction = min(1, max(0, (Double(completedUploads) + currentUploadFraction) / Double(progress.totalUploads)))
-        return 0.28 + uploadFraction * 0.56
+        0.28 + progress.fractionCompleted * 0.56
     }
 
     private func assetsForPickedItems(_ items: [PhotosPickerItem]) async throws -> [StagedStoryImport] {

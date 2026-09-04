@@ -71,7 +71,7 @@ enum FrameMioProPlanKind: String, CaseIterable, Identifiable, Sendable {
     var savingsBadge: String? {
         switch self {
         case .yearly:
-            "Save 33%"
+            "Save 25%"
         case .monthly:
             nil
         }
@@ -554,8 +554,8 @@ struct FrameMioProView: View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
             SectionHeader(title: "Choose your plan", subtitle: "Cancel anytime in App Store settings")
             VStack(spacing: FrameMioSpacing.md) {
-                planCard(for: .yearly, cardWidth: cardWidth)
                 planCard(for: .monthly, cardWidth: cardWidth)
+                planCard(for: .yearly, cardWidth: cardWidth)
             }
         }
     }
