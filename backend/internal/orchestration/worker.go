@@ -176,6 +176,13 @@ func (w *Worker) handleReceived(ctx context.Context, received queue.ReceivedJobM
 		return true, err
 	}
 	if _, err := w.Coordinator.UpdateJobStatus(ctx, job.ID, models.JobStatusRunning, job.Progress, "", "", "", ""); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			logger(w).Warn("orchestration worker deleting stale message after running update rejected", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID), slog.Int("receive_count", received.ApproximateReceiveCount), slog.Any("error", err))
+			if deleteErr := w.Consumer.Delete(ctx, received.ReceiptHandle); deleteErr != nil {
+				return true, deleteErr
+			}
+			return true, nil
+		}
 		return true, err
 	}
 	if err := w.Consumer.ExtendVisibility(ctx, received.ReceiptHandle, visibilityTimeout); err != nil {
@@ -186,6 +193,13 @@ func (w *Worker) handleReceived(ctx context.Context, received queue.ReceivedJobM
 		logger(w).Error("orchestration worker handler failed", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.Int("attempt", job.Attempt), slog.Int("receive_count", received.ApproximateReceiveCount), slog.Int64("duration_ms", time.Since(handlerStarted).Milliseconds()), slog.Any("error", err))
 		_, updateErr := w.Coordinator.UpdateJobStatus(ctx, job.ID, models.JobStatusFailed, job.Progress, "handler_failed", err.Error(), "", "")
 		if updateErr != nil {
+			if errors.Is(updateErr, store.ErrNotFound) {
+				logger(w).Warn("orchestration worker deleting stale failed message after status update rejected", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID), slog.Int("receive_count", received.ApproximateReceiveCount), slog.Any("error", updateErr))
+				if deleteErr := w.Consumer.Delete(ctx, received.ReceiptHandle); deleteErr != nil {
+					return true, deleteErr
+				}
+				return true, nil
+			}
 			return true, updateErr
 		}
 		if deleteErr := w.Consumer.Delete(ctx, received.ReceiptHandle); deleteErr != nil {
@@ -195,6 +209,13 @@ func (w *Worker) handleReceived(ctx context.Context, received queue.ReceivedJobM
 	}
 	logger(w).Info("orchestration worker handler completed", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.Int("attempt", job.Attempt), slog.Int64("duration_ms", time.Since(handlerStarted).Milliseconds()))
 	if _, err := w.Coordinator.UpdateJobStatus(ctx, job.ID, models.JobStatusCompleted, 1, "", "", job.ArtifactS3Key, job.ArtifactType); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			logger(w).Warn("orchestration worker deleting stale completed message after status update rejected", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID), slog.Int("receive_count", received.ApproximateReceiveCount), slog.Any("error", err))
+			if deleteErr := w.Consumer.Delete(ctx, received.ReceiptHandle); deleteErr != nil {
+				return true, deleteErr
+			}
+			return true, nil
+		}
 		return true, err
 	}
 	logger(w).Info("orchestration worker completed job", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID))

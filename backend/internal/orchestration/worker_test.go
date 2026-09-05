@@ -257,6 +257,39 @@ func TestWorkerRunOnceDeletesCurrentReceiptAfterSchedulingRetry(t *testing.T) {
 	}
 }
 
+func TestWorkerRunOnceDeletesMessageWhenJobRemovedDuringHandler(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore, _, coordinator, project, _ := setupProject(t, models.MediaTypePhoto)
+	targetJob, _, err := memoryStore.CreateJob(ctx, models.ProcessingJob{ID: "job-deleted-during-handler", UserID: project.UserID, ProjectID: project.ID, Type: models.JobTypeStoryPlan, Status: models.JobStatusQueued, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}, "deleted-during-handler")
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer := &memoryConsumer{received: []queue.ReceivedJobMessage{
+		{Message: queue.JobMessage{JobID: targetJob.ID, ProjectID: project.ID, JobType: targetJob.Type}, ReceiptHandle: "receipt-deleted-during-handler", ApproximateReceiveCount: 1},
+	}}
+	worker := Worker{
+		Store:       memoryStore,
+		Consumer:    consumer,
+		Coordinator: coordinator,
+		Handlers: map[models.JobType]JobHandler{models.JobTypeStoryPlan: deletingHandler{
+			store:     memoryStore,
+			userID:    project.UserID,
+			projectID: project.ID,
+		}},
+		TargetJobID: targetJob.ID,
+	}
+	if err := worker.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(consumer.deleted) != 1 || consumer.deleted[0] != "receipt-deleted-during-handler" {
+		t.Fatalf("stale in-flight message should be deleted after handler returns: %+v", consumer.deleted)
+	}
+	if _, err := memoryStore.GetJobByID(ctx, targetJob.ID); err == nil {
+		t.Fatalf("job should have been deleted by handler")
+	}
+}
+
 func TestWorkerRunOnceProcessesRunningTargetWithInflatedReceiveCount(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -331,3 +364,13 @@ func TestWorkerRunOnceFailsRunningOverReceivedJobAndMarksProjectFailed(t *testin
 type noopHandler struct{}
 
 func (noopHandler) HandleJob(context.Context, models.ProcessingJob) error { return nil }
+
+type deletingHandler struct {
+	store     interface{ DeleteProject(context.Context, string, string) error }
+	userID    string
+	projectID string
+}
+
+func (h deletingHandler) HandleJob(ctx context.Context, _ models.ProcessingJob) error {
+	return h.store.DeleteProject(ctx, h.userID, h.projectID)
+}
