@@ -14,6 +14,7 @@ import (
 
 	"github.com/framemio/backend/internal/credits"
 	"github.com/framemio/backend/internal/models"
+	"github.com/framemio/backend/internal/queue"
 	"github.com/framemio/backend/internal/store"
 )
 
@@ -137,6 +138,29 @@ func (s *Server) deleteIOSStory(response http.ResponseWriter, request *http.Requ
 	if storyID == "" {
 		s.writeError(response, http.StatusBadRequest, "invalid_story", "story id is required")
 		return
+	}
+	jobs, err := s.Store.ListProjectJobs(request.Context(), user.ID, storyID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		s.mapStoreError(response, err)
+		return
+	}
+	activeJobIDs := make([]string, 0, len(jobs))
+	for _, job := range jobs {
+		if models.IsTerminalJobStatus(job.Status) {
+			continue
+		}
+		activeJobIDs = append(activeJobIDs, job.ID)
+		if _, err := s.Store.UpdateJob(request.Context(), job.ID, models.JobStatusCancelled, job.Progress, "story_deleted", "story was deleted by user", job.ArtifactS3Key, job.ArtifactType); err != nil && !errors.Is(err, store.ErrConflict) && !errors.Is(err, store.ErrNotFound) {
+			s.Logger.Warn("cancel story job before delete failed", "user_id", user.ID, "project_id", storyID, "job_id", job.ID, "job_type", string(job.Type), "error", err)
+		}
+	}
+	if cleaner, ok := s.Publisher.(queue.ProjectMessageCleaner); ok && len(activeJobIDs) > 0 {
+		deleted, err := cleaner.DeleteProjectMessages(request.Context(), storyID, activeJobIDs, 100)
+		if err != nil {
+			s.Logger.Warn("delete story queue messages failed", "user_id", user.ID, "project_id", storyID, "active_job_count", len(activeJobIDs), "error", err)
+		} else {
+			s.Logger.Info("deleted story queue messages", "user_id", user.ID, "project_id", storyID, "active_job_count", len(activeJobIDs), "deleted_message_count", deleted)
+		}
 	}
 	if err := s.Store.DeleteProject(request.Context(), user.ID, storyID); err != nil {
 		s.mapStoreError(response, err)

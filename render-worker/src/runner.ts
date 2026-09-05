@@ -2,15 +2,16 @@ import {setTimeout as sleep} from 'node:timers/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {AwsCliQueue, type ReceivedJobMessage} from './aws-cli.js';
-import {BackendClient} from './backend-client.js';
+import {BackendClient, isBackendRequestError} from './backend-client.js';
 import {ShellFfmpegClient} from './ffmpeg/client.js';
 import {FfmpegCompositionRenderer, RemotionCliRenderer} from './remotion/renderer.js';
 import {AwsCliObjectStore} from './storage/object-store.js';
 import {DeterministicRenderWorker} from './pipeline/render-worker.js';
+import type {RenderInput} from './types.js';
 
 const unsupportedMessageVisibilitySeconds = 1;
 
-interface RunnerConfig {
+export interface RunnerConfig {
   queueURL: string;
   backendURL: string;
   internalToken: string;
@@ -98,14 +99,46 @@ function installShutdownHandler(): {requested: boolean; dispose: () => void} {
   };
 }
 
-async function handleMessage(received: ReceivedJobMessage, dependencies: {
-  queue: AwsCliQueue;
-  backend: BackendClient;
-  worker: DeterministicRenderWorker;
+interface RenderQueueClient {
+  delete(receiptHandle: string): Promise<void>;
+  defer(receiptHandle: string, visibilityTimeoutSeconds: number): Promise<void>;
+}
+
+interface RenderBackendClient {
+  jobStatus(jobID: string): Promise<{status: string} | null>;
+  markRunning(jobID: string, progress?: number): Promise<void>;
+  renderInput(jobID: string): Promise<RenderInput>;
+  markCompleted(jobID: string, artifactS3Key: string): Promise<void>;
+  markFailed(jobID: string, error: unknown): Promise<void>;
+}
+
+interface RenderWorkerClient {
+  render(input: RenderInput): Promise<{record: {s3_key: string}}>;
+}
+
+export async function handleMessage(received: ReceivedJobMessage, dependencies: {
+  queue: RenderQueueClient;
+  backend: RenderBackendClient;
+  worker: RenderWorkerClient;
   config: RunnerConfig;
 }): Promise<boolean> {
   const {queue, backend, worker, config} = dependencies;
   const message = received.message;
+  try {
+    const status = await backend.jobStatus(message.jobId);
+    if (!status) {
+      console.warn(JSON.stringify({level: 'warn', msg: 'render worker deleting stale queue message', target_job_id: config.jobID ?? '', job_id: message.jobId, project_id: message.projectId, job_type: message.jobType, receive_count: received.receiveCount, reason: 'job_not_found'}));
+      await queue.delete(received.receiptHandle);
+      return true;
+    }
+    if (isTerminalJobStatus(status.status)) {
+      console.info(JSON.stringify({level: 'info', msg: 'render worker deleting terminal queue message', target_job_id: config.jobID ?? '', job_id: message.jobId, project_id: message.projectId, job_type: message.jobType, status: status.status, receive_count: received.receiveCount}));
+      await queue.delete(received.receiptHandle);
+      return true;
+    }
+  } catch (error) {
+    console.warn(JSON.stringify({level: 'warn', msg: 'render worker job status preflight failed', target_job_id: config.jobID ?? '', job_id: message.jobId, project_id: message.projectId, job_type: message.jobType, receive_count: received.receiveCount, error: error instanceof Error ? error.message : String(error)}));
+  }
   if (message.jobType !== 'VIDEO_RENDER') {
     console.info(JSON.stringify({level: 'info', msg: 'render worker deferring non-render message', target_job_id: config.jobID ?? '', job_id: message.jobId, project_id: message.projectId, job_type: message.jobType, receive_count: received.receiveCount, defer_seconds: unsupportedMessageVisibilitySeconds}));
     await queue.defer(received.receiptHandle, unsupportedMessageVisibilitySeconds);
@@ -137,10 +170,25 @@ async function handleMessage(received: ReceivedJobMessage, dependencies: {
     return true;
   } catch (error) {
     console.error(JSON.stringify({level: 'error', msg: 'render message failed', job_id: message.jobId, duration_ms: Date.now() - startedAt, error: error instanceof Error ? error.message : String(error)}));
-    await backend.markFailed(message.jobId, error);
+    try {
+      await backend.markFailed(message.jobId, error);
+    } catch (markFailedError) {
+      if (!isIgnorableTerminalCallbackError(markFailedError)) {
+        throw markFailedError;
+      }
+      console.warn(JSON.stringify({level: 'warn', msg: 'render worker deleting stale failed message after callback rejection', job_id: message.jobId, project_id: message.projectId, receive_count: received.receiveCount, error: markFailedError instanceof Error ? markFailedError.message : String(markFailedError)}));
+    }
     await queue.delete(received.receiptHandle);
     return true;
   }
+}
+
+function isTerminalJobStatus(status: string): boolean {
+  return status === 'COMPLETED' || status === 'FAILED' || status === 'CANCELLED';
+}
+
+function isIgnorableTerminalCallbackError(error: unknown): boolean {
+  return isBackendRequestError(error) && (error.status === 404 || error.status === 409);
 }
 
 export function loadConfig(environment = process.env): RunnerConfig {

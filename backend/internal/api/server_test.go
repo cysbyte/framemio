@@ -196,6 +196,16 @@ func TestMediaProjectAndJobFlowIsIdempotent(t *testing.T) {
 	}
 	assertSmallIdentifierOnlyMessage(t, publisher.Messages()[1])
 
+	internalStatus := performJSON(t, handler, http.MethodGet, "/internal/jobs/"+renderJobs.JobID+"/status", nil, "", false, map[string]string{"X-FrameMio-Internal-Token": testInternalToken})
+	if internalStatus.Code != http.StatusOK {
+		t.Fatalf("internal job status = %d, body = %s", internalStatus.Code, internalStatus.Body.String())
+	}
+	var internalJobStatus internalJobStatusResponse
+	decodeResponse(t, internalStatus, &internalJobStatus)
+	if internalJobStatus.JobID != renderJobs.JobID || internalJobStatus.JobType != models.JobTypeVideoRender || internalJobStatus.Status != models.JobStatusQueued {
+		t.Fatalf("unexpected internal job status: %+v", internalJobStatus)
+	}
+
 	renderStatus := performJSON(t, handler, http.MethodPost, "/internal/jobs/"+renderJobs.JobID+"/status", map[string]any{
 		"status":                "succeeded",
 		"progress":              1,
@@ -592,10 +602,16 @@ func TestIOSStoriesCompatibilityDeletesStory(t *testing.T) {
 	}
 	var story iosStory
 	decodeResponse(t, storyResponse, &story)
+	if messages := publisher.Messages(); len(messages) != 1 || messages[0].ProjectID != story.ID {
+		t.Fatalf("expected one queued story message before delete, got %+v", messages)
+	}
 
 	deleteResponse := performJSON(t, handler, http.MethodDelete, "/v1/stories/"+story.ID, nil, "", true, nil)
 	if deleteResponse.Code != http.StatusOK {
 		t.Fatalf("delete iOS story status = %d, body = %s", deleteResponse.Code, deleteResponse.Body.String())
+	}
+	if messages := publisher.Messages(); len(messages) != 0 {
+		t.Fatalf("expected delete to remove queued story messages, got %+v", messages)
 	}
 
 	getResponse := performJSON(t, handler, http.MethodGet, "/v1/stories/"+story.ID, nil, "", true, nil)

@@ -1,5 +1,30 @@
 import type {RenderInput} from './types.js';
 
+export interface JobStatusResponse {
+  job_id: string;
+  job_type: string;
+  status: string;
+  project_id: string;
+  media_id?: string;
+  attempt: number;
+}
+
+export class BackendRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly method: string,
+    readonly path: string,
+  ) {
+    super(message);
+    this.name = 'BackendRequestError';
+  }
+}
+
+export function isBackendRequestError(error: unknown): error is BackendRequestError {
+  return error instanceof BackendRequestError;
+}
+
 interface StatusRequest {
   status: 'RUNNING' | 'COMPLETED' | 'FAILED';
   progress: number;
@@ -19,6 +44,14 @@ export class BackendClient {
   async renderInput(jobID: string): Promise<RenderInput> {
     const response = await this.request(`/internal/jobs/${encodeURIComponent(jobID)}/render-input`, {method: 'GET'});
     return await response.json() as RenderInput;
+  }
+
+  async jobStatus(jobID: string): Promise<JobStatusResponse | null> {
+    const response = await this.request(`/internal/jobs/${encodeURIComponent(jobID)}/status`, {method: 'GET'}, [404]);
+    if (response.status === 404) {
+      return null;
+    }
+    return await response.json() as JobStatusResponse;
   }
 
   async markRunning(jobID: string, progress = 0.05): Promise<void> {
@@ -51,7 +84,7 @@ export class BackendClient {
     });
   }
 
-  private async request(path: string, init: RequestInit): Promise<Response> {
+  private async request(path: string, init: RequestInit, allowedStatuses: number[] = []): Promise<Response> {
     if (!this.baseURL || !this.internalToken.trim()) {
       throw new Error('backend url and internal token are required');
     }
@@ -62,9 +95,9 @@ export class BackendClient {
         'X-FrameMio-Internal-Token': this.internalToken,
       },
     });
-    if (!response.ok) {
+    if (!response.ok && !allowedStatuses.includes(response.status)) {
       const text = await response.text();
-      throw new Error(`backend ${init.method ?? 'GET'} ${path} returned ${response.status}: ${text.slice(0, 500)}`);
+      throw new BackendRequestError(`backend ${init.method ?? 'GET'} ${path} returned ${response.status}: ${text.slice(0, 500)}`, response.status, init.method ?? 'GET', path);
     }
     return response;
   }

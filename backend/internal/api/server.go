@@ -89,6 +89,10 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 	if strings.HasPrefix(request.URL.Path, "/internal/jobs/") {
 		parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
 		if len(parts) == 4 {
+			if request.Method == http.MethodGet && parts[3] == "status" {
+				s.getInternalJobStatus(response, request, parts[2])
+				return
+			}
 			if request.Method == http.MethodGet && parts[3] == "render-input" {
 				s.getRenderInput(response, request, parts[2])
 				return
@@ -948,6 +952,27 @@ type updateJobStatusRequest struct {
 	ErrorMessage        string           `json:"error_message,omitempty"`
 	ArtifactS3Key       string           `json:"artifact_s3_key,omitempty"`
 	ArtifactContentType string           `json:"artifact_content_type,omitempty"`
+}
+
+type internalJobStatusResponse struct {
+	JobID     string           `json:"job_id"`
+	JobType   models.JobType   `json:"job_type"`
+	Status    models.JobStatus `json:"status"`
+	ProjectID string           `json:"project_id"`
+	MediaID   string           `json:"media_id,omitempty"`
+	Attempt   int              `json:"attempt"`
+}
+
+func (s *Server) getInternalJobStatus(response http.ResponseWriter, request *http.Request, jobID string) {
+	if !s.authenticateInternal(response, request) {
+		return
+	}
+	job, err := s.Store.GetJobByID(request.Context(), jobID)
+	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	s.writeJSON(response, http.StatusOK, internalJobStatusResponse{JobID: job.ID, JobType: job.Type, Status: job.Status, ProjectID: job.ProjectID, MediaID: job.MediaID, Attempt: job.Attempt})
 }
 
 func (s *Server) updateJobStatus(response http.ResponseWriter, request *http.Request, jobID string) {
