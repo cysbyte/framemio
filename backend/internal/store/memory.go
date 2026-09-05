@@ -388,6 +388,26 @@ func (s *MemoryStore) CreateJob(_ context.Context, job models.ProcessingJob, ide
 	return job, false, nil
 }
 
+func (s *MemoryStore) GetJobByIdempotency(_ context.Context, userID, idempotencyKey string) (models.ProcessingJob, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return models.ProcessingJob{}, ErrNotFound
+	}
+	existingID, ok := s.jobByIdem[userID+"\x00"+idempotencyKey]
+	if !ok {
+		return models.ProcessingJob{}, ErrNotFound
+	}
+	job, ok := s.jobs[existingID]
+	if !ok {
+		return models.ProcessingJob{}, ErrNotFound
+	}
+	if job.UserID != userID {
+		return models.ProcessingJob{}, ErrInvalidOwner
+	}
+	return job, nil
+}
+
 func (s *MemoryStore) GetJob(_ context.Context, userID, jobID string) (models.ProcessingJob, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -610,6 +630,23 @@ func (s *MemoryStore) GetStoryPlan(_ context.Context, userID, projectID string) 
 		}
 	}
 	if !found {
+		return models.StoryPlan{}, ErrNotFound
+	}
+	return plan, nil
+}
+
+func (s *MemoryStore) GetStoryPlanVersion(_ context.Context, userID, projectID string, version int) (models.StoryPlan, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	project, ok := s.projects[projectID]
+	if !ok {
+		return models.StoryPlan{}, ErrNotFound
+	}
+	if project.UserID != userID {
+		return models.StoryPlan{}, ErrInvalidOwner
+	}
+	plan, ok := s.storyPlans[projectID+"\x00"+strconv.Itoa(version)]
+	if !ok {
 		return models.StoryPlan{}, ErrNotFound
 	}
 	return plan, nil

@@ -34,6 +34,7 @@ type iosStory struct {
 	ProgressTitle    string           `json:"progressTitle,omitempty"`
 	ProgressDetail   string           `json:"progressDetail,omitempty"`
 	ProgressValue    *float64         `json:"progressValue,omitempty"`
+	StoryPlanVersion int              `json:"storyPlanVersion,omitempty"`
 	Moments          []iosStoryMoment `json:"moments,omitempty"`
 	AvailableMoments []iosStoryMoment `json:"availableMoments,omitempty"`
 }
@@ -69,6 +70,7 @@ type iosStoryEditRequest struct {
 	SubtitleStyle    string                  `json:"subtitleStyle,omitempty"`
 	TargetDuration   float64                 `json:"targetDuration,omitempty"`
 	Instruction      string                  `json:"instruction,omitempty"`
+	BaseVersion      int                     `json:"baseVersion,omitempty"`
 }
 
 type iosStoryMomentReplace struct {
@@ -162,6 +164,18 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		s.mapStoreError(response, err)
 		return
 	}
+	if strings.TrimSpace(input.Instruction) != "" && input.BaseVersion <= 0 {
+		s.writeError(response, http.StatusBadRequest, "base_version_required", "baseVersion is required for AI story revisions")
+		return
+	}
+	if existing, replayed := s.replayedIOSStoryRevision(request, user.ID, project.ID); replayed {
+		s.Logger.Info("story_revision_requested", "user_id", user.ID, "project_id", project.ID, "job_id", existing.ID, "status", string(existing.Status), "replayed", true)
+		s.writeJSON(response, http.StatusAccepted, s.makeIOSStory(request, user.ID, project))
+		return
+	}
+	if !s.verifyIOSStoryBaseVersion(response, request, user.ID, project.ID, input.BaseVersion) {
+		return
+	}
 	newMediaIDs := s.newIOSStoryEditMediaIDs(project, input)
 	s.Logger.Info("trace iOS story edit media request",
 		"user_id", user.ID,
@@ -205,6 +219,7 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		"subtitle_style", normalizeIOSSubtitleStyle(input.SubtitleStyle),
 		"has_target_duration", input.TargetDuration > 0,
 		"has_instruction", strings.TrimSpace(input.Instruction) != "",
+		"base_version", input.BaseVersion,
 	)
 	if !s.allowExpensiveOperation(response, user.ID, "edit_ios_story") {
 		return
@@ -460,6 +475,41 @@ func (s *Server) regenerateIOSStory(response http.ResponseWriter, request *http.
 		return
 	}
 	s.writeJSON(response, http.StatusAccepted, s.makeIOSStory(request, user.ID, updated))
+}
+
+func (s *Server) replayedIOSStoryRevision(request *http.Request, userID, projectID string) (models.ProcessingJob, bool) {
+	key := strings.TrimSpace(request.Header.Get("Idempotency-Key"))
+	if key == "" {
+		return models.ProcessingJob{}, false
+	}
+	job, err := s.Store.GetJobByIdempotency(request.Context(), userID, projectID+":story_revision:"+key)
+	if err != nil {
+		return models.ProcessingJob{}, false
+	}
+	if job.ProjectID != projectID || job.Type != models.JobTypeStoryPlan || strings.TrimSpace(job.Configuration["edit_intent"]) == "" {
+		return models.ProcessingJob{}, false
+	}
+	return job, true
+}
+
+func (s *Server) verifyIOSStoryBaseVersion(response http.ResponseWriter, request *http.Request, userID, projectID string, baseVersion int) bool {
+	if baseVersion <= 0 {
+		return true
+	}
+	latest, err := s.Store.GetStoryPlan(request.Context(), userID, projectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			s.writeError(response, http.StatusConflict, "story_not_ready", "story plan is not ready for editing")
+			return false
+		}
+		s.mapStoreError(response, err)
+		return false
+	}
+	if latest.Version != baseVersion {
+		s.writeError(response, http.StatusConflict, "stale_story_plan_version", fmt.Sprintf("story plan version %d is no longer current", baseVersion))
+		return false
+	}
+	return true
 }
 
 func (s *Server) reserveIOSStoryCredits(response http.ResponseWriter, request *http.Request, userID string, action models.CreditAction, referenceID string, stats credits.StoryMediaStats, metadata map[string]any) (models.CreditReservation, bool) {
@@ -786,7 +836,11 @@ func (s *Server) iosStoryEditConfiguration(request *http.Request, userID string,
 		return nil, store.ErrConflict
 	}
 
-	version := latest.Version + 1
+	baseVersion := latest.Version
+	if input.BaseVersion > 0 {
+		baseVersion = input.BaseVersion
+	}
+	version := baseVersion + 1
 	if version <= 1 {
 		version = 1
 	}
@@ -796,8 +850,9 @@ func (s *Server) iosStoryEditConfiguration(request *http.Request, userID string,
 		return nil, err
 	}
 	config := map[string]string{
-		"story_plan_version": strconv.Itoa(version),
-		"selected_media_ids": strings.Join(selectedMediaIDs, ","),
+		"story_plan_version":      strconv.Itoa(version),
+		"base_story_plan_version": strconv.Itoa(baseVersion),
+		"selected_media_ids":      strings.Join(selectedMediaIDs, ","),
 	}
 	if len(preferredMediaOrder) > 0 {
 		config["preferred_media_order"] = strings.Join(preferredMediaOrder, ",")
@@ -825,6 +880,7 @@ func (s *Server) iosStoryEditConfiguration(request *http.Request, userID string,
 	}
 	if instruction := strings.TrimSpace(sanitizeIOSStoryText(input.Instruction)); instruction != "" {
 		config["user_instructions"] = truncateIOSConfigValue(instruction, 480)
+		config["revision_mode"] = "ai_story_plan_revision"
 	}
 	config["edit_intent"] = "ios_story_refinement"
 	return config, nil
@@ -1344,6 +1400,7 @@ func (s *Server) makeIOSStory(request *http.Request, userID string, project mode
 	}
 	videoAnalysesByMediaID := s.iosVideoAnalysesByMediaID(request, userID, project.ID)
 	if plan, err := s.Store.GetStoryPlan(request.Context(), userID, project.ID); err == nil {
+		story.StoryPlanVersion = plan.Version
 		if strings.TrimSpace(plan.TitleText) != "" {
 			story.Title = plan.TitleText
 		}

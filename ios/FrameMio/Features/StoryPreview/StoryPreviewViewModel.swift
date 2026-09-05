@@ -1005,12 +1005,13 @@ final class StoryPreviewViewModel: ObservableObject {
 
     func saveStoryEdits(_ request: StoryEditRequest) {
         guard let storyID, request.hasChanges, story?.status.shouldPoll != true else { return }
-        storyPreviewDebugLog("edit save requested story=\(storyID) add=\(request.addMediaIDs.joined(separator: ",")) remove_media=\(request.removeMediaIDs.joined(separator: ",")) remove_moments=\(request.removeMomentIDs.joined(separator: ",")) ordered=\(request.orderedMediaIDs.joined(separator: ",")) replace=\(request.replace.count) analyses=\(request.analyses.count) has_instruction=\(request.instruction?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) credit_actions=\(request.regenerationCreditActions.map(\.rawValue).joined(separator: ",")) required_credits=\(request.regenerationCreditCost)")
-        perform(.editStory, creditActions: request.regenerationCreditActions, mapResult: { [weak self] updatedStory in
-            self?.storyPreviewDebugLogEditResult(updatedStory, request: request)
-            return self?.storyWithPendingEdit(request, appliedTo: updatedStory) ?? updatedStory
+        let versionedRequest = request.withBaseVersion(story?.storyPlanVersion)
+        storyPreviewDebugLog("edit save requested story=\(storyID) base_version=\(versionedRequest.baseVersion.map(String.init) ?? "unset") add=\(versionedRequest.addMediaIDs.joined(separator: ",")) remove_media=\(versionedRequest.removeMediaIDs.joined(separator: ",")) remove_moments=\(versionedRequest.removeMomentIDs.joined(separator: ",")) ordered=\(versionedRequest.orderedMediaIDs.joined(separator: ",")) replace=\(versionedRequest.replace.count) analyses=\(versionedRequest.analyses.count) has_instruction=\(versionedRequest.instruction?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) credit_actions=\(versionedRequest.regenerationCreditActions.map(\.rawValue).joined(separator: ",")) required_credits=\(versionedRequest.regenerationCreditCost)")
+        perform(.editStory, creditActions: versionedRequest.regenerationCreditActions, mapResult: { [weak self] updatedStory in
+            self?.storyPreviewDebugLogEditResult(updatedStory, request: versionedRequest)
+            return self?.storyWithPendingEdit(versionedRequest, appliedTo: updatedStory) ?? updatedStory
         }) { [storyService] in
-            try await storyService.saveStoryEdits(storyID: storyID, request: request)
+            try await storyService.saveStoryEdits(storyID: storyID, request: versionedRequest)
         }
     }
 

@@ -519,6 +519,17 @@ func (s *PostgresStore) CreateJob(ctx context.Context, job models.ProcessingJob,
 	return job, false, nil
 }
 
+func (s *PostgresStore) GetJobByIdempotency(ctx context.Context, userID, idempotencyKey string) (models.ProcessingJob, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return models.ProcessingJob{}, ErrNotFound
+	}
+	var job models.ProcessingJob
+	if err := s.getByLogical(ctx, "job", userID, idempotencyKey, &job); err != nil {
+		return models.ProcessingJob{}, err
+	}
+	return job, nil
+}
+
 func (s *PostgresStore) GetJob(ctx context.Context, userID, jobID string) (models.ProcessingJob, error) {
 	var job models.ProcessingJob
 	if err := s.get(ctx, "job", userID, jobID, &job); err != nil {
@@ -796,7 +807,7 @@ func (s *PostgresStore) GetStoryPlan(ctx context.Context, userID, projectID stri
 	}
 	_ = project
 	var data []byte
-	if err := s.pool.QueryRow(ctx, `SELECT data FROM framemio_domain_records WHERE kind='story_plan' AND user_id=$1 AND project_id=$2 ORDER BY created_at DESC LIMIT 1`, userID, projectID).Scan(&data); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT data FROM framemio_domain_records WHERE kind='story_plan' AND user_id=$1 AND project_id=$2 ORDER BY (data->>'version')::int DESC, created_at DESC LIMIT 1`, userID, projectID).Scan(&data); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return models.StoryPlan{}, ErrNotFound
 		}
@@ -805,6 +816,20 @@ func (s *PostgresStore) GetStoryPlan(ctx context.Context, userID, projectID stri
 	var plan models.StoryPlan
 	if err := json.Unmarshal(data, &plan); err != nil {
 		return models.StoryPlan{}, fmt.Errorf("decode story plan: %w", err)
+	}
+	return plan, nil
+}
+
+func (s *PostgresStore) GetStoryPlanVersion(ctx context.Context, userID, projectID string, version int) (models.StoryPlan, error) {
+	if version <= 0 {
+		return models.StoryPlan{}, ErrNotFound
+	}
+	if _, err := s.GetProject(ctx, userID, projectID); err != nil {
+		return models.StoryPlan{}, err
+	}
+	var plan models.StoryPlan
+	if err := s.getByLogical(ctx, "story_plan", userID, fmt.Sprintf("%s:%d", projectID, version), &plan); err != nil {
+		return models.StoryPlan{}, err
 	}
 	return plan, nil
 }

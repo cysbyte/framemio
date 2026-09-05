@@ -140,6 +140,13 @@ type configuration struct {
 	TypographyWireAPI       string
 	TypographyMaxTokens     int
 	TypographyTimeout       time.Duration
+	StoryRevisionProvider   string
+	StoryRevisionBaseURL    string
+	StoryRevisionAPIKey     string
+	StoryRevisionModel      string
+	StoryRevisionWireAPI    string
+	StoryRevisionMaxTokens  int
+	StoryRevisionTimeout    time.Duration
 	WorkerRunOnce           bool
 	WorkerJobID             string
 	WorkerWaitTimeout       time.Duration
@@ -165,6 +172,13 @@ func loadConfiguration() (configuration, error) {
 		TypographyWireAPI:       environment("TYPOGRAPHY_WIRE_API", "responses"),
 		TypographyMaxTokens:     environmentInt("TYPOGRAPHY_MAX_OUTPUT_TOKENS", 1400),
 		TypographyTimeout:       environmentDuration("TYPOGRAPHY_TIMEOUT", 12*time.Second),
+		StoryRevisionProvider:   environment("STORY_REVISION_PROVIDER", "local"),
+		StoryRevisionBaseURL:    environment("STORY_REVISION_BASE_URL", os.Getenv("OPENAI_BASE_URL")),
+		StoryRevisionAPIKey:     environment("STORY_REVISION_API_KEY", os.Getenv("OPENAI_API_KEY")),
+		StoryRevisionModel:      os.Getenv("STORY_REVISION_MODEL"),
+		StoryRevisionWireAPI:    environment("STORY_REVISION_WIRE_API", "responses"),
+		StoryRevisionMaxTokens:  environmentInt("STORY_REVISION_MAX_OUTPUT_TOKENS", 6000),
+		StoryRevisionTimeout:    environmentDuration("STORY_REVISION_TIMEOUT", 30*time.Second),
 		WorkerRunOnce:           environmentBool("WORKER_RUN_ONCE", false),
 		WorkerJobID:             os.Getenv("JOB_ID"),
 		WorkerWaitTimeout:       environmentDuration("WORKER_RUN_ONCE_WAIT_TIMEOUT", 2*time.Minute),
@@ -215,12 +229,16 @@ func runWorkerOnce(ctx context.Context, database store.Store, coordinator *orche
 	if err != nil {
 		return err
 	}
+	revisionPlanner, err := configuredStoryRevisionPlanner(configuration, logger)
+	if err != nil {
+		return err
+	}
 	worker := orchestration.Worker{
 		Store:       database,
 		Consumer:    consumer,
 		Coordinator: coordinator,
 		Handlers: map[models.JobType]orchestration.JobHandler{
-			models.JobTypeStoryPlan: orchestration.StoryPlanHandler{Store: database, Planner: storyPlanner, Logger: logger},
+			models.JobTypeStoryPlan: orchestration.StoryPlanHandler{Store: database, Planner: storyPlanner, RevisionPlanner: revisionPlanner, Validator: coordinator.Validator, Logger: logger},
 		},
 		Logger:            logger,
 		TargetJobID:       configuration.WorkerJobID,
@@ -237,6 +255,25 @@ func configuredStoryPlanner(configuration configuration, logger *slog.Logger) (*
 		return nil, err
 	}
 	return &ai.Planner{TypographyPlanner: typographyPlanner, Logger: logger}, nil
+}
+
+func configuredStoryRevisionPlanner(configuration configuration, logger *slog.Logger) (ai.StoryRevisionPlanner, error) {
+	switch strings.ToLower(strings.TrimSpace(configuration.StoryRevisionProvider)) {
+	case "", "local", "default", "rules", "rule", "heuristic":
+		return ai.HeuristicStoryRevisionPlanner{Logger: logger}, nil
+	case "openai", "openai-compatible", "ai-gateway", "ai_gateway":
+		if strings.TrimSpace(configuration.StoryRevisionAPIKey) == "" {
+			return nil, errors.New("STORY_REVISION_API_KEY or OPENAI_API_KEY is required when STORY_REVISION_PROVIDER uses an external AI provider")
+		}
+		if strings.TrimSpace(configuration.StoryRevisionModel) == "" {
+			return nil, errors.New("STORY_REVISION_MODEL is required when STORY_REVISION_PROVIDER uses an external AI provider")
+		}
+		return ai.OpenAICompatibleStoryRevisionPlanner{BaseURL: configuration.StoryRevisionBaseURL, APIKey: configuration.StoryRevisionAPIKey, ModelName: configuration.StoryRevisionModel, ProviderName: configuration.StoryRevisionProvider, WireAPI: configuration.StoryRevisionWireAPI, MaxOutputTokens: configuration.StoryRevisionMaxTokens, Client: &http.Client{Timeout: configuration.StoryRevisionTimeout}}, nil
+	case "disabled", "off", "none":
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("unsupported STORY_REVISION_PROVIDER %q", configuration.StoryRevisionProvider)
+	}
 }
 
 func configuredTypographyPlanner(configuration configuration) (ai.TypographyPlanner, error) {

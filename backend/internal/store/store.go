@@ -33,6 +33,7 @@ type Store interface {
 	SetProjectStatus(ctx context.Context, userID, projectID string, status models.ProjectStatus) error
 	SetProjectCreditOperationKey(ctx context.Context, userID, projectID, creditOperationKey string) error
 	CreateJob(ctx context.Context, job models.ProcessingJob, idempotencyKey string) (models.ProcessingJob, bool, error)
+	GetJobByIdempotency(ctx context.Context, userID, idempotencyKey string) (models.ProcessingJob, error)
 	GetJob(ctx context.Context, userID, jobID string) (models.ProcessingJob, error)
 	GetJobByID(ctx context.Context, jobID string) (models.ProcessingJob, error)
 	UpdateJob(ctx context.Context, jobID string, status models.JobStatus, progress float64, errorCode, errorMessage, artifactS3Key, artifactType string) (models.ProcessingJob, error)
@@ -44,6 +45,7 @@ type Store interface {
 	ListProjectAnalyses(ctx context.Context, userID, projectID string) ([]models.MediaAnalysis, []models.VideoAnalysis, error)
 	SaveStoryPlan(ctx context.Context, userID string, plan models.StoryPlan) error
 	GetStoryPlan(ctx context.Context, userID, projectID string) (models.StoryPlan, error)
+	GetStoryPlanVersion(ctx context.Context, userID, projectID string, version int) (models.StoryPlan, error)
 	EnsureCreditGrant(ctx context.Context, grant models.CreditGrant) (models.CreditGrant, bool, error)
 	GetCreditBalance(ctx context.Context, userID string) (models.CreditBalance, error)
 	ReserveCredits(ctx context.Context, reservation models.CreditReservation) (models.CreditReservation, bool, error)

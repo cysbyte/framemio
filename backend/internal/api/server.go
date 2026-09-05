@@ -54,7 +54,7 @@ func NewServer(dependencies Server) *Server {
 		dependencies.Credits = credits.New(dependencies.Store, credits.LoadPolicyFromEnv(), dependencies.Now)
 	}
 	if dependencies.Orchestrator == nil && dependencies.Store != nil && dependencies.Publisher != nil {
-		dependencies.Orchestrator = orchestration.New(orchestration.Coordinator{Store: dependencies.Store, Publisher: dependencies.Publisher, Activator: dependencies.Activator, Logger: dependencies.Logger, Now: dependencies.Now, Credits: dependencies.Credits})
+		dependencies.Orchestrator = orchestration.New(orchestration.Coordinator{Store: dependencies.Store, Publisher: dependencies.Publisher, Activator: dependencies.Activator, Validator: dependencies.StoryPlanValidator, Logger: dependencies.Logger, Now: dependencies.Now, Credits: dependencies.Credits})
 	}
 	if dependencies.ExpensiveLimiter == nil {
 		dependencies.ExpensiveLimiter = NewInMemoryExpensiveOperationLimiter(ExpensiveOperationLimits{})
@@ -231,7 +231,7 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 				return
 			}
 		}
-		if len(parts) == 4 && parts[3] == "versions" && request.Method == http.MethodPost {
+		if len(parts) == 4 && (parts[3] == "versions" || parts[3] == "revisions") && request.Method == http.MethodPost {
 			s.createIOSStoryVersion(response, request, parts[2])
 			return
 		}

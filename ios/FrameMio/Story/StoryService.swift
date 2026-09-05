@@ -117,7 +117,7 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
         let data = try await apiClient.data(
             for: APIRequest(
                 method: .post,
-                path: "/v1/stories/\(storyID)/versions",
+                path: "/v1/stories/\(storyID)/revisions",
                 body: body,
                 headers: ["Idempotency-Key": "ios-story-edit-\(storyID)-\(UUID().uuidString)"]
             )

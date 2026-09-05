@@ -104,6 +104,7 @@ struct Story: Identifiable, Codable, Hashable, Sendable {
     var progressTitle: String? = nil
     var progressDetail: String? = nil
     var progressValue: Double? = nil
+    var storyPlanVersion: Int? = nil
     var moments: [StoryMoment]? = nil
     var availableMoments: [StoryMoment]? = nil
 }
@@ -132,6 +133,7 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
     let subtitleStyle: String?
     let targetDuration: TimeInterval?
     let instruction: String?
+    let baseVersion: Int?
 
     init(
         removeMomentIDs: [String],
@@ -144,7 +146,8 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
         subtitlesEnabled: Bool? = nil,
         subtitleStyle: String? = nil,
         targetDuration: TimeInterval? = nil,
-        instruction: String? = nil
+        instruction: String? = nil,
+        baseVersion: Int? = nil
     ) {
         self.removeMomentIDs = removeMomentIDs
         self.removeMediaIDs = removeMediaIDs
@@ -157,6 +160,7 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
         self.subtitleStyle = subtitleStyle
         self.targetDuration = targetDuration
         self.instruction = instruction
+        self.baseVersion = baseVersion
     }
 
     enum CodingKeys: String, CodingKey {
@@ -171,6 +175,7 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
         case subtitleStyle
         case targetDuration
         case instruction
+        case baseVersion
     }
 
     var hasChanges: Bool {
@@ -184,6 +189,23 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
             || subtitleStyle != nil
             || targetDuration != nil
             || instruction?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
+
+    func withBaseVersion(_ version: Int?) -> StoryEditRequest {
+        StoryEditRequest(
+            removeMomentIDs: removeMomentIDs,
+            removeMediaIDs: removeMediaIDs,
+            addMediaIDs: addMediaIDs,
+            orderedMediaIDs: orderedMediaIDs,
+            replace: replace,
+            analyses: analyses,
+            style: style,
+            subtitlesEnabled: subtitlesEnabled,
+            subtitleStyle: subtitleStyle,
+            targetDuration: targetDuration,
+            instruction: instruction,
+            baseVersion: version ?? baseVersion
+        )
     }
 }
 

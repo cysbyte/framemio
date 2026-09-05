@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -294,9 +295,16 @@ func TestWorkerCallbacksPersistResultsIdempotently(t *testing.T) {
 	}
 
 	storyPlanBody := map[string]any{
-		"id": "plan-worker", "project_id": "ignored-client-project", "version": 1,
-		"moments": []map[string]any{{"asset_id": media.ID, "duration_ms": 4000}},
-		"output":  map[string]any{"aspect_ratio": "9:16", "max_duration_seconds": 60, "preset": "social"},
+		"schema_version":        models.StoryPlanSchemaVersionV1,
+		"id":                    "plan-worker",
+		"project_id":            "ignored-client-project",
+		"version":               1,
+		"requested_duration_ms": 4000,
+		"title_text":            "Worker story",
+		"ending_text":           "The moments that stay with us.",
+		"moments":               []map[string]any{{"moment_id": "worker-moment", "asset_id": media.ID, "media_type": "photo", "duration_ms": 4000}},
+		"output":                map[string]any{"aspect_ratio": "9:16", "max_duration_seconds": 60, "preset": "social"},
+		"total_duration_ms":     4000,
 	}
 	status := performJSON(t, handler, http.MethodGet, "/projects/"+project.ID+"/status", nil, "", true, nil)
 	var statusBody struct {
@@ -653,6 +661,7 @@ func TestIOSStoryEditQueuesStoryPlanRevisionWithoutReanalysis(t *testing.T) {
 	}
 
 	editResponse := performJSON(t, handler, http.MethodPost, "/v1/stories/"+story.ID+"/versions", map[string]any{
+		"baseVersion":      1,
 		"removeMomentIds":  []string{"breakfast"},
 		"style":            "cinematic",
 		"subtitlesEnabled": false,
@@ -679,6 +688,73 @@ func TestIOSStoryEditQueuesStoryPlanRevisionWithoutReanalysis(t *testing.T) {
 	}
 	if strings.Contains(last.Configuration["selected_media_ids"], first.MediaID) || !strings.Contains(last.Configuration["selected_media_ids"], second.MediaID) {
 		t.Fatalf("selected media did not reflect removed moment: %+v", last.Configuration)
+	}
+}
+
+func TestIOSStoryRevisionRejectsStaleBaseVersion(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	server := newTestServer(memoryStore, publisher)
+	handler := server.Handler()
+	first := createReadyIOSMedia(t, handler, "asset-stale-photo-1", models.MediaTypePhoto)
+	second := createReadyIOSMedia(t, handler, "asset-stale-photo-2", models.MediaTypePhoto)
+	now := time.Date(2026, time.August, 19, 10, 0, 0, 0, time.UTC)
+	project := models.StoryProject{ID: "project-stale-revision", UserID: "user-1", Title: "Stale edit", Context: "Special moments", MediaIDs: []string{first.MediaID, second.MediaID}, Status: models.ProjectStatusReady, CreatedAt: now, UpdatedAt: now}
+	if _, _, err := memoryStore.CreateProject(context.Background(), project, "project-stale-revision"); err != nil {
+		t.Fatal(err)
+	}
+	for version := 1; version <= 2; version++ {
+		if err := memoryStore.SaveStoryPlan(context.Background(), "user-1", models.StoryPlan{SchemaVersion: models.StoryPlanSchemaVersionV1, ID: fmt.Sprintf("plan-stale-%d", version), ProjectID: project.ID, Version: version, Moments: []models.StoryMoment{{MomentID: "first", AssetID: first.MediaID, MediaID: first.MediaID, MediaType: models.MediaTypePhoto, Narrative: "Beach", DurationMS: 3000}, {MomentID: "second", AssetID: second.MediaID, MediaID: second.MediaID, MediaType: models.MediaTypePhoto, Narrative: "Dinner", DurationMS: 3000}}, Output: models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 8, Preset: "premium-memory"}, TotalDurationMS: 6000, CreatedAt: now.Add(time.Duration(version) * time.Minute)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	response := performJSON(t, handler, http.MethodPost, "/v1/stories/"+project.ID+"/revisions", map[string]any{"baseVersion": 1, "instruction": "Make it shorter."}, "stale-edit-key", true, nil)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("stale revision status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), "stale_story_plan_version") {
+		t.Fatalf("expected stale_story_plan_version, body = %s", response.Body.String())
+	}
+}
+
+func TestIOSStoryRevisionDuplicateRequestDoesNotDoubleReserveCredits(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	server := newTestServer(memoryStore, publisher)
+	handler := server.Handler()
+	first := createReadyIOSMedia(t, handler, "asset-duplicate-revision-1", models.MediaTypePhoto)
+	second := createReadyIOSMedia(t, handler, "asset-duplicate-revision-2", models.MediaTypePhoto)
+	now := time.Date(2026, time.August, 19, 10, 0, 0, 0, time.UTC)
+	project := models.StoryProject{ID: "project-duplicate-revision", UserID: "user-1", Title: "Duplicate edit", Context: "Special moments", MediaIDs: []string{first.MediaID, second.MediaID}, Status: models.ProjectStatusReady, CreatedAt: now, UpdatedAt: now}
+	if _, _, err := memoryStore.CreateProject(context.Background(), project, "project-duplicate-revision"); err != nil {
+		t.Fatal(err)
+	}
+	if err := memoryStore.SaveStoryPlan(context.Background(), "user-1", models.StoryPlan{SchemaVersion: models.StoryPlanSchemaVersionV1, ID: "plan-duplicate-1", ProjectID: project.ID, Version: 1, Moments: []models.StoryMoment{{MomentID: "first", AssetID: first.MediaID, MediaID: first.MediaID, MediaType: models.MediaTypePhoto, Narrative: "Beach", DurationMS: 3000}, {MomentID: "second", AssetID: second.MediaID, MediaID: second.MediaID, MediaType: models.MediaTypePhoto, Narrative: "Dinner", DurationMS: 3000}}, Output: models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 8, Preset: "premium-memory"}, TotalDurationMS: 6000, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	body := map[string]any{"baseVersion": 1, "instruction": "Remove the dinner photos."}
+	firstResponse := performJSON(t, handler, http.MethodPost, "/v1/stories/"+project.ID+"/revisions", body, "duplicate-edit-key", true, nil)
+	if firstResponse.Code != http.StatusAccepted {
+		t.Fatalf("first revision status = %d, body = %s", firstResponse.Code, firstResponse.Body.String())
+	}
+	secondResponse := performJSON(t, handler, http.MethodPost, "/v1/stories/"+project.ID+"/revisions", body, "duplicate-edit-key", true, nil)
+	if secondResponse.Code != http.StatusAccepted {
+		t.Fatalf("duplicate revision status = %d, body = %s", secondResponse.Code, secondResponse.Body.String())
+	}
+	balance, err := memoryStore.GetCreditBalance(context.Background(), "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if balance.Available != 40 || balance.Reserved != 60 {
+		t.Fatalf("duplicate should reserve once for regenerate+AI edit, got %+v", balance)
+	}
+	if got := len(publisher.Messages()); got != 1 {
+		t.Fatalf("duplicate should publish one job message, got %d", got)
 	}
 }
 
@@ -1870,7 +1946,7 @@ func TestGrantPromptTranscriptionTokenForbidden(t *testing.T) {
 	server := newTestServer(memoryStore, publisher)
 	server.PromptTranscriber = &mockPromptTokenTranscriber{
 		mockPromptTranscriber: mockPromptTranscriber{transcript: "unused"},
-		err: deepgramGrantError{StatusCode: http.StatusForbidden, Body: "forbidden"},
+		err:                   deepgramGrantError{StatusCode: http.StatusForbidden, Body: "forbidden"},
 	}
 	handler := server.Handler()
 

@@ -1388,14 +1388,14 @@ private struct EditStorySheet: View {
                         draft.instruction = trimmed
                     }
                 }
-            PrimaryButton(title: "Regenerate Story (\(draft.regenerationCreditCost) credits)", systemImage: "sparkles") {
+            PrimaryButton(title: "Update Story (\(draft.regenerationCreditCost) credits)", systemImage: "sparkles") {
                 storyPreviewUIDebugLog("edit sheet regenerate tapped has_changes=\(draft.request.hasChanges) added=\(draft.addedMediaIDs.sorted().joined(separator: ",")) ordered=\(draft.orderedMediaIDs.joined(separator: ",")) visible=\(displayedMoments.map(\.assetID).joined(separator: ",")) required_credits=\(draft.regenerationCreditCost)")
                 Task {
                     await stopVoicePromptRecording()
                     onRegenerate(draft.request)
                 }
             }
-            .disabled(isPerformingAction)
+            .disabled(isPerformingAction || !draft.hasChanges)
         }
     }
 

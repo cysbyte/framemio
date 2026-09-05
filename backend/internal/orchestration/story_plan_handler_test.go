@@ -2,9 +2,11 @@ package orchestration
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/framemio/backend/internal/ai"
 	"github.com/framemio/backend/internal/models"
 	"github.com/framemio/backend/internal/store"
 )
@@ -171,6 +173,93 @@ func TestStoryPlanHandlerReusesVideoAnalysisForSelectedVideo(t *testing.T) {
 	if !hasStoryMoment(plan.Moments, photo.ID, models.MediaTypePhoto) {
 		t.Fatalf("expected mixed story plan to retain selected photo moment, got %+v", plan.Moments)
 	}
+}
+
+func TestStoryPlanRevisionFailureLeavesBasePlanActive(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore, project := storyRevisionHandlerFixture(t)
+	job := models.ProcessingJob{ID: "job-revision-fail", UserID: project.UserID, ProjectID: project.ID, Type: models.JobTypeStoryPlan, Status: models.JobStatusRunning, Configuration: map[string]string{"revision_mode": "ai_story_plan_revision", "base_story_plan_version": "1", "story_plan_version": "2", "user_instructions": "Make it shorter."}, CreatedAt: project.CreatedAt, UpdatedAt: project.CreatedAt}
+	handler := StoryPlanHandler{Store: memoryStore, RevisionPlanner: failingRevisionPlanner{}, Now: func() time.Time { return project.CreatedAt }}
+	if err := handler.HandleJob(ctx, job); err == nil {
+		t.Fatal("expected revision planner failure")
+	}
+	latest, err := memoryStore.GetStoryPlan(ctx, project.UserID, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latest.Version != 1 {
+		t.Fatalf("base plan should remain active, got version %d", latest.Version)
+	}
+	if _, err := memoryStore.GetStoryPlanVersion(ctx, project.UserID, project.ID, 2); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("invalid revision should not persist v2, got %v", err)
+	}
+}
+
+func TestStoryPlanRevisionValidationFailureLeavesBasePlanActive(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore, project := storyRevisionHandlerFixture(t)
+	job := models.ProcessingJob{ID: "job-revision-invalid", UserID: project.UserID, ProjectID: project.ID, Type: models.JobTypeStoryPlan, Status: models.JobStatusRunning, Configuration: map[string]string{"revision_mode": "ai_story_plan_revision", "base_story_plan_version": "1", "story_plan_version": "2", "user_instructions": "Remove everything."}, CreatedAt: project.CreatedAt, UpdatedAt: project.CreatedAt}
+	handler := StoryPlanHandler{Store: memoryStore, RevisionPlanner: invalidRevisionPlanner{}, Validator: rejectingRevisionValidator{}, Now: func() time.Time { return project.CreatedAt }}
+	if err := handler.HandleJob(ctx, job); err == nil {
+		t.Fatal("expected validation failure")
+	}
+	latest, err := memoryStore.GetStoryPlan(ctx, project.UserID, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latest.Version != 1 {
+		t.Fatalf("base plan should remain active, got version %d", latest.Version)
+	}
+	if _, err := memoryStore.GetStoryPlanVersion(ctx, project.UserID, project.ID, 2); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("rejected revision should not persist v2, got %v", err)
+	}
+}
+
+func storyRevisionHandlerFixture(t *testing.T) (*store.MemoryStore, models.StoryProject) {
+	t.Helper()
+	ctx := context.Background()
+	memoryStore := store.NewMemoryStore()
+	now := time.Date(2026, time.September, 5, 8, 0, 0, 0, time.UTC)
+	photo := models.MediaAsset{ID: "photo-revision", UserID: "user-1", Type: models.MediaTypePhoto, Status: models.MediaStatusReady, FileName: "IMG_0001.JPG", ContentType: "image/jpeg", FileSizeBytes: 100, S3Key: "source/photo-revision", UploadID: "upload-photo-revision", CreatedAt: now, UpdatedAt: now}
+	if err := memoryStore.CreateMediaUpload(ctx, photo, models.UploadSession{ID: photo.UploadID, UserID: photo.UserID, MediaID: photo.ID, S3Key: photo.S3Key, Strategy: models.UploadStrategySingle, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	project := models.StoryProject{ID: "project-revision-handler", UserID: photo.UserID, Title: "Revision", MediaIDs: []string{photo.ID}, Status: models.ProjectStatusReady, CreatedAt: now, UpdatedAt: now}
+	if _, _, err := memoryStore.CreateProject(ctx, project, "project-revision-handler"); err != nil {
+		t.Fatal(err)
+	}
+	if err := memoryStore.SaveAnalysis(ctx, photo.UserID, models.MediaAnalysis{ID: "analysis-photo-revision", ProjectID: project.ID, MediaID: photo.ID, Labels: []string{"beach"}, QualityScore: 0.9, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := memoryStore.SaveStoryPlan(ctx, photo.UserID, models.StoryPlan{SchemaVersion: models.StoryPlanSchemaVersionV1, ID: "plan-revision-base", ProjectID: project.ID, Version: 1, RequestedDurationMS: 4000, TitleText: "Revision", EndingText: "The moments that stay with us.", Moments: []models.StoryMoment{{MomentID: "photo", AssetID: photo.ID, MediaID: photo.ID, MediaType: models.MediaTypePhoto, Narrative: "Beach", DurationMS: 4000, CropIntent: "fit", Transition: "fade_in"}}, Output: models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 8, Preset: "premium-memory"}, TotalDurationMS: 4000, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	return memoryStore, project
+}
+
+type failingRevisionPlanner struct{}
+
+func (failingRevisionPlanner) Revise(context.Context, ai.StoryRevisionInput) (ai.StoryRevisionResult, error) {
+	return ai.StoryRevisionResult{}, errors.New("provider unavailable")
+}
+
+type invalidRevisionPlanner struct{}
+
+func (invalidRevisionPlanner) Revise(_ context.Context, input ai.StoryRevisionInput) (ai.StoryRevisionResult, error) {
+	plan := input.CurrentStoryPlan
+	plan.ID = "plan-invalid-revision"
+	plan.Version = input.Story.NextVersion
+	plan.Moments = []models.StoryMoment{{MomentID: "missing", AssetID: "missing-media", MediaID: "missing-media", MediaType: models.MediaTypePhoto, DurationMS: 1000}}
+	plan.TotalDurationMS = 1000
+	return ai.StoryRevisionResult{RevisionSummary: "Invalid revision", RevisedStoryPlan: plan}, nil
+}
+
+type rejectingRevisionValidator struct{}
+
+func (rejectingRevisionValidator) Validate(context.Context, string, models.StoryPlan) error {
+	return errors.New("invalid story plan")
 }
 
 func hasStoryMoment(moments []models.StoryMoment, mediaID string, mediaType models.MediaType) bool {
