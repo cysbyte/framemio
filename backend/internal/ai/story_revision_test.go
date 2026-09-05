@@ -23,6 +23,29 @@ func TestHeuristicStoryRevisionShortensStory(t *testing.T) {
 	}
 }
 
+func TestHeuristicStoryRevisionLengthensMoments(t *testing.T) {
+	t.Parallel()
+	input := revisionFixtureInput("Make each moment longer.")
+	result, err := (HeuristicStoryRevisionPlanner{}).Revise(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.RevisedStoryPlan.Moments) != len(input.CurrentStoryPlan.Moments) {
+		t.Fatalf("lengthening should preserve moment selection: %+v", result.RevisedStoryPlan.Moments)
+	}
+	if result.RevisedStoryPlan.TotalDurationMS <= input.CurrentStoryPlan.TotalDurationMS {
+		t.Fatalf("story was not lengthened: before=%d after=%d", input.CurrentStoryPlan.TotalDurationMS, result.RevisedStoryPlan.TotalDurationMS)
+	}
+	if result.RevisedStoryPlan.TotalDurationMS > input.Constraints.MaxDurationMS {
+		t.Fatalf("lengthened story exceeded max duration: %+v", result.RevisedStoryPlan)
+	}
+	for index, moment := range result.RevisedStoryPlan.Moments {
+		if moment.DurationMS <= input.CurrentStoryPlan.Moments[index].DurationMS {
+			t.Fatalf("moment %d was not lengthened: before=%d after=%d", index, input.CurrentStoryPlan.Moments[index].DurationMS, moment.DurationMS)
+		}
+	}
+}
+
 func TestHeuristicStoryRevisionRemovesDinner(t *testing.T) {
 	t.Parallel()
 	result, err := (HeuristicStoryRevisionPlanner{}).Revise(context.Background(), revisionFixtureInput("Remove the dinner photos."))

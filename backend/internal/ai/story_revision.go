@@ -303,6 +303,12 @@ func (p HeuristicStoryRevisionPlanner) Revise(ctx context.Context, input StoryRe
 		if plan.TotalDurationMS < before {
 			changes = append(changes, StoryRevisionChange{Type: "duration_change", Target: "story", Reason: "user asked for a shorter story"})
 		}
+	} else if wantsLonger(instruction) {
+		before := plan.TotalDurationMS
+		lengthenStoryPlan(&plan, input)
+		if plan.TotalDurationMS > before {
+			changes = append(changes, StoryRevisionChange{Type: "duration_change", Target: "story", Reason: "user asked for longer moments"})
+		}
 	}
 	applyDurationCap(&plan, input.Constraints)
 	refreshTransitionsAndCaptions(&plan)
@@ -376,6 +382,16 @@ func stringSet(values []string) map[string]bool {
 
 func wantsShorter(instruction string) bool {
 	return strings.Contains(instruction, "shorter") || strings.Contains(instruction, "short ") || strings.Contains(instruction, "tight") || strings.Contains(instruction, "faster")
+}
+
+func wantsLonger(instruction string) bool {
+	if strings.Contains(instruction, "shorter") || strings.Contains(instruction, "faster") || strings.Contains(instruction, "tight") {
+		return false
+	}
+	if (strings.Contains(instruction, "text") || strings.Contains(instruction, "caption") || strings.Contains(instruction, "subtitle")) && !strings.Contains(instruction, "moment") && !strings.Contains(instruction, "clip") && !strings.Contains(instruction, "story") {
+		return false
+	}
+	return strings.Contains(instruction, "longer") || strings.Contains(instruction, "more time") || strings.Contains(instruction, "extend") || strings.Contains(instruction, "linger") || strings.Contains(instruction, "slower") || strings.Contains(instruction, "slow pacing")
 }
 
 func wantsNoBRoll(instruction string) bool {
@@ -586,6 +602,79 @@ func tightenStoryPlan(plan *models.StoryPlan, constraints StoryRevisionConstrain
 	applyDurationCap(plan, constraints)
 }
 
+func lengthenStoryPlan(plan *models.StoryPlan, input StoryRevisionInput) {
+	refreshTotalDuration(plan)
+	maxDuration := revisionMaxDuration(plan, input.Constraints)
+	extra := minRevisionInt(maxDuration-plan.TotalDurationMS, maxRevisionInt(500*len(plan.Moments), int(math.Round(float64(plan.TotalDurationMS)*0.25))))
+	if extra <= 0 || len(plan.Moments) == 0 {
+		return
+	}
+	growable := growableMomentDurations(*plan, input)
+	for extra > 0 {
+		applied := 0
+		share := maxRevisionInt(500, int(math.Ceil(float64(extra)/float64(maxRevisionInt(1, len(growable))))))
+		for index := range plan.Moments {
+			remaining := growable[index]
+			if remaining <= 0 {
+				continue
+			}
+			increment := minRevisionInt(remaining, minRevisionInt(share, extra))
+			if increment <= 0 {
+				continue
+			}
+			plan.Moments[index].DurationMS += increment
+			growable[index] -= increment
+			extra -= increment
+			applied += increment
+			if plan.Moments[index].MediaType == models.MediaTypeVideo && plan.Moments[index].EndMicros > plan.Moments[index].StartMicros {
+				plan.Moments[index].EndMicros += int64(increment) * 1000
+			}
+			if extra <= 0 {
+				break
+			}
+		}
+		if applied == 0 {
+			break
+		}
+	}
+	refreshTotalDuration(plan)
+}
+
+func revisionMaxDuration(plan *models.StoryPlan, constraints StoryRevisionConstraints) int {
+	if constraints.MaxDurationMS > 0 {
+		return constraints.MaxDurationMS
+	}
+	if plan.Output.MaxDurationS > 0 {
+		return plan.Output.MaxDurationS * 1000
+	}
+	return maxRevisionInt(plan.TotalDurationMS, 30000)
+}
+
+func growableMomentDurations(plan models.StoryPlan, input StoryRevisionInput) map[int]int {
+	result := make(map[int]int, len(plan.Moments))
+	videoDurations := revisionVideoDurations(input.MediaContext.VideoAnalyses)
+	for index, moment := range plan.Moments {
+		if moment.MediaType == models.MediaTypeVideo {
+			if durationMicros := videoDurations[storyMomentMediaIDForRevision(moment)]; durationMicros > moment.EndMicros {
+				result[index] = int((durationMicros - moment.EndMicros) / 1000)
+			}
+			continue
+		}
+		result[index] = maxRevisionInt(500, minRevisionInt(3000, moment.DurationMS/2))
+	}
+	return result
+}
+
+func revisionVideoDurations(analyses []models.VideoAnalysis) map[string]int64 {
+	result := make(map[string]int64, len(analyses))
+	for _, analysis := range analyses {
+		if analysis.VideoID != "" && analysis.DurationMicros > 0 {
+			result[analysis.VideoID] = analysis.DurationMicros
+		}
+	}
+	return result
+}
+
 func applyDurationCap(plan *models.StoryPlan, constraints StoryRevisionConstraints) {
 	maxDuration := constraints.MaxDurationMS
 	if maxDuration <= 0 && plan.Output.MaxDurationS > 0 {
@@ -682,6 +771,13 @@ func containsString(values []string, target string) bool {
 
 func maxRevisionInt(left, right int) int {
 	if left > right {
+		return left
+	}
+	return right
+}
+
+func minRevisionInt(left, right int) int {
+	if left < right {
 		return left
 	}
 	return right
