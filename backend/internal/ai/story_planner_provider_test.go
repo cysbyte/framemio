@@ -55,6 +55,22 @@ func TestOpenAICompatibleStoryPlannerResponsesReturnsStoryPlan(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleStoryPlannerNormalizesSchemaVersionAlias(t *testing.T) {
+	t.Parallel()
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		planJSON := strings.Replace(storyPlannerProviderPlanJSON(), `"schema_version":"story_plan_v1"`, `"schema_version":"1.0"`, 1)
+		return typographyHTTPResponse(http.StatusOK, responsesTypographyResponse(planJSON)), nil
+	})}
+	planner := OpenAICompatibleStoryPlanner{BaseURL: "https://planner.test", APIKey: "test-key", ProviderName: "openai-compatible", ModelName: "gpt-story", WireAPI: "responses", Client: client}
+	plan, err := planner.Plan(context.Background(), storyPlannerProviderRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.SchemaVersion != models.StoryPlanSchemaVersionV1 {
+		t.Fatalf("expected canonical schema version, got %q", plan.SchemaVersion)
+	}
+}
+
 func TestOpenAICompatibleStoryPlannerRejectsInvalidJSON(t *testing.T) {
 	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -90,6 +106,39 @@ func TestFallbackStoryPlannerUsesFallbackWhenPrimaryFails(t *testing.T) {
 	}
 	if plan.ID != fallbackPlan.ID || plan.ProjectID != request.ProjectID || len(plan.Moments) != 1 {
 		t.Fatalf("fallback plan not returned: %+v", plan)
+	}
+}
+
+func TestFallbackStoryPlannerUsesFallbackWhenPrimaryReturnsInvalidPlan(t *testing.T) {
+	t.Parallel()
+	request := storyPlannerProviderRequest()
+	invalidPlan := models.StoryPlan{
+		SchemaVersion:       "story_plan_v2",
+		ID:                  "plan-invalid",
+		ProjectID:           request.ProjectID,
+		Version:             request.Version,
+		RequestedDurationMS: int(request.DesiredDuration.Milliseconds()),
+		StoryType:           request.StoryType,
+		VisualStyle:         request.VisualStyle,
+		TitleText:           "Invalid",
+		EndingText:          "Invalid",
+		Moments:             []models.StoryMoment{{MomentID: "moment-invalid", MediaID: "photo-gpt", AssetID: "photo-gpt", MediaType: models.MediaTypePhoto, DurationMS: 4000, CropIntent: "fit", Transition: "cut"}},
+		Output:              models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 4, Preset: "premium-memory"},
+		TotalDurationMS:     4000,
+	}
+	fallbackPlan := invalidPlan
+	fallbackPlan.SchemaVersion = models.StoryPlanSchemaVersionV1
+	fallbackPlan.ID = "plan-fallback"
+	planner := FallbackStoryPlanner{
+		Primary:  staticStoryPlanner{plan: invalidPlan},
+		Fallback: staticStoryPlanner{plan: fallbackPlan},
+	}
+	plan, err := planner.Plan(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.ID != fallbackPlan.ID || plan.SchemaVersion != models.StoryPlanSchemaVersionV1 {
+		t.Fatalf("fallback plan not returned after invalid primary output: %+v", plan)
 	}
 }
 

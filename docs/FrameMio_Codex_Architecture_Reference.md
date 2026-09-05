@@ -1185,7 +1185,7 @@ STORY_PLANNER_BASE_URL=
 STORY_PLANNER_API_KEY=
 STORY_PLANNER_WIRE_API=chat_completions|responses
 STORY_PLANNER_MAX_OUTPUT_TOKENS=6000
-STORY_PLANNER_TIMEOUT=30s
+STORY_PLANNER_TIMEOUT=90s
 ```
 
 Rules:
@@ -1195,7 +1195,8 @@ Rules:
 - `STORY_PLANNER_BASE_URL` falls back to `OPENAI_BASE_URL`; `STORY_PLANNER_API_KEY` falls back to `OPENAI_API_KEY`.
 - External providers require both an API key and `STORY_PLANNER_MODEL`; startup must fail clearly when either is missing.
 - GPT receives bounded structured `PhotoAnalysis`, `VideoAnalysis`, transcript segments, media clusters, selected/excluded IDs, desired duration, style, and constraints; it does not receive original full-resolution media or provider secrets.
-- GPT must return the existing `models.StoryPlan` JSON shape only, never Remotion code, FFmpeg commands, shell commands, SQL, JavaScript, or executable instructions. Current production deployment defaults use `chat_completions` for OpenAI-compatible gateway compatibility; `responses` remains supported when the upstream supports it.
+- GPT must return the existing `models.StoryPlan` JSON shape only, with `schema_version` exactly `story_plan_v1`; it must never return Remotion code, FFmpeg commands, shell commands, SQL, JavaScript, or executable instructions. Current production deployment defaults use `chat_completions` for OpenAI-compatible gateway compatibility; `responses` remains supported when the upstream supports it.
+- The provider boundary canonicalizes narrow v1 schema aliases such as `1.0` to `story_plan_v1`, then runs lightweight structural validation; structurally invalid GPT plans fall back to the local planner before persistence.
 - The backend validator deterministically rejects invalid media references, unsupported transitions/crop intents/typography/caption values, bad timings, over-duration plans, and missing render-required fields before persistence/rendering.
 - `VIDEO_UNDERSTANDING_MODEL`, such as `gpt-5.4-mini`, remains separate from `STORY_PLANNER_MODEL`; media understanding can use a cheaper bulk-analysis model while planning uses a stronger creative model.
 
