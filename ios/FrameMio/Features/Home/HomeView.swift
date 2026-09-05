@@ -248,7 +248,7 @@ struct HomeView: View {
                     shortcut(title: "Today", icon: MomentContext.today.icon, context: .today)
                     shortcut(title: "Weekend", icon: MomentContext.weekend.icon, context: .weekend)
                     shortcut(title: "Trip", icon: MomentContext.trip.icon, context: .trip)
-                    shortcut(title: "Select Photos and Videos", icon: "checkmark.circle", context: .specialMoments)
+                    shortcut(title: "Select Medias", icon: "checkmark.circle", context: .specialMoments)
                 }
             }
         }

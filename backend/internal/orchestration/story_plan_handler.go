@@ -335,8 +335,8 @@ func defaultStoryDuration(project models.StoryProject) time.Duration {
 	if len(project.MediaIDs) >= 4 && seconds < 15 {
 		seconds = 15
 	}
-	if seconds > 30 {
-		seconds = 30
+	if seconds > 60 {
+		seconds = 60
 	}
 	return time.Duration(seconds) * time.Second
 }

@@ -255,15 +255,6 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		}
 		statsByAction[models.CreditActionAddMoment] = stats
 	}
-	if strings.TrimSpace(input.Instruction) != "" {
-		storyStats, err := s.currentIOSStoryCreditStats(request, user.ID, project.ID)
-		if err != nil {
-			s.mapStoreError(response, err)
-			return
-		}
-		creditActions = append(creditActions, models.CreditActionAIEditStory)
-		statsByAction[models.CreditActionAIEditStory] = storyStats
-	}
 	if _, ok := statsByAction[models.CreditActionRegenerateStory]; !ok {
 		storyStats, err := s.currentIOSStoryCreditStats(request, user.ID, project.ID)
 		if err != nil {

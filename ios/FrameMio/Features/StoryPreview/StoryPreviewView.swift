@@ -999,7 +999,56 @@ private struct EditStorySheet: View {
     private let subtitleStyleOptions = ["Bold", "Cinematic", "Minimal", "Playful"]
 
     private var lengthOptions: [Int] {
-        Array(Set([15, max(8, Int(story.duration.rounded())), 30])).sorted()
+        Array(Set([15, 30, 45, 60, max(8, min(60, Int(story.duration.rounded())))])).sorted()
+    }
+
+    private var hasPhotoLikeLengthSource: Bool {
+        displayedMoments.contains { $0.kind != .video }
+    }
+
+    private var hasUnknownVideoLengthSource: Bool {
+        displayedMoments.contains { $0.kind == .video && (($0.duration ?? 0) <= 0) }
+    }
+
+    private var totalVideoSourceDuration: TimeInterval {
+        displayedMoments.reduce(0) { total, moment in
+            guard moment.kind == .video else { return total }
+            return total + max(0, moment.duration ?? 0)
+        }
+    }
+
+    private var maxSelectableLengthSeconds: Int {
+        if hasPhotoLikeLengthSource || hasUnknownVideoLengthSource {
+            return 60
+        }
+        return max(0, Int(totalVideoSourceDuration.rounded(.down)))
+    }
+
+    private var lengthSectionSubtitle: String {
+        if hasPhotoLikeLengthSource {
+            return "Photos can extend the story up to 60s"
+        }
+        if hasUnknownVideoLengthSource {
+            return "FrameMio will fit the story to available footage"
+        }
+        let seconds = maxSelectableLengthSeconds
+        if seconds < 60 {
+            return "Video-only story: up to \(seconds)s of source footage available"
+        }
+        return "FrameMio decides what to keep"
+    }
+
+    private func isLengthOptionDisabled(_ seconds: Int) -> Bool {
+        seconds > maxSelectableLengthSeconds
+    }
+
+    private func lengthDisabledLabel(for seconds: Int) -> String? {
+        guard isLengthOptionDisabled(seconds) else { return nil }
+        let available = maxSelectableLengthSeconds
+        if available <= 0 {
+            return "Needs photo or video source"
+        }
+        return "Only \(available)s available"
     }
 
     private var displayedMoments: [StoryMomentPresentation] {
@@ -1331,13 +1380,34 @@ private struct EditStorySheet: View {
 
     private var lengthSection: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            SectionHeader(title: "Length", subtitle: "FrameMio decides what to keep")
+            SectionHeader(title: "Length", subtitle: lengthSectionSubtitle)
             LazyVGrid(columns: optionGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
                 ForEach(lengthOptions, id: \.self) { seconds in
-                    optionChip(title: "\(seconds)s", isSelected: Int((draft.targetDuration ?? story.duration).rounded()) == seconds) {
+                    let disabledReason = lengthDisabledLabel(for: seconds)
+                    optionChip(
+                        title: "\(seconds)s",
+                        subtitle: disabledReason,
+                        isSelected: Int((draft.targetDuration ?? story.duration).rounded()) == seconds,
+                        isDisabled: disabledReason != nil
+                    ) {
+                        guard disabledReason == nil else {
+                            storyPreviewUIDebugLog("edit sheet length option blocked seconds=\(seconds) max_selectable=\(maxSelectableLengthSeconds) video_source=\(Int(totalVideoSourceDuration.rounded())) has_photo_like=\(hasPhotoLikeLengthSource) unknown_video=\(hasUnknownVideoLengthSource)")
+                            return
+                        }
                         draft.targetDuration = TimeInterval(seconds)
+                        storyPreviewUIDebugLog("edit sheet length selected seconds=\(seconds) max_selectable=\(maxSelectableLengthSeconds) video_source=\(Int(totalVideoSourceDuration.rounded())) has_photo_like=\(hasPhotoLikeLengthSource) unknown_video=\(hasUnknownVideoLengthSource)")
                     }
                 }
+            }
+        }
+        .onAppear {
+            storyPreviewUIDebugLog("edit sheet length availability max_selectable=\(maxSelectableLengthSeconds) video_source=\(Int(totalVideoSourceDuration.rounded())) has_photo_like=\(hasPhotoLikeLengthSource) unknown_video=\(hasUnknownVideoLengthSource) options=\(lengthOptions.map(String.init).joined(separator: ","))")
+        }
+        .onChange(of: maxSelectableLengthSeconds) { _, value in
+            storyPreviewUIDebugLog("edit sheet length availability changed max_selectable=\(value) video_source=\(Int(totalVideoSourceDuration.rounded())) has_photo_like=\(hasPhotoLikeLengthSource) unknown_video=\(hasUnknownVideoLengthSource)")
+            if let target = draft.targetDuration, Int(target.rounded()) > value {
+                draft.targetDuration = nil
+                storyPreviewUIDebugLog("edit sheet length target cleared reason=above_available previous=\(Int(target.rounded())) max_selectable=\(value)")
             }
         }
     }
@@ -1544,20 +1614,30 @@ private struct EditStorySheet: View {
         [GridItem(.adaptive(minimum: 108), spacing: FrameMioSpacing.sm, alignment: .leading)]
     }
 
-    private func optionChip(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+    private func optionChip(title: String, subtitle: String? = nil, isSelected: Bool, isDisabled: Bool = false, action: @escaping () -> Void) -> some View {
         Button {
+            guard !isDisabled else { return }
             FrameMioHaptics.secondaryAction()
             action()
         } label: {
-            Text(title)
-                .font(FrameMioTypography.footnote)
-                .foregroundStyle(isSelected ? FrameMioColors.inverseInk : FrameMioColors.ink)
-                .padding(.horizontal, FrameMioSpacing.md)
-                .frame(minHeight: FrameMioMetrics.compactButtonHeight)
-                .background(isSelected ? FrameMioColors.accent : FrameMioColors.surface.opacity(0.78), in: Capsule())
+            VStack(spacing: 2) {
+                Text(title)
+                    .font(FrameMioTypography.footnote)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(FrameMioTypography.caption)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                }
+            }
+            .foregroundStyle(isSelected ? FrameMioColors.inverseInk : (isDisabled ? FrameMioColors.secondaryInk : FrameMioColors.ink))
+            .padding(.horizontal, FrameMioSpacing.md)
+            .frame(minHeight: FrameMioMetrics.compactButtonHeight)
+            .background(isSelected ? FrameMioColors.accent : FrameMioColors.surface.opacity(isDisabled ? 0.42 : 0.78), in: Capsule())
         }
         .buttonStyle(FrameMioPressButtonStyle())
-        .disabled(isPerformingAction)
+        .opacity(isDisabled ? FrameMioOpacity.disabled : 1)
+        .disabled(isPerformingAction || isDisabled)
     }
 }
 

@@ -750,8 +750,8 @@ func TestIOSStoryRevisionDuplicateRequestDoesNotDoubleReserveCredits(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if balance.Available != 40 || balance.Reserved != 60 {
-		t.Fatalf("duplicate should reserve once for regenerate+AI edit, got %+v", balance)
+	if balance.Available != 60 || balance.Reserved != 40 {
+		t.Fatalf("duplicate should reserve once for regenerate, got %+v", balance)
 	}
 	if got := len(publisher.Messages()); got != 1 {
 		t.Fatalf("duplicate should publish one job message, got %d", got)
@@ -843,6 +843,79 @@ func TestIOSStoryEditRejectsForeignMediaReference(t *testing.T) {
 	}, "edit-key", true, nil)
 	if editResponse.Code != http.StatusBadRequest {
 		t.Fatalf("expected invalid media reference to be rejected, got %d body=%s", editResponse.Code, editResponse.Body.String())
+	}
+}
+
+func TestIOSStoryPromptOnlyEditReservesOnlyRegenerateCredits(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	publisher := queue.NewMemoryPublisher()
+	handler := newTestServer(memoryStore, publisher).Handler()
+	now := time.Date(2026, time.August, 19, 10, 0, 0, 0, time.UTC)
+
+	original := createReadyIOSMedia(t, handler, "asset-edit-prompt-only", models.MediaTypePhoto)
+	project := models.StoryProject{
+		ID:        "project-edit-prompt-only",
+		UserID:    "user-1",
+		Title:     "Prompt edit",
+		Context:   "Special moments",
+		MediaIDs:  []string{original.MediaID},
+		Status:    models.ProjectStatusReady,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if _, _, err := memoryStore.CreateProject(context.Background(), project, "project-edit-prompt-only"); err != nil {
+		t.Fatal(err)
+	}
+	if err := memoryStore.SaveStoryPlan(context.Background(), "user-1", models.StoryPlan{
+		SchemaVersion:       models.StoryPlanSchemaVersionV1,
+		ID:                  "plan-edit-prompt-only",
+		ProjectID:           project.ID,
+		Version:             1,
+		RequestedDurationMS: 8000,
+		Moments: []models.StoryMoment{{
+			MomentID:   "moment-original",
+			AssetID:    original.MediaID,
+			MediaID:    original.MediaID,
+			MediaType:  models.MediaTypePhoto,
+			Narrative:  "Original",
+			DurationMS: 8000,
+		}},
+		Output:          models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 8, Preset: "premium-memory"},
+		TotalDurationMS: 8000,
+		CreatedAt:       now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	editResponse := performJSON(t, handler, http.MethodPost, "/v1/stories/"+project.ID+"/versions", map[string]any{
+		"baseVersion":    1,
+		"targetDuration": 30,
+		"instruction":    "Make this more emotional.",
+	}, "edit-prompt-only-cost", true, nil)
+	if editResponse.Code != http.StatusAccepted {
+		t.Fatalf("edit iOS story status = %d, body = %s", editResponse.Code, editResponse.Body.String())
+	}
+	stored, err := memoryStore.GetProject(context.Background(), "user-1", project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.CreditOperationKey != "REGENERATE_STORY" {
+		t.Fatalf("credit operation key = %q", stored.CreditOperationKey)
+	}
+	balance, err := memoryStore.GetCreditBalance(context.Background(), "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if balance.Available != 60 || balance.Reserved != 40 {
+		t.Fatalf("expected 40 credits reserved for prompt-only regenerate from initial 100, got %+v", balance)
+	}
+	if _, err := memoryStore.GetCreditReservationByReference(context.Background(), "user-1", models.CreditActionRegenerateStory, "project", project.ID+":v2"); err != nil {
+		t.Fatalf("missing regenerate reservation: %v", err)
+	}
+	if reservation, err := memoryStore.GetCreditReservationByReference(context.Background(), "user-1", models.CreditActionAIEditStory, "project", project.ID+":v2"); err == nil {
+		t.Fatalf("unexpected AI edit reservation: %+v", reservation)
 	}
 }
 

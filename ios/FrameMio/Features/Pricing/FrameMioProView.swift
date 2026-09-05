@@ -4,6 +4,37 @@ import SwiftUI
 private func pricingDebugLog(_ message: @autoclosure () -> String) {
     print("[FrameMio][Pricing] \(message())")
 }
+
+private enum StoreKitProductLoadError: LocalizedError {
+    case timedOut(seconds: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case let .timedOut(seconds):
+            return "StoreKit product loading timed out after \(seconds) seconds."
+        }
+    }
+}
+
+private func loadStoreKitProducts(productIDs: [String], timeoutSeconds: Int, logPrefix: String) async throws -> [Product] {
+    pricingDebugLog("\(logPrefix)_storekit_products_request_started ids=\(productIDs.joined(separator: ",")) timeout=\(timeoutSeconds)")
+    return try await withThrowingTaskGroup(of: [Product].self) { group in
+        group.addTask {
+            try await Product.products(for: productIDs)
+        }
+        group.addTask {
+            try await Task.sleep(nanoseconds: UInt64(timeoutSeconds) * 1_000_000_000)
+            throw StoreKitProductLoadError.timedOut(seconds: timeoutSeconds)
+        }
+        guard let products = try await group.next() else {
+            group.cancelAll()
+            return []
+        }
+        group.cancelAll()
+        pricingDebugLog("\(logPrefix)_storekit_products_request_finished returned=\(products.map(\.id).sorted().joined(separator: ",")) count=\(products.count)")
+        return products
+    }
+}
 import UIKit
 
 enum FrameMioProPlanKind: String, CaseIterable, Identifiable, Sendable {
@@ -164,7 +195,7 @@ final class FrameMioProViewModel: ObservableObject {
             return "Manage Subscription"
         }
         guard canPurchaseSelectedPlan else {
-            return isLoading ? "Loading FrameMio Pro…" : "Plans unavailable"
+            return isLoading ? "Loading FrameMio Pro…" : "Retry Loading Plans"
         }
         return "Start FrameMio Pro — \(selectedPlan.displayPrice(using: product(for: selectedPlan), fallback: selectedPlan.fallbackPrice))"
     }
@@ -173,13 +204,42 @@ final class FrameMioProViewModel: ObservableObject {
         isSubscribed || product(for: selectedPlan) != nil || shouldSimulatePurchaseSuccess
     }
 
+    var primaryButtonIsLoading: Bool {
+        !isSubscribed && (isPurchasing || (isLoading && !canPurchaseSelectedPlan))
+    }
+
+    var primaryButtonIsDisabled: Bool {
+        isPurchasing || isRestoring || (!isSubscribed && isLoading && !canPurchaseSelectedPlan)
+    }
+
+    var primaryButtonDisabledReason: String {
+        if isPurchasing { return "purchasing" }
+        if isRestoring { return "restoring" }
+        if isSubscribed { return "subscribed_manage_enabled" }
+        if canPurchaseSelectedPlan { return "enabled" }
+        if isLoading { return "loading_storekit_products" }
+        if monthlyProduct == nil && yearlyProduct == nil { return "storekit_products_unavailable_retry_enabled" }
+        return "selected_\(selectedPlan.rawValue)_product_unavailable"
+    }
+
+    var primaryButtonDebugState: String {
+        "selected=\(selectedPlan.rawValue) disabled=\(primaryButtonIsDisabled) reason=\(primaryButtonDisabledReason) loading=\(isLoading) purchasing=\(isPurchasing) restoring=\(isRestoring) subscribed=\(isSubscribed) monthly_loaded=\(monthlyProduct != nil) yearly_loaded=\(yearlyProduct != nil) simulate=\(shouldSimulatePurchaseSuccess)"
+    }
+
     func load() {
+        if isLoading {
+            pricingDebugLog("load_ignored reason=already_loading \(primaryButtonDebugState)")
+            return
+        }
         loadTask?.cancel()
         loadTask = Task { [weak self] in
             guard let self else { return }
             isLoading = true
-            pricingDebugLog("load_start source=\(source.rawValue)")
-            defer { isLoading = false }
+            pricingDebugLog("load_start source=\(source.rawValue) \(primaryButtonDebugState)")
+            defer {
+                isLoading = false
+                pricingDebugLog("load_end source=\(source.rawValue) \(primaryButtonDebugState)")
+            }
             do {
                 if shouldSimulatePurchaseSuccess {
                     pricingDebugLog("load_debug_skip_storekit_products source=\(source.rawValue) simulated=\(shouldSimulatePurchaseSuccess)")
@@ -191,9 +251,8 @@ final class FrameMioProViewModel: ObservableObject {
                     errorMessage = nil
                     pricingDebugLog("load_complete_debug subscribed=\(isSubscribed) balance=\(balance.map(String.init) ?? "nil") renewal=\(renewalDate?.description ?? "nil")")
                 } else {
-                    async let productsTask = Product.products(for: FrameMioProCatalog.productIDs)
                     async let balanceTask: Void = fetchBalance()
-                    let products = try await productsTask
+                    let products = try await loadStoreKitProducts(productIDs: FrameMioProCatalog.productIDs, timeoutSeconds: 8, logPrefix: "pro")
                     let loadedProductIDs = products.map(\.id).sorted()
                     pricingDebugLog("load_products_requested ids=\(FrameMioProCatalog.productIDs.joined(separator: ",")) returned=\(loadedProductIDs.joined(separator: ",")) count=\(products.count)")
                     monthlyProduct = products.first { $0.id == FrameMioProCatalog.monthlyProductID }
@@ -202,13 +261,15 @@ final class FrameMioProViewModel: ObservableObject {
                     _ = await balanceTask
                     await refreshEntitlements()
                     if selectedPlan == .yearly, yearlyProduct == nil, monthlyProduct != nil {
+                        pricingDebugLog("selected_plan_adjusted from=yearly to=monthly reason=yearly_product_missing")
                         selectedPlan = .monthly
                     } else if selectedPlan == .monthly, monthlyProduct == nil, yearlyProduct != nil {
+                        pricingDebugLog("selected_plan_adjusted from=monthly to=yearly reason=monthly_product_missing")
                         selectedPlan = .yearly
                     }
                     statusMessage = nil
                     errorMessage = nil
-                    pricingDebugLog("load_complete subscribed=\(isSubscribed) balance=\(balance.map(String.init) ?? "nil") renewal=\(renewalDate?.description ?? "nil")")
+                    pricingDebugLog("load_complete subscribed=\(isSubscribed) balance=\(balance.map(String.init) ?? "nil") renewal=\(renewalDate?.description ?? "nil") \(primaryButtonDebugState)")
                 }
             } catch {
                 statusMessage = nil
@@ -219,21 +280,39 @@ final class FrameMioProViewModel: ObservableObject {
                 }
 #if DEBUG
                 errorMessage = nil
-                pricingDebugLog("load_failed_debug suppressed_alert error=\(error.localizedDescription) mapped=\(AppError.from(error).localizedDescription)")
+                statusMessage = "Could not load App Store plans. Tap Retry Loading Plans."
+                pricingDebugLog("load_failed_debug suppressed_alert error=\(error.localizedDescription) mapped=\(AppError.from(error).localizedDescription) \(primaryButtonDebugState)")
 #else
-                errorMessage = AppError.from(error).localizedDescription
-                pricingDebugLog("load_failed error=\(error.localizedDescription) mapped=\(AppError.from(error).localizedDescription)")
+                errorMessage = nil
+                statusMessage = "Could not load App Store plans. Tap Retry Loading Plans."
+                pricingDebugLog("load_failed error=\(error.localizedDescription) mapped=\(AppError.from(error).localizedDescription) \(primaryButtonDebugState)")
 #endif
             }
         }
     }
 
     func purchaseSelectedPlan() {
-        guard !isPurchasing else { return }
+        guard !isPurchasing else {
+            pricingDebugLog("purchase_ignored reason=already_purchasing \(primaryButtonDebugState)")
+            return
+        }
+        guard canPurchaseSelectedPlan else {
+            if isLoading {
+                statusMessage = "Loading plans…"
+                errorMessage = nil
+                pricingDebugLog("purchase_blocked \(primaryButtonDebugState)")
+            } else {
+                statusMessage = "Retrying App Store product loading…"
+                errorMessage = nil
+                pricingDebugLog("purchase_retry_load \(primaryButtonDebugState)")
+                load()
+            }
+            return
+        }
         isPurchasing = true
         errorMessage = nil
         statusMessage = "Processing your purchase..."
-        pricingDebugLog("purchase_tapped plan=\(selectedPlan.rawValue) source=\(source.rawValue) debug_success=\(shouldSimulatePurchaseSuccess)")
+        pricingDebugLog("purchase_tapped plan=\(selectedPlan.rawValue) source=\(source.rawValue) debug_success=\(shouldSimulatePurchaseSuccess) \(primaryButtonDebugState)")
         Task { [weak self] in
             guard let self else { return }
             defer { isPurchasing = false }
@@ -400,7 +479,7 @@ final class FrameMioProViewModel: ObservableObject {
             pricingDebugLog("transaction_updates_listener_started")
             for await result in Transaction.updates {
                 guard let transaction = try? verifiedTransaction(from: result) else { continue }
-                guard let plan = FrameMioProPlanKind(productID: transaction.productID), transaction.revocationDate == nil else {
+                guard FrameMioProPlanKind(productID: transaction.productID) != nil, transaction.revocationDate == nil else {
                     continue
                 }
                 await transaction.finish()
@@ -558,6 +637,7 @@ struct FrameMioProView: View {
     private func planCard(for plan: FrameMioProPlanKind, cardWidth: CGFloat) -> some View {
         let isSelected = viewModel.selectedPlan == plan
         return Button {
+            pricingDebugLog("plan_selected from=\(viewModel.selectedPlan.rawValue) to=\(plan.rawValue) before=\(viewModel.primaryButtonDebugState)")
             viewModel.selectedPlan = plan
         } label: {
             VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
@@ -618,14 +698,25 @@ struct FrameMioProView: View {
 
     private var primaryActionSection: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
-            PrimaryButton(title: viewModel.primaryButtonTitle, systemImage: viewModel.isSubscribed ? "gearshape" : "sparkles") {
-                if viewModel.isSubscribed {
-                    viewModel.manageSubscription()
-                } else {
-                    viewModel.purchaseSelectedPlan()
-                }
+            PrimaryButton(
+                title: viewModel.primaryButtonTitle,
+                systemImage: viewModel.isSubscribed ? "gearshape" : "sparkles",
+                action: {
+                    if viewModel.isSubscribed {
+                        viewModel.manageSubscription()
+                    } else {
+                        viewModel.purchaseSelectedPlan()
+                    }
+                },
+                isDisabled: viewModel.primaryButtonIsDisabled,
+                isLoading: viewModel.primaryButtonIsLoading
+            )
+            .onAppear {
+                pricingDebugLog("primary_button_state \(viewModel.primaryButtonDebugState)")
             }
-            .disabled(viewModel.isPurchasing || viewModel.isRestoring || !viewModel.canPurchaseSelectedPlan)
+            .onChange(of: viewModel.primaryButtonDebugState) { _, state in
+                pricingDebugLog("primary_button_state \(state)")
+            }
 
             if viewModel.isPurchasing {
                 Text("Processing your purchase…")
@@ -732,8 +823,44 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
     }
 
     var primaryButtonTitle: String {
-        guard let selectedPack else { return "Loading Credit Packs" }
+        guard let selectedPack else { return isLoading ? "Loading Credit Packs…" : "Retry Loading Credit Packs" }
+        if isLoading && !canPurchaseSelectedPack {
+            return "Loading Credit Packs…"
+        }
+        if !canPurchaseSelectedPack {
+            return "Retry Loading Credit Packs"
+        }
         return "Buy \(selectedPack.credits.formatted()) Credits"
+    }
+
+    var canPurchaseSelectedPack: Bool {
+        guard let selectedPack else { return false }
+        return shouldSimulatePurchaseSuccess || product(for: selectedPack) != nil
+    }
+
+    var primaryButtonIsLoading: Bool {
+        isPurchasing || (isLoading && !canPurchaseSelectedPack)
+    }
+
+    var primaryButtonIsDisabled: Bool {
+        isPurchasing || (isLoading && !canPurchaseSelectedPack)
+    }
+
+    var primaryButtonDisabledReason: String {
+        if isPurchasing { return "purchasing" }
+        guard let selectedPack else {
+            return isLoading ? "loading_credit_packs" : "no_credit_pack_selected"
+        }
+        if canPurchaseSelectedPack { return "enabled" }
+        if isLoading { return "loading_storekit_products" }
+        return "selected_\(selectedPack.id)_product_unavailable_retry_enabled"
+    }
+
+    var primaryButtonDebugState: String {
+        let selectedID = selectedPackID ?? "nil"
+        let selectedProductID = selectedPack.flatMap { productID(for: $0) } ?? "nil"
+        let productKeys = products.keys.sorted().joined(separator: ",")
+        return "selected_pack=\(selectedID) selected_product=\(selectedProductID) disabled=\(primaryButtonIsDisabled) reason=\(primaryButtonDisabledReason) loading=\(isLoading) purchasing=\(isPurchasing) packs=\(packs.count) products=\(products.count) product_ids=\(productKeys.isEmpty ? "none" : productKeys) simulate=\(shouldSimulatePurchaseSuccess)"
     }
 
     func displayPrice(for pack: CreditPack) -> String {
@@ -746,57 +873,116 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
         return product.displayPrice
     }
 
+    private func product(for pack: CreditPack) -> Product? {
+        guard let productID = productID(for: pack) else { return nil }
+        return products[productID]
+    }
+
     private func productID(for pack: CreditPack) -> String? {
         pack.productID ?? FrameMioCreditPackCatalog.productID(for: pack.id)
     }
 
     func load() {
+        if isLoading {
+            pricingDebugLog("credit_packs_load_ignored reason=already_loading \(primaryButtonDebugState)")
+            return
+        }
         loadTask?.cancel()
         loadTask = Task { [weak self] in
             guard let self else { return }
             isLoading = true
-            defer { isLoading = false }
+            pricingDebugLog("credit_packs_load_start \(primaryButtonDebugState)")
+            defer {
+                isLoading = false
+                pricingDebugLog("credit_packs_load_end \(primaryButtonDebugState)")
+            }
             do {
-                guard let creditService else { return }
+                guard let creditService else {
+                    pricingDebugLog("credit_packs_load_skipped reason=missing_credit_service")
+                    return
+                }
                 async let packsTask = creditService.creditPacks()
                 async let balanceTask = creditService.balance()
                 let loadedPacks = try await packsTask
                 packs = loadedPacks
+                pricingDebugLog("credit_packs_loaded count=\(loadedPacks.count) ids=\(loadedPacks.map(\.id).joined(separator: ","))")
                 if selectedPackID == nil {
                     selectedPackID = loadedPacks.first?.id
+                    pricingDebugLog("credit_pack_selected_initial id=\(selectedPackID ?? "nil")")
                 }
                 balance = try await balanceTask
+                pricingDebugLog("credit_packs_balance_loaded available=\(balance?.available.description ?? "nil") reserved=\(balance?.reserved.description ?? "nil") purchased_display=\(balance?.displayPurchasedCredits.description ?? "nil")")
                 if shouldSimulatePurchaseSuccess {
                     products = [:]
+                    pricingDebugLog("credit_packs_storekit_skipped reason=debug_simulation")
                 } else {
                     let productIDs = loadedPacks.compactMap { self.productID(for: $0) }
-                    let loadedProducts = try await Product.products(for: productIDs)
+                    pricingDebugLog("credit_packs_products_requested ids=\(productIDs.joined(separator: ","))")
+                    let loadedProducts = try await loadStoreKitProducts(productIDs: productIDs, timeoutSeconds: 8, logPrefix: "credit_packs")
                     products = Dictionary(uniqueKeysWithValues: loadedProducts.map { ($0.id, $0) })
+                    pricingDebugLog("credit_packs_products_loaded returned=\(loadedProducts.map(\.id).sorted().joined(separator: ",")) count=\(loadedProducts.count) \(primaryButtonDebugState)")
                 }
                 errorMessage = nil
             } catch {
-                errorMessage = AppError.from(error).localizedDescription
+                errorMessage = nil
+                statusMessage = "Could not load App Store credit packs. Tap Retry Loading Credit Packs."
+                pricingDebugLog("credit_packs_load_failed error=\(error.localizedDescription) mapped=\(AppError.from(error).localizedDescription) \(primaryButtonDebugState)")
             }
         }
     }
 
     func purchaseSelectedPack() {
-        guard !isPurchasing, let pack = selectedPack else { return }
+        guard !isPurchasing else {
+            pricingDebugLog("credit_pack_purchase_ignored reason=already_purchasing \(primaryButtonDebugState)")
+            return
+        }
+        guard let pack = selectedPack else {
+            if isLoading {
+                statusMessage = "Loading credit packs…"
+                errorMessage = nil
+                pricingDebugLog("credit_pack_purchase_blocked reason=no_selected_pack \(primaryButtonDebugState)")
+            } else {
+                statusMessage = "Retrying App Store credit pack loading…"
+                errorMessage = nil
+                pricingDebugLog("credit_pack_purchase_retry_load reason=no_selected_pack \(primaryButtonDebugState)")
+                load()
+            }
+            return
+        }
+        guard canPurchaseSelectedPack else {
+            if isLoading {
+                statusMessage = "Loading credit pack products…"
+                errorMessage = nil
+                pricingDebugLog("credit_pack_purchase_blocked \(primaryButtonDebugState)")
+            } else {
+                statusMessage = "Retrying App Store credit pack loading…"
+                errorMessage = nil
+                pricingDebugLog("credit_pack_purchase_retry_load \(primaryButtonDebugState)")
+                load()
+            }
+            return
+        }
         isPurchasing = true
         errorMessage = nil
         statusMessage = "Processing your credit purchase..."
+        pricingDebugLog("credit_pack_purchase_tapped pack=\(pack.id) credits=\(pack.credits) \(primaryButtonDebugState)")
         Task { [weak self] in
             guard let self else { return }
-            defer { isPurchasing = false }
+            defer {
+                isPurchasing = false
+                pricingDebugLog("credit_pack_purchase_end pack=\(pack.id) \(primaryButtonDebugState)")
+            }
             do {
                 if shouldSimulatePurchaseSuccess {
                     let purchaseID = "debug-credit-pack-\(pack.id)"
                     balance = try await creditService?.grantPurchasedCredits(packID: pack.id, purchaseID: purchaseID)
                     statusMessage = "Debug credit purchase completed."
+                    pricingDebugLog("credit_pack_purchase_debug_complete pack=\(pack.id) purchase_id=\(purchaseID) balance=\(balance?.available.description ?? "nil")")
                 } else {
                     guard let productID = productID(for: pack), let product = products[productID] else {
                         statusMessage = nil
                         errorMessage = "Credit pack products are not configured yet."
+                        pricingDebugLog("credit_pack_purchase_missing_product pack=\(pack.id) product_id=\(productID(for: pack) ?? "nil") \(primaryButtonDebugState)")
                         return
                     }
                     let result = try await product.purchase()
@@ -806,14 +992,18 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
                         balance = try await creditService?.grantPurchasedCredits(packID: pack.id, purchaseID: String(transaction.id))
                         await transaction.finish()
                         statusMessage = "Credits added."
+                        pricingDebugLog("credit_pack_purchase_success pack=\(pack.id) product_id=\(productID) transaction=\(transaction.id) balance=\(balance?.available.description ?? "nil")")
                     case .pending:
                         statusMessage = "Purchase pending approval."
+                        pricingDebugLog("credit_pack_purchase_pending pack=\(pack.id)")
                         return
                     case .userCancelled:
                         statusMessage = nil
+                        pricingDebugLog("credit_pack_purchase_cancelled pack=\(pack.id)")
                         return
                     @unknown default:
                         statusMessage = "Purchase could not be completed."
+                        pricingDebugLog("credit_pack_purchase_unknown_result pack=\(pack.id)")
                         return
                     }
                 }
@@ -822,6 +1012,7 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
             } catch {
                 statusMessage = nil
                 errorMessage = AppError.from(error).localizedDescription
+                pricingDebugLog("credit_pack_purchase_failed pack=\(pack.id) error=\(error.localizedDescription) mapped=\(AppError.from(error).localizedDescription)")
             }
         }
     }
@@ -830,10 +1021,15 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
         updatesTask?.cancel()
         updatesTask = Task { [weak self] in
             guard let self else { return }
+            pricingDebugLog("credit_pack_transaction_updates_listener_started")
             for await result in Transaction.updates {
-                guard let transaction = try? verifiedTransaction(from: result) else { continue }
+                guard let transaction = try? verifiedTransaction(from: result) else {
+                    pricingDebugLog("credit_pack_transaction_update_unverified")
+                    continue
+                }
                 guard transaction.revocationDate == nil,
                       let purchase = FrameMioCreditPackPurchase(productID: transaction.productID, packs: packs) else {
+                    pricingDebugLog("credit_pack_transaction_update_ignored product=\(transaction.productID) revoked=\(transaction.revocationDate != nil) packs=\(packs.count)")
                     continue
                 }
                 do {
@@ -841,9 +1037,11 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
                     await transaction.finish()
                     onBalanceUpdated()
                     onPurchaseCompleted()
+                    pricingDebugLog("credit_pack_transaction_update_applied pack=\(purchase.packID) product=\(transaction.productID) transaction=\(transaction.id) balance=\(balance?.available.description ?? "nil")")
                 } catch {
                     errorMessage = AppError.from(error).localizedDescription
                     statusMessage = nil
+                    pricingDebugLog("credit_pack_transaction_update_failed product=\(transaction.productID) error=\(error.localizedDescription)")
                 }
             }
         }
@@ -889,10 +1087,16 @@ struct FrameMioCreditPacksView: View {
                     title: viewModel.primaryButtonTitle,
                     systemImage: "sparkles",
                     action: { viewModel.purchaseSelectedPack() },
-                    isDisabled: viewModel.selectedPack == nil,
-                    isLoading: viewModel.isPurchasing
+                    isDisabled: viewModel.primaryButtonIsDisabled,
+                    isLoading: viewModel.primaryButtonIsLoading
                 )
                 .accessibilityLabel("Buy Credits. Adds purchased credits.")
+                .onAppear {
+                    pricingDebugLog("credit_pack_primary_button_state \(viewModel.primaryButtonDebugState)")
+                }
+                .onChange(of: viewModel.primaryButtonDebugState) { _, state in
+                    pricingDebugLog("credit_pack_primary_button_state \(state)")
+                }
 
                 if let statusMessage = viewModel.statusMessage {
                     Text(statusMessage)
@@ -978,6 +1182,7 @@ struct FrameMioCreditPacksView: View {
 
     private func creditPackRow(_ pack: CreditPack) -> some View {
         Button {
+            pricingDebugLog("credit_pack_selected from=\(viewModel.selectedPackID ?? "nil") to=\(pack.id) before=\(viewModel.primaryButtonDebugState)")
             FrameMioHaptics.secondaryAction()
             viewModel.selectedPackID = pack.id
         } label: {

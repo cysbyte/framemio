@@ -323,8 +323,8 @@ func TestDefaultStoryDurationAdaptsToMemorySetSize(t *testing.T) {
 	if got := defaultStoryDuration(models.StoryProject{MediaIDs: []string{"a", "b", "c", "d"}}); got != 16*time.Second {
 		t.Fatalf("4-media duration = %s, want 16s", got)
 	}
-	large := models.StoryProject{MediaIDs: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"}}
-	if got := defaultStoryDuration(large); got != 30*time.Second {
-		t.Fatalf("large story duration = %s, want 30s", got)
+	large := models.StoryProject{MediaIDs: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t"}}
+	if got := defaultStoryDuration(large); got != 60*time.Second {
+		t.Fatalf("large story duration = %s, want 60s", got)
 	}
 }

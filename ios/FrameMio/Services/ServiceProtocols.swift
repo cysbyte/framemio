@@ -405,9 +405,6 @@ extension StoryEditRequest {
         if !addMediaIDs.isEmpty || !replace.isEmpty {
             actions.append(.addMoment)
         }
-        if instruction?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
-            actions.append(.aiEditStory)
-        }
         return actions
     }
 
