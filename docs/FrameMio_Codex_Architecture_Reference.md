@@ -1128,6 +1128,8 @@ Inputs can include:
 - visual style
 - optional user instruction
 
+The planner can run as either the default deterministic local heuristic planner or a configured GPT/OpenAI-compatible planner. Both implementations must produce the same canonical `StoryPlan` model and must feed the same validation and render pipeline.
+
 Its job is:
 
 > Decide which meaningful moments form the best coherent memory story.
@@ -1172,7 +1174,34 @@ Chronological ordering is the default for everyday memories, but it is not an ab
 
 A stronger narrative may justify a different order.
 
-## 15.3 Photo typography planning
+## 15.3 Story Planner provider selection
+
+Initial StoryPlan generation is selected by backend configuration only. iOS never chooses provider names, model names, base URLs, API keys, or wire protocols.
+
+```text
+STORY_PLANNER_PROVIDER=local|openai|openai-compatible|ai-gateway
+STORY_PLANNER_MODEL=gpt-5.4
+STORY_PLANNER_BASE_URL=
+STORY_PLANNER_API_KEY=
+STORY_PLANNER_WIRE_API=responses|chat_completions
+STORY_PLANNER_MAX_OUTPUT_TOKENS=6000
+STORY_PLANNER_TIMEOUT=30s
+```
+
+Rules:
+
+- `local` is the default and preserves the existing heuristic planner behavior.
+- `ENABLE_GPT_STORY_PLANNER=true` is a compatibility alias for `openai-compatible` only when `STORY_PLANNER_PROVIDER` is unset.
+- `STORY_PLANNER_BASE_URL` falls back to `OPENAI_BASE_URL`; `STORY_PLANNER_API_KEY` falls back to `OPENAI_API_KEY`.
+- External providers require both an API key and `STORY_PLANNER_MODEL`; startup must fail clearly when either is missing.
+- GPT receives bounded structured `PhotoAnalysis`, `VideoAnalysis`, transcript segments, media clusters, selected/excluded IDs, desired duration, style, and constraints; it does not receive original full-resolution media or provider secrets.
+- GPT must return the existing `models.StoryPlan` JSON shape only, never Remotion code, FFmpeg commands, shell commands, SQL, JavaScript, or executable instructions.
+- The backend validator deterministically rejects invalid media references, unsupported transitions/crop intents/typography/caption values, bad timings, over-duration plans, and missing render-required fields before persistence/rendering.
+- `VIDEO_UNDERSTANDING_MODEL`, such as `gpt-5.4-mini`, remains separate from `STORY_PLANNER_MODEL`; media understanding can use a cheaper bulk-analysis model while planning uses a stronger creative model.
+
+The configured planner must remain an implementation of the same Story Planner abstraction used by orchestration. It must not create a second StoryPlan format, a second renderer, a second job system, or a second media-analysis pipeline.
+
+## 15.4 Photo typography planning
 
 Photo typography is a deferred post-first-publish feature. The repository may retain the domain model, validation helpers, and provider abstractions, but active first-release behavior is:
 

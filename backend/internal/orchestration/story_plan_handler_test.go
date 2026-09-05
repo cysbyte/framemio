@@ -8,7 +8,9 @@ import (
 
 	"github.com/framemio/backend/internal/ai"
 	"github.com/framemio/backend/internal/models"
+	"github.com/framemio/backend/internal/storage"
 	"github.com/framemio/backend/internal/store"
+	"github.com/framemio/backend/internal/storyvalidation"
 )
 
 func TestStoryPlanHandlerUsesPersistedVideoAnalysis(t *testing.T) {
@@ -175,6 +177,90 @@ func TestStoryPlanHandlerReusesVideoAnalysisForSelectedVideo(t *testing.T) {
 	}
 }
 
+func TestStoryPlanHandlerPersistsExternalPlannerOutput(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore, project := storyRevisionHandlerFixture(t)
+	now := project.CreatedAt
+	planner := fixedStoryPlanner{plan: models.StoryPlan{
+		SchemaVersion:       models.StoryPlanSchemaVersionV1,
+		ID:                  "plan-external-valid",
+		ProjectID:           project.ID,
+		Version:             2,
+		RequestedDurationMS: 4000,
+		StoryType:           models.StoryTypeTrip,
+		VisualStyle:         models.VisualStyleCinematic,
+		TitleText:           "GPT Beach Story",
+		EndingText:          "Until next time.",
+		Moments: []models.StoryMoment{{
+			MomentID:   "moment-photo-revision",
+			AssetID:    "photo-revision",
+			MediaID:    "photo-revision",
+			MediaType:  models.MediaTypePhoto,
+			Narrative:  "A beach memory opens the story.",
+			Caption:    "Beach memory",
+			DurationMS: 4000,
+			CropIntent: "fit",
+			Transition: "fade_in",
+			Reason:     "Strong opening photo",
+			Score:      0.9,
+		}},
+		Captions:        []models.StoryCaption{{MomentID: "moment-photo-revision", Text: "Beach memory", StartMS: 0, EndMS: 4000}},
+		CaptionStyle:    &models.CaptionStyle{Preset: "cinematic_subtitle", FontFamily: "inter-bold", FontSize: 48, TextColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 4, BackgroundEnabled: true, BackgroundColor: "#000000", BackgroundOpacity: 0.32, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 32},
+		Audio:           &models.StoryAudio{Source: "original", OriginalAudio: boolPtr(true), OriginalVolume: 0.4},
+		Output:          models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 4, Preset: "premium-memory"},
+		TotalDurationMS: 4000,
+		CreatedAt:       now,
+	}}
+	job := models.ProcessingJob{ID: "job-external-valid", UserID: project.UserID, ProjectID: project.ID, Type: models.JobTypeStoryPlan, Status: models.JobStatusRunning, Configuration: map[string]string{"story_plan_version": "2"}, CreatedAt: now, UpdatedAt: now}
+	handler := StoryPlanHandler{Store: memoryStore, Planner: planner, Validator: storyvalidation.New(memoryStore, storage.StaticObjectStorage{}, storyvalidation.DefaultConfig()), Now: func() time.Time { return now }}
+	if err := handler.HandleJob(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	latest, err := memoryStore.GetStoryPlan(ctx, project.UserID, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latest.ID != "plan-external-valid" || latest.Version != 2 || len(latest.Captions) != 1 {
+		t.Fatalf("external planner output was not persisted: %+v", latest)
+	}
+}
+
+func TestStoryPlanHandlerRejectsExternalPlannerInvalidMedia(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore, project := storyRevisionHandlerFixture(t)
+	now := project.CreatedAt
+	planner := fixedStoryPlanner{plan: models.StoryPlan{
+		SchemaVersion:       models.StoryPlanSchemaVersionV1,
+		ID:                  "plan-external-invalid",
+		ProjectID:           project.ID,
+		Version:             2,
+		RequestedDurationMS: 1000,
+		TitleText:           "Invalid",
+		EndingText:          "Invalid",
+		Moments:             []models.StoryMoment{{MomentID: "invented", AssetID: "invented-media", MediaID: "invented-media", MediaType: models.MediaTypePhoto, DurationMS: 1000, CropIntent: "fit", Transition: "fade_in"}},
+		Output:              models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 1, Preset: "premium-memory"},
+		TotalDurationMS:     1000,
+		CreatedAt:           now,
+	}}
+	job := models.ProcessingJob{ID: "job-external-invalid", UserID: project.UserID, ProjectID: project.ID, Type: models.JobTypeStoryPlan, Status: models.JobStatusRunning, Configuration: map[string]string{"story_plan_version": "2"}, CreatedAt: now, UpdatedAt: now}
+	handler := StoryPlanHandler{Store: memoryStore, Planner: planner, Validator: storyvalidation.New(memoryStore, storage.StaticObjectStorage{}, storyvalidation.DefaultConfig()), Now: func() time.Time { return now }}
+	if err := handler.HandleJob(ctx, job); err == nil {
+		t.Fatal("expected invalid external planner media reference to fail validation")
+	}
+	latest, err := memoryStore.GetStoryPlan(ctx, project.UserID, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latest.Version != 1 {
+		t.Fatalf("invalid external plan should not become active, got version %d", latest.Version)
+	}
+	if _, err := memoryStore.GetStoryPlanVersion(ctx, project.UserID, project.ID, 2); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("invalid external plan should not persist v2, got %v", err)
+	}
+}
+
 func TestStoryPlanRevisionFailureLeavesBasePlanActive(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -328,3 +414,17 @@ func TestDefaultStoryDurationAdaptsToMemorySetSize(t *testing.T) {
 		t.Fatalf("large story duration = %s, want 60s", got)
 	}
 }
+
+type fixedStoryPlanner struct {
+	plan models.StoryPlan
+}
+
+func (planner fixedStoryPlanner) Plan(context.Context, ai.Request) (models.StoryPlan, error) {
+	return planner.plan, nil
+}
+
+func (fixedStoryPlanner) Name() string { return "openai-compatible" }
+
+func (fixedStoryPlanner) Model() string { return "gpt-test" }
+
+func boolPtr(value bool) *bool { return &value }

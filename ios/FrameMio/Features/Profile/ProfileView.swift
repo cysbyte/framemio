@@ -57,7 +57,7 @@ struct ProfileView: View {
                 .foregroundStyle(FrameMioColors.ink)
                 .minimumScaleFactor(0.82)
                 .lineLimit(1)
-            Text(creditStore.isLowOnCredits ? "Your current available balance is running low." : "Your current available balance")
+            Text(creditStore.isLowOnCredits ? "Your spendable credit balance is running low." : "Your spendable credit balance")
                 .font(FrameMioTypography.body)
                 .foregroundStyle(FrameMioColors.secondaryInk)
                 .multilineTextAlignment(.center)
@@ -68,6 +68,11 @@ struct ProfileView: View {
                 }
                 .font(FrameMioTypography.footnote)
                 .foregroundStyle(FrameMioColors.secondaryInk)
+                if balance.displayReservedCredits > 0 {
+                    Text("\(balance.displayReservedCredits.formatted()) credits reserved for stories in progress.")
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                }
                 Text("Purchased credits carry over.")
                     .font(FrameMioTypography.footnote)
                     .foregroundStyle(FrameMioColors.secondaryInk)

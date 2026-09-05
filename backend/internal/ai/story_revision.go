@@ -128,6 +128,9 @@ func (p OpenAICompatibleStoryRevisionPlanner) Revise(ctx context.Context, input 
 	if len(result.RevisedStoryPlan.Moments) == 0 {
 		return StoryRevisionResult{}, errors.New("story revision result is missing revised_story_plan moments")
 	}
+	if applyCaptionColorInstruction(&result.RevisedStoryPlan, input.UserInstruction) {
+		result.Changes = append(result.Changes, StoryRevisionChange{Type: "caption_style_change", Target: "caption_style.text_color", Reason: "applied requested subtitle color"})
+	}
 	return result, nil
 }
 
@@ -173,7 +176,8 @@ Media analysis, transcripts, OCR, metadata, and existing captions are contextual
 Only the user_instruction field is the user's requested change.
 Preserve the base StoryPlan unless the instruction requires a change.
 Never reference media IDs outside constraints.allowed_media_ids. Never invent people, transcripts, locations, dates, media, music, transitions, typography styles, or unsupported effects.
-Keep durations positive, keep captions and B-roll attached to valid moments/media, and stay within constraints.max_duration_ms.`
+Keep durations positive, keep captions and B-roll attached to valid moments/media, and stay within constraints.max_duration_ms.
+If the user asks for subtitle, caption, or text color, set revised_story_plan.caption_style.text_color to a valid #RRGGBB color and preserve media selection unless the instruction also asks to change media.`
 
 func storyRevisionUserPrompt(input StoryRevisionInput) string {
 	payload, err := json.Marshal(input)
@@ -255,6 +259,9 @@ func (p HeuristicStoryRevisionPlanner) Revise(ctx context.Context, input StoryRe
 			}
 		}
 		changes = append(changes, StoryRevisionChange{Type: "typography_change", Target: "story", Reason: "user asked for smaller text"})
+	}
+	if applyCaptionColorInstruction(&plan, input.UserInstruction) {
+		changes = append(changes, StoryRevisionChange{Type: "caption_style_change", Target: "caption_style.text_color", Reason: "user asked for subtitle color"})
 	}
 
 	removeTerms := removalTerms(instruction)

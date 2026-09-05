@@ -164,6 +164,7 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 		TotalDurationMS: totalDuration,
 		CreatedAt:       now,
 	}
+	applyCaptionColorInstruction(&plan, request.UserInstructions)
 	if err := ValidateStoryPlan(plan); err != nil {
 		return models.StoryPlan{}, err
 	}
@@ -360,6 +361,116 @@ func captionStylePreset(preset string, storyType models.StoryType, visualStyle m
 	default:
 		return captionStyleFor(storyType, visualStyle)
 	}
+}
+
+func applyCaptionColorInstruction(plan *models.StoryPlan, instructions string) bool {
+	color, ok := captionTextColorFromInstruction(instructions)
+	if !ok {
+		return false
+	}
+	if plan.CaptionStyle == nil {
+		plan.CaptionStyle = captionStyleFor(plan.StoryType, plan.VisualStyle)
+	}
+	if plan.CaptionStyle == nil {
+		plan.CaptionStyle = &models.CaptionStyle{Preset: "clean_minimal"}
+	}
+	plan.CaptionStyle.TextColor = color
+	if strings.TrimSpace(plan.CaptionStyle.FontFamily) == "" {
+		plan.CaptionStyle.FontFamily = "inter"
+	}
+	if strings.TrimSpace(plan.CaptionStyle.StrokeColor) == "" {
+		plan.CaptionStyle.StrokeColor = "#000000"
+	}
+	if plan.CaptionStyle.FontSize <= 0 {
+		plan.CaptionStyle.FontSize = 42
+	}
+	if strings.TrimSpace(plan.CaptionStyle.Position) == "" {
+		plan.CaptionStyle.Position = "bottom"
+	}
+	return true
+}
+
+func captionTextColorFromInstruction(instructions string) (string, bool) {
+	text := strings.ToLower(strings.TrimSpace(instructions))
+	if text == "" || !captionColorInstructionTargetsText(text) {
+		return "", false
+	}
+	if hex, ok := firstHexColor(text); ok {
+		return strings.ToUpper(hex), true
+	}
+	colors := []struct {
+		name string
+		hex  string
+	}{
+		{"red", "#FF3B30"},
+		{"white", "#FFFFFF"},
+		{"black", "#000000"},
+		{"yellow", "#FFE066"},
+		{"gold", "#FFD60A"},
+		{"orange", "#FF9500"},
+		{"blue", "#4DA3FF"},
+		{"green", "#34C759"},
+		{"pink", "#FF2D55"},
+		{"purple", "#AF52DE"},
+	}
+	for _, color := range colors {
+		if containsInstructionWord(text, color.name) {
+			return color.hex, true
+		}
+	}
+	return "", false
+}
+
+func captionColorInstructionTargetsText(text string) bool {
+	return containsInstructionWord(text, "subtitle") ||
+		containsInstructionWord(text, "subtitles") ||
+		containsInstructionWord(text, "caption") ||
+		containsInstructionWord(text, "captions") ||
+		containsInstructionWord(text, "text") ||
+		strings.Contains(text, "text overlay") ||
+		strings.Contains(text, "text overlays")
+}
+
+func firstHexColor(text string) (string, bool) {
+	for index := 0; index+7 <= len(text); index++ {
+		if text[index] != '#' {
+			continue
+		}
+		candidate := text[index : index+7]
+		valid := true
+		for _, char := range candidate[1:] {
+			if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+				valid = false
+				break
+			}
+		}
+		if valid {
+			return candidate, true
+		}
+	}
+	return "", false
+}
+
+func containsInstructionWord(text, word string) bool {
+	start := strings.Index(text, word)
+	for start >= 0 {
+		beforeOK := start == 0 || !isInstructionWordChar(rune(text[start-1]))
+		afterIndex := start + len(word)
+		afterOK := afterIndex >= len(text) || !isInstructionWordChar(rune(text[afterIndex]))
+		if beforeOK && afterOK {
+			return true
+		}
+		next := strings.Index(text[start+len(word):], word)
+		if next < 0 {
+			return false
+		}
+		start += len(word) + next
+	}
+	return false
+}
+
+func isInstructionWordChar(char rune) bool {
+	return (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '_'
 }
 
 func ValidateStoryPlan(plan models.StoryPlan) error {

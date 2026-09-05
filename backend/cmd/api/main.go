@@ -140,6 +140,13 @@ type configuration struct {
 	TypographyWireAPI       string
 	TypographyMaxTokens     int
 	TypographyTimeout       time.Duration
+	StoryPlannerProvider    string
+	StoryPlannerBaseURL     string
+	StoryPlannerAPIKey      string
+	StoryPlannerModel       string
+	StoryPlannerWireAPI     string
+	StoryPlannerMaxTokens   int
+	StoryPlannerTimeout     time.Duration
 	StoryRevisionProvider   string
 	StoryRevisionBaseURL    string
 	StoryRevisionAPIKey     string
@@ -172,6 +179,13 @@ func loadConfiguration() (configuration, error) {
 		TypographyWireAPI:       environment("TYPOGRAPHY_WIRE_API", "responses"),
 		TypographyMaxTokens:     environmentInt("TYPOGRAPHY_MAX_OUTPUT_TOKENS", 1400),
 		TypographyTimeout:       environmentDuration("TYPOGRAPHY_TIMEOUT", 12*time.Second),
+		StoryPlannerProvider:    storyPlannerProviderFromEnv(),
+		StoryPlannerBaseURL:     environment("STORY_PLANNER_BASE_URL", os.Getenv("OPENAI_BASE_URL")),
+		StoryPlannerAPIKey:      environment("STORY_PLANNER_API_KEY", os.Getenv("OPENAI_API_KEY")),
+		StoryPlannerModel:       os.Getenv("STORY_PLANNER_MODEL"),
+		StoryPlannerWireAPI:     environment("STORY_PLANNER_WIRE_API", "responses"),
+		StoryPlannerMaxTokens:   environmentInt("STORY_PLANNER_MAX_OUTPUT_TOKENS", 6000),
+		StoryPlannerTimeout:     environmentDuration("STORY_PLANNER_TIMEOUT", 30*time.Second),
 		StoryRevisionProvider:   environment("STORY_REVISION_PROVIDER", "local"),
 		StoryRevisionBaseURL:    environment("STORY_REVISION_BASE_URL", os.Getenv("OPENAI_BASE_URL")),
 		StoryRevisionAPIKey:     environment("STORY_REVISION_API_KEY", os.Getenv("OPENAI_API_KEY")),
@@ -192,7 +206,35 @@ func loadConfiguration() (configuration, error) {
 	if len(result.InternalAPIToken) < 32 {
 		return configuration{}, errors.New("INTERNAL_API_TOKEN must contain at least 32 characters")
 	}
+	if isExternalStoryPlannerProvider(result.StoryPlannerProvider) {
+		if strings.TrimSpace(result.StoryPlannerAPIKey) == "" {
+			return configuration{}, errors.New("STORY_PLANNER_API_KEY or OPENAI_API_KEY is required when STORY_PLANNER_PROVIDER uses an external AI provider")
+		}
+		if strings.TrimSpace(result.StoryPlannerModel) == "" {
+			return configuration{}, errors.New("STORY_PLANNER_MODEL is required when STORY_PLANNER_PROVIDER uses an external AI provider")
+		}
+	}
 	return result, nil
+}
+
+func storyPlannerProviderFromEnv() string {
+	provider := environment("STORY_PLANNER_PROVIDER", "local")
+	if strings.TrimSpace(os.Getenv("STORY_PLANNER_PROVIDER")) != "" {
+		return provider
+	}
+	if environmentBool("ENABLE_GPT_STORY_PLANNER", false) {
+		return "openai-compatible"
+	}
+	return provider
+}
+
+func isExternalStoryPlannerProvider(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "openai", "openai-compatible", "ai-gateway", "ai_gateway":
+		return true
+	default:
+		return false
+	}
 }
 
 func environment(name, fallback string) string {
@@ -249,12 +291,33 @@ func runWorkerOnce(ctx context.Context, database store.Store, coordinator *orche
 	return worker.RunOnce(workerContext)
 }
 
-func configuredStoryPlanner(configuration configuration, logger *slog.Logger) (*ai.Planner, error) {
+func configuredStoryPlanner(configuration configuration, logger *slog.Logger) (ai.StoryPlanner, error) {
 	typographyPlanner, err := configuredTypographyPlanner(configuration)
 	if err != nil {
 		return nil, err
 	}
-	return &ai.Planner{TypographyPlanner: typographyPlanner, Logger: logger}, nil
+	switch strings.ToLower(strings.TrimSpace(configuration.StoryPlannerProvider)) {
+	case "", "local", "default", "rules", "rule", "heuristic":
+		return &ai.Planner{TypographyPlanner: typographyPlanner, Logger: logger}, nil
+	case "openai", "openai-compatible", "ai-gateway", "ai_gateway":
+		if strings.TrimSpace(configuration.StoryPlannerAPIKey) == "" {
+			return nil, errors.New("STORY_PLANNER_API_KEY or OPENAI_API_KEY is required when STORY_PLANNER_PROVIDER uses an external AI provider")
+		}
+		if strings.TrimSpace(configuration.StoryPlannerModel) == "" {
+			return nil, errors.New("STORY_PLANNER_MODEL is required when STORY_PLANNER_PROVIDER uses an external AI provider")
+		}
+		return ai.OpenAICompatibleStoryPlanner{
+			BaseURL:         configuration.StoryPlannerBaseURL,
+			APIKey:          configuration.StoryPlannerAPIKey,
+			ProviderName:    configuration.StoryPlannerProvider,
+			ModelName:       configuration.StoryPlannerModel,
+			WireAPI:         configuration.StoryPlannerWireAPI,
+			MaxOutputTokens: configuration.StoryPlannerMaxTokens,
+			Client:          &http.Client{Timeout: configuration.StoryPlannerTimeout},
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported STORY_PLANNER_PROVIDER %q", configuration.StoryPlannerProvider)
+	}
 }
 
 func configuredStoryRevisionPlanner(configuration configuration, logger *slog.Logger) (ai.StoryRevisionPlanner, error) {

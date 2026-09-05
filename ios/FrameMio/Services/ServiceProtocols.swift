@@ -206,10 +206,11 @@ struct CreditBalance: Codable, Hashable, Sendable {
     let yearlySubscriptionCycleCredits: Int
     let totalCredits: Int
 
-    var displayCredits: Int { totalCredits }
+    var displayCredits: Int { available }
     var spendableCredits: Int { available }
-    var displaySubscriptionCredits: Int { subscriptionCredits + subscriptionReserved }
-    var displayPurchasedCredits: Int { purchasedCredits + purchasedReserved }
+    var displaySubscriptionCredits: Int { subscriptionCredits }
+    var displayPurchasedCredits: Int { purchasedCredits }
+    var displayReservedCredits: Int { reserved }
 
     var hasActiveSubscriptionCycle: Bool {
         if subscriptionCredits > 0 || subscriptionReserved > 0 {
@@ -417,6 +418,7 @@ protocol CreditService: Sendable {
     func balance() async throws -> CreditBalance
     func creditPacks() async throws -> [CreditPack]
     func grantPurchasedCredits(packID: String, purchaseID: String) async throws -> CreditBalance
+    func grantSubscriptionCycleCredits(plan: String, purchaseID: String, expiresAt: Date?) async throws -> CreditBalance
 }
 
 @MainActor

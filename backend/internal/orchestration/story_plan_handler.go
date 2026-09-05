@@ -18,7 +18,7 @@ import (
 
 type StoryPlanHandler struct {
 	Store           store.Store
-	Planner         *ai.Planner
+	Planner         ai.StoryPlanner
 	RevisionPlanner ai.StoryRevisionPlanner
 	Validator       storyvalidation.Service
 	Now             func() time.Time
@@ -58,6 +58,10 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		planner = &ai.Planner{Now: h.Now}
 	}
 	request := h.storyPlanRequest(project, job.Configuration, photoAnalyses, videoAnalyses, mediaClusters(project, mediaByID, photoAnalyses, videoAnalyses))
+	plannerProvider := storyPlannerName(planner)
+	plannerModel := storyPlannerModel(planner)
+	started := time.Now()
+	h.logger().Info("story_planner_started", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("story_plan_version", request.Version), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int("media_count", len(project.MediaIDs)), slog.Int("photo_analysis_count", len(photoAnalyses)), slog.Int("video_analysis_count", len(videoAnalyses)))
 	h.logger().Info("story planner request prepared",
 		slog.String("job_id", job.ID),
 		slog.String("project_id", project.ID),
@@ -76,17 +80,34 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		slog.String("subtitles_enabled", boolPointerLogValue(request.SubtitlesEnabled)),
 		slog.String("caption_style_preset", valueOrUnset(request.CaptionStylePreset)),
 	)
+	if plannerProvider != "local" {
+		h.logger().Info("story_planner_ai_request_started", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("story_plan_version", request.Version), slog.String("provider", plannerProvider), slog.String("model", plannerModel))
+	}
 	plan, err := planner.Plan(ctx, request)
 	if err != nil {
-		h.logger().Error("story planner failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Any("error", err))
+		h.logger().Error("story_planner_failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.String("failure_category", "planner"), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Any("error", err))
 		return err
 	}
+	if plannerProvider != "local" {
+		h.logger().Info("story_planner_ai_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("story_plan_version", plan.Version), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)))
+		if validationErr := ai.ValidateStoryPlan(plan); validationErr != nil {
+			h.logger().Warn("story_planner_validation_failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.String("failure_category", "schema"), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Any("error", validationErr))
+			return validationErr
+		}
+	}
 	h.logger().Info("story planner output ready", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.Int("candidate_count", len(photoAnalyses)+totalVideoSegments(videoAnalyses)), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.String("broll_scores", brollScores(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)), slog.Int("typography_count", typographyCount(plan.Moments)), slog.Int("video_moment_count", videoMomentCount(plan.Moments)), slog.String("caption_style_preset", storyPlanCaptionStylePreset(plan)))
+	if h.Validator != nil {
+		if validationErr := h.Validator.Validate(ctx, job.UserID, plan); validationErr != nil {
+			h.logger().Warn("story_planner_validation_failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Any("error", validationErr))
+			return validationErr
+		}
+	}
 	if err := h.Store.SaveStoryPlan(ctx, job.UserID, plan); err != nil {
 		h.logger().Error("save story plan failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("caption_count", len(plan.Captions)), slog.Any("error", err))
 		return err
 	}
 	h.logger().Info("story plan saved", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("caption_count", len(plan.Captions)))
+	h.logger().Info("story_planner_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)))
 	return nil
 }
 
@@ -210,6 +231,32 @@ func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configur
 
 func isAIStoryPlanRevision(configuration map[string]string) bool {
 	return strings.EqualFold(strings.TrimSpace(configuration["revision_mode"]), "ai_story_plan_revision") && strings.TrimSpace(configuration["user_instructions"]) != ""
+}
+
+type namedStoryPlanner interface {
+	Name() string
+}
+
+type modeledStoryPlanner interface {
+	Model() string
+}
+
+func storyPlannerName(planner ai.StoryPlanner) string {
+	if named, ok := planner.(namedStoryPlanner); ok {
+		if name := strings.TrimSpace(named.Name()); name != "" {
+			return name
+		}
+	}
+	return "local"
+}
+
+func storyPlannerModel(planner ai.StoryPlanner) string {
+	if modeled, ok := planner.(modeledStoryPlanner); ok {
+		if model := strings.TrimSpace(modeled.Model()); model != "" {
+			return model
+		}
+	}
+	return ""
 }
 
 type namedStoryRevisionPlanner interface {

@@ -72,6 +72,21 @@ func TestHeuristicStoryRevisionUpdatesTypographyOnly(t *testing.T) {
 	}
 }
 
+func TestHeuristicStoryRevisionAppliesSubtitleColor(t *testing.T) {
+	t.Parallel()
+	input := revisionFixtureInput("Make the subtitle in red color.")
+	result, err := (HeuristicStoryRevisionPlanner{}).Revise(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.RevisedStoryPlan.Moments) != len(input.CurrentStoryPlan.Moments) {
+		t.Fatalf("subtitle color change altered media selection: %+v", result.RevisedStoryPlan.Moments)
+	}
+	if result.RevisedStoryPlan.CaptionStyle == nil || result.RevisedStoryPlan.CaptionStyle.TextColor != "#FF3B30" {
+		t.Fatalf("expected red subtitle text color, got %+v", result.RevisedStoryPlan.CaptionStyle)
+	}
+}
+
 func TestHeuristicStoryRevisionAddsBeachBRollFromExistingMedia(t *testing.T) {
 	t.Parallel()
 	input := revisionFixtureInput("Add more beach B-roll.")

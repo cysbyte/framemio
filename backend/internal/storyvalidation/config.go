@@ -7,6 +7,8 @@ type Config struct {
 	SupportedAspectRatios       map[string]struct{}
 	AllowedCaptionPresets       map[string]struct{}
 	AllowedCaptionFonts         map[string]struct{}
+	AllowedTransitions          map[string]struct{}
+	AllowedCropIntents          map[string]struct{}
 	AllowedCaptionPositions     map[string]struct{}
 	AllowedTextOverlayTypes     map[models.TextOverlayType]struct{}
 	AllowedTypographyStyles     map[models.TypographyStyle]struct{}
@@ -58,6 +60,16 @@ func DefaultConfig() Config {
 			"system-bold":    {},
 			"noto-sans":      {},
 			"noto-sans-bold": {},
+		},
+		AllowedTransitions: map[string]struct{}{
+			"fade_in":   {},
+			"fade":      {},
+			"crossfade": {},
+			"cut":       {},
+		},
+		AllowedCropIntents: map[string]struct{}{
+			"fit":  {},
+			"fill": {},
 		},
 		AllowedCaptionPositions: map[string]struct{}{
 			"bottom": {},

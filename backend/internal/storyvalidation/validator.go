@@ -37,6 +37,12 @@ func New(store store.Store, objectStorage storage.ObjectStorage, config Config) 
 	if config.AllowedCaptionFonts == nil {
 		config.AllowedCaptionFonts = DefaultConfig().AllowedCaptionFonts
 	}
+	if config.AllowedTransitions == nil {
+		config.AllowedTransitions = DefaultConfig().AllowedTransitions
+	}
+	if config.AllowedCropIntents == nil {
+		config.AllowedCropIntents = DefaultConfig().AllowedCropIntents
+	}
 	if config.AllowedCaptionPositions == nil {
 		config.AllowedCaptionPositions = DefaultConfig().AllowedCaptionPositions
 	}
@@ -222,9 +228,13 @@ func (v *Validator) Validate(ctx context.Context, userID string, plan models.Sto
 		}
 		if len(moment.CropIntent) > config.MaxCropIntentLength {
 			problems.Add(field+".crop_intent", "too_long", fmt.Sprintf("crop intent must be at most %d characters", config.MaxCropIntentLength))
+		} else if strings.TrimSpace(moment.CropIntent) != "" && !allowedString(config.AllowedCropIntents, moment.CropIntent) {
+			problems.Add(field+".crop_intent", "unsupported_crop_intent", "crop intent is unsupported")
 		}
 		if len(moment.Transition) > config.MaxTransitionLength {
 			problems.Add(field+".transition", "too_long", fmt.Sprintf("transition must be at most %d characters", config.MaxTransitionLength))
+		} else if strings.TrimSpace(moment.Transition) != "" && !allowedString(config.AllowedTransitions, moment.Transition) {
+			problems.Add(field+".transition", "unsupported_transition", "transition is unsupported")
 		}
 		if len(moment.Narrative) > config.MaxNarrativeLength {
 			problems.Add(field+".narrative", "too_long", fmt.Sprintf("narrative must be at most %d characters", config.MaxNarrativeLength))
@@ -388,6 +398,12 @@ func (v *Validator) config() Config {
 	if config.AllowedCaptionFonts == nil {
 		config.AllowedCaptionFonts = defaults.AllowedCaptionFonts
 	}
+	if config.AllowedTransitions == nil {
+		config.AllowedTransitions = defaults.AllowedTransitions
+	}
+	if config.AllowedCropIntents == nil {
+		config.AllowedCropIntents = defaults.AllowedCropIntents
+	}
 	if config.AllowedCaptionPositions == nil {
 		config.AllowedCaptionPositions = defaults.AllowedCaptionPositions
 	}
@@ -470,6 +486,11 @@ func (v *Validator) config() Config {
 		config.MaxCaptionLineCharacters = defaults.MaxCaptionLineCharacters
 	}
 	return config
+}
+
+func allowedString(values map[string]struct{}, value string) bool {
+	_, ok := values[strings.ToLower(strings.TrimSpace(value))]
+	return ok
 }
 
 func (v *Validator) supportedAspectRatio(aspectRatio string) bool {
@@ -593,6 +614,8 @@ func validateBRoll(ctx context.Context, v *Validator, userID string, plan models
 		}
 		if len(overlay.CropIntent) > config.MaxCropIntentLength {
 			problems.Add(field+".crop_intent", "too_long", fmt.Sprintf("crop intent must be at most %d characters", config.MaxCropIntentLength))
+		} else if strings.TrimSpace(overlay.CropIntent) != "" && !allowedString(config.AllowedCropIntents, overlay.CropIntent) {
+			problems.Add(field+".crop_intent", "unsupported_crop_intent", "b-roll crop intent is unsupported")
 		}
 		if len(overlay.Reason) > config.MaxBRollReasonLength {
 			problems.Add(field+".reason", "too_long", fmt.Sprintf("b-roll reason must be at most %d characters", config.MaxBRollReasonLength))

@@ -134,6 +134,7 @@ final class FrameMioProViewModel: ObservableObject {
     @Published private(set) var monthlyProduct: Product?
     @Published private(set) var yearlyProduct: Product?
     @Published private(set) var balance: Int?
+    @Published private(set) var reservedBalance = 0
     @Published private(set) var isSubscribed = false
     @Published private(set) var renewalDate: Date?
     @Published private(set) var isLoading = false
@@ -180,9 +181,14 @@ final class FrameMioProViewModel: ObservableObject {
             return "Loading credits..."
         }
         if isSubscribed {
-            return "\(balance.formatted()) credits remaining"
+            return "\(balance.formatted()) credits available"
         }
-        return "You have \(balance.formatted()) credits"
+        return "You have \(balance.formatted()) credits available"
+    }
+
+    var reservedBalanceText: String? {
+        guard reservedBalance > 0 else { return nil }
+        return "\(reservedBalance.formatted()) credits are reserved for stories in progress."
     }
 
     var renewalText: String? {
@@ -260,6 +266,18 @@ final class FrameMioProViewModel: ObservableObject {
                     pricingDebugLog("load_products_loaded monthly=\(monthlyProduct != nil) yearly=\(yearlyProduct != nil)")
                     _ = await balanceTask
                     await refreshEntitlements()
+                    if isSubscribed {
+                        do {
+                            let synced = try await syncActiveSubscriptionCycleCredits(source: "load")
+                            if synced {
+                                onBalanceUpdated()
+                            }
+                            pricingDebugLog("load_subscription_credit_sync_complete synced=\(synced) balance=\(balance.map(String.init) ?? "nil") reserved=\(reservedBalance)")
+                        } catch {
+                            pricingDebugLog("load_subscription_credit_sync_failed error=\(error.localizedDescription) mapped=\(AppError.from(error).localizedDescription)")
+                            statusMessage = "FrameMio Pro is active. Tap Restore Purchases if credits do not update."
+                        }
+                    }
                     if selectedPlan == .yearly, yearlyProduct == nil, monthlyProduct != nil {
                         pricingDebugLog("selected_plan_adjusted from=yearly to=monthly reason=yearly_product_missing")
                         selectedPlan = .monthly
@@ -318,7 +336,7 @@ final class FrameMioProViewModel: ObservableObject {
             defer { isPurchasing = false }
             if shouldSimulatePurchaseSuccess {
                 pricingDebugLog("simulate_purchase_success plan=\(selectedPlan.rawValue) source=\(source.rawValue) simulated=\(shouldSimulatePurchaseSuccess)")
-                await completePurchaseSuccess(statusMessage: "Debug purchase completed.")
+                try? await completePurchaseSuccess(statusMessage: "Debug purchase completed.")
             } else {
                 guard let product = product(for: selectedPlan) else {
                     pricingDebugLog("purchase_missing_product selected=\(selectedPlan.rawValue) product_id=\(selectedPlan.productID) monthly_loaded=\(monthlyProduct != nil) yearly_loaded=\(yearlyProduct != nil)")
@@ -335,7 +353,7 @@ final class FrameMioProViewModel: ObservableObject {
                     switch result {
                     case let .success(verificationResult):
                         let transaction = try verifiedTransaction(from: verificationResult)
-                        await completePurchaseSuccess(statusMessage: isSubscribed ? "FrameMio Pro is active." : "Purchase completed.")
+                        try await completePurchaseSuccess(for: transaction, statusMessage: "FrameMio Pro is active.")
                         await transaction.finish()
                     case .pending:
                         statusMessage = "Purchase pending approval."
@@ -370,10 +388,13 @@ final class FrameMioProViewModel: ObservableObject {
             do {
                 try await AppStore.sync()
                 await refreshEntitlements()
-                await fetchBalance()
+                let synced = try await syncActiveSubscriptionCycleCredits(source: "restore")
+                if !synced {
+                    await fetchBalance()
+                }
                 onBalanceUpdated()
                 statusMessage = "Purchases restored."
-                pricingDebugLog("restore_complete subscribed=\(isSubscribed) balance=\(balance.map(String.init) ?? "nil")")
+                pricingDebugLog("restore_complete subscribed=\(isSubscribed) synced=\(synced) balance=\(balance.map(String.init) ?? "nil") reserved=\(reservedBalance)")
             } catch {
                 statusMessage = nil
                 if isCancellationLikeError(error) {
@@ -429,7 +450,7 @@ final class FrameMioProViewModel: ObservableObject {
         var activeSubscriptionDate: Date?
         var subscriptionActive = false
         pricingDebugLog("refresh_entitlements_start")
-        for await result in Transaction.currentEntitlements {
+        for await result in StoreKit.Transaction.currentEntitlements {
             guard let transaction = try? verifiedTransaction(from: result) else { continue }
             guard FrameMioProCatalog.productIDs.contains(transaction.productID), transaction.revocationDate == nil else {
                 continue
@@ -452,24 +473,79 @@ final class FrameMioProViewModel: ObservableObject {
         guard let creditService else { return }
         do {
             let creditBalance = try await creditService.balance()
-            balance = creditBalance.available
-            monthlySubscriptionCycleCredits = creditBalance.monthlySubscriptionCycleCredits
-            yearlySubscriptionCycleCredits = creditBalance.yearlySubscriptionCycleCredits
-            pricingDebugLog("fetch_balance_complete balance=\(creditBalance.available) reserved=\(creditBalance.reserved)")
+            applyBalance(creditBalance)
+            pricingDebugLog("fetch_balance_complete balance=\(creditBalance.available) reserved=\(creditBalance.reserved) subscription=\(creditBalance.subscriptionCredits) subscription_reserved=\(creditBalance.subscriptionReserved) subscription_expires=\(creditBalance.subscriptionCycleExpiresAt?.description ?? "nil")")
         } catch {
             pricingDebugLog("fetch_balance_failed error=\(error.localizedDescription)")
         }
     }
 
-    private func completePurchaseSuccess(statusMessage: String) async {
-        pricingDebugLog("complete_purchase_success_start")
+    private func applyBalance(_ creditBalance: CreditBalance) {
+        balance = creditBalance.available
+        reservedBalance = creditBalance.reserved
+        monthlySubscriptionCycleCredits = creditBalance.monthlySubscriptionCycleCredits
+        yearlySubscriptionCycleCredits = creditBalance.yearlySubscriptionCycleCredits
+    }
+
+    @discardableResult
+    private func syncSubscriptionCycleCredits(for transaction: StoreKit.Transaction, source: String) async throws -> Bool {
+        guard let creditService else {
+            pricingDebugLog("subscription_credit_sync_skipped source=\(source) reason=no_credit_service product=\(transaction.productID) transaction=\(transaction.id)")
+            return false
+        }
+        guard let plan = FrameMioProPlanKind(productID: transaction.productID) else {
+            pricingDebugLog("subscription_credit_sync_ignored source=\(source) reason=non_pro_product product=\(transaction.productID) transaction=\(transaction.id)")
+            return false
+        }
+        let purchaseID = String(transaction.id)
+        pricingDebugLog("subscription_credit_sync_start source=\(source) plan=\(plan.rawValue) product=\(transaction.productID) transaction=\(purchaseID) expires=\(transaction.expirationDate?.description ?? "nil")")
+        let creditBalance = try await creditService.grantSubscriptionCycleCredits(
+            plan: transaction.productID,
+            purchaseID: purchaseID,
+            expiresAt: transaction.expirationDate
+        )
+        applyBalance(creditBalance)
+        pricingDebugLog("subscription_credit_sync_success source=\(source) plan=\(plan.rawValue) product=\(transaction.productID) transaction=\(purchaseID) balance=\(creditBalance.available) reserved=\(creditBalance.reserved) subscription=\(creditBalance.subscriptionCredits) subscription_expires=\(creditBalance.subscriptionCycleExpiresAt?.description ?? "nil")")
+        return true
+    }
+
+    private func syncActiveSubscriptionCycleCredits(source: String) async throws -> Bool {
+        var didSync = false
+        for await result in StoreKit.Transaction.currentEntitlements {
+            guard let transaction = try? verifiedTransaction(from: result) else {
+                pricingDebugLog("subscription_credit_sync_current_unverified source=\(source)")
+                continue
+            }
+            guard FrameMioProPlanKind(productID: transaction.productID) != nil, transaction.revocationDate == nil else {
+                pricingDebugLog("subscription_credit_sync_current_ignored source=\(source) product=\(transaction.productID) revoked=\(transaction.revocationDate != nil)")
+                continue
+            }
+            didSync = try await syncSubscriptionCycleCredits(for: transaction, source: source) || didSync
+        }
+        if !didSync {
+            pricingDebugLog("subscription_credit_sync_skipped source=\(source) reason=no_active_subscription")
+        }
+        return didSync
+    }
+
+    private func completePurchaseSuccess(for transaction: StoreKit.Transaction? = nil, statusMessage: String) async throws {
+        pricingDebugLog("complete_purchase_success_start transaction=\(transaction.map { String($0.id) } ?? "nil")")
         await refreshEntitlements()
-        await fetchBalance()
+        let synced: Bool
+        if let transaction {
+            synced = try await syncSubscriptionCycleCredits(for: transaction, source: "purchase")
+        } else {
+            synced = false
+            await fetchBalance()
+        }
+        if !synced {
+            await fetchBalance()
+        }
         onBalanceUpdated()
         errorMessage = nil
         self.statusMessage = statusMessage
         onPurchaseCompleted()
-        pricingDebugLog("complete_purchase_success_complete subscribed=\(isSubscribed) balance=\(balance.map(String.init) ?? "nil")")
+        pricingDebugLog("complete_purchase_success_complete subscribed=\(isSubscribed) synced=\(synced) balance=\(balance.map(String.init) ?? "nil") reserved=\(reservedBalance)")
     }
 
     private func startTransactionUpdates() {
@@ -477,17 +553,27 @@ final class FrameMioProViewModel: ObservableObject {
         updatesTask = Task { [weak self] in
             guard let self else { return }
             pricingDebugLog("transaction_updates_listener_started")
-            for await result in Transaction.updates {
-                guard let transaction = try? verifiedTransaction(from: result) else { continue }
-                guard FrameMioProPlanKind(productID: transaction.productID) != nil, transaction.revocationDate == nil else {
+            for await result in StoreKit.Transaction.updates {
+                guard let transaction = try? verifiedTransaction(from: result) else {
+                    pricingDebugLog("transaction_update_unverified")
                     continue
                 }
-                await transaction.finish()
-                await refreshEntitlements()
-                await fetchBalance()
-                onBalanceUpdated()
-                onPurchaseCompleted()
-                pricingDebugLog("transaction_update_applied product=\(transaction.productID)")
+                guard FrameMioProPlanKind(productID: transaction.productID) != nil, transaction.revocationDate == nil else {
+                    pricingDebugLog("transaction_update_ignored product=\(transaction.productID) revoked=\(transaction.revocationDate != nil)")
+                    continue
+                }
+                do {
+                    await refreshEntitlements()
+                    try await syncSubscriptionCycleCredits(for: transaction, source: "transaction_update")
+                    await transaction.finish()
+                    onBalanceUpdated()
+                    onPurchaseCompleted()
+                    pricingDebugLog("transaction_update_applied product=\(transaction.productID) transaction=\(transaction.id) balance=\(balance.map(String.init) ?? "nil") reserved=\(reservedBalance)")
+                } catch {
+                    errorMessage = AppError.from(error).localizedDescription
+                    statusMessage = nil
+                    pricingDebugLog("transaction_update_sync_failed product=\(transaction.productID) transaction=\(transaction.id) error=\(error.localizedDescription) mapped=\(AppError.from(error).localizedDescription)")
+                }
             }
         }
     }
@@ -594,6 +680,11 @@ struct FrameMioProView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if let renewalText = viewModel.renewalText {
                     Text(renewalText)
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                }
+                if let reservedBalanceText = viewModel.reservedBalanceText {
+                    Text(reservedBalanceText)
                         .font(FrameMioTypography.footnote)
                         .foregroundStyle(FrameMioColors.secondaryInk)
                 }
@@ -1022,26 +1113,46 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
         updatesTask = Task { [weak self] in
             guard let self else { return }
             pricingDebugLog("credit_pack_transaction_updates_listener_started")
-            for await result in Transaction.updates {
+            for await result in StoreKit.Transaction.updates {
                 guard let transaction = try? verifiedTransaction(from: result) else {
                     pricingDebugLog("credit_pack_transaction_update_unverified")
                     continue
                 }
-                guard transaction.revocationDate == nil,
-                      let purchase = FrameMioCreditPackPurchase(productID: transaction.productID, packs: packs) else {
-                    pricingDebugLog("credit_pack_transaction_update_ignored product=\(transaction.productID) revoked=\(transaction.revocationDate != nil) packs=\(packs.count)")
+                guard transaction.revocationDate == nil else {
+                    pricingDebugLog("credit_pack_transaction_update_ignored product=\(transaction.productID) reason=revoked")
                     continue
                 }
-                do {
-                    balance = try await creditService?.grantPurchasedCredits(packID: purchase.packID, purchaseID: String(transaction.id))
-                    await transaction.finish()
-                    onBalanceUpdated()
-                    onPurchaseCompleted()
-                    pricingDebugLog("credit_pack_transaction_update_applied pack=\(purchase.packID) product=\(transaction.productID) transaction=\(transaction.id) balance=\(balance?.available.description ?? "nil")")
-                } catch {
-                    errorMessage = AppError.from(error).localizedDescription
-                    statusMessage = nil
-                    pricingDebugLog("credit_pack_transaction_update_failed product=\(transaction.productID) error=\(error.localizedDescription)")
+                if let purchase = FrameMioCreditPackPurchase(productID: transaction.productID, packs: packs) {
+                    do {
+                        balance = try await creditService?.grantPurchasedCredits(packID: purchase.packID, purchaseID: String(transaction.id))
+                        await transaction.finish()
+                        onBalanceUpdated()
+                        onPurchaseCompleted()
+                        pricingDebugLog("credit_pack_transaction_update_applied pack=\(purchase.packID) product=\(transaction.productID) transaction=\(transaction.id) balance=\(balance?.available.description ?? "nil")")
+                    } catch {
+                        errorMessage = AppError.from(error).localizedDescription
+                        statusMessage = nil
+                        pricingDebugLog("credit_pack_transaction_update_failed product=\(transaction.productID) error=\(error.localizedDescription)")
+                    }
+                } else if let plan = FrameMioProPlanKind(productID: transaction.productID) {
+                    do {
+                        pricingDebugLog("credit_pack_subscription_transaction_sync_start plan=\(plan.rawValue) product=\(transaction.productID) transaction=\(transaction.id) expires=\(transaction.expirationDate?.description ?? "nil")")
+                        balance = try await creditService?.grantSubscriptionCycleCredits(
+                            plan: transaction.productID,
+                            purchaseID: String(transaction.id),
+                            expiresAt: transaction.expirationDate
+                        )
+                        await transaction.finish()
+                        onBalanceUpdated()
+                        onPurchaseCompleted()
+                        pricingDebugLog("credit_pack_subscription_transaction_sync_success plan=\(plan.rawValue) product=\(transaction.productID) transaction=\(transaction.id) balance=\(balance?.available.description ?? "nil") subscription=\(balance?.subscriptionCredits.description ?? "nil")")
+                    } catch {
+                        errorMessage = AppError.from(error).localizedDescription
+                        statusMessage = nil
+                        pricingDebugLog("credit_pack_subscription_transaction_sync_failed product=\(transaction.productID) transaction=\(transaction.id) error=\(error.localizedDescription)")
+                    }
+                } else {
+                    pricingDebugLog("credit_pack_transaction_update_ignored product=\(transaction.productID) reason=unknown_product packs=\(packs.count)")
                 }
             }
         }
@@ -1152,6 +1263,11 @@ struct FrameMioCreditPacksView: View {
             }
             .font(FrameMioTypography.footnote)
             .foregroundStyle(FrameMioColors.secondaryInk)
+            if let reserved = viewModel.balance?.displayReservedCredits, reserved > 0 {
+                Text("\(reserved.formatted()) credits reserved for stories in progress.")
+                    .font(FrameMioTypography.footnote)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+            }
         }
         .padding(FrameMioSpacing.lg)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -311,9 +311,13 @@ final class RemoteCreditService: CreditService, @unchecked Sendable {
 
     func balance() async throws -> CreditBalance {
         try await balanceCache.balance {
-            let data = try await self.apiClient.data(for: APIRequest(method: .get, path: "/v1/me/credits"))
-            return try FrameMioJSONCoding.apiDecoder().decode(CreditBalance.self, from: data)
+            try await self.fetchRemoteBalance()
         }
+    }
+
+    private func fetchRemoteBalance() async throws -> CreditBalance {
+        let data = try await apiClient.data(for: APIRequest(method: .get, path: "/v1/me/credits"))
+        return try decoder.decode(CreditBalance.self, from: data)
     }
 
     func creditPacks() async throws -> [CreditPack] {
@@ -342,6 +346,26 @@ final class RemoteCreditService: CreditService, @unchecked Sendable {
         let body = try encoder.encode(Request(packID: packID, purchaseID: purchaseID))
         let data = try await apiClient.data(for: APIRequest(method: .post, path: "/v1/me/credits/purchased", body: body))
         let balance = try decoder.decode(Response.self, from: data).balance
+        await balanceCache.store(balance)
+        return balance
+    }
+
+    func grantSubscriptionCycleCredits(plan: String, purchaseID: String, expiresAt: Date?) async throws -> CreditBalance {
+        struct Request: Encodable {
+            let plan: String
+            let purchaseID: String
+            let expiresAt: Date?
+
+            enum CodingKeys: String, CodingKey {
+                case plan
+                case purchaseID = "purchase_id"
+                case expiresAt = "expires_at"
+            }
+        }
+
+        let body = try encoder.encode(Request(plan: plan, purchaseID: purchaseID, expiresAt: expiresAt))
+        _ = try await apiClient.data(for: APIRequest(method: .post, path: "/v1/me/credits/subscription-cycle", body: body))
+        let balance = try await fetchRemoteBalance()
         await balanceCache.store(balance)
         return balance
     }
@@ -410,6 +434,10 @@ final class MockCreditService: CreditService, @unchecked Sendable {
     }
 
     func grantPurchasedCredits(packID: String, purchaseID: String) async throws -> CreditBalance {
+        balanceValue
+    }
+
+    func grantSubscriptionCycleCredits(plan: String, purchaseID: String, expiresAt: Date?) async throws -> CreditBalance {
         balanceValue
     }
 }
