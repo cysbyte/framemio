@@ -241,6 +241,9 @@ func TestWorkerUsesVisibilityAndDeadLetterQueue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := coordinator.UpdateJobStatus(ctx, jobs[0].ID, models.JobStatusRunning, 0.1, "", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
 	consumer := &memoryConsumer{received: []queue.ReceivedJobMessage{{Message: publisher.Messages()[0], ReceiptHandle: "receipt-1", ApproximateReceiveCount: 6}}}
 	worker := Worker{Store: memoryStore, Consumer: consumer, Coordinator: coordinator, MaxReceiveCount: 5}
 	if err := worker.RunOnce(ctx); err != nil {

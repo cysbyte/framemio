@@ -185,14 +185,14 @@ func loadConfiguration() (configuration, error) {
 		StoryPlannerModel:       os.Getenv("STORY_PLANNER_MODEL"),
 		StoryPlannerWireAPI:     environment("STORY_PLANNER_WIRE_API", "responses"),
 		StoryPlannerMaxTokens:   environmentInt("STORY_PLANNER_MAX_OUTPUT_TOKENS", 6000),
-		StoryPlannerTimeout:     environmentDuration("STORY_PLANNER_TIMEOUT", 30*time.Second),
+		StoryPlannerTimeout:     environmentDuration("STORY_PLANNER_TIMEOUT", 90*time.Second),
 		StoryRevisionProvider:   environment("STORY_REVISION_PROVIDER", "local"),
 		StoryRevisionBaseURL:    environment("STORY_REVISION_BASE_URL", os.Getenv("OPENAI_BASE_URL")),
 		StoryRevisionAPIKey:     environment("STORY_REVISION_API_KEY", os.Getenv("OPENAI_API_KEY")),
 		StoryRevisionModel:      os.Getenv("STORY_REVISION_MODEL"),
 		StoryRevisionWireAPI:    environment("STORY_REVISION_WIRE_API", "responses"),
 		StoryRevisionMaxTokens:  environmentInt("STORY_REVISION_MAX_OUTPUT_TOKENS", 6000),
-		StoryRevisionTimeout:    environmentDuration("STORY_REVISION_TIMEOUT", 30*time.Second),
+		StoryRevisionTimeout:    environmentDuration("STORY_REVISION_TIMEOUT", 90*time.Second),
 		WorkerRunOnce:           environmentBool("WORKER_RUN_ONCE", false),
 		WorkerJobID:             os.Getenv("JOB_ID"),
 		WorkerWaitTimeout:       environmentDuration("WORKER_RUN_ONCE_WAIT_TIMEOUT", 2*time.Minute),
@@ -306,7 +306,7 @@ func configuredStoryPlanner(configuration configuration, logger *slog.Logger) (a
 		if strings.TrimSpace(configuration.StoryPlannerModel) == "" {
 			return nil, errors.New("STORY_PLANNER_MODEL is required when STORY_PLANNER_PROVIDER uses an external AI provider")
 		}
-		return ai.OpenAICompatibleStoryPlanner{
+		primary := ai.OpenAICompatibleStoryPlanner{
 			BaseURL:         configuration.StoryPlannerBaseURL,
 			APIKey:          configuration.StoryPlannerAPIKey,
 			ProviderName:    configuration.StoryPlannerProvider,
@@ -314,6 +314,11 @@ func configuredStoryPlanner(configuration configuration, logger *slog.Logger) (a
 			WireAPI:         configuration.StoryPlannerWireAPI,
 			MaxOutputTokens: configuration.StoryPlannerMaxTokens,
 			Client:          &http.Client{Timeout: configuration.StoryPlannerTimeout},
+		}
+		return ai.FallbackStoryPlanner{
+			Primary:  primary,
+			Fallback: &ai.Planner{TypographyPlanner: typographyPlanner, Logger: logger},
+			Logger:   logger,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported STORY_PLANNER_PROVIDER %q", configuration.StoryPlannerProvider)

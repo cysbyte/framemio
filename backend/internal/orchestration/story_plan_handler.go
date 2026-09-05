@@ -26,6 +26,7 @@ type StoryPlanHandler struct {
 }
 
 func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJob) error {
+	handlerStarted := time.Now()
 	if job.Type != models.JobTypeStoryPlan {
 		return fmt.Errorf("story plan handler received %s job", job.Type)
 	}
@@ -49,7 +50,7 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		return err
 	}
 	photoAnalyses := h.photoAnalyses(project, mediaByID, mediaAnalyses)
-	h.logger().Info("story planner input loaded", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("project_media_count", len(project.MediaIDs)), slog.Int("photo_analysis_count", len(photoAnalyses)), slog.Int("video_analysis_count", len(videoAnalyses)), slog.Int("video_with_speech_count", videoAnalysesWithSpeech(videoAnalyses)), slog.Int("transcript_segment_count", totalTranscriptSegments(videoAnalyses)))
+	h.logger().Info("story planner input loaded", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("project_media_count", len(project.MediaIDs)), slog.Int("photo_analysis_count", len(photoAnalyses)), slog.Int("video_analysis_count", len(videoAnalyses)), slog.Int("video_with_speech_count", videoAnalysesWithSpeech(videoAnalyses)), slog.Int("transcript_segment_count", totalTranscriptSegments(videoAnalyses)), slog.Int64("input_load_ms", time.Since(handlerStarted).Milliseconds()))
 	if isAIStoryPlanRevision(job.Configuration) {
 		return h.handleStoryRevision(ctx, job, project, photoAnalyses, videoAnalyses, mediaClusters(project, mediaByID, photoAnalyses, videoAnalyses))
 	}
@@ -57,6 +58,7 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 	if planner == nil {
 		planner = &ai.Planner{Now: h.Now}
 	}
+	requestPrepareStarted := time.Now()
 	request := h.storyPlanRequest(project, job.Configuration, photoAnalyses, videoAnalyses, mediaClusters(project, mediaByID, photoAnalyses, videoAnalyses))
 	plannerProvider := storyPlannerName(planner)
 	plannerModel := storyPlannerModel(planner)
@@ -80,8 +82,9 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		slog.String("subtitles_enabled", boolPointerLogValue(request.SubtitlesEnabled)),
 		slog.String("caption_style_preset", valueOrUnset(request.CaptionStylePreset)),
 	)
+	h.logger().Info("story_planner_request_ready", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("story_plan_version", request.Version), slog.Int64("request_prepare_ms", time.Since(requestPrepareStarted).Milliseconds()), slog.Int64("elapsed_ms", time.Since(handlerStarted).Milliseconds()))
 	if plannerProvider != "local" {
-		h.logger().Info("story_planner_ai_request_started", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("story_plan_version", request.Version), slog.String("provider", plannerProvider), slog.String("model", plannerModel))
+		h.logger().Info("story_planner_ai_request_started", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("story_plan_version", request.Version), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int64("elapsed_ms", time.Since(handlerStarted).Milliseconds()))
 	}
 	plan, err := planner.Plan(ctx, request)
 	if err != nil {
@@ -97,17 +100,20 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 	}
 	h.logger().Info("story planner output ready", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.Int("candidate_count", len(photoAnalyses)+totalVideoSegments(videoAnalyses)), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.String("broll_scores", brollScores(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)), slog.Int("typography_count", typographyCount(plan.Moments)), slog.Int("video_moment_count", videoMomentCount(plan.Moments)), slog.String("caption_style_preset", storyPlanCaptionStylePreset(plan)))
 	if h.Validator != nil {
+		validationStarted := time.Now()
 		if validationErr := h.Validator.Validate(ctx, job.UserID, plan); validationErr != nil {
-			h.logger().Warn("story_planner_validation_failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Any("error", validationErr))
+			h.logger().Warn("story_planner_validation_failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Int64("validation_ms", time.Since(validationStarted).Milliseconds()), slog.Any("error", validationErr))
 			return validationErr
 		}
+		h.logger().Info("story_planner_validation_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int64("validation_ms", time.Since(validationStarted).Milliseconds()), slog.Int64("elapsed_ms", time.Since(handlerStarted).Milliseconds()))
 	}
+	saveStarted := time.Now()
 	if err := h.Store.SaveStoryPlan(ctx, job.UserID, plan); err != nil {
 		h.logger().Error("save story plan failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("caption_count", len(plan.Captions)), slog.Any("error", err))
 		return err
 	}
-	h.logger().Info("story plan saved", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("caption_count", len(plan.Captions)))
-	h.logger().Info("story_planner_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)))
+	h.logger().Info("story plan saved", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("caption_count", len(plan.Captions)), slog.Int64("save_ms", time.Since(saveStarted).Milliseconds()), slog.Int64("elapsed_ms", time.Since(handlerStarted).Milliseconds()))
+	h.logger().Info("story_planner_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Int64("total_duration_ms", time.Since(handlerStarted).Milliseconds()), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)))
 	return nil
 }
 
@@ -159,16 +165,19 @@ func (h StoryPlanHandler) handleStoryRevision(ctx context.Context, job models.Pr
 	}
 	h.logger().Info("story_revision_ai_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("base_version", baseVersion), slog.Int("resulting_version", nextVersion), slog.String("provider", storyRevisionPlannerName(planner)), slog.String("model", storyRevisionPlannerModel(planner)), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Int("change_count", len(result.Changes)), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)))
 	if h.Validator != nil {
+		validationStarted := time.Now()
 		if validationErr := h.Validator.Validate(ctx, job.UserID, plan); validationErr != nil {
-			h.logger().Warn("story_revision_validation_failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("base_version", baseVersion), slog.Int("resulting_version", nextVersion), slog.Any("error", validationErr))
+			h.logger().Warn("story_revision_validation_failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("base_version", baseVersion), slog.Int("resulting_version", nextVersion), slog.Int64("validation_ms", time.Since(validationStarted).Milliseconds()), slog.Int64("elapsed_ms", time.Since(started).Milliseconds()), slog.Any("error", validationErr))
 			return validationErr
 		}
+		h.logger().Info("story_revision_validation_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("base_version", baseVersion), slog.Int("resulting_version", nextVersion), slog.Int64("validation_ms", time.Since(validationStarted).Milliseconds()), slog.Int64("elapsed_ms", time.Since(started).Milliseconds()))
 	}
+	saveStarted := time.Now()
 	if err := h.Store.SaveStoryPlan(ctx, job.UserID, plan); err != nil {
 		h.logger().Error("story_revision_failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("resulting_version", nextVersion), slog.String("failure_category", "persist"), slog.Any("error", err))
 		return err
 	}
-	h.logger().Info("story_revision_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("base_version", baseVersion), slog.Int("resulting_version", nextVersion), slog.String("story_plan_id", plan.ID), slog.String("revision_summary", result.RevisionSummary))
+	h.logger().Info("story_revision_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("base_version", baseVersion), slog.Int("resulting_version", nextVersion), slog.String("story_plan_id", plan.ID), slog.Int64("save_ms", time.Since(saveStarted).Milliseconds()), slog.Int64("total_duration_ms", time.Since(started).Milliseconds()), slog.String("revision_summary", result.RevisionSummary))
 	return nil
 }
 

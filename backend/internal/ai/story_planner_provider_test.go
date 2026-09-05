@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -65,6 +66,33 @@ func TestOpenAICompatibleStoryPlannerRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestFallbackStoryPlannerUsesFallbackWhenPrimaryFails(t *testing.T) {
+	t.Parallel()
+	request := storyPlannerProviderRequest()
+	fallbackPlan := models.StoryPlan{
+		ID:                  "plan-fallback",
+		ProjectID:           request.ProjectID,
+		Version:             request.Version,
+		RequestedDurationMS: int(request.DesiredDuration.Milliseconds()),
+		StoryType:           request.StoryType,
+		VisualStyle:         request.VisualStyle,
+		Moments:             []models.StoryMoment{{MomentID: "moment-fallback", MediaID: "photo-gpt", AssetID: "photo-gpt", MediaType: models.MediaTypePhoto, DurationMS: 4000}},
+		Output:              models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 4, Preset: "premium-memory"},
+		TotalDurationMS:     4000,
+	}
+	planner := FallbackStoryPlanner{
+		Primary:  staticStoryPlanner{err: errors.New("context deadline exceeded")},
+		Fallback: staticStoryPlanner{plan: fallbackPlan},
+	}
+	plan, err := planner.Plan(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.ID != fallbackPlan.ID || plan.ProjectID != request.ProjectID || len(plan.Moments) != 1 {
+		t.Fatalf("fallback plan not returned: %+v", plan)
+	}
+}
+
 func storyPlannerProviderRequest() Request {
 	return Request{
 		ProjectID:        "project-gpt",
@@ -88,3 +116,17 @@ func storyPlannerProviderRequest() Request {
 func storyPlannerProviderPlanJSON() string {
 	return `{"schema_version":"story_plan_v1","id":"plan-gpt","project_id":"project-gpt","version":3,"requested_duration_ms":4000,"story_type":"trip","visual_style":"cinematic","title_text":"Beach Story","ending_text":"Until next time.","user_instructions":"Make subtitles red.","moments":[{"moment_id":"moment-1","asset_id":"photo-gpt","media_id":"photo-gpt","media_type":"photo","narrative":"A beach sunset opens the story.","caption":"Beach sunset","duration_ms":4000,"crop_intent":"fit","transition":"fade_in","reason":"Strong opening image","score":0.9}],"captions":[{"moment_id":"moment-1","text":"Beach sunset","start_ms":0,"end_ms":4000}],"caption_style":{"preset":"cinematic_subtitle","font_family":"inter-bold","font_size":48,"text_color":"#FFFFFF","stroke_color":"#000000","stroke_width":4,"background_enabled":true,"background_color":"#000000","background_opacity":0.32,"position":"bottom","bottom_offset":150,"max_lines":2,"max_characters_per_line":32},"audio":{"source":"original","original_audio":true,"original_volume":0.4},"output":{"aspect_ratio":"9:16","max_duration_seconds":4,"preset":"premium-memory"},"total_duration_ms":4000}`
 }
+
+type staticStoryPlanner struct {
+	plan models.StoryPlan
+	err  error
+}
+
+func (p staticStoryPlanner) Plan(context.Context, Request) (models.StoryPlan, error) {
+	if p.err != nil {
+		return models.StoryPlan{}, p.err
+	}
+	return p.plan, nil
+}
+
+func (p staticStoryPlanner) Name() string { return "static" }

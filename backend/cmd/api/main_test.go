@@ -44,9 +44,16 @@ func TestConfiguredStoryPlannerUsesOpenAICompatibleProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	external, ok := planner.(ai.OpenAICompatibleStoryPlanner)
+	fallback, ok := planner.(ai.FallbackStoryPlanner)
 	if !ok {
-		t.Fatalf("expected external story planner, got %T", planner)
+		t.Fatalf("expected external story planner with local fallback, got %T", planner)
+	}
+	external, ok := fallback.Primary.(ai.OpenAICompatibleStoryPlanner)
+	if !ok {
+		t.Fatalf("expected external primary story planner, got %T", fallback.Primary)
+	}
+	if _, ok := fallback.Fallback.(*ai.Planner); !ok {
+		t.Fatalf("expected local fallback story planner, got %T", fallback.Fallback)
 	}
 	if external.BaseURL != "https://planner.test/v1" || external.ModelName != "gpt-test" || external.WireAPI != "responses" || external.MaxOutputTokens != 7000 || external.Client.Timeout != 25*time.Second {
 		t.Fatalf("external story planner not configured: %+v", external)
@@ -68,7 +75,7 @@ func TestLoadConfigurationStoryPlannerFallsBackToOpenAIEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.StoryPlannerBaseURL != "https://openai-compatible.test" || config.StoryPlannerAPIKey != "fallback-key" || config.StoryPlannerWireAPI != "responses" || config.StoryPlannerTimeout != 30*time.Second {
+	if config.StoryPlannerBaseURL != "https://openai-compatible.test" || config.StoryPlannerAPIKey != "fallback-key" || config.StoryPlannerWireAPI != "responses" || config.StoryPlannerTimeout != 90*time.Second {
 		t.Fatalf("unexpected story planner config: %+v", config)
 	}
 }

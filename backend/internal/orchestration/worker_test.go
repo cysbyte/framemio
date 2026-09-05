@@ -220,6 +220,80 @@ func TestWorkerRunOnceRemovesPoisonNonTargetAndContinuesToTarget(t *testing.T) {
 	}
 }
 
+func TestWorkerRunOnceDeletesCurrentReceiptAfterSchedulingRetry(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore, publisher, coordinator, project, _ := setupProject(t, models.MediaTypePhoto)
+	targetJob, _, err := memoryStore.CreateJob(ctx, models.ProcessingJob{ID: "job-retry-target", UserID: project.UserID, ProjectID: project.ID, Type: models.JobTypeStoryPlan, Status: models.JobStatusQueued, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(), MaxAttempts: 2}, "retry-target-job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer := &memoryConsumer{received: []queue.ReceivedJobMessage{
+		{Message: queue.JobMessage{JobID: targetJob.ID, ProjectID: project.ID, JobType: targetJob.Type}, ReceiptHandle: "receipt-target-retry", ApproximateReceiveCount: 1},
+	}}
+	worker := Worker{
+		Store:           memoryStore,
+		Consumer:        consumer,
+		Coordinator:     coordinator,
+		Handlers:        map[models.JobType]JobHandler{models.JobTypeStoryPlan: failingHandler{}},
+		TargetJobID:     targetJob.ID,
+		MaxReceiveCount: 5,
+	}
+	if err := worker.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(consumer.deleted) != 1 || consumer.deleted[0] != "receipt-target-retry" {
+		t.Fatalf("failed attempt receipt should be deleted after retry is queued: %+v", consumer.deleted)
+	}
+	if len(publisher.Messages()) != 1 || publisher.Messages()[0].JobID != targetJob.ID {
+		t.Fatalf("retry message was not published: %+v", publisher.Messages())
+	}
+	retried, err := memoryStore.GetJob(ctx, project.UserID, targetJob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retried.Status != models.JobStatusQueued || retried.Attempt != 1 || retried.NextRunAt == nil {
+		t.Fatalf("job should be queued for retry: %+v", retried)
+	}
+}
+
+func TestWorkerRunOnceFailsRunningOverReceivedJobAndMarksProjectFailed(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore, _, coordinator, project, _ := setupProject(t, models.MediaTypePhoto)
+	if err := memoryStore.SetProjectStatus(ctx, project.UserID, project.ID, models.ProjectStatusAnalyzing); err != nil {
+		t.Fatal(err)
+	}
+	runningJob, _, err := memoryStore.CreateJob(ctx, models.ProcessingJob{ID: "job-running-poison", UserID: project.UserID, ProjectID: project.ID, Type: models.JobTypeStoryPlan, Status: models.JobStatusRunning, Attempt: 1, CreatedAt: time.Now().UTC().Add(-10 * time.Minute), UpdatedAt: time.Now().UTC().Add(-10 * time.Minute), MaxAttempts: 2}, "running-poison-job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer := &memoryConsumer{received: []queue.ReceivedJobMessage{
+		{Message: queue.JobMessage{JobID: runningJob.ID, ProjectID: project.ID, JobType: runningJob.Type}, ReceiptHandle: "receipt-running-poison", ApproximateReceiveCount: 10},
+	}}
+	worker := Worker{Store: memoryStore, Consumer: consumer, Coordinator: coordinator, Handlers: map[models.JobType]JobHandler{models.JobTypeStoryPlan: noopHandler{}}, MaxReceiveCount: 5}
+	if err := worker.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(consumer.deadLetters) != 1 || consumer.deadLetters[0].Message.JobID != runningJob.ID {
+		t.Fatalf("running poison job should be dead-lettered: %+v", consumer.deadLetters)
+	}
+	failed, err := memoryStore.GetJob(ctx, project.UserID, runningJob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Status != models.JobStatusFailed || failed.ErrorCode != "max_receive_count_exceeded" {
+		t.Fatalf("running poison job should be failed: %+v", failed)
+	}
+	projectAfter, err := memoryStore.GetProject(ctx, project.UserID, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projectAfter.Status != models.ProjectStatusFailed {
+		t.Fatalf("project should be marked failed after terminal job failure: %+v", projectAfter)
+	}
+}
+
 type noopHandler struct{}
 
 func (noopHandler) HandleJob(context.Context, models.ProcessingJob) error { return nil }

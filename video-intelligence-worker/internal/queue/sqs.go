@@ -264,9 +264,16 @@ func (c *Consumer) deferUnsupported(ctx context.Context, received types.Message,
 	if received.ReceiptHandle == nil {
 		return
 	}
-	c.logger.Info("defer non-video-analysis message", slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID), slog.String("job_type", message.JobType))
+	deferSeconds := int32(15)
+	receiveCount := 1
+	if value := received.Attributes[string(types.MessageSystemAttributeNameApproximateReceiveCount)]; value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
+			receiveCount = parsed
+		}
+	}
+	c.logger.Info("defer non-video-analysis message", slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID), slog.String("job_type", message.JobType), slog.Int("receive_count", receiveCount), slog.Int("defer_seconds", int(deferSeconds)))
 	_, err := c.client.ChangeMessageVisibility(ctx, &sqs.ChangeMessageVisibilityInput{
-		QueueUrl: aws.String(c.queueURL), ReceiptHandle: received.ReceiptHandle, VisibilityTimeout: 2,
+		QueueUrl: aws.String(c.queueURL), ReceiptHandle: received.ReceiptHandle, VisibilityTimeout: deferSeconds,
 	})
 	if err != nil && ctx.Err() == nil {
 		c.logger.Warn("defer unmatched video analysis message", slog.Any("error", err))

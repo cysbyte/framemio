@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
 	"strings"
@@ -31,6 +32,80 @@ type OpenAICompatibleStoryPlanner struct {
 
 var _ StoryPlanner = (*Planner)(nil)
 var _ StoryPlanner = OpenAICompatibleStoryPlanner{}
+
+// FallbackStoryPlanner tries an external structured planner first and safely
+// falls back to the deterministic local planner if the provider is unavailable
+// or returns invalid output. The renderer still receives a normal StoryPlan.
+type FallbackStoryPlanner struct {
+	Primary  StoryPlanner
+	Fallback StoryPlanner
+	Logger   *slog.Logger
+}
+
+var _ StoryPlanner = FallbackStoryPlanner{}
+
+func (p FallbackStoryPlanner) Name() string {
+	primaryName := storyPlannerProviderName(p.Primary)
+	fallbackName := storyPlannerProviderName(p.Fallback)
+	if primaryName == "" {
+		primaryName = "primary"
+	}
+	if fallbackName == "" {
+		fallbackName = "local"
+	}
+	return primaryName + "+" + fallbackName + "-fallback"
+}
+
+func (p FallbackStoryPlanner) Model() string {
+	return storyPlannerProviderModel(p.Primary)
+}
+
+func (p FallbackStoryPlanner) Plan(ctx context.Context, request Request) (models.StoryPlan, error) {
+	if p.Primary == nil {
+		if p.Fallback == nil {
+			return models.StoryPlan{}, errors.New("story planner is not configured")
+		}
+		return p.Fallback.Plan(ctx, request)
+	}
+	plan, err := p.Primary.Plan(ctx, request)
+	if err == nil {
+		return plan, nil
+	}
+	if p.Fallback == nil {
+		return models.StoryPlan{}, err
+	}
+	if p.Logger != nil {
+		p.Logger.Warn("story_planner_primary_failed_falling_back", slog.String("primary_provider", storyPlannerProviderName(p.Primary)), slog.String("primary_model", storyPlannerProviderModel(p.Primary)), slog.String("fallback_provider", storyPlannerProviderName(p.Fallback)), slog.Any("error", err))
+	}
+	fallbackPlan, fallbackErr := p.Fallback.Plan(ctx, request)
+	if fallbackErr != nil {
+		return models.StoryPlan{}, fmt.Errorf("primary story planner failed: %v; fallback story planner failed: %w", err, fallbackErr)
+	}
+	return fallbackPlan, nil
+}
+
+func storyPlannerProviderName(planner StoryPlanner) string {
+	type named interface {
+		Name() string
+	}
+	if typed, ok := planner.(named); ok {
+		return strings.TrimSpace(typed.Name())
+	}
+	if _, ok := planner.(*Planner); ok {
+		return "local"
+	}
+	return ""
+}
+
+func storyPlannerProviderModel(planner StoryPlanner) string {
+	type modeled interface {
+		Model() string
+	}
+	if typed, ok := planner.(modeled); ok {
+		return strings.TrimSpace(typed.Model())
+	}
+	return ""
+}
 
 func (p OpenAICompatibleStoryPlanner) Name() string {
 	if strings.TrimSpace(p.ProviderName) != "" {

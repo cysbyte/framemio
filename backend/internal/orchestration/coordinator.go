@@ -274,14 +274,14 @@ func (c *Coordinator) UpdateJobStatus(ctx context.Context, jobID string, status 
 		if err := c.publishJob(ctx, retried); err != nil {
 			return models.ProcessingJob{}, err
 		}
-		c.Logger.Warn("job attempt failed; scheduled retry", slog.String("job_id", retried.ID), slog.String("job_type", string(retried.Type)), slog.Int("attempt", retried.Attempt), slog.Time("next_run_at", nextRunAt))
+		c.Logger.Warn("job attempt failed; scheduled retry", slog.String("job_id", retried.ID), slog.String("job_type", string(retried.Type)), slog.String("project_id", retried.ProjectID), slog.String("media_id", retried.MediaID), slog.Int("attempt", retried.Attempt), slog.Int("max_attempts", retried.MaxAttempts), slog.Time("next_run_at", nextRunAt), slog.Int64("job_age_ms", time.Since(job.CreatedAt).Milliseconds()), slog.Int64("attempt_duration_ms", time.Since(job.UpdatedAt).Milliseconds()), slog.String("error_code", errorCode))
 		return retried, nil
 	}
 	updated, err := c.Store.UpdateJob(ctx, jobID, status, progress, errorCode, errorMessage, artifactS3Key, artifactType)
 	if err != nil {
 		return models.ProcessingJob{}, err
 	}
-	c.Logger.Info("job status updated", slog.String("job_id", updated.ID), slog.String("job_type", string(updated.Type)), slog.String("project_id", updated.ProjectID), slog.String("media_id", updated.MediaID), slog.String("previous_status", string(job.Status)), slog.String("status", string(updated.Status)), slog.Float64("progress", updated.Progress), slog.Int("attempt", updated.Attempt), slog.Bool("has_artifact", updated.ArtifactS3Key != ""))
+	c.Logger.Info("job status updated", slog.String("job_id", updated.ID), slog.String("job_type", string(updated.Type)), slog.String("project_id", updated.ProjectID), slog.String("media_id", updated.MediaID), slog.String("previous_status", string(job.Status)), slog.String("status", string(updated.Status)), slog.Float64("progress", updated.Progress), slog.Int("attempt", updated.Attempt), slog.Int("max_attempts", updated.MaxAttempts), slog.Bool("has_artifact", updated.ArtifactS3Key != ""), slog.Int64("job_age_ms", time.Since(job.CreatedAt).Milliseconds()), slog.Int64("previous_status_age_ms", time.Since(job.UpdatedAt).Milliseconds()))
 	if err := c.AdvanceAfterJob(ctx, updated); err != nil {
 		return models.ProcessingJob{}, err
 	}
@@ -290,7 +290,7 @@ func (c *Coordinator) UpdateJobStatus(ctx context.Context, jobID string, status 
 
 func (c *Coordinator) AdvanceAfterJob(ctx context.Context, job models.ProcessingJob) error {
 	if job.Status == models.JobStatusFailed || job.Status == models.JobStatusCancelled {
-		c.Logger.Warn("job terminal failure; marking project failed", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID), slog.String("status", string(job.Status)), slog.String("error_code", job.ErrorCode))
+		c.Logger.Warn("job terminal failure; marking project failed", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID), slog.String("status", string(job.Status)), slog.String("error_code", job.ErrorCode), slog.Int("attempt", job.Attempt), slog.Int("max_attempts", job.MaxAttempts), slog.Int64("job_age_ms", time.Since(job.CreatedAt).Milliseconds()), slog.Int64("status_age_ms", time.Since(job.UpdatedAt).Milliseconds()))
 		if err := c.Store.SetProjectStatus(ctx, job.UserID, job.ProjectID, models.ProjectStatusFailed); err != nil {
 			return err
 		}

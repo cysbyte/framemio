@@ -8,6 +8,8 @@ import {FfmpegCompositionRenderer, RemotionCliRenderer} from './remotion/rendere
 import {AwsCliObjectStore} from './storage/object-store.js';
 import {DeterministicRenderWorker} from './pipeline/render-worker.js';
 
+const unsupportedMessageVisibilitySeconds = 15;
+
 interface RunnerConfig {
   queueURL: string;
   backendURL: string;
@@ -105,26 +107,36 @@ async function handleMessage(received: ReceivedJobMessage, dependencies: {
   const {queue, backend, worker, config} = dependencies;
   const message = received.message;
   if (message.jobType !== 'VIDEO_RENDER') {
-    console.info(JSON.stringify({level: 'info', msg: 'render worker deferring non-render message', target_job_id: config.jobID ?? '', job_id: message.jobId, job_type: message.jobType}));
-    await queue.defer(received.receiptHandle, 2);
-    await sleep(1500);
+    console.info(JSON.stringify({level: 'info', msg: 'render worker deferring non-render message', target_job_id: config.jobID ?? '', job_id: message.jobId, project_id: message.projectId, job_type: message.jobType, receive_count: received.receiveCount, defer_seconds: unsupportedMessageVisibilitySeconds}));
+    await queue.defer(received.receiptHandle, unsupportedMessageVisibilitySeconds);
+    if (config.runOnce) {
+      await sleep(1500);
+    }
     return false;
   }
   if (config.jobID && message.jobId !== config.jobID) {
     console.info(JSON.stringify({level: 'info', msg: 'handling available render message', target_job_id: config.jobID, job_id: message.jobId}));
   }
+  const startedAt = Date.now();
   console.info(JSON.stringify({level: 'info', msg: 'handling render message', job_id: message.jobId, project_id: message.projectId, receive_count: received.receiveCount}));
   try {
+    const markRunningStartedAt = Date.now();
     await backend.markRunning(message.jobId, 0.08);
+    console.info(JSON.stringify({level: 'info', msg: 'render mark running completed', job_id: message.jobId, duration_ms: Date.now() - markRunningStartedAt, elapsed_ms: Date.now() - startedAt}));
+    const inputStartedAt = Date.now();
     const input = await backend.renderInput(message.jobId);
-    console.info(JSON.stringify({level: 'info', msg: 'render input received', job_id: message.jobId, project_id: input.project_id, story_plan_id: input.story_plan.id, moment_count: input.story_plan.moments.length, caption_count: input.story_plan.captions?.length ?? 0, media_asset_count: input.media_assets.length}));
+    console.info(JSON.stringify({level: 'info', msg: 'render input received', job_id: message.jobId, project_id: input.project_id, story_plan_id: input.story_plan.id, moment_count: input.story_plan.moments.length, caption_count: input.story_plan.captions?.length ?? 0, media_asset_count: input.media_assets.length, duration_ms: Date.now() - inputStartedAt, elapsed_ms: Date.now() - startedAt}));
+    const renderStartedAt = Date.now();
     const result = await worker.render(input);
+    console.info(JSON.stringify({level: 'info', msg: 'render pipeline completed', job_id: message.jobId, output_s3_key: result.record.s3_key, duration_ms: Date.now() - renderStartedAt, elapsed_ms: Date.now() - startedAt}));
+    const markCompletedStartedAt = Date.now();
     await backend.markCompleted(message.jobId, result.record.s3_key);
+    console.info(JSON.stringify({level: 'info', msg: 'render mark completed callback completed', job_id: message.jobId, duration_ms: Date.now() - markCompletedStartedAt, elapsed_ms: Date.now() - startedAt}));
     await queue.delete(received.receiptHandle);
-    console.info(JSON.stringify({level: 'info', msg: 'render message handled', job_id: message.jobId, output_s3_key: result.record.s3_key}));
+    console.info(JSON.stringify({level: 'info', msg: 'render message handled', job_id: message.jobId, output_s3_key: result.record.s3_key, total_duration_ms: Date.now() - startedAt}));
     return true;
   } catch (error) {
-    console.error(JSON.stringify({level: 'error', msg: 'render message failed', job_id: message.jobId, error: error instanceof Error ? error.message : String(error)}));
+    console.error(JSON.stringify({level: 'error', msg: 'render message failed', job_id: message.jobId, duration_ms: Date.now() - startedAt, error: error instanceof Error ? error.message : String(error)}));
     await backend.markFailed(message.jobId, error);
     await queue.delete(received.receiptHandle);
     return true;
