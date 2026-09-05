@@ -71,6 +71,25 @@ func TestOpenAICompatibleStoryPlannerNormalizesSchemaVersionAlias(t *testing.T) 
 	}
 }
 
+func TestOpenAICompatibleStoryPlannerNormalizesTotalDurationMismatch(t *testing.T) {
+	t.Parallel()
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		planJSON := strings.Replace(storyPlannerProviderPlanJSON(), `"total_duration_ms":4000`, `"total_duration_ms":5000`, 1)
+		return typographyHTTPResponse(http.StatusOK, responsesTypographyResponse(planJSON)), nil
+	})}
+	planner := OpenAICompatibleStoryPlanner{BaseURL: "https://planner.test", APIKey: "test-key", ProviderName: "openai-compatible", ModelName: "gpt-story", WireAPI: "responses", Client: client}
+	plan, err := planner.Plan(context.Background(), storyPlannerProviderRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.TotalDurationMS != 4000 {
+		t.Fatalf("expected total duration repaired to moment sum, got %d", plan.TotalDurationMS)
+	}
+	if err := ValidateStoryPlan(plan); err != nil {
+		t.Fatalf("expected repaired plan to pass lightweight validation: %v", err)
+	}
+}
+
 func TestOpenAICompatibleStoryPlannerNormalizesVideoMomentReferences(t *testing.T) {
 	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {

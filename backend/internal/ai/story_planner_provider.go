@@ -715,10 +715,12 @@ func normalizeStoryPlannerOutput(plan *models.StoryPlan, request Request) error 
 	if strings.TrimSpace(plan.UserInstructions) == "" {
 		plan.UserInstructions = strings.TrimSpace(request.UserInstructions)
 	}
-	if plan.TotalDurationMS <= 0 {
-		for _, moment := range plan.Moments {
-			plan.TotalDurationMS += moment.DurationMS
-		}
+	momentDurationMS := 0
+	for _, moment := range plan.Moments {
+		momentDurationMS += moment.DurationMS
+	}
+	if momentDurationMS > 0 {
+		plan.TotalDurationMS = momentDurationMS
 	}
 	if plan.Output.AspectRatio == "" {
 		plan.Output.AspectRatio = "9:16"

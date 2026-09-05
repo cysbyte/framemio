@@ -70,7 +70,7 @@ func TestLoadConfigurationStoryPlannerFallsBackToOpenAIEnv(t *testing.T) {
 	t.Setenv("STORY_PLANNER_PROVIDER", "openai-compatible")
 	t.Setenv("OPENAI_BASE_URL", "https://openai-compatible.test")
 	t.Setenv("OPENAI_API_KEY", "fallback-key")
-	t.Setenv("STORY_PLANNER_MODEL", "gpt-5.4")
+	t.Setenv("STORY_PLANNER_MODEL", "gpt-5.6-luna")
 
 	config, err := loadConfiguration()
 	if err != nil {
@@ -88,7 +88,7 @@ func TestLoadConfigurationRejectsIncompleteExternalStoryPlanner(t *testing.T) {
 	t.Setenv("AUTH_HMAC_SECRET", "12345678901234567890123456789012")
 	t.Setenv("INTERNAL_API_TOKEN", "12345678901234567890123456789012")
 	t.Setenv("STORY_PLANNER_PROVIDER", "openai-compatible")
-	t.Setenv("STORY_PLANNER_MODEL", "gpt-5.4")
+	t.Setenv("STORY_PLANNER_MODEL", "gpt-5.6-luna")
 
 	if _, err := loadConfiguration(); err == nil {
 		t.Fatal("expected missing story planner API key to fail startup config")

@@ -902,7 +902,7 @@ Current implementation notes:
 - frame extraction seeks before opening the input (`-ss` before `-i`) for faster representative-frame extraction
 - preprocessing artifacts are cached by user, media, input/analysis version, and source ETag
 - VideoAnalysis is cached by user, media, input version, understanding version, provider/model, and source ETag
-- production deployments use either a FrameMio-compatible provider adapter or direct OpenAI-compatible video understanding with `VIDEO_UNDERSTANDING_DIRECT=true`, `VIDEO_UNDERSTANDING_PROVIDER=openai-direct`, `VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL=https://api2.65535.space`, and `VIDEO_UNDERSTANDING_MODEL=gpt-5.4-mini`; `heuristic-v1` is a development fallback only
+- production deployments use either a FrameMio-compatible provider adapter or direct OpenAI-compatible video understanding with `VIDEO_UNDERSTANDING_DIRECT=true`, `VIDEO_UNDERSTANDING_PROVIDER=openai-direct`, `VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL=https://api2.65535.space`, and `VIDEO_UNDERSTANDING_MODEL=ggpt-5.6-luna`; `heuristic-v1` is a development fallback only
 - transcription uses the replaceable backend provider abstraction; production can use Deepgram prerecorded STT with `TRANSCRIPTION_PROVIDER=deepgram`, `TRANSCRIPTION_MODEL=nova-3`, `DEEPGRAM_API_KEY=...`, optional `DEEPGRAM_BASE_URL`, and `ENABLE_TRANSCRIPTION=true`, or an upstream/OpenAI-compatible adapter with an authorized transcription model, while still falling back to visual-only evidence when the provider is unavailable
 - force reanalysis should reuse deterministic preprocessing where possible and append a new semantic analysis version rather than overwriting old records
 
@@ -1180,7 +1180,7 @@ Initial StoryPlan generation is selected by backend configuration only. iOS neve
 
 ```text
 STORY_PLANNER_PROVIDER=local|openai|openai-compatible|ai-gateway
-STORY_PLANNER_MODEL=gpt-5.5
+STORY_PLANNER_MODEL=gpt-5.6-luna
 STORY_PLANNER_BASE_URL=
 STORY_PLANNER_API_KEY=
 STORY_PLANNER_WIRE_API=chat_completions|responses
@@ -1199,7 +1199,7 @@ Rules:
 - GPT must return the existing `models.StoryPlan` JSON shape only, with `schema_version` exactly `story_plan_v1`; it must never return Remotion code, FFmpeg commands, shell commands, SQL, JavaScript, or executable instructions. Current production deployment defaults use `chat_completions` for OpenAI-compatible gateway compatibility; `responses` remains supported when the upstream supports it. `STORY_PLANNER_FALLBACK_TIMEOUT` bounds initial GPT planning latency before falling back to the deterministic local planner, while `STORY_PLANNER_TIMEOUT` remains the HTTP hard timeout.
 - The provider boundary canonicalizes narrow v1 schema aliases such as `1.0` to `story_plan_v1`, repairs bounded media-reference omissions from existing analysis data, then runs lightweight structural validation; structurally invalid GPT plans fall back to the local planner before persistence.
 - The backend validator deterministically rejects invalid media references, unsupported transitions/crop intents/typography/caption values, bad timings, over-duration plans, and missing render-required fields before persistence/rendering.
-- `VIDEO_UNDERSTANDING_MODEL`, such as `gpt-5.4-mini`, remains separate from `STORY_PLANNER_MODEL`; media understanding can use a cheaper bulk-analysis model while planning uses a stronger creative model.
+- `VIDEO_UNDERSTANDING_MODEL`, such as `gpt-5.6-luna`, remains separate from `STORY_PLANNER_MODEL`; media understanding can use a cheaper bulk-analysis model while planning uses a stronger creative model.
 
 The configured planner must remain an implementation of the same Story Planner abstraction used by orchestration. It must not create a second StoryPlan format, a second renderer, a second job system, or a second media-analysis pipeline.
 

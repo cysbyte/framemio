@@ -253,7 +253,7 @@ func TestOpenAICompatibleVideoUnderstandingProviderSendsChatCompletionsRequest(t
 		if err := json.NewDecoder(request.Body).Decode(&envelope); err != nil {
 			t.Fatal(err)
 		}
-		if envelope.Model != "gpt-5.4-mini" || envelope.MaxTokens != 6000 || envelope.ResponseFormat.Type != "json_object" || len(envelope.Messages) != 2 {
+		if envelope.Model != "gpt-5.6-luna" || envelope.MaxTokens != 6000 || envelope.ResponseFormat.Type != "json_object" || len(envelope.Messages) != 2 {
 			t.Fatalf("unexpected chat completions envelope: %+v", envelope)
 		}
 		content := string(envelope.Messages[1].Content)
@@ -268,13 +268,13 @@ func TestOpenAICompatibleVideoUnderstandingProviderSendsChatCompletionsRequest(t
 	})}
 	provider := OpenAICompatibleVideoUnderstandingProvider{
 		BaseURL: "https://api2.65535.space", APIKey: "secret", ProviderName: "openai-direct",
-		ModelName: "gpt-5.4-mini", WireAPI: "chat_completions", ImageDetail: "high", MaxOutputTokens: 6000, Client: client,
+		ModelName: "gpt-5.6-luna", WireAPI: "chat_completions", ImageDetail: "high", MaxOutputTokens: 6000, Client: client,
 	}
 	response, err := provider.Understand(context.Background(), providerUnderstandingInput())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.SchemaVersion != domain.VideoAnalysisSchemaV1 || len(response.Candidates) != 1 || provider.Name() != "openai-direct" || provider.Model() != "gpt-5.4-mini" {
+	if response.SchemaVersion != domain.VideoAnalysisSchemaV1 || len(response.Candidates) != 1 || provider.Name() != "openai-direct" || provider.Model() != "gpt-5.6-luna" {
 		t.Fatalf("unexpected direct understanding response: %+v", response)
 	}
 }
@@ -300,7 +300,7 @@ func TestOpenAICompatibleVideoUnderstandingProviderSupportsResponsesWireAPI(t *t
 		if err := json.NewDecoder(request.Body).Decode(&envelope); err != nil {
 			t.Fatal(err)
 		}
-		if envelope.Model != "gpt-5.4-mini" || envelope.MaxOutputTokens != 5000 || len(envelope.Input) != 2 {
+		if envelope.Model != "gpt-5.6-luna" || envelope.MaxOutputTokens != 5000 || len(envelope.Input) != 2 {
 			t.Fatalf("unexpected responses envelope: %+v", envelope)
 		}
 		content := string(envelope.Input[1].Content)
@@ -315,7 +315,7 @@ func TestOpenAICompatibleVideoUnderstandingProviderSupportsResponsesWireAPI(t *t
 	})}
 	provider := OpenAICompatibleVideoUnderstandingProvider{
 		BaseURL: "https://api2.65535.space/v1", APIKey: "secret", ProviderName: "openai-direct",
-		ModelName: "gpt-5.4-mini", WireAPI: "responses", Client: client,
+		ModelName: "gpt-5.6-luna", WireAPI: "responses", Client: client,
 	}
 	response, err := provider.Understand(context.Background(), providerUnderstandingInput())
 	if err != nil {
