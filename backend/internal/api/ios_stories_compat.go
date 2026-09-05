@@ -14,6 +14,7 @@ import (
 
 	"github.com/framemio/backend/internal/credits"
 	"github.com/framemio/backend/internal/models"
+	"github.com/framemio/backend/internal/orchestration"
 	"github.com/framemio/backend/internal/queue"
 	"github.com/framemio/backend/internal/store"
 )
@@ -54,9 +55,10 @@ type iosStoryMoment struct {
 }
 
 type iosCreateStoryRequest struct {
-	Context  string             `json:"context"`
-	Assets   []iosStoryAsset    `json:"assets"`
-	Analyses []iosStoryAnalysis `json:"analyses"`
+	Context        string             `json:"context"`
+	Assets         []iosStoryAsset    `json:"assets"`
+	Analyses       []iosStoryAnalysis `json:"analyses"`
+	TargetDuration float64            `json:"targetDuration,omitempty"`
 }
 
 type iosStoryEditRequest struct {
@@ -1157,7 +1159,15 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 	if !s.allowExpensiveOperation(response, user.ID, "create_ios_story") {
 		return
 	}
-	s.Logger.Info("creating iOS story", "user_id", user.ID, "context", input.Context, "asset_count", len(input.Assets), "analysis_count", len(input.Analyses), "idempotency_key_present", strings.TrimSpace(request.Header.Get("Idempotency-Key")) != "")
+	s.Logger.Info("creating iOS story", "user_id", user.ID, "context", input.Context, "asset_count", len(input.Assets), "analysis_count", len(input.Analyses), "target_duration_seconds", input.TargetDuration, "has_target_duration", input.TargetDuration > 0, "idempotency_key_present", strings.TrimSpace(request.Header.Get("Idempotency-Key")) != "")
+	storyConfig := map[string]string{"pipeline_version": orchestration.PipelineVersion}
+	if input.TargetDuration > 0 {
+		if input.TargetDuration < 5 || input.TargetDuration > 60 {
+			s.writeError(response, http.StatusBadRequest, "invalid_story_duration", "target duration must be between 5 and 60 seconds")
+			return
+		}
+		storyConfig["target_duration_seconds"] = strconv.Itoa(int(input.TargetDuration + 0.5))
+	}
 	resolved, err := s.resolveIOSStoryAssets(request, user.ID, input.Assets)
 	if err != nil {
 		s.Logger.Warn("resolve iOS story media failed", "user_id", user.ID, "asset_count", len(input.Assets), "error", err)
@@ -1231,7 +1241,7 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 		s.internalError(response, errors.New("job orchestrator not configured"), "job orchestrator not configured")
 		return
 	}
-	jobs, err := s.Orchestrator.StartIOSAnalysis(request.Context(), user.ID, created.ID, idempotencyKey+":analysis")
+	jobs, err := s.Orchestrator.StartIOSAnalysis(request.Context(), user.ID, created.ID, idempotencyKey+":analysis", storyConfig)
 	if err != nil {
 		s.Logger.Error("start iOS story analysis failed", "user_id", user.ID, "project_id", created.ID, "error", err)
 		s.mapStoreError(response, err)

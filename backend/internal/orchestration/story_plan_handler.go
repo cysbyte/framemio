@@ -65,7 +65,7 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 	plannerProvider := storyPlannerName(planner)
 	plannerModel := storyPlannerModel(planner)
 	started := time.Now()
-	h.logger().Info("story_planner_started", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("story_plan_version", request.Version), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int("media_count", len(project.MediaIDs)), slog.Int("photo_analysis_count", len(photoAnalyses)), slog.Int("video_analysis_count", len(videoAnalyses)))
+	h.logger().Info("story_planner_started", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("story_plan_version", request.Version), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int("media_count", len(project.MediaIDs)), slog.Int("photo_analysis_count", len(photoAnalyses)), slog.Int("video_analysis_count", len(videoAnalyses)), slog.Int64("suggested_duration_ms", request.DesiredDuration.Milliseconds()), slog.Bool("target_duration_fixed", request.TargetDurationFixed), slog.Int("max_duration_ms", storyPlannerMaxDurationLogMS(request)))
 	h.logger().Info("story planner request prepared",
 		slog.String("job_id", job.ID),
 		slog.String("project_id", project.ID),
@@ -83,6 +83,9 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		slog.Int("instruction_length", len(strings.TrimSpace(request.UserInstructions))),
 		slog.String("subtitles_enabled", boolPointerLogValue(request.SubtitlesEnabled)),
 		slog.String("caption_style_preset", valueOrUnset(request.CaptionStylePreset)),
+		slog.Int64("suggested_duration_ms", request.DesiredDuration.Milliseconds()),
+		slog.Bool("target_duration_fixed", request.TargetDurationFixed),
+		slog.Int("max_duration_ms", storyPlannerMaxDurationLogMS(request)),
 	)
 	h.logger().Info("story_planner_request_ready", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("story_plan_version", request.Version), slog.Int64("request_prepare_ms", time.Since(requestPrepareStarted).Milliseconds()), slog.Int64("elapsed_ms", time.Since(handlerStarted).Milliseconds()))
 	if plannerProvider != "local" {
@@ -94,13 +97,13 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		return err
 	}
 	if plannerProvider != "local" {
-		h.logger().Info("story_planner_ai_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("story_plan_version", plan.Version), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)))
+		h.logger().Info("story_planner_ai_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("story_plan_version", plan.Version), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Int("requested_duration_ms", plan.RequestedDurationMS), slog.Int("planned_duration_ms", plan.TotalDurationMS), slog.Int("output_max_duration_seconds", plan.Output.MaxDurationS), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)))
 		if validationErr := ai.ValidateStoryPlan(plan); validationErr != nil {
 			h.logger().Warn("story_planner_validation_failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.String("failure_category", "schema"), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Any("error", validationErr))
 			return validationErr
 		}
 	}
-	h.logger().Info("story planner output ready", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.Int("candidate_count", len(photoAnalyses)+totalVideoSegments(videoAnalyses)), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.String("broll_scores", brollScores(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)), slog.Int("typography_count", typographyCount(plan.Moments)), slog.Int("video_moment_count", videoMomentCount(plan.Moments)), slog.String("caption_style_preset", storyPlanCaptionStylePreset(plan)))
+	h.logger().Info("story planner output ready", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.Int("candidate_count", len(photoAnalyses)+totalVideoSegments(videoAnalyses)), slog.Int("requested_duration_ms", plan.RequestedDurationMS), slog.Int("planned_duration_ms", plan.TotalDurationMS), slog.Int("output_max_duration_seconds", plan.Output.MaxDurationS), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.String("broll_scores", brollScores(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)), slog.Int("typography_count", typographyCount(plan.Moments)), slog.Int("video_moment_count", videoMomentCount(plan.Moments)), slog.String("caption_style_preset", storyPlanCaptionStylePreset(plan)))
 	if h.Validator != nil {
 		validationStarted := time.Now()
 		if validationErr := h.Validator.Validate(ctx, job.UserID, plan); validationErr != nil {
@@ -115,7 +118,7 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		return err
 	}
 	h.logger().Info("story plan saved", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("caption_count", len(plan.Captions)), slog.Int64("save_ms", time.Since(saveStarted).Milliseconds()), slog.Int64("elapsed_ms", time.Since(handlerStarted).Milliseconds()))
-	h.logger().Info("story_planner_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Int64("total_duration_ms", time.Since(handlerStarted).Milliseconds()), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)))
+	h.logger().Info("story_planner_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Int64("total_duration_ms", time.Since(handlerStarted).Milliseconds()), slog.Int("requested_duration_ms", plan.RequestedDurationMS), slog.Int("planned_duration_ms", plan.TotalDurationMS), slog.Int("output_max_duration_seconds", plan.Output.MaxDurationS), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)))
 	return nil
 }
 
@@ -210,8 +213,10 @@ func (h StoryPlanHandler) storyRevisionInput(project models.StoryProject, config
 func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configuration map[string]string, photoAnalyses []models.PhotoAnalysis, videoAnalyses []models.VideoAnalysis, clusters []models.MediaCluster) ai.Request {
 	version, _ := strconv.Atoi(strings.TrimSpace(configuration["story_plan_version"]))
 	duration := defaultStoryDuration(project)
+	targetDurationFixed := false
 	if seconds, _ := strconv.Atoi(strings.TrimSpace(configuration["target_duration_seconds"])); seconds > 0 {
 		duration = time.Duration(seconds) * time.Second
+		targetDurationFixed = true
 	}
 	selectedMediaIDs := splitStoryPlanConfigList(configuration["selected_media_ids"])
 	if len(selectedMediaIDs) == 0 {
@@ -230,6 +235,7 @@ func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configur
 		ProjectID:           project.ID,
 		Version:             version,
 		DesiredDuration:     duration,
+		TargetDurationFixed: targetDurationFixed,
 		StoryType:           storyTypeFromContext(project.Context),
 		VisualStyle:         style,
 		UserInstructions:    instructions,
@@ -273,6 +279,17 @@ func storyPlannerModel(planner ai.StoryPlanner) string {
 		}
 	}
 	return ""
+}
+
+func storyPlannerMaxDurationLogMS(request ai.Request) int {
+	desiredMS := int(request.DesiredDuration.Milliseconds())
+	if desiredMS <= 0 {
+		desiredMS = 1
+	}
+	if request.TargetDurationFixed {
+		return desiredMS
+	}
+	return flexibleStoryRevisionMaxDurationMS
 }
 
 type namedStoryRevisionPlanner interface {

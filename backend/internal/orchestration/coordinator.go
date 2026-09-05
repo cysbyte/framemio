@@ -100,10 +100,14 @@ func (c *Coordinator) StartAnalysis(ctx context.Context, userID, projectID, idem
 	return jobs, nil
 }
 
-func (c *Coordinator) StartIOSAnalysis(ctx context.Context, userID, projectID, idempotencyKey string) ([]models.ProcessingJob, error) {
+func (c *Coordinator) StartIOSAnalysis(ctx context.Context, userID, projectID, idempotencyKey string, configuration ...map[string]string) ([]models.ProcessingJob, error) {
 	project, err := c.Store.GetProject(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
+	}
+	baseConfig := inheritConfiguration(nil)
+	if len(configuration) > 0 {
+		baseConfig = inheritConfiguration(configuration[0])
 	}
 	jobs := make([]models.ProcessingJob, 0, len(project.MediaIDs))
 	markAnalyzing := false
@@ -115,7 +119,7 @@ func (c *Coordinator) StartIOSAnalysis(ctx context.Context, userID, projectID, i
 		if media.Type != models.MediaTypeVideo {
 			continue
 		}
-		job, err := c.createStageJob(ctx, userID, projectID, mediaID, models.JobTypeMediaPreprocess, map[string]string{"pipeline_version": PipelineVersion}, stableStageKey(projectID, mediaID, models.JobTypeMediaPreprocess), true)
+		job, err := c.createStageJob(ctx, userID, projectID, mediaID, models.JobTypeMediaPreprocess, baseConfig, stableStageKey(projectID, mediaID, models.JobTypeMediaPreprocess), true)
 		if err != nil {
 			return nil, err
 		}
@@ -354,12 +358,12 @@ func (c *Coordinator) AdvanceAfterJob(ctx context.Context, job models.Processing
 			_, err = c.createStageJob(ctx, job.UserID, job.ProjectID, job.MediaID, models.JobTypeTranscribe, inheritConfiguration(job.Configuration), stableStageKey(job.ProjectID, job.MediaID, models.JobTypeTranscribe), true)
 			return err
 		}
-		return c.enqueueStoryPlanIfReady(ctx, job.UserID, job.ProjectID)
+		return c.enqueueStoryPlanIfReady(ctx, job.UserID, job.ProjectID, job.Configuration)
 	case models.JobTypeTranscribe:
 		_, err := c.createStageJob(ctx, job.UserID, job.ProjectID, job.MediaID, models.JobTypeVideoUnderstand, inheritConfiguration(job.Configuration), stableStageKey(job.ProjectID, job.MediaID, models.JobTypeVideoUnderstand), true)
 		return err
 	case models.JobTypeVideoUnderstand:
-		return c.enqueueStoryPlanIfReady(ctx, job.UserID, job.ProjectID)
+		return c.enqueueStoryPlanIfReady(ctx, job.UserID, job.ProjectID, job.Configuration)
 	case models.JobTypeStoryPlan:
 		if err := c.Store.SetProjectStatus(ctx, job.UserID, job.ProjectID, models.ProjectStatusStoryReady); err != nil {
 			return err
@@ -577,7 +581,7 @@ func (c *Coordinator) AdvanceStoryPlanToRender(ctx context.Context, userID, proj
 	return c.Store.SetProjectStatus(ctx, userID, projectID, models.ProjectStatusRendering)
 }
 
-func (c *Coordinator) enqueueStoryPlanIfReady(ctx context.Context, userID, projectID string) error {
+func (c *Coordinator) enqueueStoryPlanIfReady(ctx context.Context, userID, projectID string, configuration ...map[string]string) error {
 	project, err := c.Store.GetProject(ctx, userID, projectID)
 	if err != nil {
 		return err
@@ -602,6 +606,19 @@ func (c *Coordinator) enqueueStoryPlanIfReady(ctx context.Context, userID, proje
 		c.Logger.Info("story plan enqueue skipped", slog.String("project_id", projectID), slog.String("reason", "story_plan_already_exists_or_active"))
 		return nil
 	}
+	storyConfig := inheritConfiguration(nil)
+	if len(configuration) > 0 {
+		storyConfig = inheritConfiguration(configuration[0])
+	}
+	for _, job := range jobs {
+		if strings.TrimSpace(storyConfig["target_duration_seconds"]) != "" {
+			break
+		}
+		if value := strings.TrimSpace(job.Configuration["target_duration_seconds"]); value != "" {
+			storyConfig["target_duration_seconds"] = value
+			break
+		}
+	}
 	for _, mediaID := range project.MediaIDs {
 		media, err := c.Store.GetMedia(ctx, userID, mediaID)
 		if err != nil {
@@ -616,7 +633,7 @@ func (c *Coordinator) enqueueStoryPlanIfReady(ctx context.Context, userID, proje
 		}
 	}
 	c.Logger.Info("all media stages complete; queueing story plan", slog.String("project_id", projectID), slog.Int("media_count", len(project.MediaIDs)))
-	_, err = c.createStageJob(ctx, userID, projectID, "", models.JobTypeStoryPlan, map[string]string{"pipeline_version": PipelineVersion}, stableStageKey(projectID, "", models.JobTypeStoryPlan), true)
+	_, err = c.createStageJob(ctx, userID, projectID, "", models.JobTypeStoryPlan, storyConfig, stableStageKey(projectID, "", models.JobTypeStoryPlan), true)
 	return err
 }
 

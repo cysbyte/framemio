@@ -506,6 +506,9 @@ func (s *MemoryStore) ListProjectJobs(_ context.Context, userID, projectID strin
 			jobs = append(jobs, job)
 		}
 	}
+	slices.SortFunc(jobs, func(left, right models.ProcessingJob) int {
+		return left.CreatedAt.Compare(right.CreatedAt)
+	})
 	return jobs, nil
 }
 

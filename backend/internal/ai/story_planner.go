@@ -19,6 +19,7 @@ type Request struct {
 	ProjectID           string
 	Version             int
 	DesiredDuration     time.Duration
+	TargetDurationFixed bool
 	StoryType           models.StoryType
 	VisualStyle         models.VisualStyle
 	UserInstructions    string

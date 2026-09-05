@@ -134,6 +134,84 @@ func TestOpenAICompatibleStoryPlannerRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleStoryPlannerLetsModelChooseDurationUpToSixtySeconds(t *testing.T) {
+	t.Parallel()
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		var request struct {
+			Input []struct {
+				Role    string `json:"role"`
+				Content []struct {
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		prompt := request.Input[1].Content[0].Text
+		if !strings.Contains(prompt, `"desiredDurationMs":4000`) || !strings.Contains(prompt, `"maxDurationMs":60000`) || !strings.Contains(prompt, `"targetDurationFixed":false`) {
+			t.Fatalf("expected suggested 4s with flexible 60s max, got %s", prompt)
+		}
+		planJSON := strings.Replace(storyPlannerProviderPlanJSON(), `"requested_duration_ms":4000`, `"requested_duration_ms":12000`, 1)
+		planJSON = strings.Replace(planJSON, `"duration_ms":4000`, `"duration_ms":12000`, 1)
+		planJSON = strings.Replace(planJSON, `"end_ms":4000`, `"end_ms":12000`, 1)
+		planJSON = strings.Replace(planJSON, `"max_duration_seconds":4`, `"max_duration_seconds":12`, 1)
+		planJSON = strings.Replace(planJSON, `"total_duration_ms":4000`, `"total_duration_ms":12000`, 1)
+		return typographyHTTPResponse(http.StatusOK, responsesTypographyResponse(planJSON)), nil
+	})}
+	planner := OpenAICompatibleStoryPlanner{BaseURL: "https://planner.test", APIKey: "test-key", ModelName: "gpt-story", WireAPI: "responses", Client: client}
+	plan, err := planner.Plan(context.Background(), storyPlannerProviderRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.TotalDurationMS != 12000 || plan.RequestedDurationMS != 12000 || plan.Output.MaxDurationS != 12 {
+		t.Fatalf("expected model-selected 12s duration to be preserved, got %+v", plan)
+	}
+}
+
+func TestOpenAICompatibleStoryPlannerRejectsFlexibleDurationAboveSixtySeconds(t *testing.T) {
+	t.Parallel()
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		planJSON := strings.Replace(storyPlannerProviderPlanJSON(), `"requested_duration_ms":4000`, `"requested_duration_ms":61000`, 1)
+		planJSON = strings.Replace(planJSON, `"duration_ms":4000`, `"duration_ms":61000`, 1)
+		planJSON = strings.Replace(planJSON, `"end_ms":4000`, `"end_ms":61000`, 1)
+		planJSON = strings.Replace(planJSON, `"max_duration_seconds":4`, `"max_duration_seconds":61`, 1)
+		planJSON = strings.Replace(planJSON, `"total_duration_ms":4000`, `"total_duration_ms":61000`, 1)
+		return typographyHTTPResponse(http.StatusOK, responsesTypographyResponse(planJSON)), nil
+	})}
+	planner := OpenAICompatibleStoryPlanner{BaseURL: "https://planner.test", APIKey: "test-key", ModelName: "gpt-story", WireAPI: "responses", Client: client}
+	if _, err := planner.Plan(context.Background(), storyPlannerProviderRequest()); err == nil {
+		t.Fatal("expected flexible story plan above 60s to fail")
+	}
+}
+
+func TestOpenAICompatibleStoryPlannerKeepsExplicitTargetDurationFixed(t *testing.T) {
+	t.Parallel()
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		var request struct {
+			Input []struct {
+				Content []struct {
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		prompt := request.Input[1].Content[0].Text
+		if !strings.Contains(prompt, `"maxDurationMs":4000`) || !strings.Contains(prompt, `"targetDurationFixed":true`) {
+			t.Fatalf("expected fixed 4s max, got %s", prompt)
+		}
+		return typographyHTTPResponse(http.StatusOK, responsesTypographyResponse(storyPlannerProviderPlanJSON())), nil
+	})}
+	request := storyPlannerProviderRequest()
+	request.TargetDurationFixed = true
+	planner := OpenAICompatibleStoryPlanner{BaseURL: "https://planner.test", APIKey: "test-key", ModelName: "gpt-story", WireAPI: "responses", Client: client}
+	if _, err := planner.Plan(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFallbackStoryPlannerUsesFallbackWhenPrimaryFails(t *testing.T) {
 	t.Parallel()
 	request := storyPlannerProviderRequest()

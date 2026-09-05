@@ -366,7 +366,9 @@ type noopHandler struct{}
 func (noopHandler) HandleJob(context.Context, models.ProcessingJob) error { return nil }
 
 type deletingHandler struct {
-	store     interface{ DeleteProject(context.Context, string, string) error }
+	store interface {
+		DeleteProject(context.Context, string, string) error
+	}
 	userID    string
 	projectID string
 }
