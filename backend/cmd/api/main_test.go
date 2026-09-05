@@ -31,15 +31,16 @@ func TestConfiguredStoryPlannerRequiresExternalProviderConfig(t *testing.T) {
 func TestConfiguredStoryPlannerUsesOpenAICompatibleProvider(t *testing.T) {
 	t.Parallel()
 	planner, err := configuredStoryPlanner(configuration{
-		TypographyEnabled:     true,
-		TypographyProvider:    "local",
-		StoryPlannerProvider:  "openai-compatible",
-		StoryPlannerBaseURL:   "https://planner.test/v1",
-		StoryPlannerAPIKey:    "test-key",
-		StoryPlannerModel:     "gpt-test",
-		StoryPlannerWireAPI:   "responses",
-		StoryPlannerMaxTokens: 7000,
-		StoryPlannerTimeout:   25 * time.Second,
+		TypographyEnabled:           true,
+		TypographyProvider:          "local",
+		StoryPlannerProvider:        "openai-compatible",
+		StoryPlannerBaseURL:         "https://planner.test/v1",
+		StoryPlannerAPIKey:          "test-key",
+		StoryPlannerModel:           "gpt-test",
+		StoryPlannerWireAPI:         "responses",
+		StoryPlannerMaxTokens:       7000,
+		StoryPlannerTimeout:         25 * time.Second,
+		StoryPlannerFallbackTimeout: 12 * time.Second,
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +56,7 @@ func TestConfiguredStoryPlannerUsesOpenAICompatibleProvider(t *testing.T) {
 	if _, ok := fallback.Fallback.(*ai.Planner); !ok {
 		t.Fatalf("expected local fallback story planner, got %T", fallback.Fallback)
 	}
-	if external.BaseURL != "https://planner.test/v1" || external.ModelName != "gpt-test" || external.WireAPI != "responses" || external.MaxOutputTokens != 7000 || external.Client.Timeout != 25*time.Second {
+	if external.BaseURL != "https://planner.test/v1" || external.ModelName != "gpt-test" || external.WireAPI != "responses" || external.MaxOutputTokens != 7000 || external.Client.Timeout != 25*time.Second || fallback.PrimaryTimeout != 12*time.Second {
 		t.Fatalf("external story planner not configured: %+v", external)
 	}
 }
@@ -75,7 +76,7 @@ func TestLoadConfigurationStoryPlannerFallsBackToOpenAIEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.StoryPlannerBaseURL != "https://openai-compatible.test" || config.StoryPlannerAPIKey != "fallback-key" || config.StoryPlannerWireAPI != "responses" || config.StoryPlannerTimeout != 90*time.Second {
+	if config.StoryPlannerBaseURL != "https://openai-compatible.test" || config.StoryPlannerAPIKey != "fallback-key" || config.StoryPlannerWireAPI != "responses" || config.StoryPlannerTimeout != 90*time.Second || config.StoryPlannerFallbackTimeout != 30*time.Second {
 		t.Fatalf("unexpected story planner config: %+v", config)
 	}
 }

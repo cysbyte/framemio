@@ -175,6 +175,41 @@ func TestFallbackStoryPlannerUsesFallbackWhenPrimaryReturnsInvalidPlan(t *testin
 	}
 }
 
+func TestFallbackStoryPlannerUsesFallbackAfterPrimaryTimeout(t *testing.T) {
+	t.Parallel()
+	request := storyPlannerProviderRequest()
+	fallbackPlan := models.StoryPlan{
+		SchemaVersion:       models.StoryPlanSchemaVersionV1,
+		ID:                  "plan-fallback-timeout",
+		ProjectID:           request.ProjectID,
+		Version:             request.Version,
+		RequestedDurationMS: int(request.DesiredDuration.Milliseconds()),
+		StoryType:           request.StoryType,
+		VisualStyle:         request.VisualStyle,
+		TitleText:           "Fallback",
+		EndingText:          "Done",
+		Moments:             []models.StoryMoment{{MomentID: "moment-fallback", MediaID: "photo-gpt", AssetID: "photo-gpt", MediaType: models.MediaTypePhoto, DurationMS: 4000, CropIntent: "fit", Transition: "cut"}},
+		Output:              models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 4, Preset: "premium-memory"},
+		TotalDurationMS:     4000,
+	}
+	planner := FallbackStoryPlanner{
+		Primary:        blockingStoryPlanner{},
+		Fallback:       staticStoryPlanner{plan: fallbackPlan},
+		PrimaryTimeout: 10 * time.Millisecond,
+	}
+	started := time.Now()
+	plan, err := planner.Plan(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("fallback took too long: %s", elapsed)
+	}
+	if plan.ID != fallbackPlan.ID {
+		t.Fatalf("fallback plan not returned after primary timeout: %+v", plan)
+	}
+}
+
 func storyPlannerProviderRequest() Request {
 	return Request{
 		ProjectID:        "project-gpt",
@@ -212,3 +247,12 @@ func (p staticStoryPlanner) Plan(context.Context, Request) (models.StoryPlan, er
 }
 
 func (p staticStoryPlanner) Name() string { return "static" }
+
+type blockingStoryPlanner struct{}
+
+func (blockingStoryPlanner) Plan(ctx context.Context, _ Request) (models.StoryPlan, error) {
+	<-ctx.Done()
+	return models.StoryPlan{}, ctx.Err()
+}
+
+func (blockingStoryPlanner) Name() string { return "blocking" }

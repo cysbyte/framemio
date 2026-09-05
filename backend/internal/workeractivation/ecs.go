@@ -157,6 +157,7 @@ func (a *ECSRunTaskActivator) Activate(ctx context.Context, message queue.JobMes
 	if taskDefinition == "" {
 		return fmt.Errorf("%s task definition is not configured", reason)
 	}
+	overrideEnv := workerOverrideEnvironment(message)
 	a.logger.Info("starting one-off ECS worker task", slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)), slog.String("reason", reason), slog.String("cluster", a.cluster), slog.String("task_definition", taskDefinition), slog.String("container", containerName), slog.Int("subnet_count", len(a.subnets)), slog.Int("security_group_count", len(a.securityGroups)), slog.String("assign_public_ip", string(a.assignPublicIP)))
 	input := &ecs.RunTaskInput{
 		Cluster:        aws.String(a.cluster),
@@ -175,12 +176,8 @@ func (a *ECSRunTaskActivator) Activate(ctx context.Context, message queue.JobMes
 		},
 		Overrides: &types.TaskOverride{
 			ContainerOverrides: []types.ContainerOverride{{
-				Name: aws.String(containerName),
-				Environment: []types.KeyValuePair{
-					{Name: aws.String("JOB_ID"), Value: aws.String(message.JobID)},
-					{Name: aws.String("JOB_TYPE"), Value: aws.String(string(message.JobType))},
-					{Name: aws.String("WORKER_RUN_ONCE"), Value: aws.String("true")},
-				},
+				Name:        aws.String(containerName),
+				Environment: overrideEnv,
 			}},
 		},
 		StartedBy: aws.String("framemio-" + reason),
@@ -202,6 +199,21 @@ func (a *ECSRunTaskActivator) Activate(ctx context.Context, message queue.JobMes
 	}
 	a.logger.Info("started one-off ECS worker task", slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)), slog.String("reason", reason), slog.Int("tasks", len(output.Tasks)), slog.Any("task_arns", taskARNs))
 	return serviceScaleErr
+}
+
+func workerOverrideEnvironment(message queue.JobMessage) []types.KeyValuePair {
+	environment := []types.KeyValuePair{
+		{Name: aws.String("JOB_ID"), Value: aws.String(message.JobID)},
+		{Name: aws.String("JOB_TYPE"), Value: aws.String(string(message.JobType))},
+		{Name: aws.String("WORKER_RUN_ONCE"), Value: aws.String("true")},
+	}
+	if message.JobType == models.JobTypeStoryPlan {
+		environment = append(environment,
+			types.KeyValuePair{Name: aws.String("WORKER_RUN_ONCE_WAIT_TIMEOUT"), Value: aws.String("6m")},
+			types.KeyValuePair{Name: aws.String("SQS_VISIBILITY_TIMEOUT"), Value: aws.String("5m")},
+		)
+	}
+	return environment
 }
 
 func (a *ECSRunTaskActivator) scaleServiceForJob(ctx context.Context, message queue.JobMessage) error {

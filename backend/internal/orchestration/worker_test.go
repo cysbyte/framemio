@@ -257,6 +257,40 @@ func TestWorkerRunOnceDeletesCurrentReceiptAfterSchedulingRetry(t *testing.T) {
 	}
 }
 
+func TestWorkerRunOnceProcessesRunningTargetWithInflatedReceiveCount(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore, _, coordinator, project, _ := setupProject(t, models.MediaTypePhoto)
+	runningJob, _, err := memoryStore.CreateJob(ctx, models.ProcessingJob{ID: "job-running-target-inflated", UserID: project.UserID, ProjectID: project.ID, Type: models.JobTypeStoryPlan, Status: models.JobStatusRunning, Attempt: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(), MaxAttempts: 2}, "running-target-inflated")
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer := &memoryConsumer{received: []queue.ReceivedJobMessage{
+		{Message: queue.JobMessage{JobID: runningJob.ID, ProjectID: project.ID, JobType: runningJob.Type}, ReceiptHandle: "receipt-running-target", ApproximateReceiveCount: 25},
+	}}
+	worker := Worker{
+		Store:           memoryStore,
+		Consumer:        consumer,
+		Coordinator:     coordinator,
+		Handlers:        map[models.JobType]JobHandler{models.JobTypeStoryPlan: noopHandler{}},
+		TargetJobID:     runningJob.ID,
+		MaxReceiveCount: 5,
+	}
+	if err := worker.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(consumer.deadLetters) != 0 {
+		t.Fatalf("target should not be dead-lettered for inflated receives: %+v", consumer.deadLetters)
+	}
+	updated, err := memoryStore.GetJob(ctx, project.UserID, runningJob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != models.JobStatusCompleted {
+		t.Fatalf("running target should complete despite inflated receives: %+v", updated)
+	}
+}
+
 func TestWorkerRunOnceFailsRunningOverReceivedJobAndMarksProjectFailed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

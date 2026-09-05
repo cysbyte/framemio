@@ -609,6 +609,22 @@ func (s *Server) reconcileIOSStoryProgress(request *http.Request, userID string,
 			return project
 		}
 	}
+	for _, job := range jobs {
+		if job.Status != models.JobStatusFailed && job.Status != models.JobStatusCancelled {
+			continue
+		}
+		if err := s.Orchestrator.AdvanceAfterJob(request.Context(), job); err != nil {
+			s.Logger.Warn("reconcile iOS story terminal failure failed", "user_id", userID, "project_id", project.ID, "job_id", job.ID, "job_type", string(job.Type), "status", string(job.Status), "error", err)
+			return project
+		}
+		updated, err := s.Store.GetProject(request.Context(), userID, project.ID)
+		if err != nil {
+			s.Logger.Warn("reload reconciled failed iOS story failed", "user_id", userID, "project_id", project.ID, "error", err)
+			return project
+		}
+		s.Logger.Info("reconciled failed iOS story", "user_id", userID, "project_id", project.ID, "status", string(updated.Status), "job_id", job.ID, "job_type", string(job.Type))
+		return updated
+	}
 	advanced := false
 	for _, job := range jobs {
 		if job.Status != models.JobStatusCompleted {

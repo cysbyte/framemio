@@ -122,80 +122,84 @@ func main() {
 }
 
 type configuration struct {
-	Port                    string
-	DatabaseURL             string
-	S3Bucket                string
-	MediaDownloadBaseURL    string
-	SQSQueueURL             string
-	AuthHMACSecret          string
-	InternalAPIToken        string
-	PartSizeBytes           int64
-	MultipartThresholdBytes int64
-	DeadLetterQueueURL      string
-	TypographyEnabled       bool
-	TypographyProvider      string
-	TypographyBaseURL       string
-	TypographyAPIKey        string
-	TypographyModel         string
-	TypographyWireAPI       string
-	TypographyMaxTokens     int
-	TypographyTimeout       time.Duration
-	StoryPlannerProvider    string
-	StoryPlannerBaseURL     string
-	StoryPlannerAPIKey      string
-	StoryPlannerModel       string
-	StoryPlannerWireAPI     string
-	StoryPlannerMaxTokens   int
-	StoryPlannerTimeout     time.Duration
-	StoryRevisionProvider   string
-	StoryRevisionBaseURL    string
-	StoryRevisionAPIKey     string
-	StoryRevisionModel      string
-	StoryRevisionWireAPI    string
-	StoryRevisionMaxTokens  int
-	StoryRevisionTimeout    time.Duration
-	WorkerRunOnce           bool
-	WorkerJobID             string
-	WorkerWaitTimeout       time.Duration
+	Port                        string
+	DatabaseURL                 string
+	S3Bucket                    string
+	MediaDownloadBaseURL        string
+	SQSQueueURL                 string
+	AuthHMACSecret              string
+	InternalAPIToken            string
+	PartSizeBytes               int64
+	MultipartThresholdBytes     int64
+	DeadLetterQueueURL          string
+	TypographyEnabled           bool
+	TypographyProvider          string
+	TypographyBaseURL           string
+	TypographyAPIKey            string
+	TypographyModel             string
+	TypographyWireAPI           string
+	TypographyMaxTokens         int
+	TypographyTimeout           time.Duration
+	StoryPlannerProvider        string
+	StoryPlannerBaseURL         string
+	StoryPlannerAPIKey          string
+	StoryPlannerModel           string
+	StoryPlannerWireAPI         string
+	StoryPlannerMaxTokens       int
+	StoryPlannerTimeout         time.Duration
+	StoryPlannerFallbackTimeout time.Duration
+	StoryRevisionProvider       string
+	StoryRevisionBaseURL        string
+	StoryRevisionAPIKey         string
+	StoryRevisionModel          string
+	StoryRevisionWireAPI        string
+	StoryRevisionMaxTokens      int
+	StoryRevisionTimeout        time.Duration
+	WorkerRunOnce               bool
+	WorkerJobID                 string
+	WorkerWaitTimeout           time.Duration
+	WorkerVisibilityTimeout     time.Duration
 }
 
 func loadConfiguration() (configuration, error) {
 	result := configuration{
-		Port:                    environment("PORT", "8080"),
-		DatabaseURL:             os.Getenv("DATABASE_URL"),
-		S3Bucket:                os.Getenv("S3_MEDIA_BUCKET"),
-		MediaDownloadBaseURL:    environment("MEDIA_DOWNLOAD_BASE_URL", os.Getenv("MEDIA_CDN_BASE_URL")),
-		SQSQueueURL:             os.Getenv("SQS_PROCESSING_QUEUE_URL"),
-		AuthHMACSecret:          os.Getenv("AUTH_HMAC_SECRET"),
-		InternalAPIToken:        os.Getenv("INTERNAL_API_TOKEN"),
-		PartSizeBytes:           environmentInt64("UPLOAD_PART_SIZE_BYTES", 8*1024*1024),
-		MultipartThresholdBytes: environmentInt64("UPLOAD_MULTIPART_THRESHOLD_BYTES", 16*1024*1024),
-		DeadLetterQueueURL:      os.Getenv("SQS_DEAD_LETTER_QUEUE_URL"),
-		TypographyEnabled:       environmentBool("TYPOGRAPHY_ENABLED", true),
-		TypographyProvider:      environment("TYPOGRAPHY_PROVIDER", "local"),
-		TypographyBaseURL:       environment("TYPOGRAPHY_BASE_URL", os.Getenv("OPENAI_BASE_URL")),
-		TypographyAPIKey:        environment("TYPOGRAPHY_API_KEY", os.Getenv("OPENAI_API_KEY")),
-		TypographyModel:         os.Getenv("TYPOGRAPHY_MODEL"),
-		TypographyWireAPI:       environment("TYPOGRAPHY_WIRE_API", "responses"),
-		TypographyMaxTokens:     environmentInt("TYPOGRAPHY_MAX_OUTPUT_TOKENS", 1400),
-		TypographyTimeout:       environmentDuration("TYPOGRAPHY_TIMEOUT", 12*time.Second),
-		StoryPlannerProvider:    storyPlannerProviderFromEnv(),
-		StoryPlannerBaseURL:     environment("STORY_PLANNER_BASE_URL", os.Getenv("OPENAI_BASE_URL")),
-		StoryPlannerAPIKey:      environment("STORY_PLANNER_API_KEY", os.Getenv("OPENAI_API_KEY")),
-		StoryPlannerModel:       os.Getenv("STORY_PLANNER_MODEL"),
-		StoryPlannerWireAPI:     environment("STORY_PLANNER_WIRE_API", "responses"),
-		StoryPlannerMaxTokens:   environmentInt("STORY_PLANNER_MAX_OUTPUT_TOKENS", 6000),
-		StoryPlannerTimeout:     environmentDuration("STORY_PLANNER_TIMEOUT", 90*time.Second),
-		StoryRevisionProvider:   environment("STORY_REVISION_PROVIDER", "local"),
-		StoryRevisionBaseURL:    environment("STORY_REVISION_BASE_URL", os.Getenv("OPENAI_BASE_URL")),
-		StoryRevisionAPIKey:     environment("STORY_REVISION_API_KEY", os.Getenv("OPENAI_API_KEY")),
-		StoryRevisionModel:      os.Getenv("STORY_REVISION_MODEL"),
-		StoryRevisionWireAPI:    environment("STORY_REVISION_WIRE_API", "responses"),
-		StoryRevisionMaxTokens:  environmentInt("STORY_REVISION_MAX_OUTPUT_TOKENS", 6000),
-		StoryRevisionTimeout:    environmentDuration("STORY_REVISION_TIMEOUT", 90*time.Second),
-		WorkerRunOnce:           environmentBool("WORKER_RUN_ONCE", false),
-		WorkerJobID:             os.Getenv("JOB_ID"),
-		WorkerWaitTimeout:       environmentDuration("WORKER_RUN_ONCE_WAIT_TIMEOUT", 2*time.Minute),
+		Port:                        environment("PORT", "8080"),
+		DatabaseURL:                 os.Getenv("DATABASE_URL"),
+		S3Bucket:                    os.Getenv("S3_MEDIA_BUCKET"),
+		MediaDownloadBaseURL:        environment("MEDIA_DOWNLOAD_BASE_URL", os.Getenv("MEDIA_CDN_BASE_URL")),
+		SQSQueueURL:                 os.Getenv("SQS_PROCESSING_QUEUE_URL"),
+		AuthHMACSecret:              os.Getenv("AUTH_HMAC_SECRET"),
+		InternalAPIToken:            os.Getenv("INTERNAL_API_TOKEN"),
+		PartSizeBytes:               environmentInt64("UPLOAD_PART_SIZE_BYTES", 8*1024*1024),
+		MultipartThresholdBytes:     environmentInt64("UPLOAD_MULTIPART_THRESHOLD_BYTES", 16*1024*1024),
+		DeadLetterQueueURL:          os.Getenv("SQS_DEAD_LETTER_QUEUE_URL"),
+		TypographyEnabled:           environmentBool("TYPOGRAPHY_ENABLED", true),
+		TypographyProvider:          environment("TYPOGRAPHY_PROVIDER", "local"),
+		TypographyBaseURL:           environment("TYPOGRAPHY_BASE_URL", os.Getenv("OPENAI_BASE_URL")),
+		TypographyAPIKey:            environment("TYPOGRAPHY_API_KEY", os.Getenv("OPENAI_API_KEY")),
+		TypographyModel:             os.Getenv("TYPOGRAPHY_MODEL"),
+		TypographyWireAPI:           environment("TYPOGRAPHY_WIRE_API", "responses"),
+		TypographyMaxTokens:         environmentInt("TYPOGRAPHY_MAX_OUTPUT_TOKENS", 1400),
+		TypographyTimeout:           environmentDuration("TYPOGRAPHY_TIMEOUT", 12*time.Second),
+		StoryPlannerProvider:        storyPlannerProviderFromEnv(),
+		StoryPlannerBaseURL:         environment("STORY_PLANNER_BASE_URL", os.Getenv("OPENAI_BASE_URL")),
+		StoryPlannerAPIKey:          environment("STORY_PLANNER_API_KEY", os.Getenv("OPENAI_API_KEY")),
+		StoryPlannerModel:           os.Getenv("STORY_PLANNER_MODEL"),
+		StoryPlannerWireAPI:         environment("STORY_PLANNER_WIRE_API", "responses"),
+		StoryPlannerMaxTokens:       environmentInt("STORY_PLANNER_MAX_OUTPUT_TOKENS", 6000),
+		StoryPlannerTimeout:         environmentDuration("STORY_PLANNER_TIMEOUT", 90*time.Second),
+		StoryPlannerFallbackTimeout: environmentDuration("STORY_PLANNER_FALLBACK_TIMEOUT", 30*time.Second),
+		StoryRevisionProvider:       environment("STORY_REVISION_PROVIDER", "local"),
+		StoryRevisionBaseURL:        environment("STORY_REVISION_BASE_URL", os.Getenv("OPENAI_BASE_URL")),
+		StoryRevisionAPIKey:         environment("STORY_REVISION_API_KEY", os.Getenv("OPENAI_API_KEY")),
+		StoryRevisionModel:          os.Getenv("STORY_REVISION_MODEL"),
+		StoryRevisionWireAPI:        environment("STORY_REVISION_WIRE_API", "responses"),
+		StoryRevisionMaxTokens:      environmentInt("STORY_REVISION_MAX_OUTPUT_TOKENS", 6000),
+		StoryRevisionTimeout:        environmentDuration("STORY_REVISION_TIMEOUT", 90*time.Second),
+		WorkerRunOnce:               environmentBool("WORKER_RUN_ONCE", false),
+		WorkerJobID:                 os.Getenv("JOB_ID"),
+		WorkerWaitTimeout:           environmentDuration("WORKER_RUN_ONCE_WAIT_TIMEOUT", 6*time.Minute),
+		WorkerVisibilityTimeout:     environmentDuration("SQS_VISIBILITY_TIMEOUT", 5*time.Minute),
 	}
 	if result.DatabaseURL == "" || result.S3Bucket == "" || result.SQSQueueURL == "" {
 		return configuration{}, errors.New("DATABASE_URL, S3_MEDIA_BUCKET, and SQS_PROCESSING_QUEUE_URL are required")
@@ -284,7 +288,7 @@ func runWorkerOnce(ctx context.Context, database store.Store, coordinator *orche
 		},
 		Logger:            logger,
 		TargetJobID:       configuration.WorkerJobID,
-		VisibilityTimeout: 2 * time.Minute,
+		VisibilityTimeout: configuration.WorkerVisibilityTimeout,
 		WaitTime:          20 * time.Second,
 	}
 	logger.Info("backend worker run-once started", slog.String("job_id", configuration.WorkerJobID))
@@ -316,9 +320,10 @@ func configuredStoryPlanner(configuration configuration, logger *slog.Logger) (a
 			Client:          &http.Client{Timeout: configuration.StoryPlannerTimeout},
 		}
 		return ai.FallbackStoryPlanner{
-			Primary:  primary,
-			Fallback: &ai.Planner{TypographyPlanner: typographyPlanner, Logger: logger},
-			Logger:   logger,
+			Primary:        primary,
+			Fallback:       &ai.Planner{TypographyPlanner: typographyPlanner, Logger: logger},
+			Logger:         logger,
+			PrimaryTimeout: configuration.StoryPlannerFallbackTimeout,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported STORY_PLANNER_PROVIDER %q", configuration.StoryPlannerProvider)

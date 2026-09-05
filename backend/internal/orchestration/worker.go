@@ -61,7 +61,7 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 				}
 				continue
 			}
-			if received.ApproximateReceiveCount > maxReceiveCount {
+			if received.ApproximateReceiveCount > maxReceiveCount && !w.isTargetMessage(received) {
 				job, err := w.Store.GetJobByID(ctx, received.Message.JobID)
 				if errors.Is(err, store.ErrNotFound) {
 					logger(w).Warn("orchestration worker deleting stale queue message", slog.String("target_job_id", w.TargetJobID), slog.String("job_id", received.Message.JobID), slog.String("job_type", string(received.Message.JobType)), slog.String("project_id", received.Message.ProjectID), slog.String("media_id", received.Message.MediaID), slog.Int("receive_count", received.ApproximateReceiveCount))
@@ -135,6 +135,10 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 			return err
 		}
 	}
+}
+
+func (w *Worker) isTargetMessage(received queue.ReceivedJobMessage) bool {
+	return w.TargetJobID != "" && received.Message.JobID == w.TargetJobID
 }
 
 func (w *Worker) handleReceived(ctx context.Context, received queue.ReceivedJobMessage, visibilityTimeout time.Duration) (bool, error) {

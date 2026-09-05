@@ -264,7 +264,7 @@ func (c *Consumer) deferUnsupported(ctx context.Context, received types.Message,
 	if received.ReceiptHandle == nil {
 		return
 	}
-	deferSeconds := int32(15)
+	deferSeconds := int32(1)
 	receiveCount := 1
 	if value := received.Attributes[string(types.MessageSystemAttributeNameApproximateReceiveCount)]; value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {

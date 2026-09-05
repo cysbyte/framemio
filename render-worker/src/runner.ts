@@ -8,7 +8,7 @@ import {FfmpegCompositionRenderer, RemotionCliRenderer} from './remotion/rendere
 import {AwsCliObjectStore} from './storage/object-store.js';
 import {DeterministicRenderWorker} from './pipeline/render-worker.js';
 
-const unsupportedMessageVisibilitySeconds = 15;
+const unsupportedMessageVisibilitySeconds = 1;
 
 interface RunnerConfig {
   queueURL: string;

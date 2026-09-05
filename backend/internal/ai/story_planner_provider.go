@@ -37,9 +37,10 @@ var _ StoryPlanner = OpenAICompatibleStoryPlanner{}
 // falls back to the deterministic local planner if the provider is unavailable
 // or returns invalid output. The renderer still receives a normal StoryPlan.
 type FallbackStoryPlanner struct {
-	Primary  StoryPlanner
-	Fallback StoryPlanner
-	Logger   *slog.Logger
+	Primary        StoryPlanner
+	Fallback       StoryPlanner
+	Logger         *slog.Logger
+	PrimaryTimeout time.Duration
 }
 
 var _ StoryPlanner = FallbackStoryPlanner{}
@@ -67,7 +68,17 @@ func (p FallbackStoryPlanner) Plan(ctx context.Context, request Request) (models
 		}
 		return p.Fallback.Plan(ctx, request)
 	}
-	plan, err := p.Primary.Plan(ctx, request)
+	primaryCtx := ctx
+	var cancel context.CancelFunc
+	if p.PrimaryTimeout > 0 {
+		primaryCtx, cancel = context.WithTimeout(ctx, p.PrimaryTimeout)
+	}
+	if cancel != nil {
+		defer cancel()
+	}
+	started := time.Now()
+	plan, err := p.Primary.Plan(primaryCtx, request)
+	primaryLatency := time.Since(started)
 	if err == nil {
 		if validationErr := ValidateStoryPlan(plan); validationErr == nil {
 			return plan, nil
@@ -79,7 +90,14 @@ func (p FallbackStoryPlanner) Plan(ctx context.Context, request Request) (models
 		return models.StoryPlan{}, err
 	}
 	if p.Logger != nil {
-		p.Logger.Warn("story_planner_primary_failed_falling_back", slog.String("primary_provider", storyPlannerProviderName(p.Primary)), slog.String("primary_model", storyPlannerProviderModel(p.Primary)), slog.String("fallback_provider", storyPlannerProviderName(p.Fallback)), slog.Any("error", err))
+		p.Logger.Warn("story_planner_primary_failed_falling_back",
+			slog.String("primary_provider", storyPlannerProviderName(p.Primary)),
+			slog.String("primary_model", storyPlannerProviderModel(p.Primary)),
+			slog.String("fallback_provider", storyPlannerProviderName(p.Fallback)),
+			slog.Int64("primary_latency_ms", primaryLatency.Milliseconds()),
+			slog.Int64("primary_timeout_ms", p.PrimaryTimeout.Milliseconds()),
+			slog.Any("error", err),
+		)
 	}
 	fallbackPlan, fallbackErr := p.Fallback.Plan(ctx, request)
 	if fallbackErr != nil {

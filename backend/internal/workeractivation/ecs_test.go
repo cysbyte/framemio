@@ -50,6 +50,34 @@ func TestReadJobTypesNormalizesValues(t *testing.T) {
 	}
 }
 
+func TestWorkerOverrideEnvironmentAddsStoryTimeouts(t *testing.T) {
+	environment := workerOverrideEnvironment(queue.JobMessage{JobID: "job-story", JobType: models.JobTypeStoryPlan})
+	values := make(map[string]string, len(environment))
+	for _, entry := range environment {
+		values[*entry.Name] = *entry.Value
+	}
+	if values["JOB_ID"] != "job-story" || values["JOB_TYPE"] != string(models.JobTypeStoryPlan) || values["WORKER_RUN_ONCE"] != "true" {
+		t.Fatalf("missing base override env: %+v", values)
+	}
+	if values["WORKER_RUN_ONCE_WAIT_TIMEOUT"] != "6m" || values["SQS_VISIBILITY_TIMEOUT"] != "5m" {
+		t.Fatalf("missing story timeout override env: %+v", values)
+	}
+}
+
+func TestWorkerOverrideEnvironmentKeepsNonStoryOverridesMinimal(t *testing.T) {
+	environment := workerOverrideEnvironment(queue.JobMessage{JobID: "job-render", JobType: models.JobTypeVideoRender})
+	values := make(map[string]string, len(environment))
+	for _, entry := range environment {
+		values[*entry.Name] = *entry.Value
+	}
+	if _, ok := values["WORKER_RUN_ONCE_WAIT_TIMEOUT"]; ok {
+		t.Fatalf("render override should not force story wait timeout: %+v", values)
+	}
+	if _, ok := values["SQS_VISIBILITY_TIMEOUT"]; ok {
+		t.Fatalf("render override should not force story visibility timeout: %+v", values)
+	}
+}
+
 func TestECSRunTaskActivatorRoutesWorkerServices(t *testing.T) {
 	activator := &ECSRunTaskActivator{
 		videoServiceName:  "video-service",
