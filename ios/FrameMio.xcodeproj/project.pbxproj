@@ -20,6 +20,7 @@
 		A1000000000000000000001A /* StoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002A /* StoryView.swift */; };
 		A1000000000000000000001B /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002B /* ProfileView.swift */; };
 		A1000000000000000000001C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002C /* Assets.xcassets */; };
+		E90000000000000000000001 /* FrameMio.env in Resources */ = {isa = PBXBuildFile; fileRef = E90000000000000000000002 /* FrameMio.env */; };
 		A10000000000000000000050 /* FrameMioSpacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000070 /* FrameMioSpacing.swift */; };
 		A10000000000000000000051 /* FrameMioRadius.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000071 /* FrameMioRadius.swift */; };
 		A10000000000000000000052 /* FrameMioMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000072 /* FrameMioMetrics.swift */; };
@@ -104,6 +105,7 @@
 		A1000000000000000000002A /* StoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoryView.swift; sourceTree = "<group>"; };
 		A1000000000000000000002B /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
 		A1000000000000000000002C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		E90000000000000000000002 /* FrameMio.env */ = {isa = PBXFileReference; lastKnownFileType = text; path = FrameMio.env; sourceTree = "<group>"; };
 		A1000000000000000000002D /* FrameMio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FrameMio.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000070 /* FrameMioSpacing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameMioSpacing.swift; sourceTree = "<group>"; };
 		A10000000000000000000071 /* FrameMioRadius.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameMioRadius.swift; sourceTree = "<group>"; };
@@ -250,6 +252,7 @@
 			children = (
 				A1000000000000000000002C /* Assets.xcassets */,
 				D80000000000000000000002 /* HomeHeroPreview.mp4 */,
+				E90000000000000000000002 /* FrameMio.env */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -560,6 +563,7 @@
 			files = (
 				A1000000000000000000001C /* Assets.xcassets in Resources */,
 				D80000000000000000000001 /* HomeHeroPreview.mp4 in Resources */,
+				E90000000000000000000001 /* FrameMio.env in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -677,16 +681,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = RAXZ4685K6;
 				ENABLE_TESTABILITY = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_APIBaseURL = "https://api.framemio.com";
-				INFOPLIST_KEY_CFBundleDisplayName = FrameMio;
-				INFOPLIST_KEY_CFBundleShortVersionString = 1.0;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photo-video";
-				INFOPLIST_KEY_NSCameraUsageDescription = "FrameMio uses the camera to capture new moments for memory stories.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "FrameMio uses the microphone for voice prompts and video audio to understand memory stories.";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "FrameMio saves new photos and videos so they can be selected for memory stories.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "FrameMio needs access to your photos and videos to create personal memory stories.";
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = FrameMio/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -715,16 +711,8 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = RAXZ4685K6;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_APIBaseURL = "https://api.framemio.com";
-				INFOPLIST_KEY_CFBundleDisplayName = FrameMio;
-				INFOPLIST_KEY_CFBundleShortVersionString = 1.0;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photo-video";
-				INFOPLIST_KEY_NSCameraUsageDescription = "FrameMio uses the camera to capture new moments for memory stories.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "FrameMio uses the microphone for voice prompts and video audio to understand memory stories.";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "FrameMio saves new photos and videos so they can be selected for memory stories.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "FrameMio needs access to your photos and videos to create personal memory stories.";
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = FrameMio/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -750,7 +738,8 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = RAXZ4685K6;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = FrameMio/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.framemio.app.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -771,7 +760,8 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = RAXZ4685K6;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = FrameMio/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.framemio.app.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";

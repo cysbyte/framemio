@@ -239,10 +239,7 @@ final class FrameMioProViewModel: ObservableObject {
             defer { isPurchasing = false }
             if shouldSimulatePurchaseSuccess {
                 pricingDebugLog("simulate_purchase_success plan=\(selectedPlan.rawValue) source=\(source.rawValue) simulated=\(shouldSimulatePurchaseSuccess)")
-                await completePurchaseSuccess(
-                    purchaseID: "debug-\(selectedPlan.rawValue)",
-                    statusMessage: "Debug purchase completed."
-                )
+                await completePurchaseSuccess(statusMessage: "Debug purchase completed.")
             } else {
                 guard let product = product(for: selectedPlan) else {
                     pricingDebugLog("purchase_missing_product selected=\(selectedPlan.rawValue) product_id=\(selectedPlan.productID) monthly_loaded=\(monthlyProduct != nil) yearly_loaded=\(yearlyProduct != nil)")
@@ -259,12 +256,7 @@ final class FrameMioProViewModel: ObservableObject {
                     switch result {
                     case let .success(verificationResult):
                         let transaction = try verifiedTransaction(from: verificationResult)
-                        await completePurchaseSuccess(
-                            plan: selectedPlan,
-                            purchaseID: String(transaction.id),
-                            expiresAt: transaction.expirationDate,
-                            statusMessage: isSubscribed ? "FrameMio Pro is active." : "Purchase completed."
-                        )
+                        await completePurchaseSuccess(statusMessage: isSubscribed ? "FrameMio Pro is active." : "Purchase completed.")
                         await transaction.finish()
                     case .pending:
                         statusMessage = "Purchase pending approval."
@@ -390,36 +382,8 @@ final class FrameMioProViewModel: ObservableObject {
         }
     }
 
-    private func grantSubscriptionCycle(plan: FrameMioProPlanKind, purchaseID: String, expiresAt: Date?) async throws {
-        guard let creditService else { return }
-        pricingDebugLog("grant_subscription_cycle_start plan=\(plan.rawValue) purchase_id=\(purchaseID)")
-        do {
-            try await creditService.grantSubscriptionCycle(plan: plan.rawValue, purchaseID: purchaseID, expiresAt: expiresAt)
-            pricingDebugLog("grant_subscription_cycle_complete plan=\(plan.rawValue) purchase_id=\(purchaseID)")
-        } catch {
-            pricingDebugLog("grant_subscription_cycle_failed plan=\(plan.rawValue) purchase_id=\(purchaseID) error=\(error.localizedDescription)")
-            throw error
-        }
-    }
-
-    private func completePurchaseSuccess(
-        plan: FrameMioProPlanKind? = nil,
-        purchaseID: String,
-        expiresAt: Date? = nil,
-        statusMessage: String
-    ) async {
+    private func completePurchaseSuccess(statusMessage: String) async {
         pricingDebugLog("complete_purchase_success_start")
-        do {
-            try await grantSubscriptionCycle(
-                plan: plan ?? selectedPlan,
-                purchaseID: purchaseID,
-                expiresAt: expiresAt ?? renewalDate
-            )
-        } catch {
-            self.errorMessage = AppError.from(error).localizedDescription
-            self.statusMessage = nil
-            return
-        }
         await refreshEntitlements()
         await fetchBalance()
         onBalanceUpdated()
@@ -439,14 +403,7 @@ final class FrameMioProViewModel: ObservableObject {
                 guard let plan = FrameMioProPlanKind(productID: transaction.productID), transaction.revocationDate == nil else {
                     continue
                 }
-                do {
-                    try await grantSubscriptionCycle(plan: plan, purchaseID: String(transaction.id), expiresAt: transaction.expirationDate)
-                    await transaction.finish()
-                } catch {
-                    errorMessage = AppError.from(error).localizedDescription
-                    statusMessage = nil
-                    continue
-                }
+                await transaction.finish()
                 await refreshEntitlements()
                 await fetchBalance()
                 onBalanceUpdated()

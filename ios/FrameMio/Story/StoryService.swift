@@ -223,6 +223,16 @@ final class RemotePromptTranscriptionService: PromptTranscriptionService, @unche
     }
 
     func livePromptConfiguration() async throws -> PromptLiveTranscriptionConfiguration {
+        if let apiKey = AppConfiguration.deepgramAPIKey {
+            return PromptLiveTranscriptionConfiguration(
+                accessToken: apiKey,
+                expiresIn: 60,
+                websocketURL: URL(string: "wss://api.deepgram.com/v1/listen")!,
+                model: "nova-3",
+                language: AppConfiguration.deepgramLanguage,
+                authorizationScheme: "Subprotocol"
+            )
+        }
         let data = try await apiClient.data(
             for: APIRequest(
                 method: .post,
@@ -392,7 +402,8 @@ final class MockPromptTranscriptionService: PromptTranscriptionService, @uncheck
             expiresIn: 60,
             websocketURL: URL(string: "wss://api.deepgram.com/v1/listen")!,
             model: "nova-3",
-            language: "en"
+            language: "en",
+            authorizationScheme: "Subprotocol"
         )
     }
 }

@@ -173,6 +173,7 @@ struct PromptLiveTranscriptionConfiguration: Decodable, Sendable {
     let websocketURL: URL
     let model: String
     let language: String?
+    let authorizationScheme: String?
 }
 
 protocol PromptTranscriptionService: Sendable {
@@ -418,7 +419,6 @@ extension StoryEditRequest {
 protocol CreditService: Sendable {
     func balance() async throws -> CreditBalance
     func creditPacks() async throws -> [CreditPack]
-    func grantSubscriptionCycle(plan: String, purchaseID: String, expiresAt: Date?) async throws
     func grantPurchasedCredits(packID: String, purchaseID: String) async throws -> CreditBalance
 }
 

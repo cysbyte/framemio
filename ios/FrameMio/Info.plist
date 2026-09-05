@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>APIBaseURL</key>
+	<string>https://api.framemio.com</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>FrameMio</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>FrameMioDeepgramAPIKey</key>
+	<string>$(FrameMioDeepgramAPIKey)</string>
+	<key>FrameMioDeepgramLanguage</key>
+	<string>$(FrameMioDeepgramLanguage)</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.photo-video</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>MinimumOSVersion</key>
+	<string>17.0</string>
+	<key>NSCameraUsageDescription</key>
+	<string>FrameMio uses the camera to capture new moments for memory stories.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>FrameMio uses the microphone for voice prompts and video audio to understand memory stories.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>FrameMio saves new photos and videos so they can be selected for memory stories.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>FrameMio needs access to your photos and videos to create personal memory stories.</string>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
+	<key>UIDeviceFamily</key>
+	<array>
+		<integer>1</integer>
+	</array>
+	<key>UILaunchScreen</key>
+	<dict/>
+</dict>
+</plist>

@@ -1108,6 +1108,11 @@ private struct EditStorySheet: View {
                 .padding(FrameMioSpacing.lg)
             }
             .background(FrameMioColors.canvas.ignoresSafeArea())
+            .overlay {
+                if voicePromptRecorder.isListening {
+                    voicePromptListeningOverlay
+                }
+            }
             .navigationTitle("Edit Story")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1364,6 +1369,18 @@ private struct EditStorySheet: View {
             .padding(FrameMioSpacing.md)
             .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
             .accessibilityLabel("Tell FrameMio what you want")
+            HStack {
+                Spacer()
+                Button {
+                    clearVoicePromptTranscript()
+                } label: {
+                    Label("Clear transcript", systemImage: "trash")
+                        .font(FrameMioTypography.footnote)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(FrameMioColors.secondaryInk)
+                .disabled(voicePromptRecorder.currentTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
             voicePromptControl
                 .onChange(of: voicePromptRecorder.currentTranscript) { _, transcript in
                     let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1386,10 +1403,6 @@ private struct EditStorySheet: View {
         VStack(alignment: .center, spacing: FrameMioSpacing.xs) {
             HStack(spacing: FrameMioSpacing.sm) {
                 voicePromptButton
-
-                if voicePromptRecorder.isListening {
-                    VoicePromptListeningIndicator()
-                }
             }
             .frame(maxWidth: .infinity, alignment: .center)
 
@@ -1399,6 +1412,19 @@ private struct EditStorySheet: View {
                 .frame(maxWidth: .infinity, alignment: .center)
         }
         .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private var voicePromptListeningOverlay: some View {
+        VStack {
+            Spacer()
+            VoicePromptListeningIndicator()
+                .padding(.horizontal, FrameMioSpacing.xl)
+                .padding(.vertical, FrameMioSpacing.lg)
+                .background(.clear)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(false)
     }
 
     private var voicePromptButton: some View {
@@ -1473,6 +1499,13 @@ private struct EditStorySheet: View {
     private func startVoicePromptRecording() async {
         guard let promptTranscriptionService else { return }
         await voicePromptRecorder.startRecording(using: promptTranscriptionService)
+    }
+
+    private func clearVoicePromptTranscript() {
+        voicePromptRecorder.clearTranscript()
+        if let instruction = draft.instruction?.trimmingCharacters(in: .whitespacesAndNewlines), !instruction.isEmpty {
+            draft.instruction = ""
+        }
     }
 
     @MainActor
@@ -2395,15 +2428,17 @@ private final class VoicePromptRecorder: ObservableObject {
     private var silenceMonitorTask: Task<Void, Never>?
     private var lastVoiceInputAt = ContinuousClock.now
     private var stopRequestedAfterStart = false
+    private var isEndingLiveTranscription = false
     private var finalTranscript = ""
     private var interimTranscript = ""
-    private let silenceAutoStopDelay: Duration = .seconds(8)
+    private let silenceAutoStopDelay: Duration = .seconds(30)
     private let voiceActivityThreshold: Float = 0.012
 
     func startRecording(using service: PromptTranscriptionService) async {
         guard !isRecording, !isPreparing, !isTranscribing else { return }
         isPreparing = true
         stopRequestedAfterStart = false
+        isEndingLiveTranscription = false
         errorMessage = nil
         didAutoStopForSilence = false
         currentTranscript = ""
@@ -2472,6 +2507,7 @@ private final class VoicePromptRecorder: ObservableObject {
             return
         }
         guard isRecording || isTranscribing || audioEngine != nil || webSocketTask != nil else { return }
+        isEndingLiveTranscription = true
         isRecording = false
         isPreparing = false
         isTranscribing = true
@@ -2481,12 +2517,21 @@ private final class VoicePromptRecorder: ObservableObject {
         }
         cleanupActiveRecording()
         isTranscribing = false
+        isEndingLiveTranscription = false
     }
 
     private func stopRecordingForSilence() async {
         didAutoStopForSilence = true
         storyPreviewUIDebugLog("voice prompt auto-stopped after silence")
         await stopRecording()
+    }
+
+    func clearTranscript() {
+        currentTranscript = ""
+        finalTranscript = ""
+        interimTranscript = ""
+        errorMessage = nil
+        didAutoStopForSilence = false
     }
 
     private func cleanupActiveRecording() {
@@ -2542,7 +2587,13 @@ private final class VoicePromptRecorder: ObservableObject {
             throw AppError.invalidConfiguration
         }
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(configuration.accessToken)", forHTTPHeaderField: "Authorization")
+        let scheme = configuration.authorizationScheme?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if scheme == "subprotocol" {
+            request.setValue("token, \(configuration.accessToken)", forHTTPHeaderField: "Sec-WebSocket-Protocol")
+        } else {
+            let authorizationScheme = scheme?.isEmpty == false ? (configuration.authorizationScheme ?? "Bearer") : "Bearer"
+            request.setValue("\(authorizationScheme) \(configuration.accessToken)", forHTTPHeaderField: "Authorization")
+        }
         return URLSession.shared.webSocketTask(with: request)
     }
 
@@ -2594,9 +2645,14 @@ private final class VoicePromptRecorder: ObservableObject {
     }
 
     private func handleStreamingError(_ error: Error) {
+        guard !isEndingLiveTranscription else { return }
         guard isRecording || isTranscribing else { return }
+        let errorMessageText = error.localizedDescription
+        if errorMessageText.contains("Socket is not connected") || errorMessageText.contains("cancelled") {
+            return
+        }
         errorMessage = AppError.from(error).localizedDescription
-        storyPreviewUIDebugLog("voice prompt live transcription failed error=\(error.localizedDescription)")
+        storyPreviewUIDebugLog("voice prompt live transcription failed error=\(errorMessageText)")
     }
 
     private func requestRecordPermission() async -> Bool {

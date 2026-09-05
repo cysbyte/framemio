@@ -325,24 +325,6 @@ final class RemoteCreditService: CreditService, @unchecked Sendable {
         return try decoder.decode(Response.self, from: data).packs
     }
 
-    func grantSubscriptionCycle(plan: String, purchaseID: String, expiresAt: Date?) async throws {
-        struct Request: Encodable {
-            let plan: String
-            let purchaseID: String
-            let expiresAt: Date?
-
-            enum CodingKeys: String, CodingKey {
-                case plan
-                case purchaseID = "purchase_id"
-                case expiresAt = "expires_at"
-            }
-        }
-
-        let body = try encoder.encode(Request(plan: plan, purchaseID: purchaseID, expiresAt: expiresAt))
-        _ = try await apiClient.data(for: APIRequest(method: .post, path: "/v1/me/credits/subscription-cycle", body: body))
-        await balanceCache.invalidate()
-    }
-
     func grantPurchasedCredits(packID: String, purchaseID: String) async throws -> CreditBalance {
         struct Request: Encodable {
             let packID: String
@@ -425,9 +407,6 @@ final class MockCreditService: CreditService, @unchecked Sendable {
             CreditPack(id: "medium", title: "Medium Pack", subtitle: "More room for memories", productID: FrameMioCreditPackCatalog.mediumProductID, credits: 300),
             CreditPack(id: "large", title: "Large Pack", subtitle: "Keep creating all week", productID: FrameMioCreditPackCatalog.largeProductID, credits: 700)
         ]
-    }
-
-    func grantSubscriptionCycle(plan: String, purchaseID: String, expiresAt: Date?) async throws {
     }
 
     func grantPurchasedCredits(packID: String, purchaseID: String) async throws -> CreditBalance {

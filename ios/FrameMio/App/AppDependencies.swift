@@ -20,6 +20,9 @@ struct AppDependencies {
     let promptTranscriptionService: PromptTranscriptionService
 
     static func live() -> AppDependencies {
+        let deepgramLanguageLogValue = AppConfiguration.deepgramLanguage ?? "nil"
+        print("[FrameMio][Config] bundle_path=\(Bundle.main.bundlePath)")
+        print("[FrameMio][Config] deepgram_api_key_configured=\(AppConfiguration.deepgramAPIKey != nil) deepgram_language=\(deepgramLanguageLogValue) source=\(AppConfiguration.deepgramAPIKeySource)")
         let persistence = UserDefaultsStoryPersistence()
         let apiSession = URLSession(configuration: AppConfiguration.apiSessionConfiguration)
         let tokenProvider = KeychainAuthTokenProvider(baseURL: AppConfiguration.apiBaseURL, session: apiSession)
@@ -99,9 +102,27 @@ struct AppDependencies {
 }
 
 enum AppConfiguration {
+    private static let localEnvironmentValues: [String: String] = loadLocalEnvironmentValues()
+
     static var apiBaseURL: URL {
         let configuredValue = Bundle.main.object(forInfoDictionaryKey: "APIBaseURL") as? String
         return URL(string: configuredValue ?? "https://api.framemio.com")!
+    }
+
+    static var deepgramAPIKey: String? {
+        let value = stringConfigurationValue(infoKey: "FrameMioDeepgramAPIKey", environmentKey: "DEEPGRAM_API_KEY")
+        if value == "dg-mock-replace-with-real-key" {
+            return nil
+        }
+        return value
+    }
+
+    static var deepgramAPIKeySource: String {
+        resolvedStringConfigurationSource(infoKey: "FrameMioDeepgramAPIKey", environmentKey: "DEEPGRAM_API_KEY")
+    }
+
+    static var deepgramLanguage: String? {
+        stringConfigurationValue(infoKey: "FrameMioDeepgramLanguage", environmentKey: "DEEPGRAM_LANGUAGE")
     }
 
     static var initialCreditGrant: Int {
@@ -156,5 +177,106 @@ enum AppConfiguration {
         }
 
         return fallback
+    }
+
+    private static func stringConfigurationValue(infoKey: String, environmentKey: String) -> String? {
+        if let environmentValue = debugEnvironmentValue(forKey: environmentKey) {
+            print("[FrameMio][Config] resolved_from_environment key=\(environmentKey) value=\(environmentValue)")
+            return environmentValue
+        }
+
+        if let localEnvironmentValue = localEnvironmentValue(forKey: environmentKey) {
+            print("[FrameMio][Config] resolved_from_local_env key=\(environmentKey) value=\(localEnvironmentValue)")
+            return localEnvironmentValue
+        }
+
+        if let infoValue = debugInfoPlistValue(forKey: infoKey) {
+            print("[FrameMio][Config] resolved_from_info_plist key=\(infoKey) value=\(infoValue)")
+            return infoValue
+        }
+
+        print("[FrameMio][Config] missing_value key=\(infoKey) environment_key=\(environmentKey)")
+        return nil
+    }
+
+    static func debugEnvironmentValue(forKey key: String) -> String? {
+        guard let value = ProcessInfo.processInfo.environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+        return value
+    }
+
+    static func localEnvironmentValue(forKey key: String) -> String? {
+        guard let value = localEnvironmentValues[key]?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+        return value
+    }
+
+    static func loadLocalEnvironmentValues() -> [String: String] {
+        guard let url = Bundle.main.url(forResource: "FrameMio", withExtension: "env"),
+              let data = try? Data(contentsOf: url),
+              let contents = String(data: data, encoding: .utf8) else {
+            return [:]
+        }
+
+        var values: [String: String] = [:]
+        for rawLine in contents.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty, !line.hasPrefix("#"), let equalsIndex = line.firstIndex(of: "=") else {
+                continue
+            }
+
+            let key = line[..<equalsIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+            let valueStart = line.index(after: equalsIndex)
+            let value = line[valueStart...].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty else {
+                continue
+            }
+
+            values[String(key)] = unquoteEnvironmentValue(value)
+        }
+
+        return values
+    }
+
+    static func debugInfoPlistValue(forKey key: String) -> String? {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String else {
+            return nil
+        }
+
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+        guard !(trimmed.hasPrefix("$(") && trimmed.hasSuffix(")")) else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private static func resolvedStringConfigurationSource(infoKey: String, environmentKey: String) -> String {
+        if debugEnvironmentValue(forKey: environmentKey) != nil {
+            return "environment"
+        }
+        if localEnvironmentValue(forKey: environmentKey) != nil {
+            return "local_env"
+        }
+        if debugInfoPlistValue(forKey: infoKey) != nil {
+            return "info_plist"
+        }
+        return "missing"
+    }
+
+    private static func unquoteEnvironmentValue(_ value: String) -> String {
+        guard value.count >= 2 else {
+            return value
+        }
+
+        if (value.hasPrefix("\"") && value.hasSuffix("\"")) || (value.hasPrefix("'") && value.hasSuffix("'")) {
+            return String(value.dropFirst().dropLast())
+        }
+
+        return value
     }
 }
