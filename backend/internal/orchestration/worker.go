@@ -81,8 +81,12 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 					if _, err := w.Store.UpdateJob(ctx, received.Message.JobID, models.JobStatusFailed, 0, "max_receive_count_exceeded", "job exceeded queue receive limit", "", ""); err != nil {
 						return err
 					}
-					if err := w.Consumer.MoveToDeadLetter(ctx, received, "max_receive_count_exceeded"); err != nil {
+					if err := w.deadLetterOrDelete(ctx, received, "max_receive_count_exceeded"); err != nil {
 						return err
+					}
+					if w.TargetJobID != "" && received.Message.JobID != w.TargetJobID {
+						logger(w).Warn("orchestration worker removed poison non-target message while waiting for target", slog.String("target_job_id", w.TargetJobID), slog.String("job_id", received.Message.JobID), slog.String("job_type", string(received.Message.JobType)), slog.String("project_id", received.Message.ProjectID), slog.Int("receive_count", received.ApproximateReceiveCount))
+						continue
 					}
 					return nil
 				}
@@ -163,6 +167,15 @@ func (w *Worker) handleReceived(ctx context.Context, received queue.ReceivedJobM
 		return true, err
 	}
 	return true, nil
+}
+
+func (w *Worker) deadLetterOrDelete(ctx context.Context, received queue.ReceivedJobMessage, reason string) error {
+	if err := w.Consumer.MoveToDeadLetter(ctx, received, reason); err == nil {
+		return nil
+	} else {
+		logger(w).Warn("orchestration worker dead-letter failed; deleting poison queue message", slog.String("job_id", received.Message.JobID), slog.String("job_type", string(received.Message.JobType)), slog.String("project_id", received.Message.ProjectID), slog.String("reason", reason), slog.Any("error", err))
+	}
+	return w.Consumer.Delete(ctx, received.ReceiptHandle)
 }
 
 func sleep(ctx context.Context, duration time.Duration) error {

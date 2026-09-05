@@ -178,6 +178,48 @@ func TestWorkerRunOnceProcessesQueuedTargetWithInflatedReceiveCount(t *testing.T
 	}
 }
 
+func TestWorkerRunOnceRemovesPoisonNonTargetAndContinuesToTarget(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore, _, coordinator, project, _ := setupProject(t, models.MediaTypePhoto)
+	poisonJob, _, err := memoryStore.CreateJob(ctx, models.ProcessingJob{ID: "job-poison-story", UserID: project.UserID, ProjectID: project.ID, Type: models.JobTypeStoryPlan, Status: models.JobStatusFailed, Attempt: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}, "poison-story-job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetJob, _, err := memoryStore.CreateJob(ctx, models.ProcessingJob{ID: "job-target-after-poison", UserID: project.UserID, ProjectID: project.ID, Type: models.JobTypeStoryPlan, Status: models.JobStatusQueued, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}, "target-after-poison-job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer := &memoryConsumer{received: []queue.ReceivedJobMessage{
+		{Message: queue.JobMessage{JobID: poisonJob.ID, ProjectID: project.ID, JobType: poisonJob.Type}, ReceiptHandle: "receipt-poison-story", ApproximateReceiveCount: 301},
+		{Message: queue.JobMessage{JobID: targetJob.ID, ProjectID: project.ID, JobType: targetJob.Type}, ReceiptHandle: "receipt-target-story"},
+	}}
+	worker := Worker{
+		Store:           memoryStore,
+		Consumer:        consumer,
+		Coordinator:     coordinator,
+		Handlers:        map[models.JobType]JobHandler{models.JobTypeStoryPlan: noopHandler{}},
+		TargetJobID:     targetJob.ID,
+		MaxReceiveCount: 5,
+	}
+	if err := worker.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(consumer.deadLetters) != 1 || consumer.deadLetters[0].Message.JobID != poisonJob.ID {
+		t.Fatalf("poison non-target was not dead-lettered: %+v", consumer.deadLetters)
+	}
+	if len(consumer.deleted) != 2 || consumer.deleted[0] != "receipt-poison-story" || consumer.deleted[1] != "receipt-target-story" {
+		t.Fatalf("poison and target messages were not deleted in order: %+v", consumer.deleted)
+	}
+	targetAfter, err := memoryStore.GetJob(ctx, project.UserID, targetJob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targetAfter.Status != models.JobStatusCompleted {
+		t.Fatalf("target job should complete after poison non-target: %+v", targetAfter)
+	}
+}
+
 type noopHandler struct{}
 
 func (noopHandler) HandleJob(context.Context, models.ProcessingJob) error { return nil }
