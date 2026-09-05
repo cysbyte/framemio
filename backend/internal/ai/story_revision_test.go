@@ -196,6 +196,77 @@ func TestOpenAIStoryRevisionNormalizesProviderOutput(t *testing.T) {
 	}
 }
 
+func TestOpenAIStoryRevisionAcceptsStringChanges(t *testing.T) {
+	t.Parallel()
+	input := revisionFixtureInput("Make each moment longer and make subtitle red.")
+	revisedPlan := input.CurrentStoryPlan
+	revisedPlan.ProjectID = input.Story.ID
+	revisedPlan.Version = input.Story.NextVersion
+	output := map[string]any{
+		"revision_summary": "Lengthened moments and changed subtitles to red.",
+		"changes": []string{
+			"lengthened each moment",
+			"kept existing media selection",
+		},
+		"revised_story_plan": revisedPlan,
+	}
+	content, err := json.Marshal(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return typographyHTTPResponse(http.StatusOK, chatTypographyResponse(string(content))), nil
+	})}
+	planner := OpenAICompatibleStoryRevisionPlanner{BaseURL: "https://revision.test", APIKey: "test-key", ModelName: "revision-model", WireAPI: "chat_completions", Client: client}
+	result, err := planner.Revise(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Changes) < 2 || result.Changes[0].Type != "note" || result.Changes[0].Reason != "lengthened each moment" {
+		t.Fatalf("expected string changes to decode as note changes, got %+v", result.Changes)
+	}
+	if result.RevisedStoryPlan.ProjectID != input.Story.ID || result.RevisedStoryPlan.Version != input.Story.NextVersion {
+		t.Fatalf("expected normalized revised plan identity, got project=%q version=%d", result.RevisedStoryPlan.ProjectID, result.RevisedStoryPlan.Version)
+	}
+}
+
+func TestOpenAIStoryRevisionPreservesSelectedAddedMedia(t *testing.T) {
+	t.Parallel()
+	input := revisionFixtureInput("Add this video and make each moment longer.")
+	input.MediaContext.ProjectMediaIDs = append(input.MediaContext.ProjectMediaIDs, "media-added-video")
+	input.MediaContext.SelectedMediaIDs = append(input.MediaContext.SelectedMediaIDs, "media-added-video")
+	input.MediaContext.PreferredMediaOrder = []string{"media-beach", "media-dinner", "media-sunset", "media-added-video"}
+	input.MediaContext.VideoAnalyses = []models.VideoAnalysis{{VideoID: "media-added-video", AnalysisVersion: "va-added", DurationMicros: 8_000_000}}
+	input.Constraints.AllowedMediaIDs = append(input.Constraints.AllowedMediaIDs, "media-added-video")
+	revisedPlan := input.CurrentStoryPlan
+	revisedPlan.ProjectID = input.Story.ID
+	revisedPlan.Version = input.Story.NextVersion
+	output := StoryRevisionResult{
+		RevisionSummary:  "Lengthened existing moments.",
+		Changes:          []StoryRevisionChange{{Type: "duration_change", Target: "story", Reason: "lengthened existing moments"}},
+		RevisedStoryPlan: revisedPlan,
+	}
+	content, err := json.Marshal(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return typographyHTTPResponse(http.StatusOK, chatTypographyResponse(string(content))), nil
+	})}
+	planner := OpenAICompatibleStoryRevisionPlanner{BaseURL: "https://revision.test", APIKey: "test-key", ModelName: "revision-model", WireAPI: "chat_completions", Client: client}
+	result, err := planner.Revise(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !revisionContainsMedia(result.RevisedStoryPlan, "media-added-video") {
+		t.Fatalf("expected selected added video to be forced into moments, got %+v", result.RevisedStoryPlan.Moments)
+	}
+	last := result.RevisedStoryPlan.Moments[len(result.RevisedStoryPlan.Moments)-1]
+	if last.MediaID != "media-added-video" || last.MediaType != models.MediaTypeVideo || last.VideoAnalysisVersion != "va-added" {
+		t.Fatalf("expected added video as ordered final moment, got %+v", last)
+	}
+}
+
 func revisionFixtureInput(instruction string) StoryRevisionInput {
 	base := models.StoryPlan{
 		SchemaVersion:       models.StoryPlanSchemaVersionV1,

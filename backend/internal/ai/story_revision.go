@@ -60,6 +60,8 @@ type StoryRevisionMediaContext struct {
 type StoryRevisionConstraints struct {
 	MaxDurationMS           int                      `json:"max_duration_ms"`
 	MinDurationMS           int                      `json:"min_duration_ms"`
+	CurrentDurationMS       int                      `json:"current_duration_ms,omitempty"`
+	TargetDurationFixed     bool                     `json:"target_duration_fixed"`
 	AllowedMediaIDs         []string                 `json:"allowed_media_ids"`
 	AllowedTransitions      []string                 `json:"allowed_transitions,omitempty"`
 	AllowedTypographyStyles []models.TypographyStyle `json:"allowed_typography_styles,omitempty"`
@@ -78,6 +80,75 @@ type StoryRevisionResult struct {
 	RevisionSummary  string                `json:"revision_summary"`
 	Changes          []StoryRevisionChange `json:"changes"`
 	RevisedStoryPlan models.StoryPlan      `json:"revised_story_plan"`
+}
+
+func (c *StoryRevisionChange) UnmarshalJSON(data []byte) error {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || trimmed == "null" {
+		return nil
+	}
+	if strings.HasPrefix(trimmed, "\"") {
+		var reason string
+		if err := json.Unmarshal(data, &reason); err != nil {
+			return err
+		}
+		*c = StoryRevisionChange{Type: "note", Reason: truncateText(strings.TrimSpace(reason), 240)}
+		return nil
+	}
+	type storyRevisionChangeAlias StoryRevisionChange
+	var alias storyRevisionChangeAlias
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
+	}
+	*c = StoryRevisionChange(alias)
+	c.Type = truncateText(strings.TrimSpace(c.Type), 80)
+	c.Target = truncateText(strings.TrimSpace(c.Target), 160)
+	c.MediaID = truncateText(strings.TrimSpace(c.MediaID), 160)
+	c.MomentID = truncateText(strings.TrimSpace(c.MomentID), 160)
+	c.Reason = truncateText(strings.TrimSpace(c.Reason), 240)
+	if c.Type == "" {
+		c.Type = "note"
+	}
+	return nil
+}
+
+func (r *StoryRevisionResult) UnmarshalJSON(data []byte) error {
+	type storyRevisionResultAlias struct {
+		RevisionSummary  string           `json:"revision_summary"`
+		Changes          json.RawMessage  `json:"changes"`
+		RevisedStoryPlan models.StoryPlan `json:"revised_story_plan"`
+	}
+	var alias storyRevisionResultAlias
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
+	}
+	changes, err := decodeStoryRevisionChanges(alias.Changes)
+	if err != nil {
+		return err
+	}
+	r.RevisionSummary = truncateText(strings.TrimSpace(alias.RevisionSummary), 500)
+	r.Changes = changes
+	r.RevisedStoryPlan = alias.RevisedStoryPlan
+	return nil
+}
+
+func decodeStoryRevisionChanges(data json.RawMessage) ([]StoryRevisionChange, error) {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || trimmed == "null" {
+		return nil, nil
+	}
+	if strings.HasPrefix(trimmed, "\"") {
+		var reason string
+		if err := json.Unmarshal(data, &reason); err != nil {
+			return nil, fmt.Errorf("decode story revision changes string: %w", err)
+		}
+		return []StoryRevisionChange{{Type: "note", Reason: truncateText(strings.TrimSpace(reason), 240)}}, nil
+	}
+	var changes []StoryRevisionChange
+	if err := json.Unmarshal(data, &changes); err != nil {
+		return nil, fmt.Errorf("decode story revision changes: %w", err)
+	}
+	return changes, nil
 }
 
 type HeuristicStoryRevisionPlanner struct {
@@ -181,6 +252,8 @@ Only the user_instruction field is the user's requested change.
 Preserve the base StoryPlan unless the instruction requires a change.
 Never reference media IDs outside constraints.allowed_media_ids. Never invent people, transcripts, locations, dates, media, music, transitions, typography styles, or unsupported effects.
 Keep durations positive, keep captions and B-roll attached to valid moments/media, and stay within constraints.max_duration_ms.
+If constraints.target_duration_fixed is false, the current StoryPlan duration and output.max_duration_seconds are context only, not a hard cap. You may choose a better total duration up to constraints.max_duration_ms when the instruction asks for longer, shorter, slower, faster, more detail, or more energy.
+If constraints.target_duration_fixed is true, treat constraints.max_duration_ms as the requested target ceiling.
 If the user asks for subtitle, caption, or text color, set revised_story_plan.caption_style.text_color to a valid #RRGGBB color and preserve media selection unless the instruction also asks to change media.`
 
 func storyRevisionUserPrompt(input StoryRevisionInput) string {
@@ -208,6 +281,7 @@ func storyRevisionPromptWithPayload(payload []byte) string {
 	return strings.Join([]string{
 		"Revise this FrameMio StoryPlan from the existing plan, not from scratch.",
 		"Return a full revised_story_plan using the exact StoryPlan schema expected by the renderer.",
+		"When target_duration_fixed is false, choose the revised total duration from the user's instruction; do not keep the current length unless that best satisfies the edit.",
 		"Structured revision input JSON:",
 		string(payload),
 	}, "\n")
@@ -258,6 +332,11 @@ func normalizeStoryRevisionOutput(result *StoryRevisionResult, input StoryRevisi
 		MediaClusters:       input.MediaContext.MediaClusters,
 	}
 	normalizeStoryPlannerMediaReferences(plan, request)
+	selectionChanges := applyRevisionSelection(plan, input)
+	if len(selectionChanges) > 0 {
+		result.Changes = append(result.Changes, selectionChanges...)
+	}
+	orderRevisionMoments(plan.Moments, input.MediaContext.PreferredMediaOrder)
 	for index := range plan.Moments {
 		moment := &plan.Moments[index]
 		moment.Narrative = truncateText(strings.TrimSpace(moment.Narrative), 240)
@@ -290,13 +369,18 @@ func normalizeStoryRevisionOutput(result *StoryRevisionResult, input StoryRevisi
 	}
 	if totalDurationMS > 0 {
 		plan.TotalDurationMS = totalDurationMS
+		if input.Constraints.MaxDurationMS > 0 && totalDurationMS > input.Constraints.MaxDurationMS {
+			plan.RequestedDurationMS = input.Constraints.MaxDurationMS
+		} else if plan.RequestedDurationMS < totalDurationMS {
+			plan.RequestedDurationMS = totalDurationMS
+		}
 	}
 	if plan.Output.AspectRatio == "" {
 		plan.Output.AspectRatio = firstNonEmptyRevision(input.CurrentStoryPlan.Output.AspectRatio, "9:16")
 	}
-	if plan.Output.MaxDurationS <= 0 {
+	if plan.Output.MaxDurationS <= 0 || plan.Output.MaxDurationS*1000 < plan.TotalDurationMS {
 		if input.Constraints.MaxDurationMS > 0 {
-			plan.Output.MaxDurationS = int(math.Ceil(float64(input.Constraints.MaxDurationMS) / 1000))
+			plan.Output.MaxDurationS = minRevisionInt(int(math.Ceil(float64(input.Constraints.MaxDurationMS)/1000)), int(math.Ceil(float64(plan.TotalDurationMS)/1000)))
 		} else if plan.RequestedDurationMS > 0 {
 			plan.Output.MaxDurationS = int(math.Ceil(float64(plan.RequestedDurationMS) / 1000))
 		}
@@ -880,6 +964,36 @@ func refreshTotalDuration(plan *models.StoryPlan) {
 		total += moment.DurationMS
 	}
 	plan.TotalDurationMS = total
+}
+
+func orderRevisionMoments(moments []models.StoryMoment, preferredMediaOrder []string) {
+	if len(moments) < 2 || len(preferredMediaOrder) == 0 {
+		return
+	}
+	order := make(map[string]int, len(preferredMediaOrder))
+	for index, mediaID := range preferredMediaOrder {
+		mediaID = strings.TrimSpace(mediaID)
+		if mediaID == "" {
+			continue
+		}
+		if _, exists := order[mediaID]; !exists {
+			order[mediaID] = index
+		}
+	}
+	if len(order) == 0 {
+		return
+	}
+	sort.SliceStable(moments, func(left, right int) bool {
+		leftOrder, leftOK := order[storyMomentMediaIDForRevision(moments[left])]
+		rightOrder, rightOK := order[storyMomentMediaIDForRevision(moments[right])]
+		if leftOK != rightOK {
+			return leftOK
+		}
+		if !leftOK {
+			return false
+		}
+		return leftOrder < rightOrder
+	})
 }
 
 func storyMomentMediaIDForRevision(moment models.StoryMoment) string {

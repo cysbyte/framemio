@@ -3,6 +3,7 @@ package orchestration
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -303,6 +304,49 @@ func TestStoryPlanRevisionValidationFailureLeavesBasePlanActive(t *testing.T) {
 	}
 }
 
+func TestStoryPlanRevisionAllowsAIFlexibleDurationUpToSixtySeconds(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore, project := storyRevisionHandlerFixture(t)
+	job := models.ProcessingJob{ID: "job-revision-flex-duration", UserID: project.UserID, ProjectID: project.ID, Type: models.JobTypeStoryPlan, Status: models.JobStatusRunning, Configuration: map[string]string{"revision_mode": "ai_story_plan_revision", "base_story_plan_version": "1", "story_plan_version": "2", "user_instructions": "Make each moment longer."}, CreatedAt: project.CreatedAt, UpdatedAt: project.CreatedAt}
+	planner := &capturingRevisionPlanner{}
+	handler := StoryPlanHandler{Store: memoryStore, RevisionPlanner: planner, Now: func() time.Time { return project.CreatedAt }}
+	if err := handler.HandleJob(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	if planner.input.Constraints.TargetDurationFixed {
+		t.Fatal("expected revision duration to be AI-selected when no explicit target duration is set")
+	}
+	if planner.input.Constraints.MaxDurationMS != 60000 {
+		t.Fatalf("max duration = %d, want 60000", planner.input.Constraints.MaxDurationMS)
+	}
+	plan, err := memoryStore.GetStoryPlan(ctx, project.UserID, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.TotalDurationMS != 12000 || plan.Output.MaxDurationS != 12 || plan.RequestedDurationMS != 12000 {
+		t.Fatalf("expected longer AI-selected duration to persist, got total=%d requested=%d max=%d", plan.TotalDurationMS, plan.RequestedDurationMS, plan.Output.MaxDurationS)
+	}
+}
+
+func TestStoryPlanRevisionKeepsExplicitTargetDurationFixed(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore, project := storyRevisionHandlerFixture(t)
+	job := models.ProcessingJob{ID: "job-revision-fixed-duration", UserID: project.UserID, ProjectID: project.ID, Type: models.JobTypeStoryPlan, Status: models.JobStatusRunning, Configuration: map[string]string{"revision_mode": "ai_story_plan_revision", "base_story_plan_version": "1", "story_plan_version": "2", "target_duration_seconds": "15", "user_instructions": "Make this exactly the selected length."}, CreatedAt: project.CreatedAt, UpdatedAt: project.CreatedAt}
+	planner := &capturingRevisionPlanner{}
+	handler := StoryPlanHandler{Store: memoryStore, RevisionPlanner: planner, Now: func() time.Time { return project.CreatedAt }}
+	if err := handler.HandleJob(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	if !planner.input.Constraints.TargetDurationFixed {
+		t.Fatal("expected explicit target duration to be fixed")
+	}
+	if planner.input.Constraints.MaxDurationMS != 15000 {
+		t.Fatalf("max duration = %d, want 15000", planner.input.Constraints.MaxDurationMS)
+	}
+}
+
 func storyRevisionHandlerFixture(t *testing.T) (*store.MemoryStore, models.StoryProject) {
 	t.Helper()
 	ctx := context.Background()
@@ -346,6 +390,26 @@ type rejectingRevisionValidator struct{}
 
 func (rejectingRevisionValidator) Validate(context.Context, string, models.StoryPlan) error {
 	return errors.New("invalid story plan")
+}
+
+type capturingRevisionPlanner struct {
+	input ai.StoryRevisionInput
+}
+
+func (p *capturingRevisionPlanner) Revise(_ context.Context, input ai.StoryRevisionInput) (ai.StoryRevisionResult, error) {
+	p.input = input
+	plan := input.CurrentStoryPlan
+	plan.ID = "plan-captured-revision"
+	plan.ProjectID = input.Story.ID
+	plan.Version = input.Story.NextVersion
+	plan.RequestedDurationMS = 12000
+	plan.Output.MaxDurationS = 12
+	for index := range plan.Moments {
+		plan.Moments[index].DurationMS = 12000 / len(plan.Moments)
+		plan.Moments[index].MomentID = fmt.Sprintf("moment-%d", index+1)
+	}
+	plan.TotalDurationMS = 12000
+	return ai.StoryRevisionResult{RevisionSummary: "Captured revision duration constraints", RevisedStoryPlan: plan}, nil
 }
 
 func hasStoryMoment(moments []models.StoryMoment, mediaID string, mediaType models.MediaType) bool {
