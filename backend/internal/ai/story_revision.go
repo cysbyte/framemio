@@ -125,8 +125,8 @@ func (p OpenAICompatibleStoryRevisionPlanner) Revise(ctx context.Context, input 
 	if err := json.Unmarshal([]byte(text), &result); err != nil {
 		return StoryRevisionResult{}, fmt.Errorf("decode story revision result: %w", err)
 	}
-	if len(result.RevisedStoryPlan.Moments) == 0 {
-		return StoryRevisionResult{}, errors.New("story revision result is missing revised_story_plan moments")
+	if err := normalizeStoryRevisionOutput(&result, input); err != nil {
+		return StoryRevisionResult{}, err
 	}
 	if applyCaptionColorInstruction(&result.RevisedStoryPlan, input.UserInstruction) {
 		result.Changes = append(result.Changes, StoryRevisionChange{Type: "caption_style_change", Target: "caption_style.text_color", Reason: "applied requested subtitle color"})
@@ -197,6 +197,133 @@ func revisionMaxOutputTokens(value int) int {
 		return value
 	}
 	return 6000
+}
+
+func normalizeStoryRevisionOutput(result *StoryRevisionResult, input StoryRevisionInput) error {
+	if result == nil {
+		return errors.New("story revision result is missing")
+	}
+	plan := &result.RevisedStoryPlan
+	if len(plan.Moments) == 0 {
+		return errors.New("story revision result is missing revised_story_plan moments")
+	}
+	if strings.TrimSpace(plan.ProjectID) != "" && strings.TrimSpace(input.Story.ID) != "" && strings.TrimSpace(plan.ProjectID) != strings.TrimSpace(input.Story.ID) {
+		return fmt.Errorf("story revision returned project_id %q for project %q", plan.ProjectID, input.Story.ID)
+	}
+	if plan.Version != 0 && input.Story.NextVersion > 0 && plan.Version != input.Story.NextVersion {
+		return fmt.Errorf("story revision returned version %d for requested version %d", plan.Version, input.Story.NextVersion)
+	}
+	if isStoryPlanSchemaVersionV1Alias(plan.SchemaVersion) {
+		plan.SchemaVersion = models.StoryPlanSchemaVersionV1
+	}
+	if strings.TrimSpace(input.Story.ID) != "" {
+		plan.ProjectID = strings.TrimSpace(input.Story.ID)
+	}
+	if input.Story.NextVersion > 0 {
+		plan.Version = input.Story.NextVersion
+	}
+	request := Request{
+		ProjectID:           plan.ProjectID,
+		Version:             plan.Version,
+		DesiredDuration:     time.Duration(maxRevisionConfigInt(input.Constraints.MaxDurationMS, plan.RequestedDurationMS, input.Story.DurationMS)) * time.Millisecond,
+		StoryType:           firstNonEmptyRevisionStoryType(plan.StoryType, input.Story.StoryType, input.CurrentStoryPlan.StoryType),
+		VisualStyle:         firstNonEmptyRevisionVisualStyle(plan.VisualStyle, input.Story.VisualStyle, input.CurrentStoryPlan.VisualStyle),
+		UserInstructions:    strings.TrimSpace(input.UserInstruction),
+		SelectedMediaIDs:    revisionSelectedMediaIDs(input),
+		PreferredMediaOrder: input.MediaContext.PreferredMediaOrder,
+		ExcludedMediaIDs:    input.MediaContext.ExcludedMediaIDs,
+		PhotoAnalyses:       input.MediaContext.PhotoAnalyses,
+		VideoAnalyses:       input.MediaContext.VideoAnalyses,
+		MediaClusters:       input.MediaContext.MediaClusters,
+	}
+	normalizeStoryPlannerMediaReferences(plan, request)
+	for index := range plan.Moments {
+		moment := &plan.Moments[index]
+		moment.Narrative = truncateText(strings.TrimSpace(moment.Narrative), 240)
+		moment.Caption = truncateText(strings.TrimSpace(moment.Caption), 220)
+		moment.Reason = truncateText(strings.TrimSpace(moment.Reason), 240)
+	}
+	for index := range plan.BRoll {
+		overlay := &plan.BRoll[index]
+		overlay.Reason = truncateText(strings.TrimSpace(overlay.Reason), 120)
+	}
+	for index := range plan.Captions {
+		plan.Captions[index].Text = truncateText(strings.TrimSpace(plan.Captions[index].Text), 220)
+	}
+	if strings.TrimSpace(plan.ID) == "" {
+		plan.ID = planIDForRevision(input.Story.ID, input.Story.NextVersion, input.UserInstruction, plan.Moments)
+	}
+	if plan.RequestedDurationMS <= 0 {
+		plan.RequestedDurationMS = maxRevisionConfigInt(input.Constraints.MaxDurationMS, input.Story.DurationMS, input.CurrentStoryPlan.RequestedDurationMS)
+	}
+	if plan.StoryType == "" {
+		plan.StoryType = firstNonEmptyRevisionStoryType(input.Story.StoryType, input.CurrentStoryPlan.StoryType)
+	}
+	if plan.VisualStyle == "" {
+		plan.VisualStyle = firstNonEmptyRevisionVisualStyle(input.Story.VisualStyle, input.CurrentStoryPlan.VisualStyle)
+	}
+	if strings.TrimSpace(plan.UserInstructions) == "" {
+		plan.UserInstructions = strings.TrimSpace(input.UserInstruction)
+	}
+	totalDurationMS := 0
+	for _, moment := range plan.Moments {
+		totalDurationMS += moment.DurationMS
+	}
+	if totalDurationMS > 0 {
+		plan.TotalDurationMS = totalDurationMS
+	}
+	if plan.Output.AspectRatio == "" {
+		plan.Output.AspectRatio = firstNonEmptyRevision(input.CurrentStoryPlan.Output.AspectRatio, "9:16")
+	}
+	if plan.Output.MaxDurationS <= 0 {
+		if input.Constraints.MaxDurationMS > 0 {
+			plan.Output.MaxDurationS = int(math.Ceil(float64(input.Constraints.MaxDurationMS) / 1000))
+		} else if plan.RequestedDurationMS > 0 {
+			plan.Output.MaxDurationS = int(math.Ceil(float64(plan.RequestedDurationMS) / 1000))
+		}
+	}
+	if plan.Output.Preset == "" {
+		plan.Output.Preset = firstNonEmptyRevision(input.CurrentStoryPlan.Output.Preset, "premium-memory")
+	}
+	return nil
+}
+
+func revisionSelectedMediaIDs(input StoryRevisionInput) []string {
+	if len(input.MediaContext.SelectedMediaIDs) > 0 {
+		return input.MediaContext.SelectedMediaIDs
+	}
+	if len(input.MediaContext.ProjectMediaIDs) > 0 {
+		return input.MediaContext.ProjectMediaIDs
+	}
+	return input.Constraints.AllowedMediaIDs
+}
+
+func maxRevisionConfigInt(values ...int) int {
+	best := 0
+	for _, value := range values {
+		if value > best {
+			best = value
+		}
+	}
+	return best
+}
+
+func firstNonEmptyRevisionStoryType(values ...models.StoryType) models.StoryType {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstNonEmptyRevisionVisualStyle(values ...models.VisualStyle) models.VisualStyle {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (p HeuristicStoryRevisionPlanner) Revise(ctx context.Context, input StoryRevisionInput) (StoryRevisionResult, error) {

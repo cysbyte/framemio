@@ -2,6 +2,9 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -121,6 +124,72 @@ func TestHeuristicStoryRevisionAddsBeachBRollFromExistingMedia(t *testing.T) {
 	}
 	if len(result.RevisedStoryPlan.BRoll) == 0 || result.RevisedStoryPlan.BRoll[0].MediaID != "media-beach" {
 		t.Fatalf("expected existing beach media as B-roll: %+v", result.RevisedStoryPlan.BRoll)
+	}
+}
+
+func TestOpenAIStoryRevisionNormalizesProviderOutput(t *testing.T) {
+	t.Parallel()
+	input := revisionFixtureInput("Make each moment longer.")
+	input.CurrentStoryPlan.Moments = []models.StoryMoment{
+		{MomentID: "video", AssetID: "media-video", MediaID: "media-video", MediaType: models.MediaTypeVideo, VideoAnalysisVersion: "va-1", StartMicros: 0, EndMicros: 5_000_000, Narrative: "Beach video", DurationMS: 5000, CropIntent: "fill", Transition: "fade_in", Reason: "base"},
+	}
+	input.CurrentStoryPlan.TotalDurationMS = 5000
+	input.MediaContext.ProjectMediaIDs = []string{"media-video"}
+	input.MediaContext.SelectedMediaIDs = []string{"media-video"}
+	input.MediaContext.PhotoAnalyses = nil
+	input.MediaContext.VideoAnalyses = []models.VideoAnalysis{{VideoID: "media-video", AnalysisVersion: "va-1", DurationMicros: 12_000_000}}
+	input.Constraints.AllowedMediaIDs = []string{"media-video"}
+	output := StoryRevisionResult{
+		RevisionSummary: "Lengthened video moment.",
+		RevisedStoryPlan: models.StoryPlan{
+			SchemaVersion:       models.StoryPlanSchemaVersionV1,
+			ID:                  "plan-ai-revision",
+			ProjectID:           input.Story.ID,
+			Version:             input.Story.NextVersion,
+			RequestedDurationMS: 12000,
+			StoryType:           models.StoryTypeTrip,
+			VisualStyle:         models.VisualStyleNatural,
+			Moments: []models.StoryMoment{{
+				MomentID:             "video",
+				AssetID:              "media-video",
+				MediaID:              "media-video",
+				MediaType:            models.MediaTypeVideo,
+				VideoAnalysisVersion: "va-1",
+				StartMicros:          0,
+				EndMicros:            5_000_000,
+				Narrative:            "Beach video",
+				DurationMS:           9000,
+				CropIntent:           "fill",
+				Transition:           "fade_in",
+				Reason:               strings.Repeat("long reason ", 30),
+			}},
+			Output: models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 30, Preset: "premium-memory"},
+		},
+	}
+	content, err := json.Marshal(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		return typographyHTTPResponse(http.StatusOK, chatTypographyResponse(string(content))), nil
+	})}
+	planner := OpenAICompatibleStoryRevisionPlanner{BaseURL: "https://revision.test", APIKey: "test-key", ModelName: "revision-model", WireAPI: "chat_completions", Client: client}
+	result, err := planner.Revise(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	moment := result.RevisedStoryPlan.Moments[0]
+	if moment.DurationMS != 5000 {
+		t.Fatalf("expected duration to match source range, got %d", moment.DurationMS)
+	}
+	if len(moment.Reason) > 240 {
+		t.Fatalf("expected reason to be truncated, got length %d", len(moment.Reason))
+	}
+	if result.RevisedStoryPlan.TotalDurationMS != 5000 {
+		t.Fatalf("expected total duration to be recalculated, got %d", result.RevisedStoryPlan.TotalDurationMS)
 	}
 }
 

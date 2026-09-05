@@ -2249,8 +2249,15 @@ private struct AddMomentSelectionSheet: View {
                     }
                     .font(FrameMioTypography.headline)
                     .foregroundStyle(FrameMioColors.accent)
-                    .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.compactButtonHeight, alignment: .leading)
+                    .padding(.horizontal, FrameMioSpacing.lg)
+                    .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.buttonHeight, alignment: .center)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous)
+                            .stroke(FrameMioColors.accent.opacity(0.85), lineWidth: FrameMioMetrics.borderWidth)
+                    }
                 }
+                .buttonStyle(FrameMioPressButtonStyle())
+                .frame(maxWidth: .infinity, alignment: .center)
                 .accessibilityLabel("Add from Photos")
             }
 
