@@ -71,6 +71,39 @@ func TestOpenAICompatibleStoryPlannerNormalizesSchemaVersionAlias(t *testing.T) 
 	}
 }
 
+func TestOpenAICompatibleStoryPlannerNormalizesVideoMomentReferences(t *testing.T) {
+	t.Parallel()
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		planJSON := `{"schema_version":"story_plan_v1","id":"plan-gpt","project_id":"project-gpt","version":3,"requested_duration_ms":4000,"story_type":"trip","visual_style":"cinematic","title_text":"Video Story","ending_text":"Until next time.","moments":[{"moment_id":"moment-video","asset_id":"video-gpt","media_id":"video-gpt","media_type":"video","narrative":"A video moment","duration_ms":4000,"crop_intent":"fill","transition":"fade_in"}],"output":{"aspect_ratio":"9:16","max_duration_seconds":4,"preset":"premium-memory"},"total_duration_ms":4000}`
+		return typographyHTTPResponse(http.StatusOK, responsesTypographyResponse(planJSON)), nil
+	})}
+	request := storyPlannerProviderRequest()
+	request.VideoAnalyses[0].Segments = []models.VideoSegment{{
+		SegmentID:      "segment-1",
+		SceneID:        "scene-1",
+		StartMicros:    500_000,
+		EndMicros:      4_500_000,
+		Importance:     0.9,
+		MemoryValue:    0.9,
+		EmotionalValue: 0.8,
+		VisualQuality:  0.9,
+		StoryRelevance: 0.95,
+		Recommended:    true,
+	}}
+	planner := OpenAICompatibleStoryPlanner{BaseURL: "https://planner.test", APIKey: "test-key", ProviderName: "openai-compatible", ModelName: "gpt-story", WireAPI: "responses", Client: client}
+	plan, err := planner.Plan(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	moment := plan.Moments[0]
+	if moment.VideoAnalysisVersion != "video-v1" || moment.StartMicros != 500_000 || moment.EndMicros != 4_500_000 || moment.DurationMS != 4000 {
+		t.Fatalf("expected video references normalized from analysis, got %+v", moment)
+	}
+	if err := ValidateStoryPlan(plan); err != nil {
+		t.Fatalf("expected normalized plan to pass lightweight validation: %v", err)
+	}
+}
+
 func TestOpenAICompatibleStoryPlannerRejectsInvalidJSON(t *testing.T) {
 	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
