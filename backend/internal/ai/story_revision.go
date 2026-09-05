@@ -135,6 +135,10 @@ func (p OpenAICompatibleStoryRevisionPlanner) Revise(ctx context.Context, input 
 }
 
 func (p OpenAICompatibleStoryRevisionPlanner) post(ctx context.Context, input StoryRevisionInput) ([]byte, error) {
+	userPrompt, err := boundedStoryRevisionUserPrompt(input, storyModelMaxUserPromptBytes)
+	if err != nil {
+		return nil, err
+	}
 	switch normalizeTypographyWireAPI(p.WireAPI) {
 	case "chat_completions":
 		request := map[string]any{
@@ -145,10 +149,10 @@ func (p OpenAICompatibleStoryRevisionPlanner) post(ctx context.Context, input St
 			},
 			"messages": []map[string]string{
 				{"role": "system", "content": storyRevisionSystemPrompt},
-				{"role": "user", "content": storyRevisionUserPrompt(input)},
+				{"role": "user", "content": userPrompt},
 			},
 		}
-		return postTypographyJSON(ctx, p.Client, typographyEndpointFor(p.BaseURL, "chat/completions"), p.APIKey, request, 4<<20)
+		return postTypographyJSONWithRequestLimit(ctx, p.Client, typographyEndpointFor(p.BaseURL, "chat/completions"), p.APIKey, request, storyModelMaxProviderRequestBytes, 4<<20)
 	case "responses":
 		request := map[string]any{
 			"model":             p.ModelName,
@@ -159,10 +163,10 @@ func (p OpenAICompatibleStoryRevisionPlanner) post(ctx context.Context, input St
 			},
 			"input": []map[string]any{
 				{"role": "system", "content": []map[string]string{{"type": "input_text", "text": storyRevisionSystemPrompt}}},
-				{"role": "user", "content": []map[string]string{{"type": "input_text", "text": storyRevisionUserPrompt(input)}}},
+				{"role": "user", "content": []map[string]string{{"type": "input_text", "text": userPrompt}}},
 			},
 		}
-		return postTypographyJSON(ctx, p.Client, typographyEndpointFor(p.BaseURL, "responses"), p.APIKey, request, 4<<20)
+		return postTypographyJSONWithRequestLimit(ctx, p.Client, typographyEndpointFor(p.BaseURL, "responses"), p.APIKey, request, storyModelMaxProviderRequestBytes, 4<<20)
 	default:
 		return nil, fmt.Errorf("unsupported story revision wire API %q", p.WireAPI)
 	}
@@ -180,10 +184,27 @@ Keep durations positive, keep captions and B-roll attached to valid moments/medi
 If the user asks for subtitle, caption, or text color, set revised_story_plan.caption_style.text_color to a valid #RRGGBB color and preserve media selection unless the instruction also asks to change media.`
 
 func storyRevisionUserPrompt(input StoryRevisionInput) string {
-	payload, err := json.Marshal(input)
+	prompt, err := boundedStoryRevisionUserPrompt(input, storyModelMaxUserPromptBytes)
 	if err != nil {
 		return "Revise the supplied FrameMio StoryPlan."
 	}
+	return prompt
+}
+
+func boundedStoryRevisionUserPrompt(input StoryRevisionInput, maxBytes int) (string, error) {
+	input = compactStoryRevisionInputForPrompt(input, maxBytes)
+	payload, err := json.Marshal(input)
+	if err != nil {
+		return "", err
+	}
+	prompt := storyRevisionPromptWithPayload(payload)
+	if maxBytes > 0 && len([]byte(prompt)) > maxBytes {
+		return "", fmt.Errorf("story revision prompt exceeds %d bytes after compaction", maxBytes)
+	}
+	return prompt, nil
+}
+
+func storyRevisionPromptWithPayload(payload []byte) string {
 	return strings.Join([]string{
 		"Revise this FrameMio StoryPlan from the existing plan, not from scratch.",
 		"Return a full revised_story_plan using the exact StoryPlan schema expected by the renderer.",
@@ -250,9 +271,7 @@ func normalizeStoryRevisionOutput(result *StoryRevisionResult, input StoryRevisi
 	for index := range plan.Captions {
 		plan.Captions[index].Text = truncateText(strings.TrimSpace(plan.Captions[index].Text), 220)
 	}
-	if strings.TrimSpace(plan.ID) == "" {
-		plan.ID = planIDForRevision(input.Story.ID, input.Story.NextVersion, input.UserInstruction, plan.Moments)
-	}
+	plan.ID = planIDForRevision(input.Story.ID, input.Story.NextVersion, input.UserInstruction, plan.Moments)
 	if plan.RequestedDurationMS <= 0 {
 		plan.RequestedDurationMS = maxRevisionConfigInt(input.Constraints.MaxDurationMS, input.Story.DurationMS, input.CurrentStoryPlan.RequestedDurationMS)
 	}

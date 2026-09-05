@@ -199,12 +199,19 @@ func typographyHTTPClient(timeout time.Duration) *http.Client {
 }
 
 func postTypographyJSON(ctx context.Context, client *http.Client, endpoint, apiKey string, input any, limit int64) ([]byte, error) {
+	return postTypographyJSONWithRequestLimit(ctx, client, endpoint, apiKey, input, 0, limit)
+}
+
+func postTypographyJSONWithRequestLimit(ctx context.Context, client *http.Client, endpoint, apiKey string, input any, requestLimit, responseLimit int64) ([]byte, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
 	data, err := json.Marshal(input)
 	if err != nil {
 		return nil, err
+	}
+	if requestLimit > 0 && int64(len(data)) > requestLimit {
+		return nil, fmt.Errorf("provider request exceeds %d bytes", requestLimit)
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
 	if err != nil {
@@ -224,12 +231,12 @@ func postTypographyJSON(ctx context.Context, client *http.Client, endpoint, apiK
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 		return nil, fmt.Errorf("provider returned %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
 	}
-	data, err = io.ReadAll(io.LimitReader(response.Body, limit+1))
+	data, err = io.ReadAll(io.LimitReader(response.Body, responseLimit+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(data)) > limit {
-		return nil, fmt.Errorf("provider response exceeds %d bytes", limit)
+	if int64(len(data)) > responseLimit {
+		return nil, fmt.Errorf("provider response exceeds %d bytes", responseLimit)
 	}
 	return data, nil
 }

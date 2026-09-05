@@ -369,6 +369,45 @@ func TestExplicitRenderRequestCanRetryTerminalRenderJob(t *testing.T) {
 	}
 }
 
+func TestSupersededStoryRevisionFailureDoesNotFailProject(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore, _, coordinator, project, _ := setupProject(t, models.MediaTypePhoto)
+	now := time.Date(2026, time.September, 5, 19, 0, 0, 0, time.UTC)
+	if err := memoryStore.SetProjectStatus(ctx, project.UserID, project.ID, models.ProjectStatusRendering); err != nil {
+		t.Fatal(err)
+	}
+	if err := memoryStore.SaveStoryPlan(ctx, project.UserID, models.StoryPlan{ID: "story-plan-v2", ProjectID: project.ID, Version: 2, Moments: []models.StoryMoment{{MomentID: "photo", AssetID: "media-1", MediaID: "media-1", MediaType: models.MediaTypePhoto, DurationMS: 4000, CropIntent: "fit", Transition: "fade_in"}}, Output: models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 30, Preset: "premium-memory"}, TotalDurationMS: 4000}); err != nil {
+		t.Fatal(err)
+	}
+	failedJob := models.ProcessingJob{
+		ID:          "job-superseded-revision-failure",
+		UserID:      project.UserID,
+		ProjectID:   project.ID,
+		Type:        models.JobTypeStoryPlan,
+		Status:      models.JobStatusFailed,
+		Attempt:     3,
+		MaxAttempts: 3,
+		Configuration: map[string]string{
+			"base_story_plan_version": "1",
+			"story_plan_version":      "2",
+			"edit_intent":             "ios_story_refinement",
+		},
+		CreatedAt: now,
+		UpdatedAt: now.Add(4 * time.Minute),
+	}
+	if err := coordinator.AdvanceAfterJob(ctx, failedJob); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := memoryStore.GetProject(ctx, project.UserID, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != models.ProjectStatusRendering {
+		t.Fatalf("project status = %s, want rendering", updated.Status)
+	}
+}
+
 // completeThroughStoryPlan drives the analysis chain to a completed STORY_PLAN
 // job with a stored plan, which is the state the auto-advance reacts to.
 func completeThroughStoryPlan(t *testing.T, memoryStore *store.MemoryStore, publisher *queue.MemoryPublisher, coordinator *Coordinator, project models.StoryProject, idempotencyKey string) models.StoryPlan {

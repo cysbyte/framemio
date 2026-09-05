@@ -288,8 +288,52 @@ func (c *Coordinator) UpdateJobStatus(ctx context.Context, jobID string, status 
 	return updated, nil
 }
 
+func (c *Coordinator) shouldIgnoreTerminalProjectFailure(ctx context.Context, job models.ProcessingJob) (bool, string, error) {
+	if job.Type != models.JobTypeStoryPlan || !isStoryRevisionJob(job) {
+		return false, "", nil
+	}
+	targetVersion, _ := strconv.Atoi(strings.TrimSpace(job.Configuration["story_plan_version"]))
+	if targetVersion <= 0 {
+		return false, "", nil
+	}
+	latest, err := c.Store.GetStoryPlan(ctx, job.UserID, job.ProjectID)
+	if err == nil && latest.Version >= targetVersion {
+		return true, "target_story_plan_version_exists", nil
+	}
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return false, "", err
+	}
+	jobs, err := c.Store.ListProjectJobs(ctx, job.UserID, job.ProjectID)
+	if err != nil {
+		return false, "", err
+	}
+	for _, candidate := range jobs {
+		if candidate.ID == job.ID || candidate.Type != models.JobTypeStoryPlan || !isStoryRevisionJob(candidate) {
+			continue
+		}
+		candidateVersion, _ := strconv.Atoi(strings.TrimSpace(candidate.Configuration["story_plan_version"]))
+		if candidateVersion < targetVersion || !candidate.CreatedAt.After(job.CreatedAt) {
+			continue
+		}
+		if candidate.Status == models.JobStatusCompleted || !models.IsTerminalJobStatus(candidate.Status) {
+			return true, "newer_story_revision_job_exists", nil
+		}
+	}
+	return false, "", nil
+}
+
+func isStoryRevisionJob(job models.ProcessingJob) bool {
+	return strings.TrimSpace(job.Configuration["base_story_plan_version"]) != "" || strings.EqualFold(strings.TrimSpace(job.Configuration["edit_intent"]), "ios_story_refinement")
+}
+
 func (c *Coordinator) AdvanceAfterJob(ctx context.Context, job models.ProcessingJob) error {
 	if job.Status == models.JobStatusFailed || job.Status == models.JobStatusCancelled {
+		if ignored, reason, err := c.shouldIgnoreTerminalProjectFailure(ctx, job); err != nil {
+			return err
+		} else if ignored {
+			c.Logger.Warn("job terminal failure ignored for superseded story revision", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID), slog.String("status", string(job.Status)), slog.String("error_code", job.ErrorCode), slog.String("reason", reason), slog.Int("attempt", job.Attempt), slog.Int("max_attempts", job.MaxAttempts), slog.Int64("job_age_ms", time.Since(job.CreatedAt).Milliseconds()), slog.Int64("status_age_ms", time.Since(job.UpdatedAt).Milliseconds()))
+			return nil
+		}
 		c.Logger.Warn("job terminal failure; marking project failed", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID), slog.String("status", string(job.Status)), slog.String("error_code", job.ErrorCode), slog.Int("attempt", job.Attempt), slog.Int("max_attempts", job.MaxAttempts), slog.Int64("job_age_ms", time.Since(job.CreatedAt).Milliseconds()), slog.Int64("status_age_ms", time.Since(job.UpdatedAt).Milliseconds()))
 		if err := c.Store.SetProjectStatus(ctx, job.UserID, job.ProjectID, models.ProjectStatusFailed); err != nil {
 			return err

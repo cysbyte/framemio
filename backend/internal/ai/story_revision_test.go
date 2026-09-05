@@ -181,6 +181,9 @@ func TestOpenAIStoryRevisionNormalizesProviderOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if result.RevisedStoryPlan.ID == input.CurrentStoryPlan.ID || result.RevisedStoryPlan.ID == output.RevisedStoryPlan.ID {
+		t.Fatalf("expected backend-owned revision plan ID, got %q", result.RevisedStoryPlan.ID)
+	}
 	moment := result.RevisedStoryPlan.Moments[0]
 	if moment.DurationMS != 5000 {
 		t.Fatalf("expected duration to match source range, got %d", moment.DurationMS)
