@@ -447,6 +447,7 @@ FrameMio currently implements anonymous application authentication with no visib
 First launch
   ↓
 iOS creates/stores anonymous installation ID in Keychain
+  ↳ on simulator, it may fall back to a stable SIMULATOR_UDID-derived installation ID when Keychain state is lost across reinstalls
   ↓
 POST /v1/auth/anonymous { installation_id }
   ↓

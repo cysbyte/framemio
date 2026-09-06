@@ -119,6 +119,12 @@ final class URLSessionAPIClient: APIClient, @unchecked Sendable {
 }
 
 final class KeychainAuthTokenProvider: AuthTokenProvider, @unchecked Sendable {
+    private enum InstallationIDSource: String {
+        case keychain
+        case simulatorUDID = "simulator_udid"
+        case generated
+    }
+
     private let service: String
     private let account: String
     private let refreshAccount: String
@@ -163,17 +169,19 @@ final class KeychainAuthTokenProvider: AuthTokenProvider, @unchecked Sendable {
     }
 
     private func issueAnonymousToken(baseURL: URL) async -> String? {
-        let installationID = storedValue(account: installationAccount) ?? saveNewInstallationID()
+        let installation = currentInstallationIdentity()
         var url = baseURL
         for component in "v1/auth/anonymous".split(separator: "/") {
             url.appendPathComponent(String(component))
         }
 
+        apiClientDebugLog("anonymous auth installation_id_source=\(installation.source.rawValue) installation_id=\(redactedInstallationID(installation.id))")
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? encoder.encode(AnonymousAuthRequest(installationID: installationID))
+        request.httpBody = try? encoder.encode(AnonymousAuthRequest(installationID: installation.id))
 
         do {
             let (data, response) = try await session.data(for: request)
@@ -226,6 +234,30 @@ final class KeychainAuthTokenProvider: AuthTokenProvider, @unchecked Sendable {
         let installationID = UUID().uuidString.lowercased()
         saveValue(installationID, account: installationAccount)
         return installationID
+    }
+
+    private func currentInstallationIdentity() -> (id: String, source: InstallationIDSource) {
+        if let storedInstallationID = storedValue(account: installationAccount) {
+            return (storedInstallationID, .keychain)
+        }
+
+        #if targetEnvironment(simulator)
+        if let simulatorUDID = ProcessInfo.processInfo.environment["SIMULATOR_UDID"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !simulatorUDID.isEmpty {
+            let installationID = "simulator-\(simulatorUDID.lowercased())"
+            saveValue(installationID, account: installationAccount)
+            return (installationID, .simulatorUDID)
+        }
+        #endif
+
+        return (saveNewInstallationID(), .generated)
+    }
+
+    private func redactedInstallationID(_ installationID: String) -> String {
+        guard installationID.count > 12 else { return installationID }
+        let prefix = installationID.prefix(8)
+        let suffix = installationID.suffix(4)
+        return "\(prefix)…\(suffix)"
     }
 
     private func storedValue(account: String) -> String? {

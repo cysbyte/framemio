@@ -658,15 +658,49 @@ func (s *Server) grantSubscriptionCycleCredits(response http.ResponseWriter, req
 		s.writeError(response, http.StatusBadRequest, "invalid_plan", "plan must be monthly or yearly")
 		return
 	}
+	beforeBalance, err := s.Credits.GetBalance(request.Context(), user.ID)
+	if err != nil {
+		s.internalError(response, err, "get credit balance before subscription grant")
+		return
+	}
 	grant, created, err := s.Credits.GrantSubscriptionCycle(request.Context(), user.ID, purchaseID, amount, input.ExpiresAt, map[string]any{"plan": plan})
 	if err != nil {
 		s.internalError(response, err, "grant subscription cycle credits")
 		return
 	}
+	afterBalance, err := s.Credits.GetBalance(request.Context(), user.ID)
+	if err != nil {
+		s.internalError(response, err, "get credit balance after subscription grant")
+		return
+	}
 	if created {
-		s.Logger.Info("subscription credits granted", slog.String("user_id", user.ID), slog.String("purchase_id", purchaseID), slog.String("plan", plan), slog.Int("amount", amount))
+		s.Logger.Info("subscription credits granted",
+			slog.String("user_id", user.ID),
+			slog.String("purchase_id", purchaseID),
+			slog.String("plan", plan),
+			slog.Int("amount", amount),
+			slog.String("grant_id", grant.ID),
+			slog.Int("balance_before_available", beforeBalance.Available),
+			slog.Int("balance_before_subscription", beforeBalance.SubscriptionCredits),
+			slog.Int("balance_before_purchased", beforeBalance.PurchasedCredits),
+			slog.Int("balance_after_available", afterBalance.Available),
+			slog.Int("balance_after_subscription", afterBalance.SubscriptionCredits),
+			slog.Int("balance_after_purchased", afterBalance.PurchasedCredits),
+		)
 	} else {
-		s.Logger.Info("subscription credits grant reused", slog.String("user_id", user.ID), slog.String("purchase_id", purchaseID), slog.String("plan", plan), slog.Int("amount", amount))
+		s.Logger.Info("subscription credits grant reused",
+			slog.String("user_id", user.ID),
+			slog.String("purchase_id", purchaseID),
+			slog.String("plan", plan),
+			slog.Int("amount", amount),
+			slog.String("grant_id", grant.ID),
+			slog.Int("balance_before_available", beforeBalance.Available),
+			slog.Int("balance_before_subscription", beforeBalance.SubscriptionCredits),
+			slog.Int("balance_before_purchased", beforeBalance.PurchasedCredits),
+			slog.Int("balance_after_available", afterBalance.Available),
+			slog.Int("balance_after_subscription", afterBalance.SubscriptionCredits),
+			slog.Int("balance_after_purchased", afterBalance.PurchasedCredits),
+		)
 	}
 	s.writeJSON(response, http.StatusOK, grant)
 }
@@ -695,6 +729,11 @@ func (s *Server) grantPurchasedCredits(response http.ResponseWriter, request *ht
 		s.writeError(response, http.StatusBadRequest, "invalid_credit_pack", "credit pack is invalid")
 		return
 	}
+	beforeBalance, err := s.Credits.GetBalance(request.Context(), user.ID)
+	if err != nil {
+		s.internalError(response, err, "get credit balance before purchase grant")
+		return
+	}
 	grant, duplicate, err := s.Credits.GrantPurchasedCredits(request.Context(), user.ID, purchaseID, pack.Credits, map[string]any{
 		"pack_id":    pack.ID,
 		"product_id": pack.ProductID,
@@ -709,9 +748,35 @@ func (s *Server) grantPurchasedCredits(response http.ResponseWriter, request *ht
 		return
 	}
 	if duplicate {
-		s.Logger.Info("purchased credits grant reused", slog.String("user_id", user.ID), slog.String("purchase_id", purchaseID), slog.String("pack_id", pack.ID), slog.Int("amount", pack.Credits))
+		s.Logger.Info("purchased credits grant reused",
+			slog.String("user_id", user.ID),
+			slog.String("purchase_id", purchaseID),
+			slog.String("pack_id", pack.ID),
+			slog.String("product_id", pack.ProductID),
+			slog.Int("amount", pack.Credits),
+			slog.String("grant_id", grant.ID),
+			slog.Int("balance_before_available", beforeBalance.Available),
+			slog.Int("balance_before_subscription", beforeBalance.SubscriptionCredits),
+			slog.Int("balance_before_purchased", beforeBalance.PurchasedCredits),
+			slog.Int("balance_after_available", balance.Available),
+			slog.Int("balance_after_subscription", balance.SubscriptionCredits),
+			slog.Int("balance_after_purchased", balance.PurchasedCredits),
+		)
 	} else {
-		s.Logger.Info("purchased credits granted", slog.String("user_id", user.ID), slog.String("purchase_id", purchaseID), slog.String("pack_id", pack.ID), slog.Int("amount", pack.Credits))
+		s.Logger.Info("purchased credits granted",
+			slog.String("user_id", user.ID),
+			slog.String("purchase_id", purchaseID),
+			slog.String("pack_id", pack.ID),
+			slog.String("product_id", pack.ProductID),
+			slog.Int("amount", pack.Credits),
+			slog.String("grant_id", grant.ID),
+			slog.Int("balance_before_available", beforeBalance.Available),
+			slog.Int("balance_before_subscription", beforeBalance.SubscriptionCredits),
+			slog.Int("balance_before_purchased", beforeBalance.PurchasedCredits),
+			slog.Int("balance_after_available", balance.Available),
+			slog.Int("balance_after_subscription", balance.SubscriptionCredits),
+			slog.Int("balance_after_purchased", balance.PurchasedCredits),
+		)
 	}
 	s.writeJSON(response, http.StatusOK, map[string]any{"grant": grant, "balance": balance})
 }
