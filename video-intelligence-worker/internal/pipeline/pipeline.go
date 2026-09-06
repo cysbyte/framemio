@@ -129,6 +129,7 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "RUNNING", 0.78, "", "", artifact.EvidenceS3Key); err != nil {
 		return Result{}, err
 	}
+	understandingStarted := time.Now()
 	p.logger().Info("starting video understanding", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.String("evidence_s3_key", artifact.EvidenceS3Key))
 	understandingResult, err := p.Understanding.Analyze(ctx, understanding.Request{
 		CacheRequest: understanding.CacheRequest{
@@ -139,9 +140,10 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 		RunID: jobContext.Job.ID, Force: force || refreshCachedAnalysis,
 	})
 	if err != nil {
-		p.logger().Error("video understanding failed", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Any("error", err))
+		p.logger().Error("video understanding failed", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Int64("duration_ms", time.Since(understandingStarted).Milliseconds()), slog.Any("error", err))
 		return Result{}, fmt.Errorf("understand video evidence: %w", err)
 	}
+	p.logger().Info("video understanding completed", slog.String("job_id", jobContext.Job.ID), slog.String("media_id", jobContext.Media.ID), slog.Int64("duration_ms", time.Since(understandingStarted).Milliseconds()), slog.Bool("reused", understandingResult.Reused))
 	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "RUNNING", 0.92, "", "", artifact.EvidenceS3Key); err != nil {
 		return Result{}, err
 	}

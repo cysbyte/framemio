@@ -191,7 +191,7 @@ Optional tuning:
 - `STAGE_RETRIES`, `MAX_JOB_ATTEMPTS`, `SQS_VISIBILITY_TIMEOUT`
 - `EVIDENCE_URL_EXPIRY`
 
-Duration values use Go duration syntax such as `750ms`, `5m`, or `2h`.
+Duration values use Go duration syntax such as `750ms`, `90s`, or `2h`. Keep `SQS_VISIBILITY_TIMEOUT` close to the expected provider timeout so transient video-understanding cancellations retry quickly; the GitHub Actions deployment default is `90s`, overridable with `VIDEO_WORKER_SQS_VISIBILITY_TIMEOUT`.
 
 The previous `SPEECH_*` and `ENABLE_SPEECH_TO_TEXT` variables remain supported as compatibility fallbacks, but new deployments should use the `TRANSCRIPTION_*` names.
 

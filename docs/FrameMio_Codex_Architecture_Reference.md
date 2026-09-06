@@ -1651,6 +1651,7 @@ Current AWS operation supports both queued workers and one-off ECS task activati
 - when configured, the Go API can start one-off ECS Fargate worker tasks for video, story planning, and rendering stages
 - one-off workers receive `JOB_ID`/`JOB_TYPE` overrides and must process only that target job; non-target active messages are briefly released, while stale or terminal non-target messages may be deleted
 - story one-off wait and SQS visibility defaults are bounded to 3 minutes unless overridden by `STORY_WORKER_RUN_ONCE_WAIT_TIMEOUT`, `WORKER_RUN_ONCE_WAIT_TIMEOUT`, `STORY_WORKER_SQS_VISIBILITY_TIMEOUT`, or `SQS_VISIBILITY_TIMEOUT`
+- video-analysis worker receive visibility defaults are short enough for fast retry (`90s` in GitHub Actions, `2m` code fallback); shutdown cancellations release messages with a short retry visibility instead of leaving them hidden for the full queue timeout
 - long-running worker services can also be manually scaled with scripts, but normal production worker deploys keep `desiredCount=0` and backend `RunTask` activation starts one-off tasks when jobs arrive
 
 Current helper scripts:

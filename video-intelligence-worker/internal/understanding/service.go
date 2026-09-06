@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -84,6 +85,7 @@ type Service struct {
 	RetryAttempts  int
 	RetryDelay     time.Duration
 	FrameURLExpiry time.Duration
+	Logger         *slog.Logger
 	Now            func() time.Time
 }
 
@@ -154,7 +156,7 @@ func (s *Service) Analyze(ctx context.Context, request Request) (Result, error) 
 		return Result{}, err
 	}
 	var response domain.VideoUnderstandingResponseV1
-	if err := s.retry(ctx, func() error {
+	if err := s.retry(ctx, request, input, func() error {
 		var providerErr error
 		response, providerErr = s.Provider.Understand(ctx, input)
 		if providerErr != nil {
@@ -606,7 +608,7 @@ func (s *Service) validateDependencies() error {
 	return nil
 }
 
-func (s *Service) retry(ctx context.Context, operation func() error) error {
+func (s *Service) retry(ctx context.Context, request Request, input domain.VideoUnderstandingInputV1, operation func() error) error {
 	attempts := s.RetryAttempts
 	if attempts <= 0 {
 		attempts = 3
@@ -616,10 +618,44 @@ func (s *Service) retry(ctx context.Context, operation func() error) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		attemptNumber := attempt + 1
+		started := time.Now()
+		s.logger().Info("video_understanding_provider_attempt_started",
+			slog.String("job_id", request.RunID),
+			slog.String("project_id", request.ProjectID),
+			slog.String("media_id", request.MediaID),
+			slog.String("provider", s.Provider.Name()),
+			slog.String("model", s.Provider.Model()),
+			slog.Int("attempt", attemptNumber),
+			slog.Int("max_attempts", attempts),
+			slog.Int("candidate_count", len(input.Segments)),
+			slog.Int("frame_count", len(input.Frames)),
+			slog.Int("transcript_segment_count", len(input.Transcript.Segments)),
+		)
 		if err := operation(); err == nil {
+			s.logger().Info("video_understanding_provider_attempt_completed",
+				slog.String("job_id", request.RunID),
+				slog.String("project_id", request.ProjectID),
+				slog.String("media_id", request.MediaID),
+				slog.String("provider", s.Provider.Name()),
+				slog.String("model", s.Provider.Model()),
+				slog.Int("attempt", attemptNumber),
+				slog.Int64("latency_ms", time.Since(started).Milliseconds()),
+			)
 			return nil
 		} else {
 			lastErr = err
+			s.logger().Warn("video_understanding_provider_attempt_failed",
+				slog.String("job_id", request.RunID),
+				slog.String("project_id", request.ProjectID),
+				slog.String("media_id", request.MediaID),
+				slog.String("provider", s.Provider.Name()),
+				slog.String("model", s.Provider.Model()),
+				slog.Int("attempt", attemptNumber),
+				slog.Int("max_attempts", attempts),
+				slog.Int64("latency_ms", time.Since(started).Milliseconds()),
+				slog.Any("error", err),
+			)
 		}
 		if attempt+1 == attempts {
 			break
@@ -632,6 +668,13 @@ func (s *Service) retry(ctx context.Context, operation func() error) error {
 		if delay > 5*time.Second {
 			delay = 5 * time.Second
 		}
+		s.logger().Info("video_understanding_provider_retry_scheduled",
+			slog.String("job_id", request.RunID),
+			slog.String("project_id", request.ProjectID),
+			slog.String("media_id", request.MediaID),
+			slog.Int("next_attempt", attemptNumber+1),
+			slog.Int64("delay_ms", delay.Milliseconds()),
+		)
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
@@ -641,6 +684,13 @@ func (s *Service) retry(ctx context.Context, operation func() error) error {
 		}
 	}
 	return lastErr
+}
+
+func (s *Service) logger() *slog.Logger {
+	if s.Logger != nil {
+		return s.Logger
+	}
+	return slog.Default()
 }
 
 func (s *Service) frameURLExpiry() time.Duration {

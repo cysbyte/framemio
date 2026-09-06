@@ -106,7 +106,7 @@ func Load() (Config, error) {
 		FrameWidth:                        environmentInt("ANALYSIS_FRAME_WIDTH", 1280),
 		StageRetries:                      environmentInt("STAGE_RETRIES", 3),
 		MaxJobAttempts:                    environmentInt("MAX_JOB_ATTEMPTS", 5),
-		VisibilityTimeout:                 environmentDuration("SQS_VISIBILITY_TIMEOUT", 5*time.Minute),
+		VisibilityTimeout:                 environmentDuration("SQS_VISIBILITY_TIMEOUT", 2*time.Minute),
 		RunOnce:                           environmentBool("WORKER_RUN_ONCE", false),
 		JobID:                             os.Getenv("JOB_ID"),
 		RunOnceWaitTimeout:                environmentDuration("WORKER_RUN_ONCE_WAIT_TIMEOUT", 2*time.Minute),

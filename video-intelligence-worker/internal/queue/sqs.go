@@ -17,13 +17,27 @@ import (
 	"github.com/framemio/video-intelligence-worker/internal/domain"
 )
 
+const (
+	minimumVisibilityTimeout = 30 * time.Second
+	defaultVisibilityTimeout = 2 * time.Minute
+	retryBaseVisibility      = 15 * time.Second
+	shutdownRetryVisibility  = 15 * time.Second
+	visibilityReleaseTimeout = 5 * time.Second
+)
+
 type Handler interface {
 	Process(ctx context.Context, message domain.JobMessage) error
 	MarkFailed(ctx context.Context, message domain.JobMessage, processingError error) error
 }
 
+type sqsClient interface {
+	ReceiveMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error)
+	DeleteMessage(ctx context.Context, params *sqs.DeleteMessageInput, optFns ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error)
+	ChangeMessageVisibility(ctx context.Context, params *sqs.ChangeMessageVisibilityInput, optFns ...func(*sqs.Options)) (*sqs.ChangeMessageVisibilityOutput, error)
+}
+
 type Consumer struct {
-	client            *sqs.Client
+	client            sqsClient
 	queueURL          string
 	visibilityTimeout time.Duration
 	maxAttempts       int
@@ -39,8 +53,8 @@ func NewConsumer(ctx context.Context, queueURL, region string, visibilityTimeout
 	if err != nil {
 		return nil, fmt.Errorf("load aws configuration: %w", err)
 	}
-	if visibilityTimeout < 30*time.Second {
-		visibilityTimeout = 5 * time.Minute
+	if visibilityTimeout < minimumVisibilityTimeout {
+		visibilityTimeout = defaultVisibilityTimeout
 	}
 	if maxAttempts <= 0 {
 		maxAttempts = 5
@@ -182,6 +196,7 @@ func (c *Consumer) handleMessage(ctx context.Context, handler Handler, received 
 		return
 	}
 	if errors.Is(err, context.Canceled) && ctx.Err() != nil {
+		c.releaseCanceledMessage(received, message, receiveCount)
 		return
 	}
 	c.logger.Error("video analysis job failed",
@@ -209,18 +224,42 @@ func (c *Consumer) handleMessage(ctx context.Context, handler Handler, received 
 		c.delete(ctx, *received.ReceiptHandle)
 		return
 	}
-	backoffAttempt := receiveCount
-	if c.maxAttempts > 0 {
-		backoffAttempt = min(backoffAttempt, c.maxAttempts)
-	}
-	backoff := time.Duration(math.Pow(2, float64(backoffAttempt-1))) * 15 * time.Second
-	backoff = min(backoff, c.visibilityTimeout)
+	backoff := retryVisibility(receiveCount, c.maxAttempts, c.visibilityTimeout)
 	_, changeErr := c.client.ChangeMessageVisibility(ctx, &sqs.ChangeMessageVisibilityInput{
 		QueueUrl: aws.String(c.queueURL), ReceiptHandle: received.ReceiptHandle, VisibilityTimeout: int32(backoff.Seconds()),
 	})
 	if changeErr != nil {
 		c.logger.Error("set video analysis retry visibility", slog.String("job_id", message.JobID), slog.Any("error", changeErr))
 	}
+}
+
+func (c *Consumer) releaseCanceledMessage(received types.Message, message domain.JobMessage, receiveCount int) {
+	if received.ReceiptHandle == nil {
+		return
+	}
+	releaseContext, cancel := context.WithTimeout(context.Background(), visibilityReleaseTimeout)
+	defer cancel()
+	visibilityTimeout := min(shutdownRetryVisibility, c.visibilityTimeout)
+	_, err := c.client.ChangeMessageVisibility(releaseContext, &sqs.ChangeMessageVisibilityInput{
+		QueueUrl: aws.String(c.queueURL), ReceiptHandle: received.ReceiptHandle, VisibilityTimeout: int32(visibilityTimeout.Seconds()),
+	})
+	if err != nil {
+		c.logger.Warn("release canceled video analysis message", slog.String("job_id", message.JobID), slog.String("media_id", message.MediaID), slog.Int("receive_count", receiveCount), slog.Any("error", err))
+		return
+	}
+	c.logger.Info("released canceled video analysis message for retry", slog.String("job_id", message.JobID), slog.String("media_id", message.MediaID), slog.Int("receive_count", receiveCount), slog.Int("visibility_timeout_seconds", int(visibilityTimeout.Seconds())))
+}
+
+func retryVisibility(receiveCount, maxAttempts int, visibilityTimeout time.Duration) time.Duration {
+	if receiveCount <= 0 {
+		receiveCount = 1
+	}
+	backoffAttempt := receiveCount
+	if maxAttempts > 0 {
+		backoffAttempt = min(backoffAttempt, maxAttempts)
+	}
+	backoff := time.Duration(math.Pow(2, float64(backoffAttempt-1))) * retryBaseVisibility
+	return min(backoff, visibilityTimeout)
 }
 
 func (c *Consumer) extendVisibility(ctx context.Context, receiptHandle string, done chan<- struct{}) {

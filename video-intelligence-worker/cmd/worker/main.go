@@ -106,6 +106,7 @@ func main() {
 	understandingService := &understanding.Service{
 		Provider: understandingProvider, Repository: repository, Artifacts: objects,
 		RetryAttempts: configuration.UnderstandingRetries, FrameURLExpiry: configuration.PresignedEvidenceExpiry,
+		Logger: logger,
 	}
 	var completionReporter pipeline.CompletionReporter
 	if configuration.BackendURL != "" && configuration.InternalToken != "" {
@@ -134,7 +135,16 @@ func main() {
 		os.Exit(1)
 	}
 	handler := worker.Handler{Processor: processor, Logger: logger}
-	logger.Info("video intelligence worker started", slog.String("analysis_version", configuration.AnalysisVersion), slog.Bool("run_once", configuration.RunOnce))
+	logger.Info("video intelligence worker started",
+		slog.String("analysis_version", configuration.AnalysisVersion),
+		slog.Bool("run_once", configuration.RunOnce),
+		slog.Duration("sqs_visibility_timeout", configuration.VisibilityTimeout),
+		slog.Duration("run_once_wait_timeout", configuration.RunOnceWaitTimeout),
+		slog.Duration("video_understanding_timeout", configuration.UnderstandingTimeout),
+		slog.Int("video_understanding_retries", configuration.UnderstandingRetries),
+		slog.String("video_understanding_provider", configuration.UnderstandingProvider),
+		slog.String("video_understanding_model", configuration.UnderstandingModel),
+	)
 	if configuration.RunOnce {
 		if err := consumer.RunOnce(ctx, handler, configuration.JobID, configuration.RunOnceWaitTimeout); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("video intelligence worker run-once failed", slog.Any("error", err))
