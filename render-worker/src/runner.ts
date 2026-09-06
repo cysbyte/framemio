@@ -11,6 +11,7 @@ import type {RenderInput} from './types.js';
 
 const unsupportedMessageVisibilitySeconds = 1;
 const nonTargetMessageVisibilitySeconds = 1;
+const defaultShutdownReleaseVisibilitySeconds = 15;
 
 export interface RunnerConfig {
   queueURL: string;
@@ -22,6 +23,7 @@ export interface RunnerConfig {
   runOnce: boolean;
   waitTimeoutMs: number;
   visibilityTimeoutSeconds: number;
+  shutdownReleaseVisibilitySeconds: number;
   maxReceiveCount: number;
   rendererMode: 'ffmpeg' | 'remotion';
   remotionEntryPoint: string;
@@ -39,8 +41,25 @@ export async function runRenderWorker(config = loadConfig()): Promise<void> {
     workRoot: config.workRoot,
   });
   let idleDeadline = Date.now() + config.waitTimeoutMs;
-  const shutdown = installShutdownHandler();
-  console.info(JSON.stringify({level: 'info', msg: 'render worker started', run_once: config.runOnce, job_id: config.jobID ?? '', renderer_mode: config.rendererMode}));
+  let activeMessage: ReceivedJobMessage | undefined;
+  const releasedReceiptHandles = new Set<string>();
+  const shutdown = installShutdownHandler((signal) => {
+    const message = activeMessage;
+    if (!message || releasedReceiptHandles.has(message.receiptHandle)) {
+      return;
+    }
+    releasedReceiptHandles.add(message.receiptHandle);
+    const releaseStartedAt = Date.now();
+    console.warn(JSON.stringify({level: 'warn', msg: 'render worker shutdown releasing active message', signal, job_id: message.message.jobId, project_id: message.message.projectId, receive_count: message.receiveCount, release_visibility_seconds: config.shutdownReleaseVisibilitySeconds}));
+    void queue.defer(message.receiptHandle, config.shutdownReleaseVisibilitySeconds)
+      .then(() => {
+        console.warn(JSON.stringify({level: 'warn', msg: 'render worker shutdown active message released', signal, job_id: message.message.jobId, project_id: message.message.projectId, duration_ms: Date.now() - releaseStartedAt}));
+      })
+      .catch((error) => {
+        console.error(JSON.stringify({level: 'error', msg: 'render worker shutdown active message release failed', signal, job_id: message.message.jobId, project_id: message.message.projectId, error: error instanceof Error ? error.message : String(error)}));
+      });
+  });
+  console.info(JSON.stringify({level: 'info', msg: 'render worker started', run_once: config.runOnce, job_id: config.jobID ?? '', renderer_mode: config.rendererMode, visibility_timeout_seconds: config.visibilityTimeoutSeconds, shutdown_release_visibility_seconds: config.shutdownReleaseVisibilitySeconds}));
 
   try {
     do {
@@ -50,7 +69,16 @@ export async function runRenderWorker(config = loadConfig()): Promise<void> {
       }
       let handledMessage = false;
       for (const message of received) {
-        if (await handleMessage(message, {queue, backend, worker, config})) {
+        activeMessage = message;
+        let handledCurrentMessage = false;
+        try {
+          handledCurrentMessage = await handleMessage(message, {queue, backend, worker, config});
+        } finally {
+          if (activeMessage?.receiptHandle === message.receiptHandle) {
+            activeMessage = undefined;
+          }
+        }
+        if (handledCurrentMessage) {
           handledMessage = true;
           if (config.runOnce && (!config.jobID || message.message.jobId === config.jobID)) {
             console.info(JSON.stringify({level: 'info', msg: 'render worker run-once target handled', target_job_id: config.jobID ?? '', job_id: message.message.jobId}));
@@ -81,11 +109,12 @@ export async function runRenderWorker(config = loadConfig()): Promise<void> {
   }
 }
 
-function installShutdownHandler(): {requested: boolean; dispose: () => void} {
+function installShutdownHandler(onShutdown?: (signal: NodeJS.Signals) => void): {requested: boolean; dispose: () => void} {
   const state = {requested: false};
   const onSignal = (signal: NodeJS.Signals) => {
     state.requested = true;
     console.info(JSON.stringify({level: 'info', msg: 'render worker shutdown requested', signal}));
+    onShutdown?.(signal);
   };
   process.once('SIGTERM', onSignal);
   process.once('SIGINT', onSignal);
@@ -206,6 +235,7 @@ export function loadConfig(environment = process.env): RunnerConfig {
     runOnce: bool(environment.WORKER_RUN_ONCE, false),
     waitTimeoutMs: durationMs(environment.WORKER_RUN_ONCE_WAIT_TIMEOUT, 2 * 60 * 1000),
     visibilityTimeoutSeconds: Math.round(durationMs(environment.SQS_VISIBILITY_TIMEOUT, 15 * 60 * 1000) / 1000),
+    shutdownReleaseVisibilitySeconds: Math.round(durationMs(environment.SHUTDOWN_RELEASE_VISIBILITY_TIMEOUT, defaultShutdownReleaseVisibilitySeconds * 1000) / 1000),
     maxReceiveCount: number(environment.MAX_JOB_ATTEMPTS, 5),
     rendererMode,
     remotionEntryPoint: environment.REMOTION_ENTRY_POINT ?? path.join(process.cwd(), 'src/remotion/entry.tsx'),

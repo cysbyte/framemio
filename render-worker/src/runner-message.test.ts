@@ -14,6 +14,7 @@ const baseConfig: RunnerConfig = {
   runOnce: true,
   waitTimeoutMs: 1000,
   visibilityTimeoutSeconds: 900,
+  shutdownReleaseVisibilitySeconds: 15,
   maxReceiveCount: 5,
   rendererMode: 'ffmpeg',
   remotionEntryPoint: 'entry.tsx',

@@ -1521,6 +1521,8 @@ The render worker currently:
 
 The renderer must not call AI, must not call ElevenLabs/music providers, and must not choose or reorder story moments. It executes the StoryPlan.
 
+Render workers use a render-specific SQS visibility timeout long enough for normal Remotion/FFmpeg work. If ECS sends `SIGTERM` during an active render, the worker shortens the active message visibility so deployment interruption does not leave a job hidden until the full render visibility timeout expires.
+
 ## 18.4 Render input resilience
 
 The renderer must be resilient to common iPhone media realities:
@@ -1652,6 +1654,7 @@ Current AWS operation supports both queued workers and one-off ECS task activati
 - one-off workers receive `JOB_ID`/`JOB_TYPE` overrides and must process only that target job; non-target active messages are briefly released, while stale or terminal non-target messages may be deleted
 - story one-off wait and SQS visibility defaults are bounded to 3 minutes unless overridden by `STORY_WORKER_RUN_ONCE_WAIT_TIMEOUT`, `WORKER_RUN_ONCE_WAIT_TIMEOUT`, `STORY_WORKER_SQS_VISIBILITY_TIMEOUT`, or `SQS_VISIBILITY_TIMEOUT`
 - video-analysis worker receive visibility defaults are short enough for fast retry (`90s` in GitHub Actions, `2m` code fallback); shutdown cancellations release messages with a short retry visibility instead of leaving them hidden for the full queue timeout
+- render-worker receive visibility defaults to `15m` in GitHub Actions via `RENDER_WORKER_SQS_VISIBILITY_TIMEOUT`; `SIGTERM` during an active render releases the message after `RENDER_WORKER_SHUTDOWN_RELEASE_VISIBILITY_TIMEOUT` (`15s` default) so interrupted deploys retry quickly
 - long-running worker services can also be manually scaled with scripts, but normal production worker deploys keep `desiredCount=0` and backend `RunTask` activation starts one-off tasks when jobs arrive
 
 Current helper scripts:
