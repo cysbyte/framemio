@@ -589,7 +589,7 @@ FFmpeg
         ↓
 AI
         ↓
-wait 10 minutes
+wait 3 minutes
         ↓
 return response
 ```
@@ -685,6 +685,8 @@ Photos Picker
 Removing or replacing a moment changes the story revision intent only; it must not delete the underlying Project Media. Existing `VideoAnalysis`, transcript, and photo analysis records are reused. Only newly added media without valid analysis should enter the media-analysis pipeline.
 
 If a selected new video is not analysis-ready, the backend creates a queued but unpublished `STORY_PLAN` revision job marked `deferred_until_analysis=true`, queues the missing media stages through the existing SQS pipeline, and publishes the deferred revision once the selected media are ready. This avoids reanalyzing existing story media and avoids rendering from incomplete evidence.
+
+Story revision may use the configured external structured StoryPlan revision planner, but it must fall back to the deterministic local revision planner when the provider is unavailable, too slow, or returns invalid structured output. The fallback edits the existing StoryPlan version; it must not regenerate from scratch or bypass StoryPlan validation.
 
 Background music is intentionally out of scope for V1. Edit Story must not expose music controls, and story revisions must not call music providers, download music files, or attach music to media/moments. Future music should be added as a StoryPlan-level composition component, not as a property of Project Media or Story Moments.
 
@@ -1187,6 +1189,7 @@ STORY_PLANNER_WIRE_API=chat_completions|responses
 STORY_PLANNER_MAX_OUTPUT_TOKENS=6000
 STORY_PLANNER_TIMEOUT=90s
 STORY_PLANNER_FALLBACK_TIMEOUT=30s
+STORY_REVISION_FALLBACK_TIMEOUT=45s
 ```
 
 Rules:
@@ -1198,6 +1201,7 @@ Rules:
 - GPT receives bounded structured `PhotoAnalysis`, `VideoAnalysis`, transcript segments, media clusters, selected/excluded IDs, desired duration, style, and constraints; it does not receive original full-resolution media or provider secrets.
 - GPT must return the existing `models.StoryPlan` JSON shape only, with `schema_version` exactly `story_plan_v1`; it must never return Remotion code, FFmpeg commands, shell commands, SQL, JavaScript, or executable instructions. Current production deployment defaults use `chat_completions` for OpenAI-compatible gateway compatibility; `responses` remains supported when the upstream supports it. `STORY_PLANNER_FALLBACK_TIMEOUT` bounds initial GPT planning latency before falling back to the deterministic local planner, while `STORY_PLANNER_TIMEOUT` remains the HTTP hard timeout.
 - The provider boundary canonicalizes narrow v1 schema aliases such as `1.0` to `story_plan_v1`, repairs bounded media-reference omissions from existing analysis data, then runs lightweight structural validation; structurally invalid GPT plans fall back to the local planner before persistence.
+- `STORY_REVISION_FALLBACK_TIMEOUT` bounds external revision-planner latency before falling back to the deterministic local revision planner; `STORY_REVISION_TIMEOUT` remains the HTTP hard timeout for the provider request.
 - The backend validator deterministically rejects invalid media references, unsupported transitions/crop intents/typography/caption values, bad timings, over-duration plans, and missing render-required fields before persistence/rendering.
 - `VIDEO_UNDERSTANDING_MODEL`, such as `gpt-5.6-luna`, remains separate from `STORY_PLANNER_MODEL`; media understanding can use a cheaper bulk-analysis model while planning uses a stronger creative model.
 
@@ -1645,6 +1649,8 @@ Current AWS operation supports both queued workers and one-off ECS task activati
 
 - backend orchestration publishes identifier-only SQS messages
 - when configured, the Go API can start one-off ECS Fargate worker tasks for video, story planning, and rendering stages
+- one-off workers receive `JOB_ID`/`JOB_TYPE` overrides and must process only that target job; non-target active messages are briefly released, while stale or terminal non-target messages may be deleted
+- story one-off wait and SQS visibility defaults are bounded to 3 minutes unless overridden by `STORY_WORKER_RUN_ONCE_WAIT_TIMEOUT`, `WORKER_RUN_ONCE_WAIT_TIMEOUT`, `STORY_WORKER_SQS_VISIBILITY_TIMEOUT`, or `SQS_VISIBILITY_TIMEOUT`
 - long-running worker services can also be manually scaled with scripts, but normal production worker deploys keep `desiredCount=0` and backend `RunTask` activation starts one-off tasks when jobs arrive
 
 Current helper scripts:

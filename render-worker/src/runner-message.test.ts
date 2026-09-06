@@ -61,6 +61,20 @@ test('defers active non-render messages', async () => {
   assert.deepEqual(calls, ['jobStatus:job-story-plan', 'defer:receipt-job-story-plan:1']);
 });
 
+test('defers active non-target render messages in run-once mode', async () => {
+  const calls: string[] = [];
+  const received = renderMessage({jobId: 'job-other-render', receiveCount: 1});
+  const handled = await handleMessage(received, {
+    queue: queueSpy(calls),
+    backend: backendSpy({status: 'QUEUED'}, calls),
+    worker: workerSpy(calls),
+    config: {...baseConfig, jobID: 'job-target-render'},
+  });
+
+  assert.equal(handled, false);
+  assert.deepEqual(calls, ['jobStatus:job-other-render', 'defer:receipt-job-other-render:1']);
+});
+
 test('deletes stale render messages when callbacks report missing job', async () => {
   const calls: string[] = [];
   const received = renderMessage({jobId: 'job-deleted', receiveCount: 330});

@@ -169,6 +169,110 @@ type OpenAICompatibleStoryRevisionPlanner struct {
 var _ StoryRevisionPlanner = HeuristicStoryRevisionPlanner{}
 var _ StoryRevisionPlanner = OpenAICompatibleStoryRevisionPlanner{}
 
+// FallbackStoryRevisionPlanner tries an external structured revision planner first
+// and falls back to the deterministic local revision planner when the provider is
+// unavailable, too slow, or returns invalid structured output.
+type FallbackStoryRevisionPlanner struct {
+	Primary        StoryRevisionPlanner
+	Fallback       StoryRevisionPlanner
+	Logger         *slog.Logger
+	PrimaryTimeout time.Duration
+}
+
+var _ StoryRevisionPlanner = FallbackStoryRevisionPlanner{}
+
+func (p FallbackStoryRevisionPlanner) Name() string {
+	primaryName := storyRevisionProviderName(p.Primary)
+	fallbackName := storyRevisionProviderName(p.Fallback)
+	if primaryName == "" {
+		primaryName = "primary"
+	}
+	if fallbackName == "" {
+		fallbackName = "local"
+	}
+	return primaryName + "+" + fallbackName + "-fallback"
+}
+
+func (p FallbackStoryRevisionPlanner) Model() string {
+	return storyRevisionProviderModel(p.Primary)
+}
+
+func (p FallbackStoryRevisionPlanner) Revise(ctx context.Context, input StoryRevisionInput) (StoryRevisionResult, error) {
+	if p.Primary == nil {
+		if p.Fallback == nil {
+			return StoryRevisionResult{}, errors.New("story revision planner is not configured")
+		}
+		return p.Fallback.Revise(ctx, input)
+	}
+	primaryCtx := ctx
+	var cancel context.CancelFunc
+	if p.PrimaryTimeout > 0 {
+		primaryCtx, cancel = context.WithTimeout(ctx, p.PrimaryTimeout)
+	}
+	if cancel != nil {
+		defer cancel()
+	}
+	started := time.Now()
+	result, err := p.Primary.Revise(primaryCtx, input)
+	primaryLatency := time.Since(started)
+	if err == nil {
+		if validationErr := ValidateStoryPlan(result.RevisedStoryPlan); validationErr == nil {
+			return result, nil
+		} else {
+			err = fmt.Errorf("primary story revision returned invalid story plan: %w", validationErr)
+		}
+	}
+	if p.Fallback == nil {
+		return StoryRevisionResult{}, err
+	}
+	if p.Logger != nil {
+		p.Logger.Warn("story_revision_primary_failed_falling_back",
+			slog.String("primary_provider", storyRevisionProviderName(p.Primary)),
+			slog.String("primary_model", storyRevisionProviderModel(p.Primary)),
+			slog.String("fallback_provider", storyRevisionProviderName(p.Fallback)),
+			slog.Int64("primary_latency_ms", primaryLatency.Milliseconds()),
+			slog.Int64("primary_timeout_ms", p.PrimaryTimeout.Milliseconds()),
+			slog.Any("error", err),
+		)
+	}
+	fallbackResult, fallbackErr := p.Fallback.Revise(ctx, input)
+	if fallbackErr != nil {
+		return StoryRevisionResult{}, fmt.Errorf("primary story revision failed: %v; fallback story revision failed: %w", err, fallbackErr)
+	}
+	return fallbackResult, nil
+}
+
+func storyRevisionProviderName(planner StoryRevisionPlanner) string {
+	type named interface {
+		Name() string
+	}
+	if typed, ok := planner.(named); ok {
+		return strings.TrimSpace(typed.Name())
+	}
+	if _, ok := planner.(HeuristicStoryRevisionPlanner); ok {
+		return "local"
+	}
+	return ""
+}
+
+func storyRevisionProviderModel(planner StoryRevisionPlanner) string {
+	type modeled interface {
+		Model() string
+	}
+	if typed, ok := planner.(modeled); ok {
+		return strings.TrimSpace(typed.Model())
+	}
+	return ""
+}
+
+func (p HeuristicStoryRevisionPlanner) Name() string {
+	return "local"
+}
+
+func (p HeuristicStoryRevisionPlanner) Model() string {
+	return "heuristic-story-revision-v1"
+}
+
 func (p OpenAICompatibleStoryRevisionPlanner) Name() string {
 	if strings.TrimSpace(p.ProviderName) != "" {
 		return strings.TrimSpace(p.ProviderName)
@@ -215,6 +319,7 @@ func (p OpenAICompatibleStoryRevisionPlanner) post(ctx context.Context, input St
 		request := map[string]any{
 			"model":       p.ModelName,
 			"temperature": 0.25,
+			"max_tokens":  revisionMaxOutputTokens(p.MaxOutputTokens),
 			"response_format": map[string]string{
 				"type": "json_object",
 			},

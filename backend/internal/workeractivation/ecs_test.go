@@ -59,8 +59,21 @@ func TestWorkerOverrideEnvironmentAddsStoryTimeouts(t *testing.T) {
 	if values["JOB_ID"] != "job-story" || values["JOB_TYPE"] != string(models.JobTypeStoryPlan) || values["WORKER_RUN_ONCE"] != "true" {
 		t.Fatalf("missing base override env: %+v", values)
 	}
-	if values["WORKER_RUN_ONCE_WAIT_TIMEOUT"] != "6m" || values["SQS_VISIBILITY_TIMEOUT"] != "5m" {
+	if values["WORKER_RUN_ONCE_WAIT_TIMEOUT"] != "3m" || values["SQS_VISIBILITY_TIMEOUT"] != "3m" {
 		t.Fatalf("missing story timeout override env: %+v", values)
+	}
+}
+
+func TestWorkerOverrideEnvironmentUsesConfiguredStoryTimeouts(t *testing.T) {
+	t.Setenv("STORY_WORKER_RUN_ONCE_WAIT_TIMEOUT", "4m")
+	t.Setenv("STORY_WORKER_SQS_VISIBILITY_TIMEOUT", "4m")
+	environment := workerOverrideEnvironment(queue.JobMessage{JobID: "job-story", JobType: models.JobTypeStoryPlan})
+	values := make(map[string]string, len(environment))
+	for _, entry := range environment {
+		values[*entry.Name] = *entry.Value
+	}
+	if values["WORKER_RUN_ONCE_WAIT_TIMEOUT"] != "4m" || values["SQS_VISIBILITY_TIMEOUT"] != "4m" {
+		t.Fatalf("story timeout overrides should use env values: %+v", values)
 	}
 }
 

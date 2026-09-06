@@ -38,7 +38,7 @@ func TestWorkerRunOnceDefersNonTargetUnsupportedMessage(t *testing.T) {
 	if len(consumer.deleted) != 1 || consumer.deleted[0] != "receipt-target" {
 		t.Fatalf("target message was not deleted after processing: %+v", consumer.deleted)
 	}
-	if len(consumer.extended) == 0 || consumer.extended[0] != 2*time.Second {
+	if len(consumer.extended) == 0 || consumer.extended[0] != time.Second {
 		t.Fatalf("non-target message was not deferred briefly: %+v", consumer.extended)
 	}
 	otherAfter, err := memoryStore.GetJob(ctx, project.UserID, otherJob.ID)
@@ -57,7 +57,7 @@ func TestWorkerRunOnceDefersNonTargetUnsupportedMessage(t *testing.T) {
 	}
 }
 
-func TestWorkerRunOnceProcessesAvailableSameHandlerMessage(t *testing.T) {
+func TestWorkerRunOnceDefersNonTargetSameHandlerMessage(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	memoryStore, _, coordinator, project, _ := setupProject(t, models.MediaTypePhoto)
@@ -83,27 +83,25 @@ func TestWorkerRunOnceProcessesAvailableSameHandlerMessage(t *testing.T) {
 	if err := worker.RunOnce(ctx); err != nil {
 		t.Fatal(err)
 	}
-	for _, timeout := range consumer.extended {
-		if timeout == 0 {
-			t.Fatalf("same-handler job should not be released immediately: %+v", consumer.extended)
-		}
+	if len(consumer.extended) == 0 || consumer.extended[0] != time.Second {
+		t.Fatalf("non-target same-handler message should be deferred briefly: %+v", consumer.extended)
 	}
-	if len(consumer.deleted) != 2 || consumer.deleted[0] != "receipt-other-story" || consumer.deleted[1] != "receipt-target-story" {
-		t.Fatalf("available same-handler messages were not deleted after processing: %+v", consumer.deleted)
+	if len(consumer.deleted) != 1 || consumer.deleted[0] != "receipt-target-story" {
+		t.Fatalf("only target message should be deleted after processing: %+v", consumer.deleted)
 	}
 	otherAfter, err := memoryStore.GetJob(ctx, project.UserID, otherJob.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if otherAfter.Status != models.JobStatusCompleted {
-		t.Fatalf("available same-handler job should complete: %+v", otherAfter)
+	if otherAfter.Status != models.JobStatusQueued {
+		t.Fatalf("non-target same-handler job should not be processed: %+v", otherAfter)
 	}
 	targetAfter, err := memoryStore.GetJob(ctx, project.UserID, targetJob.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if targetAfter.Status != models.JobStatusCompleted {
-		t.Fatalf("target job should complete after the available job: %+v", targetAfter)
+		t.Fatalf("target job should complete: %+v", targetAfter)
 	}
 }
 
@@ -178,11 +176,11 @@ func TestWorkerRunOnceProcessesQueuedTargetWithInflatedReceiveCount(t *testing.T
 	}
 }
 
-func TestWorkerRunOnceRemovesPoisonNonTargetAndContinuesToTarget(t *testing.T) {
+func TestWorkerRunOnceDeletesTerminalNonTargetAndContinuesToTarget(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	memoryStore, _, coordinator, project, _ := setupProject(t, models.MediaTypePhoto)
-	poisonJob, _, err := memoryStore.CreateJob(ctx, models.ProcessingJob{ID: "job-poison-story", UserID: project.UserID, ProjectID: project.ID, Type: models.JobTypeStoryPlan, Status: models.JobStatusFailed, Attempt: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}, "poison-story-job")
+	terminalJob, _, err := memoryStore.CreateJob(ctx, models.ProcessingJob{ID: "job-poison-story", UserID: project.UserID, ProjectID: project.ID, Type: models.JobTypeStoryPlan, Status: models.JobStatusFailed, Attempt: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}, "poison-story-job")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +189,7 @@ func TestWorkerRunOnceRemovesPoisonNonTargetAndContinuesToTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	consumer := &memoryConsumer{received: []queue.ReceivedJobMessage{
-		{Message: queue.JobMessage{JobID: poisonJob.ID, ProjectID: project.ID, JobType: poisonJob.Type}, ReceiptHandle: "receipt-poison-story", ApproximateReceiveCount: 301},
+		{Message: queue.JobMessage{JobID: terminalJob.ID, ProjectID: project.ID, JobType: terminalJob.Type}, ReceiptHandle: "receipt-poison-story", ApproximateReceiveCount: 301},
 		{Message: queue.JobMessage{JobID: targetJob.ID, ProjectID: project.ID, JobType: targetJob.Type}, ReceiptHandle: "receipt-target-story"},
 	}}
 	worker := Worker{
@@ -205,11 +203,11 @@ func TestWorkerRunOnceRemovesPoisonNonTargetAndContinuesToTarget(t *testing.T) {
 	if err := worker.RunOnce(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if len(consumer.deadLetters) != 1 || consumer.deadLetters[0].Message.JobID != poisonJob.ID {
-		t.Fatalf("poison non-target was not dead-lettered: %+v", consumer.deadLetters)
+	if len(consumer.deadLetters) != 0 {
+		t.Fatalf("terminal non-target should be deleted without dead-lettering: %+v", consumer.deadLetters)
 	}
 	if len(consumer.deleted) != 2 || consumer.deleted[0] != "receipt-poison-story" || consumer.deleted[1] != "receipt-target-story" {
-		t.Fatalf("poison and target messages were not deleted in order: %+v", consumer.deleted)
+		t.Fatalf("terminal non-target and target messages were not deleted in order: %+v", consumer.deleted)
 	}
 	targetAfter, err := memoryStore.GetJob(ctx, project.UserID, targetJob.ID)
 	if err != nil {

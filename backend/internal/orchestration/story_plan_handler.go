@@ -146,7 +146,12 @@ func (h StoryPlanHandler) handleStoryRevision(ctx context.Context, job models.Pr
 	}
 	input := h.storyRevisionInput(project, job.Configuration, basePlan, nextVersion, photoAnalyses, videoAnalyses, clusters)
 	started := time.Now()
-	h.logger().Info("story_revision_started", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("base_version", baseVersion), slog.Int("resulting_version", nextVersion), slog.String("provider", storyRevisionPlannerName(planner)), slog.String("model", storyRevisionPlannerModel(planner)), slog.Int("instruction_length", len(strings.TrimSpace(input.UserInstruction))), slog.Int("current_duration_ms", basePlan.TotalDurationMS), slog.Int("max_duration_ms", input.Constraints.MaxDurationMS), slog.Bool("explicit_target_duration", strings.TrimSpace(job.Configuration["target_duration_seconds"]) != ""))
+	revisionProvider := storyRevisionPlannerName(planner)
+	revisionModel := storyRevisionPlannerModel(planner)
+	h.logger().Info("story_revision_started", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("base_version", baseVersion), slog.Int("resulting_version", nextVersion), slog.String("provider", revisionProvider), slog.String("model", revisionModel), slog.Int("instruction_length", len(strings.TrimSpace(input.UserInstruction))), slog.Int("current_duration_ms", basePlan.TotalDurationMS), slog.Int("max_duration_ms", input.Constraints.MaxDurationMS), slog.Bool("explicit_target_duration", strings.TrimSpace(job.Configuration["target_duration_seconds"]) != ""))
+	if revisionProvider != "local" {
+		h.logger().Info("story_revision_ai_request_started", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("base_version", baseVersion), slog.Int("resulting_version", nextVersion), slog.String("provider", revisionProvider), slog.String("model", revisionModel), slog.Int("photo_analysis_count", len(photoAnalyses)), slog.Int("video_analysis_count", len(videoAnalyses)), slog.Int("media_count", len(project.MediaIDs)), slog.Int("current_moment_count", len(basePlan.Moments)), slog.Int("current_duration_ms", basePlan.TotalDurationMS), slog.Int("max_duration_ms", input.Constraints.MaxDurationMS))
+	}
 	result, err := planner.Revise(ctx, input)
 	if err != nil {
 		h.logger().Error("story_revision_failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("base_version", baseVersion), slog.Int("resulting_version", nextVersion), slog.String("failure_category", "ai_revision"), slog.Any("error", err))
@@ -168,7 +173,7 @@ func (h StoryPlanHandler) handleStoryRevision(ctx context.Context, job models.Pr
 	if plan.ID == "" {
 		plan.ID = models.NewID("plan")
 	}
-	h.logger().Info("story_revision_ai_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("base_version", baseVersion), slog.Int("resulting_version", nextVersion), slog.String("provider", storyRevisionPlannerName(planner)), slog.String("model", storyRevisionPlannerModel(planner)), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Int("change_count", len(result.Changes)), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)))
+	h.logger().Info("story_revision_ai_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("base_version", baseVersion), slog.Int("resulting_version", nextVersion), slog.String("provider", revisionProvider), slog.String("model", revisionModel), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Int("change_count", len(result.Changes)), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)))
 	if h.Validator != nil {
 		validationStarted := time.Now()
 		if validationErr := h.Validator.Validate(ctx, job.UserID, plan); validationErr != nil {

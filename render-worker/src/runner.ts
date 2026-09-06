@@ -10,6 +10,7 @@ import {DeterministicRenderWorker} from './pipeline/render-worker.js';
 import type {RenderInput} from './types.js';
 
 const unsupportedMessageVisibilitySeconds = 1;
+const nonTargetMessageVisibilitySeconds = 1;
 
 export interface RunnerConfig {
   queueURL: string;
@@ -139,16 +140,15 @@ export async function handleMessage(received: ReceivedJobMessage, dependencies: 
   } catch (error) {
     console.warn(JSON.stringify({level: 'warn', msg: 'render worker job status preflight failed', target_job_id: config.jobID ?? '', job_id: message.jobId, project_id: message.projectId, job_type: message.jobType, receive_count: received.receiveCount, error: error instanceof Error ? error.message : String(error)}));
   }
+  if (config.runOnce && config.jobID && message.jobId !== config.jobID) {
+    console.info(JSON.stringify({level: 'info', msg: 'render worker deferring non-target message', target_job_id: config.jobID, job_id: message.jobId, project_id: message.projectId, job_type: message.jobType, receive_count: received.receiveCount, defer_seconds: nonTargetMessageVisibilitySeconds}));
+    await queue.defer(received.receiptHandle, nonTargetMessageVisibilitySeconds);
+    return false;
+  }
   if (message.jobType !== 'VIDEO_RENDER') {
     console.info(JSON.stringify({level: 'info', msg: 'render worker deferring non-render message', target_job_id: config.jobID ?? '', job_id: message.jobId, project_id: message.projectId, job_type: message.jobType, receive_count: received.receiveCount, defer_seconds: unsupportedMessageVisibilitySeconds}));
     await queue.defer(received.receiptHandle, unsupportedMessageVisibilitySeconds);
-    if (config.runOnce) {
-      await sleep(1500);
-    }
     return false;
-  }
-  if (config.jobID && message.jobId !== config.jobID) {
-    console.info(JSON.stringify({level: 'info', msg: 'handling available render message', target_job_id: config.jobID, job_id: message.jobId}));
   }
   const startedAt = Date.now();
   console.info(JSON.stringify({level: 'info', msg: 'handling render message', job_id: message.jobId, project_id: message.projectId, receive_count: received.receiveCount}));

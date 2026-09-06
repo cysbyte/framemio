@@ -49,6 +49,26 @@ func TestHeuristicStoryRevisionLengthensMoments(t *testing.T) {
 	}
 }
 
+func TestFallbackStoryRevisionUsesHeuristicWhenPrimaryTimesOut(t *testing.T) {
+	t.Parallel()
+	input := revisionFixtureInput("Make each moment longer.")
+	planner := FallbackStoryRevisionPlanner{
+		Primary:        blockingRevisionPlanner{},
+		Fallback:       HeuristicStoryRevisionPlanner{},
+		PrimaryTimeout: time.Nanosecond,
+	}
+	result, err := planner.Revise(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RevisedStoryPlan.TotalDurationMS <= input.CurrentStoryPlan.TotalDurationMS {
+		t.Fatalf("fallback should lengthen moments: before=%d after=%d", input.CurrentStoryPlan.TotalDurationMS, result.RevisedStoryPlan.TotalDurationMS)
+	}
+	if result.RevisedStoryPlan.UserInstructions != input.UserInstruction {
+		t.Fatalf("fallback should preserve user instruction, got %q", result.RevisedStoryPlan.UserInstructions)
+	}
+}
+
 func TestHeuristicStoryRevisionRemovesDinner(t *testing.T) {
 	t.Parallel()
 	result, err := (HeuristicStoryRevisionPlanner{}).Revise(context.Background(), revisionFixtureInput("Remove the dinner photos."))
@@ -311,4 +331,11 @@ func revisionContainsMedia(plan models.StoryPlan, mediaID string) bool {
 		}
 	}
 	return false
+}
+
+type blockingRevisionPlanner struct{}
+
+func (blockingRevisionPlanner) Revise(ctx context.Context, _ StoryRevisionInput) (StoryRevisionResult, error) {
+	<-ctx.Done()
+	return StoryRevisionResult{}, ctx.Err()
 }

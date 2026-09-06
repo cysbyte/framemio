@@ -209,8 +209,8 @@ func workerOverrideEnvironment(message queue.JobMessage) []types.KeyValuePair {
 	}
 	if message.JobType == models.JobTypeStoryPlan {
 		environment = append(environment,
-			types.KeyValuePair{Name: aws.String("WORKER_RUN_ONCE_WAIT_TIMEOUT"), Value: aws.String("6m")},
-			types.KeyValuePair{Name: aws.String("SQS_VISIBILITY_TIMEOUT"), Value: aws.String("5m")},
+			types.KeyValuePair{Name: aws.String("WORKER_RUN_ONCE_WAIT_TIMEOUT"), Value: aws.String(valueOrDefault(firstEnv("STORY_WORKER_RUN_ONCE_WAIT_TIMEOUT", "WORKER_RUN_ONCE_WAIT_TIMEOUT"), "3m"))},
+			types.KeyValuePair{Name: aws.String("SQS_VISIBILITY_TIMEOUT"), Value: aws.String(valueOrDefault(firstEnv("STORY_WORKER_SQS_VISIBILITY_TIMEOUT", "SQS_VISIBILITY_TIMEOUT"), "3m"))},
 		)
 	}
 	return environment
