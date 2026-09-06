@@ -403,21 +403,6 @@ func (s *PostgresStore) EnsureCreditGrant(ctx context.Context, grant models.Cred
 	}
 	defer tx.Rollback(ctx)
 	grantKey := creditGrantKey(grant)
-	var existingData []byte
-	err = tx.QueryRow(ctx, `SELECT data FROM framemio_domain_records WHERE kind=$1 AND user_id=$2 AND logical_key=$3 FOR UPDATE`, creditGrantKind, grant.UserID, grantKey).Scan(&existingData)
-	if err == nil {
-		var existing models.CreditGrant
-		if err := json.Unmarshal(existingData, &existing); err != nil {
-			return models.CreditGrant{}, false, err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return models.CreditGrant{}, false, err
-		}
-		return existing, true, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return models.CreditGrant{}, false, err
-	}
 	if grant.ID == "" {
 		grant.ID = models.NewID("credit-grant")
 	}
@@ -426,6 +411,28 @@ func (s *PostgresStore) EnsureCreditGrant(ctx context.Context, grant models.Cred
 	}
 	if grant.GrantedAt.IsZero() {
 		grant.GrantedAt = time.Now().UTC()
+	}
+	data, err := json.Marshal(grant)
+	if err != nil {
+		return models.CreditGrant{}, false, err
+	}
+	grantResult, err := tx.Exec(ctx, `INSERT INTO framemio_domain_records (kind,id,user_id,logical_key,data,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$6) ON CONFLICT DO NOTHING`, creditGrantKind, grant.ID, grant.UserID, grantKey, jsonbParam(data), grant.GrantedAt)
+	if err != nil {
+		return models.CreditGrant{}, false, err
+	}
+	if grantResult.RowsAffected() == 0 {
+		var existingData []byte
+		if err := tx.QueryRow(ctx, `SELECT data FROM framemio_domain_records WHERE kind=$1 AND user_id=$2 AND logical_key=$3 FOR UPDATE`, creditGrantKind, grant.UserID, grantKey).Scan(&existingData); err != nil {
+			return models.CreditGrant{}, false, err
+		}
+		var existing models.CreditGrant
+		if err := json.Unmarshal(existingData, &existing); err != nil {
+			return models.CreditGrant{}, false, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return models.CreditGrant{}, false, err
+		}
+		return existing, true, nil
 	}
 	balance, err := loadCreditBalanceTx(ctx, tx, grant.UserID)
 	if err != nil {
@@ -443,23 +450,6 @@ func (s *PostgresStore) EnsureCreditGrant(ctx context.Context, grant models.Cred
 	}
 	if err := saveCreditBalanceTx(ctx, tx, grant.UserID, balance); err != nil {
 		return models.CreditGrant{}, false, err
-	}
-	data, err := json.Marshal(grant)
-	if err != nil {
-		return models.CreditGrant{}, false, err
-	}
-	grantResult, err := tx.Exec(ctx, `INSERT INTO framemio_domain_records (kind,id,user_id,logical_key,data,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$6) ON CONFLICT DO NOTHING`, creditGrantKind, grant.ID, grant.UserID, grantKey, jsonbParam(data), grant.GrantedAt)
-	if err != nil {
-		return models.CreditGrant{}, false, err
-	}
-	if grantResult.RowsAffected() == 0 {
-		if err := loadByLogicalTx(ctx, tx, creditGrantKind, grant.UserID, grantKey, &grant); err != nil {
-			return models.CreditGrant{}, false, err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return models.CreditGrant{}, false, err
-		}
-		return grant, true, nil
 	}
 	ledger := models.CreditLedgerEntry{
 		ID:            grant.ID + ":grant",
