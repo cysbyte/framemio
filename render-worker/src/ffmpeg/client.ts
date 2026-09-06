@@ -25,8 +25,10 @@ export interface FfmpegClient {
   encodeMp4(request: EncodeRequest): Promise<void>;
 }
 
+const DEFAULT_FFMPEG_TIMEOUT_MS = 5 * 60 * 1000;
+
 export class ShellFfmpegClient implements FfmpegClient {
-  constructor(private readonly ffmpegBinary = 'ffmpeg') {}
+  constructor(private readonly ffmpegBinary = 'ffmpeg', private readonly timeoutMs = DEFAULT_FFMPEG_TIMEOUT_MS) {}
 
   async trimVideo(request: TrimVideoRequest): Promise<void> {
     await mkdir(path.dirname(request.outputPath), {recursive: true});
@@ -67,7 +69,7 @@ export class ShellFfmpegClient implements FfmpegClient {
     }
 
     args.push(request.outputPath);
-    await run(this.ffmpegBinary, args);
+    await run(this.ffmpegBinary, args, this.timeoutMs);
   }
 
   async encodeMp4(request: EncodeRequest): Promise<void> {
@@ -96,7 +98,7 @@ export class ShellFfmpegClient implements FfmpegClient {
       '-movflags',
       '+faststart',
       request.outputPath,
-    ]);
+    ], this.timeoutMs);
   }
 }
 
@@ -150,15 +152,39 @@ function stableFixtureJson(value: EncodeRequest): string {
   });
 }
 
-async function run(command: string, args: string[]): Promise<void> {
+async function run(command: string, args: string[], timeoutMs = DEFAULT_FFMPEG_TIMEOUT_MS): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const child = spawn(command, args, {stdio: ['ignore', 'pipe', 'pipe']});
     let stderr = '';
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      child.kill('SIGKILL');
+      reject(new Error(`${command} timed out after ${timeoutMs}ms: ${stderr}`));
+    }, timeoutMs);
     child.stderr.on('data', (chunk) => {
       stderr += String(chunk);
+      if (stderr.length > 16000) {
+        stderr = stderr.slice(-16000);
+      }
     });
-    child.on('error', reject);
+    child.on('error', (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      reject(error);
+    });
     child.on('close', (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
       if (code === 0) {
         resolve();
         return;
