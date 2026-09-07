@@ -1003,7 +1003,7 @@ func titleFor(storyType models.StoryType, request Request, moments []models.Stor
 		}
 		fallthrough
 	default:
-		return "Your Story"
+		return "My Story"
 	}
 }
 

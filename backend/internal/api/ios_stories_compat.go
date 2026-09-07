@@ -1938,7 +1938,7 @@ func iosDisplayStoryTitle(title string, moments []iosStoryMoment, context string
 	if trimmed := strings.TrimSpace(context); trimmed != "" && !isGenericIOSMomentText(trimmed) {
 		return truncateIOSStoryTitle(trimmed)
 	}
-	return "Your Story"
+	return "My Story"
 }
 
 func truncateIOSStoryTitle(title string) string {
