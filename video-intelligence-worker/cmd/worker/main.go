@@ -18,6 +18,7 @@ import (
 	"github.com/framemio/video-intelligence-worker/internal/queue"
 	"github.com/framemio/video-intelligence-worker/internal/storage"
 	"github.com/framemio/video-intelligence-worker/internal/store"
+	"github.com/framemio/video-intelligence-worker/internal/taskprotection"
 	"github.com/framemio/video-intelligence-worker/internal/transcription"
 	"github.com/framemio/video-intelligence-worker/internal/understanding"
 	"github.com/framemio/video-intelligence-worker/internal/worker"
@@ -135,6 +136,7 @@ func main() {
 		logger.Error("configure video analysis queue", slog.Any("error", err))
 		os.Exit(1)
 	}
+	consumer.SetTaskProtector(taskprotection.NewFromEnv())
 	handler := worker.Handler{Processor: processor, Logger: logger}
 	logger.Info("video intelligence worker started",
 		slog.String("analysis_version", configuration.AnalysisVersion),

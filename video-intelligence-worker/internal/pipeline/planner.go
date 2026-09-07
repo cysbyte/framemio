@@ -55,7 +55,7 @@ func BuildScenes(metadata domain.VideoMetadata, boundaries []domain.SceneBoundar
 	return scenes
 }
 
-const defaultStorySegmentDuration = 4 * time.Second
+const defaultStorySegmentDuration = 5 * time.Second
 
 func BuildSegments(scenes []domain.VideoScene, maximumDuration time.Duration) []domain.CandidateSegment {
 	maximum := maximumDuration.Microseconds()

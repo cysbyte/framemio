@@ -115,6 +115,19 @@ func TestLoadAllowsDeepgramTranscriptionWithoutAdapterURL(t *testing.T) {
 	}
 }
 
+func TestLoadUsesOptimizedEvidenceDefaults(t *testing.T) {
+	setRequiredEnvironment(t)
+	t.Setenv("VIDEO_UNDERSTANDING_PROVIDER", "local")
+
+	configuration, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configuration.MaxSegmentDuration != 5_000_000_000 || configuration.MaxFramesShort != 12 || configuration.MaxFramesLong != 24 {
+		t.Fatalf("evidence defaults = segment:%s short:%d long:%d, want segment:5s short:12 long:24", configuration.MaxSegmentDuration, configuration.MaxFramesShort, configuration.MaxFramesLong)
+	}
+}
+
 func TestLoadPrefersVideoQueueURL(t *testing.T) {
 	setRequiredEnvironment(t)
 	t.Setenv("SQS_VIDEO_QUEUE_URL", "https://sqs.example.test/video")

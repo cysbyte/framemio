@@ -30,6 +30,11 @@ type Handler interface {
 	MarkFailed(ctx context.Context, message domain.JobMessage, processingError error) error
 }
 
+type TaskProtector interface {
+	Protect(ctx context.Context) (bool, error)
+	Unprotect(ctx context.Context) error
+}
+
 type sqsClient interface {
 	ReceiveMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error)
 	DeleteMessage(ctx context.Context, params *sqs.DeleteMessageInput, optFns ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error)
@@ -42,6 +47,7 @@ type Consumer struct {
 	visibilityTimeout time.Duration
 	maxAttempts       int
 	logger            *slog.Logger
+	taskProtector     TaskProtector
 }
 
 func NewConsumer(ctx context.Context, queueURL, region string, visibilityTimeout time.Duration, maxAttempts int, logger *slog.Logger) (*Consumer, error) {
@@ -66,6 +72,10 @@ func NewConsumer(ctx context.Context, queueURL, region string, visibilityTimeout
 		client: sqs.NewFromConfig(configuration), queueURL: queueURL,
 		visibilityTimeout: visibilityTimeout, maxAttempts: maxAttempts, logger: logger,
 	}, nil
+}
+
+func (c *Consumer) SetTaskProtector(taskProtector TaskProtector) {
+	c.taskProtector = taskProtector
 }
 
 func (c *Consumer) Run(ctx context.Context, handler Handler) error {
@@ -185,6 +195,13 @@ func (c *Consumer) handleMessage(ctx context.Context, handler Handler, received 
 		slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID),
 		slog.String("media_id", message.MediaID), slog.String("job_type", message.JobType), slog.Int("receive_count", receiveCount),
 	)
+	taskProtected, protectOK := c.protectTask(ctx, received, message, receiveCount)
+	if !protectOK {
+		return
+	}
+	if taskProtected {
+		defer c.unprotectTask(message)
+	}
 	processingContext, cancel := context.WithCancel(ctx)
 	heartbeatDone := make(chan struct{})
 	go c.extendVisibility(processingContext, *received.ReceiptHandle, heartbeatDone)
@@ -234,6 +251,42 @@ func (c *Consumer) handleMessage(ctx context.Context, handler Handler, received 
 	} else {
 		c.logger.Warn("video analysis message deferred for retry", slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID), slog.String("media_id", message.MediaID), slog.String("job_type", message.JobType), slog.Int("receive_count", receiveCount), slog.Int("retry_visibility_seconds", int(backoff.Seconds())), slog.Int64("total_duration_ms", time.Since(started).Milliseconds()))
 	}
+}
+
+func (c *Consumer) protectTask(ctx context.Context, received types.Message, message domain.JobMessage, receiveCount int) (bool, bool) {
+	if c.taskProtector == nil {
+		return false, true
+	}
+	protected, err := c.taskProtector.Protect(ctx)
+	if err == nil {
+		if protected {
+			c.logger.Info("video task scale-in protection enabled", slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID), slog.String("media_id", message.MediaID), slog.String("job_type", message.JobType), slog.Int("receive_count", receiveCount))
+		}
+		return protected, true
+	}
+	backoff := min(retryBaseVisibility, c.visibilityTimeout)
+	_, changeErr := c.client.ChangeMessageVisibility(ctx, &sqs.ChangeMessageVisibilityInput{
+		QueueUrl: aws.String(c.queueURL), ReceiptHandle: received.ReceiptHandle, VisibilityTimeout: int32(backoff.Seconds()),
+	})
+	if changeErr != nil {
+		c.logger.Error("video task scale-in protection failed; defer failed", slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID), slog.String("media_id", message.MediaID), slog.String("job_type", message.JobType), slog.Int("receive_count", receiveCount), slog.Any("error", err), slog.Any("defer_error", changeErr))
+		return false, false
+	}
+	c.logger.Error("video task scale-in protection failed; deferring message", slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID), slog.String("media_id", message.MediaID), slog.String("job_type", message.JobType), slog.Int("receive_count", receiveCount), slog.Int("retry_visibility_seconds", int(backoff.Seconds())), slog.Any("error", err))
+	return false, false
+}
+
+func (c *Consumer) unprotectTask(message domain.JobMessage) {
+	if c.taskProtector == nil {
+		return
+	}
+	releaseContext, cancel := context.WithTimeout(context.Background(), visibilityReleaseTimeout)
+	defer cancel()
+	if err := c.taskProtector.Unprotect(releaseContext); err != nil {
+		c.logger.Error("video task scale-in protection release failed", slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID), slog.String("media_id", message.MediaID), slog.String("job_type", message.JobType), slog.Any("error", err))
+		return
+	}
+	c.logger.Info("video task scale-in protection disabled", slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID), slog.String("media_id", message.MediaID), slog.String("job_type", message.JobType))
 }
 
 func (c *Consumer) releaseCanceledMessage(received types.Message, message domain.JobMessage, receiveCount int) {

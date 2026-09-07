@@ -15,7 +15,7 @@ Production uses separate SQS queues per worker type so workers do not consume or
 
 The backend deployment performs an IAM simulation before deployment and fails if the ECS task role cannot send, receive, delete, or extend visibility on every configured queue. Keep `infrastructure/iam/framemio-ecs-task-role-sqs-policy.json` synchronized with production queue names.
 
-Render workers enable ECS task scale-in protection before starting long render jobs. Keep `infrastructure/iam/framemio-ecs-task-role-task-protection-policy.json` attached to `FramemioECSTaskRole`; otherwise render messages are deferred and projects can remain stuck at the film-rendered step.
+Render and video workers enable ECS task scale-in protection before starting long jobs. Keep `infrastructure/iam/framemio-ecs-task-role-task-protection-policy.json` attached to `FramemioECSTaskRole`; otherwise render messages can be deferred and in-flight video analysis can be interrupted during scale-in/deployments.
 
 Runtime credentials should be injected through ECS secret references. Set repository variables such as `INTERNAL_API_TOKEN_SECRET_ARN`, `DEEPGRAM_API_KEY_SECRET_ARN`, `STORY_PLANNER_API_KEY_SECRET_ARN`, and `STORY_REVISION_API_KEY_SECRET_ARN` after creating the matching Secrets Manager entries and granting the ECS execution role `secretsmanager:GetSecretValue`. The workflow emits a warning and preserves the existing plaintext environment behavior until each secret is migrated.
 
@@ -37,7 +37,7 @@ Migration order:
 - Grant only the PostgreSQL, SQS, S3, logging, and secret permissions required by the worker.
 - Supply video-understanding and transcription API credentials through AWS Secrets Manager or SSM, never task-definition plaintext or queue messages.
 - Size ephemeral storage for the largest supported source video plus extracted evidence, with headroom for retries.
-- Production workers are controlled manually with the backend scripts; keep them private and set ECS service `desiredCount` to `0` or `1` as needed.
+- Production workers are controlled manually with the backend scripts; keep them private and set ECS service `desiredCount` based on expected concurrency. Video analysis can run with multiple small tasks, for example desired/max capacity `4` for four concurrent uploads.
 - Set the SQS visibility timeout above the normal processing duration and keep the worker heartbeat enabled for long videos.
 
 The worker stores deterministic preprocessing artifacts in S3 and versioned records in PostgreSQL. Lifecycle policies may expire superseded derived artifacts, but must not remove evidence still referenced by an active analysis or story project.

@@ -185,13 +185,15 @@ Optional tuning:
 - `TRANSCRIPTION_VERSION`, `ENABLE_TRANSCRIPTION`
 - `TRANSCRIPTION_RETRIES`, `TRANSCRIPTION_PROVIDER_TIMEOUT`
 - `TRANSCRIPTION_RAW_ARTIFACT_THRESHOLD_BYTES`
-- `SCENE_CHANGE_THRESHOLD`, `MIN_SCENE_DURATION`, `MAX_SEGMENT_DURATION`
-- `LONG_VIDEO_THRESHOLD`, `MAX_FRAMES_SHORT`, `MAX_FRAMES_LONG`
+- `SCENE_CHANGE_THRESHOLD`, `MIN_SCENE_DURATION`, `MAX_SEGMENT_DURATION` (default `5s`)
+- `LONG_VIDEO_THRESHOLD`, `MAX_FRAMES_SHORT` (default `12`), `MAX_FRAMES_LONG` (default `24`)
 - `MAX_SCENE_BOUNDARIES`, `DUPLICATE_HASH_DISTANCE`, `ANALYSIS_FRAME_WIDTH`
 - `STAGE_RETRIES`, `MAX_JOB_ATTEMPTS`, `SQS_VISIBILITY_TIMEOUT`
 - `EVIDENCE_URL_EXPIRY`
 
-Duration values use Go duration syntax such as `750ms`, `90s`, or `2h`. Keep `SQS_VISIBILITY_TIMEOUT` close to the expected provider timeout so transient video-understanding cancellations retry quickly; the GitHub Actions deployment default is `90s`, overridable with `VIDEO_WORKER_SQS_VISIBILITY_TIMEOUT`.
+Duration values use Go duration syntax such as `750ms`, `90s`, or `2h`. Keep `SQS_VISIBILITY_TIMEOUT` close to the expected provider timeout so transient video-understanding cancellations retry quickly; the GitHub Actions deployment default is `240s`, overridable with `VIDEO_WORKER_SQS_VISIBILITY_TIMEOUT`.
+
+On ECS, the worker enables ECS task scale-in protection while a video job is running. This prevents scale-in/deployment interruptions from canceling long video-understanding requests; outside ECS the protection client is inactive.
 
 The previous `SPEECH_*` and `ENABLE_SPEECH_TO_TEXT` variables remain supported as compatibility fallbacks, but new deployments should use the `TRANSCRIPTION_*` names.
 
