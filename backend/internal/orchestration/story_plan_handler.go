@@ -3,6 +3,7 @@ package orchestration
 import (
 	"context"
 	"fmt"
+	"math"
 	"log/slog"
 	"os"
 	"sort"
@@ -61,7 +62,7 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		planner = &ai.Planner{Now: h.Now}
 	}
 	requestPrepareStarted := time.Now()
-	request := h.storyPlanRequest(project, job.Configuration, photoAnalyses, videoAnalyses, mediaClusters(project, mediaByID, photoAnalyses, videoAnalyses))
+	request := h.storyPlanRequest(project, job.Configuration, mediaByID, photoAnalyses, videoAnalyses, mediaClusters(project, mediaByID, photoAnalyses, videoAnalyses))
 	plannerProvider := storyPlannerName(planner)
 	plannerModel := storyPlannerModel(planner)
 	started := time.Now()
@@ -217,9 +218,9 @@ func (h StoryPlanHandler) storyRevisionInput(project models.StoryProject, config
 	}
 }
 
-func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configuration map[string]string, photoAnalyses []models.PhotoAnalysis, videoAnalyses []models.VideoAnalysis, clusters []models.MediaCluster) ai.Request {
+func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configuration map[string]string, mediaByID map[string]models.MediaAsset, photoAnalyses []models.PhotoAnalysis, videoAnalyses []models.VideoAnalysis, clusters []models.MediaCluster) ai.Request {
 	version, _ := strconv.Atoi(strings.TrimSpace(configuration["story_plan_version"]))
-	duration := defaultStoryDuration(project)
+	duration := defaultStoryDuration(project, mediaByID)
 	targetDurationFixed := false
 	if seconds, _ := strconv.Atoi(strings.TrimSpace(configuration["target_duration_seconds"])); seconds > 0 {
 		duration = time.Duration(seconds) * time.Second
@@ -414,13 +415,32 @@ func (h StoryPlanHandler) photoAnalyses(project models.StoryProject, mediaByID m
 	return result
 }
 
-func defaultStoryDuration(project models.StoryProject) time.Duration {
+func defaultStoryDuration(project models.StoryProject, mediaByID map[string]models.MediaAsset) time.Duration {
 	seconds := len(project.MediaIDs) * 4
 	if seconds < 8 {
 		seconds = 8
 	}
 	if len(project.MediaIDs) >= 4 && seconds < 15 {
 		seconds = 15
+	}
+	videoSeconds := 0.0
+	videoCount := 0
+	for _, mediaID := range project.MediaIDs {
+		media, exists := mediaByID[mediaID]
+		if !exists || media.Type != models.MediaTypeVideo || media.DurationSeconds == nil || *media.DurationSeconds <= 0 {
+			continue
+		}
+		videoCount++
+		videoSeconds += *media.DurationSeconds
+	}
+	if videoSeconds > 0 {
+		videoBasedSeconds := int(math.Ceil(videoSeconds/8.0)) + 15
+		if videoCount >= 4 {
+			videoBasedSeconds += 5
+		}
+		if videoBasedSeconds > seconds {
+			seconds = videoBasedSeconds
+		}
 	}
 	if seconds > 60 {
 		seconds = 60

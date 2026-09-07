@@ -523,12 +523,26 @@ func TestMediaClustersSeparatesUnrelatedMedia(t *testing.T) {
 
 func TestDefaultStoryDurationAdaptsToMemorySetSize(t *testing.T) {
 	t.Parallel()
-	if got := defaultStoryDuration(models.StoryProject{MediaIDs: []string{"a", "b", "c", "d"}}); got != 16*time.Second {
+	if got := defaultStoryDuration(models.StoryProject{MediaIDs: []string{"a", "b", "c", "d"}}, nil); got != 16*time.Second {
 		t.Fatalf("4-media duration = %s, want 16s", got)
 	}
 	large := models.StoryProject{MediaIDs: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t"}}
-	if got := defaultStoryDuration(large); got != 60*time.Second {
+	if got := defaultStoryDuration(large, nil); got != 60*time.Second {
 		t.Fatalf("large story duration = %s, want 60s", got)
+	}
+}
+
+func TestDefaultStoryDurationUsesVideoLengthForLongUploads(t *testing.T) {
+	t.Parallel()
+	project := models.StoryProject{MediaIDs: []string{"video-short", "video-long", "photo"}}
+	mediaByID := map[string]models.MediaAsset{
+		"video-short": {ID: "video-short", Type: models.MediaTypeVideo, DurationSeconds: ptrFloat64(72)},
+		"video-long":  {ID: "video-long", Type: models.MediaTypeVideo, DurationSeconds: ptrFloat64(240)},
+		"photo":       {ID: "photo", Type: models.MediaTypePhoto},
+	}
+	got := defaultStoryDuration(project, mediaByID)
+	if got != 54*time.Second {
+		t.Fatalf("long-upload duration = %s, want 54s", got)
 	}
 }
 
