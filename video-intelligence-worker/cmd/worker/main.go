@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/framemio/video-intelligence-worker/internal/callback"
@@ -110,7 +111,7 @@ func main() {
 	}
 	var completionReporter pipeline.CompletionReporter
 	if configuration.BackendURL != "" && configuration.InternalToken != "" {
-		completionReporter = callback.BackendReporter{BaseURL: configuration.BackendURL, InternalToken: configuration.InternalToken}
+		completionReporter = callback.BackendReporter{BaseURL: configuration.BackendURL, InternalToken: configuration.InternalToken, Logger: logger}
 		logger.Info("backend job completion callback enabled")
 	}
 	processor := &pipeline.Processor{
@@ -144,6 +145,8 @@ func main() {
 		slog.Int("video_understanding_retries", configuration.UnderstandingRetries),
 		slog.String("video_understanding_provider", configuration.UnderstandingProvider),
 		slog.String("video_understanding_model", configuration.UnderstandingModel),
+		slog.String("queue_name", queueName(configuration.QueueURL)),
+		slog.String("target_job_id", configuration.JobID),
 	)
 	if configuration.RunOnce {
 		if err := consumer.RunOnce(ctx, handler, configuration.JobID, configuration.RunOnceWaitTimeout); err != nil && !errors.Is(err, context.Canceled) {
@@ -155,4 +158,12 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("video intelligence worker stopped")
+}
+
+func queueName(queueURL string) string {
+	trimmed := strings.TrimRight(strings.TrimSpace(queueURL), "/")
+	if index := strings.LastIndex(trimmed, "/"); index >= 0 {
+		return trimmed[index+1:]
+	}
+	return trimmed
 }

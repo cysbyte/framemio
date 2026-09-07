@@ -1,0 +1,23 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "SQSWorkerQueues",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:ChangeMessageVisibility",
+        "sqs:DeleteMessage",
+        "sqs:GetQueueAttributes",
+        "sqs:GetQueueUrl",
+        "sqs:ReceiveMessage",
+        "sqs:SendMessage"
+      ],
+      "Resource": [
+        "arn:aws:sqs:us-east-1:450876624497:framemio-processing",
+        "arn:aws:sqs:us-east-1:450876624497:framemio-story-processing",
+        "arn:aws:sqs:us-east-1:450876624497:framemio-video-analysis",
+        "arn:aws:sqs:us-east-1:450876624497:framemio-render-processing"
+      ]
+    }
+  ]
+}

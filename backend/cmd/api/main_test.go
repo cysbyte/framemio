@@ -76,7 +76,7 @@ func TestLoadConfigurationStoryPlannerFallsBackToOpenAIEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.StoryPlannerBaseURL != "https://openai-compatible.test" || config.StoryPlannerAPIKey != "fallback-key" || config.StoryPlannerWireAPI != "responses" || config.StoryPlannerTimeout != 90*time.Second || config.StoryPlannerFallbackTimeout != 30*time.Second {
+	if config.StoryPlannerBaseURL != "https://openai-compatible.test" || config.StoryPlannerAPIKey != "fallback-key" || config.StoryPlannerWireAPI != "responses" || config.StoryPlannerTimeout != 90*time.Second || config.StoryPlannerFallbackTimeout != 10*time.Second {
 		t.Fatalf("unexpected story planner config: %+v", config)
 	}
 }

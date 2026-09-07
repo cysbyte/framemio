@@ -163,6 +163,7 @@ func (c *Consumer) receive(ctx context.Context, maxMessages int32) (*sqs.Receive
 }
 
 func (c *Consumer) handleMessage(ctx context.Context, handler Handler, received types.Message) {
+	started := time.Now()
 	if received.Body == nil || received.ReceiptHandle == nil {
 		return
 	}
@@ -191,7 +192,7 @@ func (c *Consumer) handleMessage(ctx context.Context, handler Handler, received 
 	cancel()
 	<-heartbeatDone
 	if err == nil {
-		c.logger.Info("video analysis message handled", slog.String("job_id", message.JobID), slog.String("media_id", message.MediaID))
+		c.logger.Info("video analysis message handled", slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID), slog.String("media_id", message.MediaID), slog.String("job_type", message.JobType), slog.Int("receive_count", receiveCount), slog.Int64("total_duration_ms", time.Since(started).Milliseconds()))
 		c.delete(ctx, *received.ReceiptHandle)
 		return
 	}
@@ -201,7 +202,7 @@ func (c *Consumer) handleMessage(ctx context.Context, handler Handler, received 
 	}
 	c.logger.Error("video analysis job failed",
 		slog.String("job_id", message.JobID), slog.String("media_id", message.MediaID),
-		slog.Int("receive_count", receiveCount), slog.Any("error", err),
+		slog.Int("receive_count", receiveCount), slog.Int64("total_duration_ms", time.Since(started).Milliseconds()), slog.Any("error", err),
 	)
 	if errors.Is(err, domain.ErrNotFound) {
 		c.logger.Warn("delete stale video analysis message", slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID), slog.String("media_id", message.MediaID), slog.String("job_type", message.JobType), slog.Int("receive_count", receiveCount))
@@ -230,6 +231,8 @@ func (c *Consumer) handleMessage(ctx context.Context, handler Handler, received 
 	})
 	if changeErr != nil {
 		c.logger.Error("set video analysis retry visibility", slog.String("job_id", message.JobID), slog.Any("error", changeErr))
+	} else {
+		c.logger.Warn("video analysis message deferred for retry", slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID), slog.String("media_id", message.MediaID), slog.String("job_type", message.JobType), slog.Int("receive_count", receiveCount), slog.Int("retry_visibility_seconds", int(backoff.Seconds())), slog.Int64("total_duration_ms", time.Since(started).Milliseconds()))
 	}
 }
 

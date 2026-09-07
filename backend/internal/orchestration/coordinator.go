@@ -285,7 +285,11 @@ func (c *Coordinator) UpdateJobStatus(ctx context.Context, jobID string, status 
 	if err != nil {
 		return models.ProcessingJob{}, err
 	}
-	c.Logger.Info("job status updated", slog.String("job_id", updated.ID), slog.String("job_type", string(updated.Type)), slog.String("project_id", updated.ProjectID), slog.String("media_id", updated.MediaID), slog.String("previous_status", string(job.Status)), slog.String("status", string(updated.Status)), slog.Float64("progress", updated.Progress), slog.Int("attempt", updated.Attempt), slog.Int("max_attempts", updated.MaxAttempts), slog.Bool("has_artifact", updated.ArtifactS3Key != ""), slog.Int64("job_age_ms", time.Since(job.CreatedAt).Milliseconds()), slog.Int64("previous_status_age_ms", time.Since(job.UpdatedAt).Milliseconds()))
+	queueWait := int64(0)
+	if job.Status == models.JobStatusQueued && updated.Status == models.JobStatusRunning {
+		queueWait = updated.UpdatedAt.Sub(job.CreatedAt).Milliseconds()
+	}
+	c.Logger.Info("job status updated", slog.String("job_id", updated.ID), slog.String("job_type", string(updated.Type)), slog.String("project_id", updated.ProjectID), slog.String("media_id", updated.MediaID), slog.String("previous_status", string(job.Status)), slog.String("status", string(updated.Status)), slog.Float64("progress", updated.Progress), slog.Int("attempt", updated.Attempt), slog.Int("max_attempts", updated.MaxAttempts), slog.Bool("has_artifact", updated.ArtifactS3Key != ""), slog.Int64("job_age_ms", time.Since(job.CreatedAt).Milliseconds()), slog.Int64("previous_status_age_ms", time.Since(job.UpdatedAt).Milliseconds()), slog.Int64("queue_wait_ms", queueWait))
 	if err := c.AdvanceAfterJob(ctx, updated); err != nil {
 		return models.ProcessingJob{}, err
 	}

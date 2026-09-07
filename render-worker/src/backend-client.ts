@@ -25,6 +25,10 @@ export function isBackendRequestError(error: unknown): error is BackendRequestEr
   return error instanceof BackendRequestError;
 }
 
+export function isRetryableBackendError(error: unknown): error is BackendRequestError {
+  return isBackendRequestError(error) && (error.status === 0 || error.status === 408 || error.status === 429 || error.status >= 500);
+}
+
 interface StatusRequest {
   status: 'RUNNING' | 'COMPLETED' | 'FAILED';
   progress: number;
@@ -88,21 +92,45 @@ export class BackendClient {
     if (!this.baseURL || !this.internalToken.trim()) {
       throw new Error('backend url and internal token are required');
     }
-    const response = await fetch(this.baseURL + path, {
-      ...init,
-      headers: {
-        ...(init.headers ?? {}),
-        'X-FrameMio-Internal-Token': this.internalToken,
-      },
-    });
-    if (!response.ok && !allowedStatuses.includes(response.status)) {
+    const method = init.method ?? 'GET';
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      let response: Response;
+      try {
+        response = await fetch(this.baseURL + path, {
+          ...init,
+          headers: {
+            ...(init.headers ?? {}),
+            'X-FrameMio-Internal-Token': this.internalToken,
+          },
+        });
+      } catch (error) {
+        const requestError = new BackendRequestError(`backend ${method} ${path} failed: ${errorMessage(error)}`, 0, method, path);
+        if (attempt === 3) {
+          throw requestError;
+        }
+        console.warn(JSON.stringify({level: 'warn', msg: 'backend request retrying after transport failure', method, path, attempt, next_attempt: attempt + 1, error: requestError.message}));
+        await sleep(250 * 2 ** (attempt - 1));
+        continue;
+      }
+      if (response.ok || allowedStatuses.includes(response.status)) {
+        return response;
+      }
       const text = await response.text();
-      throw new BackendRequestError(`backend ${init.method ?? 'GET'} ${path} returned ${response.status}: ${text.slice(0, 500)}`, response.status, init.method ?? 'GET', path);
+      const requestError = new BackendRequestError(`backend ${method} ${path} returned ${response.status}: ${text.slice(0, 500)}`, response.status, method, path);
+      if (!isRetryableBackendError(requestError) || attempt === 3) {
+        throw requestError;
+      }
+      console.warn(JSON.stringify({level: 'warn', msg: 'backend request retrying after transient response', method, path, status_code: response.status, attempt, next_attempt: attempt + 1}));
+      await sleep(250 * 2 ** (attempt - 1));
     }
-    return response;
+    throw new Error(`backend ${method} ${path} failed without a response`);
   }
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function sleep(durationMs: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, durationMs));
 }

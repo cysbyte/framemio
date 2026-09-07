@@ -119,9 +119,34 @@ func (p *RoutingSQSPublisher) Publish(ctx context.Context, message JobMessage) e
 		slog.String("project_id", message.ProjectID),
 		slog.String("media_id", message.MediaID),
 		slog.String("queue_kind", string(route.Kind)),
+		slog.String("queue_name", queueName(route.URL)),
 		slog.Bool("fallback_used", route.UsedFallback),
 	)
-	return sendJobMessage(ctx, p.client, route.URL, message)
+	started := time.Now()
+	if err := sendJobMessage(ctx, p.client, route.URL, message); err != nil {
+		p.logger.Error("queue publish failed",
+			slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)),
+			slog.String("project_id", message.ProjectID), slog.String("queue_kind", string(route.Kind)),
+			slog.String("queue_name", queueName(route.URL)), slog.Bool("fallback_used", route.UsedFallback),
+			slog.Int64("publish_duration_ms", time.Since(started).Milliseconds()), slog.Any("error", err),
+		)
+		return err
+	}
+	p.logger.Info("queue publish succeeded",
+		slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)),
+		slog.String("project_id", message.ProjectID), slog.String("queue_kind", string(route.Kind)),
+		slog.String("queue_name", queueName(route.URL)), slog.Bool("fallback_used", route.UsedFallback),
+		slog.Int64("publish_duration_ms", time.Since(started).Milliseconds()),
+	)
+	return nil
+}
+
+func queueName(queueURL string) string {
+	trimmed := strings.TrimRight(strings.TrimSpace(queueURL), "/")
+	if index := strings.LastIndex(trimmed, "/"); index >= 0 {
+		return trimmed[index+1:]
+	}
+	return trimmed
 }
 
 func sendJobMessage(ctx context.Context, client *sqs.Client, queueURL string, message JobMessage) error {

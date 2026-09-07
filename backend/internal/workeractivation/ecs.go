@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -144,6 +145,7 @@ func (a *ECSRunTaskActivator) Activate(ctx context.Context, message queue.JobMes
 	if a == nil {
 		return nil
 	}
+	started := time.Now()
 	serviceScaleErr := a.scaleServiceForJob(ctx, message)
 	taskDefinition, containerName, reason, ok := a.workerFor(message.JobType)
 	if !ok {
@@ -197,7 +199,7 @@ func (a *ECSRunTaskActivator) Activate(ctx context.Context, message queue.JobMes
 	for _, task := range output.Tasks {
 		taskARNs = append(taskARNs, aws.ToString(task.TaskArn))
 	}
-	a.logger.Info("started one-off ECS worker task", slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)), slog.String("reason", reason), slog.Int("tasks", len(output.Tasks)), slog.Any("task_arns", taskARNs))
+	a.logger.Info("started one-off ECS worker task", slog.String("job_id", message.JobID), slog.String("job_type", string(message.JobType)), slog.String("reason", reason), slog.Int("tasks", len(output.Tasks)), slog.Any("task_arns", taskARNs), slog.Int64("activation_duration_ms", time.Since(started).Milliseconds()), slog.Bool("service_scale_failed", serviceScaleErr != nil))
 	return serviceScaleErr
 }
 

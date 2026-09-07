@@ -2,7 +2,7 @@ import {setTimeout as sleep} from 'node:timers/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {AwsCliQueue, type ReceivedJobMessage} from './aws-cli.js';
-import {BackendClient, isBackendRequestError} from './backend-client.js';
+import {BackendClient, isBackendRequestError, isRetryableBackendError} from './backend-client.js';
 import {ShellFfmpegClient} from './ffmpeg/client.js';
 import {FfmpegCompositionRenderer, RemotionCliRenderer} from './remotion/renderer.js';
 import {AwsCliObjectStore} from './storage/object-store.js';
@@ -11,6 +11,7 @@ import type {RenderInput} from './types.js';
 
 const unsupportedMessageVisibilitySeconds = 0;
 const nonTargetMessageVisibilitySeconds = 1;
+const backendRetryMessageVisibilitySeconds = 30;
 const defaultShutdownReleaseVisibilitySeconds = 15;
 
 export interface RunnerConfig {
@@ -59,7 +60,7 @@ export async function runRenderWorker(config = loadConfig()): Promise<void> {
         console.error(JSON.stringify({level: 'error', msg: 'render worker shutdown active message release failed', signal, job_id: message.message.jobId, project_id: message.message.projectId, error: error instanceof Error ? error.message : String(error)}));
       });
   });
-  console.info(JSON.stringify({level: 'info', msg: 'render worker started', run_once: config.runOnce, job_id: config.jobID ?? '', renderer_mode: config.rendererMode, visibility_timeout_seconds: config.visibilityTimeoutSeconds, shutdown_release_visibility_seconds: config.shutdownReleaseVisibilitySeconds}));
+  console.info(JSON.stringify({level: 'info', msg: 'render worker started', run_once: config.runOnce, job_id: config.jobID ?? '', renderer_mode: config.rendererMode, queue_name: queueName(config.queueURL), visibility_timeout_seconds: config.visibilityTimeoutSeconds, shutdown_release_visibility_seconds: config.shutdownReleaseVisibilitySeconds}));
 
   try {
     do {
@@ -167,7 +168,9 @@ export async function handleMessage(received: ReceivedJobMessage, dependencies: 
       return true;
     }
   } catch (error) {
-    console.warn(JSON.stringify({level: 'warn', msg: 'render worker job status preflight failed', target_job_id: config.jobID ?? '', job_id: message.jobId, project_id: message.projectId, job_type: message.jobType, receive_count: received.receiveCount, error: error instanceof Error ? error.message : String(error)}));
+    console.warn(JSON.stringify({level: 'warn', msg: 'render worker job status preflight failed; deferring message', target_job_id: config.jobID ?? '', job_id: message.jobId, project_id: message.projectId, job_type: message.jobType, receive_count: received.receiveCount, retry_visibility_seconds: backendRetryMessageVisibilitySeconds, retryable: isRetryableBackendError(error), error: error instanceof Error ? error.message : String(error)}));
+    await queue.defer(received.receiptHandle, backendRetryMessageVisibilitySeconds);
+    return false;
   }
   if (config.runOnce && config.jobID && message.jobId !== config.jobID) {
     console.info(JSON.stringify({level: 'info', msg: 'render worker deferring non-target message', target_job_id: config.jobID, job_id: message.jobId, project_id: message.projectId, job_type: message.jobType, receive_count: received.receiveCount, defer_seconds: nonTargetMessageVisibilitySeconds}));
@@ -180,6 +183,7 @@ export async function handleMessage(received: ReceivedJobMessage, dependencies: 
     return false;
   }
   const startedAt = Date.now();
+  let completionCallbackPending = false;
   console.info(JSON.stringify({level: 'info', msg: 'handling render message', job_id: message.jobId, project_id: message.projectId, receive_count: received.receiveCount}));
   try {
     const markRunningStartedAt = Date.now();
@@ -192,16 +196,28 @@ export async function handleMessage(received: ReceivedJobMessage, dependencies: 
     const result = await worker.render(input);
     console.info(JSON.stringify({level: 'info', msg: 'render pipeline completed', job_id: message.jobId, output_s3_key: result.record.s3_key, duration_ms: Date.now() - renderStartedAt, elapsed_ms: Date.now() - startedAt}));
     const markCompletedStartedAt = Date.now();
+    completionCallbackPending = true;
     await backend.markCompleted(message.jobId, result.record.s3_key);
+    completionCallbackPending = false;
     console.info(JSON.stringify({level: 'info', msg: 'render mark completed callback completed', job_id: message.jobId, duration_ms: Date.now() - markCompletedStartedAt, elapsed_ms: Date.now() - startedAt}));
     await queue.delete(received.receiptHandle);
     console.info(JSON.stringify({level: 'info', msg: 'render message handled', job_id: message.jobId, output_s3_key: result.record.s3_key, total_duration_ms: Date.now() - startedAt}));
     return true;
   } catch (error) {
     console.error(JSON.stringify({level: 'error', msg: 'render message failed', job_id: message.jobId, duration_ms: Date.now() - startedAt, error: error instanceof Error ? error.message : String(error)}));
+    if (completionCallbackPending || isRetryableBackendError(error)) {
+      console.warn(JSON.stringify({level: 'warn', msg: 'render worker retaining message for backend retry', job_id: message.jobId, project_id: message.projectId, receive_count: received.receiveCount, retry_visibility_seconds: backendRetryMessageVisibilitySeconds, completion_callback_pending: completionCallbackPending, error: error instanceof Error ? error.message : String(error)}));
+      await queue.defer(received.receiptHandle, backendRetryMessageVisibilitySeconds);
+      return false;
+    }
     try {
       await backend.markFailed(message.jobId, error);
     } catch (markFailedError) {
+      if (isRetryableBackendError(markFailedError)) {
+        console.warn(JSON.stringify({level: 'warn', msg: 'render worker retaining failed message for callback retry', job_id: message.jobId, project_id: message.projectId, receive_count: received.receiveCount, retry_visibility_seconds: backendRetryMessageVisibilitySeconds, error: markFailedError instanceof Error ? markFailedError.message : String(markFailedError)}));
+        await queue.defer(received.receiptHandle, backendRetryMessageVisibilitySeconds);
+        return false;
+      }
       if (!isIgnorableTerminalCallbackError(markFailedError)) {
         throw markFailedError;
       }
@@ -282,4 +298,9 @@ function durationMs(value: string | undefined, fallback: number): number {
     return amount * 1000;
   }
   return amount;
+}
+
+function queueName(queueURL: string): string {
+  const trimmed = queueURL.trim().replace(/\/+$/, '');
+  return trimmed.slice(trimmed.lastIndexOf('/') + 1);
 }

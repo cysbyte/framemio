@@ -76,7 +76,7 @@ test('defers active non-target render messages in run-once mode', async () => {
   assert.deepEqual(calls, ['jobStatus:job-other-render', 'defer:receipt-job-other-render:1']);
 });
 
-test('deletes stale render messages when callbacks report missing job', async () => {
+test('defers render messages when status preflight fails', async () => {
   const calls: string[] = [];
   const received = renderMessage({jobId: 'job-deleted', receiveCount: 330});
   const handled = await handleMessage(received, {
@@ -86,10 +86,7 @@ test('deletes stale render messages when callbacks report missing job', async ()
         calls.push(`jobStatus:${jobID}`);
         throw new BackendRequestError('status endpoint unavailable', 405, 'GET', `/internal/jobs/${jobID}/status`);
       },
-      async markRunning(jobID: string): Promise<void> {
-        calls.push(`markRunning:${jobID}`);
-        throw new BackendRequestError('record not found', 404, 'POST', `/internal/jobs/${jobID}/status`);
-      },
+      async markRunning(jobID: string): Promise<void> { calls.push(`markRunning:${jobID}`); },
       async renderInput(jobID: string): Promise<RenderInput> {
         calls.push(`renderInput:${jobID}`);
         throw new Error('renderInput should not be called');
@@ -97,17 +94,52 @@ test('deletes stale render messages when callbacks report missing job', async ()
       async markCompleted(jobID: string): Promise<void> {
         calls.push(`markCompleted:${jobID}`);
       },
-      async markFailed(jobID: string): Promise<void> {
-        calls.push(`markFailed:${jobID}`);
-        throw new BackendRequestError('record not found', 404, 'POST', `/internal/jobs/${jobID}/status`);
-      },
+      async markFailed(jobID: string): Promise<void> { calls.push(`markFailed:${jobID}`); },
     },
     worker: workerSpy(calls),
     config: baseConfig,
   });
 
-  assert.equal(handled, true);
-  assert.deepEqual(calls, ['jobStatus:job-deleted', 'markRunning:job-deleted', 'markFailed:job-deleted', 'delete:receipt-job-deleted']);
+  assert.equal(handled, false);
+  assert.deepEqual(calls, ['jobStatus:job-deleted', 'defer:receipt-job-deleted:30']);
+});
+
+test('retains rendered message when completion callback is transiently unavailable', async () => {
+  const calls: string[] = [];
+  const received = renderMessage({jobId: 'job-completion-retry', receiveCount: 2});
+  const handled = await handleMessage(received, {
+    queue: queueSpy(calls),
+    backend: {
+      async jobStatus(jobID: string): Promise<{status: string} | null> { calls.push(`jobStatus:${jobID}`); return {status: 'QUEUED'}; },
+      async markRunning(jobID: string): Promise<void> { calls.push(`markRunning:${jobID}`); },
+      async renderInput(jobID: string): Promise<RenderInput> {
+        calls.push(`renderInput:${jobID}`);
+        return {
+          job_id: jobID,
+          project_id: 'project-1',
+          output_s3_key: 'renders/completed.mp4',
+          story_plan: {id: 'story-plan-1', moments: [], captions: []},
+          media_assets: [],
+        } as unknown as RenderInput;
+      },
+      async markCompleted(jobID: string): Promise<void> { calls.push(`markCompleted:${jobID}`); throw new BackendRequestError('temporarily unavailable', 503, 'POST', `/internal/jobs/${jobID}/status`); },
+      async markFailed(jobID: string): Promise<void> { calls.push(`markFailed:${jobID}`); },
+    },
+    worker: {
+      async render(): Promise<{record: {s3_key: string}}> { calls.push('render'); return {record: {s3_key: 'renders/completed.mp4'}}; },
+    },
+    config: baseConfig,
+  });
+
+  assert.equal(handled, false);
+  assert.deepEqual(calls, [
+    'jobStatus:job-completion-retry',
+    'markRunning:job-completion-retry',
+    'renderInput:job-completion-retry',
+    'render',
+    'markCompleted:job-completion-retry',
+    'defer:receipt-job-completion-retry:30',
+  ]);
 });
 
 function renderMessage(overrides: {jobId: string; jobType?: string; receiveCount: number}): ReceivedJobMessage {

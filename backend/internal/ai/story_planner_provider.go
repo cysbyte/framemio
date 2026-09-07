@@ -81,6 +81,15 @@ func (p FallbackStoryPlanner) Plan(ctx context.Context, request Request) (models
 	primaryLatency := time.Since(started)
 	if err == nil {
 		if validationErr := ValidateStoryPlan(plan); validationErr == nil {
+			if p.Logger != nil {
+				p.Logger.Info("story_planner_primary_succeeded",
+					slog.String("primary_provider", storyPlannerProviderName(p.Primary)),
+					slog.String("primary_model", storyPlannerProviderModel(p.Primary)),
+					slog.Int64("primary_latency_ms", primaryLatency.Milliseconds()),
+					slog.Int("story_plan_version", plan.Version),
+					slog.Int("moment_count", len(plan.Moments)),
+				)
+			}
 			return plan, nil
 		} else {
 			err = fmt.Errorf("primary story planner returned invalid story plan: %w", validationErr)
@@ -102,6 +111,16 @@ func (p FallbackStoryPlanner) Plan(ctx context.Context, request Request) (models
 	fallbackPlan, fallbackErr := p.Fallback.Plan(ctx, request)
 	if fallbackErr != nil {
 		return models.StoryPlan{}, fmt.Errorf("primary story planner failed: %v; fallback story planner failed: %w", err, fallbackErr)
+	}
+	if p.Logger != nil {
+		p.Logger.Info("story_planner_fallback_succeeded",
+			slog.String("primary_provider", storyPlannerProviderName(p.Primary)),
+			slog.String("fallback_provider", storyPlannerProviderName(p.Fallback)),
+			slog.Int64("primary_latency_ms", primaryLatency.Milliseconds()),
+			slog.Int64("fallback_latency_ms", time.Since(started).Milliseconds()-primaryLatency.Milliseconds()),
+			slog.Int("story_plan_version", fallbackPlan.Version),
+			slog.Int("moment_count", len(fallbackPlan.Moments)),
+		)
 	}
 	return fallbackPlan, nil
 }

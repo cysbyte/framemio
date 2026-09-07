@@ -1041,6 +1041,7 @@ func (s *Server) getInternalJobStatus(response http.ResponseWriter, request *htt
 }
 
 func (s *Server) updateJobStatus(response http.ResponseWriter, request *http.Request, jobID string) {
+	started := time.Now()
 	if !s.authenticateInternal(response, request) {
 		return
 	}
@@ -1077,9 +1078,11 @@ func (s *Server) updateJobStatus(response http.ResponseWriter, request *http.Req
 	}
 	job, err := s.Orchestrator.UpdateJobStatus(request.Context(), jobID, input.Status, input.Progress, input.ErrorCode, input.ErrorMessage, input.ArtifactS3Key, input.ArtifactContentType)
 	if err != nil {
+		s.Logger.Error("internal job status callback failed", slog.String("job_id", jobID), slog.String("requested_status", string(input.Status)), slog.Float64("requested_progress", input.Progress), slog.Bool("has_artifact", input.ArtifactS3Key != ""), slog.Int64("callback_duration_ms", time.Since(started).Milliseconds()), slog.Any("error", err))
 		s.mapStoreError(response, err)
 		return
 	}
+	s.Logger.Info("internal job status callback completed", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID), slog.String("status", string(job.Status)), slog.Int("attempt", job.Attempt), slog.Bool("has_artifact", job.ArtifactS3Key != ""), slog.Int64("callback_duration_ms", time.Since(started).Milliseconds()))
 	s.writeJSON(response, http.StatusOK, job)
 }
 

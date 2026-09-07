@@ -2005,7 +2005,9 @@ func (s *Server) iosStoryVideoURL(request *http.Request, userID string, project 
 		}
 	}
 	if artifactKey == "" {
-		s.Logger.Warn("ready iOS story has no completed render artifact", "user_id", userID, "project_id", project.ID, "job_count", len(jobs))
+		if project.Status == models.ProjectStatusReady {
+			s.Logger.Warn("ready iOS story has no completed render artifact", "user_id", userID, "project_id", project.ID, "project_status", string(project.Status), "job_count", len(jobs))
+		}
 		return nil
 	}
 	url, err := s.ObjectStorage.PresignedDownloadURL(request.Context(), artifactKey, iosStoryVideoURLExpiry)

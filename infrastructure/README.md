@@ -13,6 +13,10 @@ Production uses separate SQS queues per worker type so workers do not consume or
 - `framemio-render-processing` via `SQS_RENDER_QUEUE_URL` for `VIDEO_RENDER`.
 - `framemio-processing` via `SQS_PROCESSING_QUEUE_URL` remains a local/dev and migration fallback only.
 
+The backend deployment performs an IAM simulation before deployment and fails if the ECS task role cannot send, receive, delete, or extend visibility on every configured queue. Keep `infrastructure/iam/framemio-ecs-task-role-sqs-policy.json` synchronized with production queue names.
+
+Runtime credentials should be injected through ECS secret references. Set repository variables such as `INTERNAL_API_TOKEN_SECRET_ARN`, `DEEPGRAM_API_KEY_SECRET_ARN`, `STORY_PLANNER_API_KEY_SECRET_ARN`, and `STORY_REVISION_API_KEY_SECRET_ARN` after creating the matching Secrets Manager entries and granting the ECS execution role `secretsmanager:GetSecretValue`. The workflow emits a warning and preserves the existing plaintext environment behavior until each secret is migrated.
+
 Autoscaling alarms must target the queue owned by the service: video worker alarms use `SQS_VIDEO_QUEUE_URL`, render worker alarms use `SQS_RENDER_QUEUE_URL`, and backend story one-off activation reads `SQS_STORY_QUEUE_URL`.
 
 Migration order:
