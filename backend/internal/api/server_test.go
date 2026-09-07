@@ -605,6 +605,27 @@ func TestIOSStoriesCompatibilityDeletesStory(t *testing.T) {
 	if messages := publisher.Messages(); len(messages) != 1 || messages[0].ProjectID != story.ID {
 		t.Fatalf("expected one queued story message before delete, got %+v", messages)
 	}
+	now := time.Now().UTC()
+	terminalRenderJob := models.ProcessingJob{
+		ID:          "job-terminal-render-delete",
+		UserID:      "user-1",
+		ProjectID:   story.ID,
+		Type:        models.JobTypeVideoRender,
+		Status:      models.JobStatusCancelled,
+		Progress:    0.86,
+		MaxAttempts: 3,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if _, _, err := memoryStore.CreateJob(context.Background(), terminalRenderJob, "terminal-render-delete"); err != nil {
+		t.Fatal(err)
+	}
+	if err := publisher.Publish(context.Background(), queue.JobMessage{JobID: terminalRenderJob.ID, ProjectID: story.ID, JobType: models.JobTypeVideoRender}); err != nil {
+		t.Fatal(err)
+	}
+	if messages := publisher.Messages(); len(messages) != 2 {
+		t.Fatalf("expected queued story and terminal render messages before delete, got %+v", messages)
+	}
 
 	deleteResponse := performJSON(t, handler, http.MethodDelete, "/v1/stories/"+story.ID, nil, "", true, nil)
 	if deleteResponse.Code != http.StatusOK {

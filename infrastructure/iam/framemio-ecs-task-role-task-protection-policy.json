@@ -1,0 +1,11 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ECSTaskScaleInProtection",
+      "Effect": "Allow",
+      "Action": "ecs:UpdateTaskProtection",
+      "Resource": "arn:aws:ecs:us-east-1:450876624497:task/my-cluster/*"
+    }
+  ]
+}
