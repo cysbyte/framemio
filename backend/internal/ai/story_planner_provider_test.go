@@ -90,6 +90,28 @@ func TestOpenAICompatibleStoryPlannerNormalizesTotalDurationMismatch(t *testing.
 	}
 }
 
+func TestOpenAICompatibleStoryPlannerSanitizesUnsupportedTransitions(t *testing.T) {
+	t.Parallel()
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		planJSON := `{"schema_version":"story_plan_v1","id":"plan-gpt","project_id":"project-gpt","version":3,"requested_duration_ms":4000,"story_type":"trip","visual_style":"cinematic","title_text":"Video Story","ending_text":"Until next time.","moments":[{"moment_id":"moment-photo","asset_id":"photo-gpt","media_id":"photo-gpt","media_type":"photo","narrative":"A photo moment","duration_ms":2000,"crop_intent":"fit","transition":"iris wipe"},{"moment_id":"moment-video","asset_id":"video-gpt","media_id":"video-gpt","media_type":"video","narrative":"A video moment","duration_ms":2000,"crop_intent":"fill","transition":"push-left"}],"output":{"aspect_ratio":"9:16","max_duration_seconds":4,"preset":"premium-memory"},"total_duration_ms":4000}`
+		return typographyHTTPResponse(http.StatusOK, responsesTypographyResponse(planJSON)), nil
+	})}
+	planner := OpenAICompatibleStoryPlanner{BaseURL: "https://planner.test", APIKey: "test-key", ProviderName: "openai-compatible", ModelName: "gpt-story", WireAPI: "responses", Client: client}
+	plan, err := planner.Plan(context.Background(), storyPlannerProviderRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := plan.Moments[0].Transition; got != "fade_in" {
+		t.Fatalf("expected unsupported first transition to fall back to fade_in, got %q", got)
+	}
+	if got := plan.Moments[1].Transition; got != "cut" {
+		t.Fatalf("expected unsupported later transition to fall back to cut, got %q", got)
+	}
+	if err := ValidateStoryPlan(plan); err != nil {
+		t.Fatalf("expected sanitized plan to pass lightweight validation: %v", err)
+	}
+}
+
 func TestOpenAICompatibleStoryPlannerNormalizesVideoMomentReferences(t *testing.T) {
 	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {

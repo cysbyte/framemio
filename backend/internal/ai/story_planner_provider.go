@@ -529,6 +529,28 @@ func storyPlannerInputFromRequest(request Request) StoryPlannerInput {
 	}
 }
 
+func sanitizeStoryPlannerTransition(transition string, momentIndex int) string {
+	normalized := strings.ToLower(strings.TrimSpace(transition))
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+	normalized = strings.ReplaceAll(normalized, " ", "_")
+	switch normalized {
+	case "fade_in", "fade", "crossfade", "cut":
+		return normalized
+	case "fadein", "fade_up", "fadeup", "dissolve", "dip_to_black", "dip_to_white":
+		return "fade"
+	case "hard_cut", "quick_cut", "jump_cut", "none", "":
+		if momentIndex == 0 {
+			return "fade_in"
+		}
+		return "cut"
+	default:
+		if momentIndex == 0 {
+			return "fade_in"
+		}
+		return "cut"
+	}
+}
+
 func normalizeStoryPlannerMediaReferences(plan *models.StoryPlan, request Request) {
 	photoIDs := make(map[string]struct{}, len(request.PhotoAnalyses))
 	for _, photo := range request.PhotoAnalyses {
@@ -549,13 +571,7 @@ func normalizeStoryPlannerMediaReferences(plan *models.StoryPlan, request Reques
 		if strings.TrimSpace(moment.MediaID) == "" {
 			moment.MediaID = mediaID
 		}
-		if strings.TrimSpace(moment.Transition) == "" {
-			if index == 0 {
-				moment.Transition = "fade_in"
-			} else {
-				moment.Transition = "cut"
-			}
-		}
+		moment.Transition = sanitizeStoryPlannerTransition(moment.Transition, index)
 		if _, ok := photoIDs[mediaID]; ok && moment.MediaType == "" {
 			moment.MediaType = models.MediaTypePhoto
 		}
