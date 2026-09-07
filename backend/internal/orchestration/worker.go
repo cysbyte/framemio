@@ -203,9 +203,8 @@ func (w *Worker) handleReceived(ctx context.Context, received queue.ReceivedJobM
 	}
 	handler := w.Handlers[job.Type]
 	if handler == nil {
-		logger(w).Warn("orchestration worker handler not configured", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)))
-		_, err := w.Coordinator.UpdateJobStatus(ctx, job.ID, models.JobStatusFailed, job.Progress, "handler_not_configured", "no worker handler is configured for this job type", "", "")
-		return true, err
+		logger(w).Warn("orchestration worker ignoring unsupported queue message", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID), slog.Int("receive_count", received.ApproximateReceiveCount))
+		return false, w.Consumer.ExtendVisibility(ctx, received.ReceiptHandle, 0)
 	}
 	if _, err := w.Coordinator.UpdateJobStatus(ctx, job.ID, models.JobStatusRunning, job.Progress, "", "", "", ""); err != nil {
 		if errors.Is(err, store.ErrNotFound) {

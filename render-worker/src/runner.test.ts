@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import {loadConfig} from './runner.js';
 
-test('loads render worker production config from shared processing queue env', () => {
+test('loads render worker production config from render queue env', () => {
   const config = loadConfig({
+    SQS_RENDER_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123/framemio-render',
     SQS_PROCESSING_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123/framemio-processing',
     BACKEND_INTERNAL_API_URL: 'https://api.framemio.com',
     INTERNAL_API_TOKEN: 'internal-token-with-at-least-thirty-two-characters',
@@ -16,7 +17,7 @@ test('loads render worker production config from shared processing queue env', (
     JOB_ID: 'job-render',
   });
 
-  assert.equal(config.queueURL, 'https://sqs.us-east-1.amazonaws.com/123/framemio-processing');
+  assert.equal(config.queueURL, 'https://sqs.us-east-1.amazonaws.com/123/framemio-render');
   assert.equal(config.backendURL, 'https://api.framemio.com');
   assert.equal(config.bucket, 'framemio-media');
   assert.equal(config.runOnce, true);
@@ -26,6 +27,17 @@ test('loads render worker production config from shared processing queue env', (
   assert.equal(config.maxReceiveCount, 7);
   assert.equal(config.rendererMode, 'ffmpeg');
   assert.equal(config.remotionEntryPoint, path.join(process.cwd(), 'src/remotion/entry.tsx'));
+});
+
+test('falls back to shared processing queue env for render worker config', () => {
+  const config = loadConfig({
+    SQS_PROCESSING_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123/framemio-processing',
+    BACKEND_INTERNAL_API_URL: 'https://api.framemio.com',
+    INTERNAL_API_TOKEN: 'internal-token-with-at-least-thirty-two-characters',
+    S3_MEDIA_BUCKET: 'framemio-media',
+  });
+
+  assert.equal(config.queueURL, 'https://sqs.us-east-1.amazonaws.com/123/framemio-processing');
 });
 
 test('loads remotion mode with default and explicit entry points', () => {

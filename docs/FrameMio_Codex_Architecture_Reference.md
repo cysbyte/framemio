@@ -1650,7 +1650,7 @@ Workers should remain private.
 
 Current AWS operation supports both queued workers and one-off ECS task activation:
 
-- backend orchestration publishes identifier-only SQS messages
+- backend orchestration publishes identifier-only SQS messages to type-specific queues: `SQS_STORY_QUEUE_URL` (`framemio-story-processing`) for `STORY_PLAN` and revision/orchestration jobs, `SQS_VIDEO_QUEUE_URL` (`framemio-video-analysis`) for `MEDIA_PREPROCESS`/`TRANSCRIBE`/`VIDEO_UNDERSTAND`, and `SQS_RENDER_QUEUE_URL` (`framemio-render-processing`) for `VIDEO_RENDER`; `SQS_PROCESSING_QUEUE_URL` remains a fallback only
 - when configured, the Go API can start one-off ECS Fargate worker tasks for video, story planning, and rendering stages
 - one-off workers receive `JOB_ID`/`JOB_TYPE` overrides and must process only that target job; non-target active messages are briefly released, while stale or terminal non-target messages may be deleted
 - story one-off wait and SQS visibility defaults are bounded to 3 minutes unless overridden by `STORY_WORKER_RUN_ONCE_WAIT_TIMEOUT`, `WORKER_RUN_ONCE_WAIT_TIMEOUT`, `STORY_WORKER_SQS_VISIBILITY_TIMEOUT`, or `SQS_VISIBILITY_TIMEOUT`

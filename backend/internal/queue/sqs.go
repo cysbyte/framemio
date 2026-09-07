@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,6 +51,34 @@ type SQSPublisher struct {
 	queueURL string
 }
 
+type QueueKind string
+
+const (
+	QueueKindProcessing QueueKind = "shared_fallback"
+	QueueKindStory      QueueKind = "story"
+	QueueKindVideo      QueueKind = "video"
+	QueueKindRender     QueueKind = "render"
+)
+
+type QueueURLs struct {
+	Processing string
+	Story      string
+	Video      string
+	Render     string
+}
+
+type RoutingSQSPublisher struct {
+	client *sqs.Client
+	queues QueueURLs
+	logger *slog.Logger
+}
+
+type QueueRoute struct {
+	Kind         QueueKind
+	URL          string
+	UsedFallback bool
+}
+
 func NewSQSPublisher(ctx context.Context, queueURL string) (*SQSPublisher, error) {
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
@@ -58,10 +87,44 @@ func NewSQSPublisher(ctx context.Context, queueURL string) (*SQSPublisher, error
 	return &SQSPublisher{client: sqs.NewFromConfig(cfg), queueURL: queueURL}, nil
 }
 
+func NewRoutingSQSPublisher(ctx context.Context, queues QueueURLs, logger *slog.Logger) (*RoutingSQSPublisher, error) {
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load aws config: %w", err)
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &RoutingSQSPublisher{client: sqs.NewFromConfig(cfg), queues: normalizeQueueURLs(queues), logger: logger}, nil
+}
+
 func (p *SQSPublisher) Publish(ctx context.Context, message JobMessage) error {
 	if err := validateJobMessage(message); err != nil {
 		return err
 	}
+	return sendJobMessage(ctx, p.client, p.queueURL, message)
+}
+
+func (p *RoutingSQSPublisher) Publish(ctx context.Context, message JobMessage) error {
+	if err := validateJobMessage(message); err != nil {
+		return err
+	}
+	route, err := RouteForJobType(message.JobType, p.queues)
+	if err != nil {
+		return err
+	}
+	p.logger.Info("publishing job message",
+		slog.String("job_id", message.JobID),
+		slog.String("job_type", string(message.JobType)),
+		slog.String("project_id", message.ProjectID),
+		slog.String("media_id", message.MediaID),
+		slog.String("queue_kind", string(route.Kind)),
+		slog.Bool("fallback_used", route.UsedFallback),
+	)
+	return sendJobMessage(ctx, p.client, route.URL, message)
+}
+
+func sendJobMessage(ctx context.Context, client *sqs.Client, queueURL string, message JobMessage) error {
 	body, err := json.Marshal(message)
 	if err != nil {
 		return fmt.Errorf("encode job message: %w", err)
@@ -70,14 +133,14 @@ func (p *SQSPublisher) Publish(ctx context.Context, message JobMessage) error {
 		return fmt.Errorf("job message exceeds 64 KiB safety limit")
 	}
 	input := &sqs.SendMessageInput{
-		QueueUrl:    aws.String(p.queueURL),
+		QueueUrl:    aws.String(queueURL),
 		MessageBody: aws.String(string(body)),
 	}
-	if strings.HasSuffix(p.queueURL, ".fifo") {
+	if strings.HasSuffix(queueURL, ".fifo") {
 		input.MessageDeduplicationId = aws.String(message.JobID)
 		input.MessageGroupId = aws.String(message.ProjectID)
 	}
-	_, err = p.client.SendMessage(ctx, input)
+	_, err = client.SendMessage(ctx, input)
 	if err != nil {
 		return fmt.Errorf("publish job message: %w", err)
 	}
@@ -86,6 +149,102 @@ func (p *SQSPublisher) Publish(ctx context.Context, message JobMessage) error {
 
 func (p *SQSPublisher) DeleteProjectMessages(ctx context.Context, projectID string, jobIDs []string, maxMessages int) (int, error) {
 	return deleteProjectMessages(ctx, p.client, p.queueURL, projectID, jobIDs, maxMessages)
+}
+
+func (p *RoutingSQSPublisher) DeleteProjectMessages(ctx context.Context, projectID string, jobIDs []string, maxMessages int) (int, error) {
+	deleted := 0
+	for _, queueURL := range uniqueQueueURLs(p.queues) {
+		count, err := deleteProjectMessages(ctx, p.client, queueURL, projectID, jobIDs, maxMessages)
+		deleted += count
+		if err != nil {
+			return deleted, err
+		}
+	}
+	return deleted, nil
+}
+
+func RouteForJobType(jobType models.JobType, queues QueueURLs) (QueueRoute, error) {
+	queues = normalizeQueueURLs(queues)
+	kind, ok := QueueKindForJobType(jobType)
+	if !ok {
+		kind = QueueKindStory
+	}
+	if queueURL := queueURLForKind(kind, queues); queueURL != "" {
+		return QueueRoute{Kind: kind, URL: queueURL}, nil
+	}
+	if queues.Processing != "" {
+		return QueueRoute{Kind: QueueKindProcessing, URL: queues.Processing, UsedFallback: true}, nil
+	}
+	return QueueRoute{}, fmt.Errorf("queue URL is not configured for %s jobs", kind)
+}
+
+func QueueKindForJobType(jobType models.JobType) (QueueKind, bool) {
+	normalized, ok := models.NormalizeJobType(jobType)
+	if !ok {
+		return "", false
+	}
+	switch normalized {
+	case models.JobTypeMediaPreprocess, models.JobTypeTranscribe, models.JobTypeVideoUnderstand:
+		return QueueKindVideo, true
+	case models.JobTypeStoryPlan, models.JobTypeStoryValidate:
+		return QueueKindStory, true
+	case models.JobTypeVideoRender:
+		return QueueKindRender, true
+	default:
+		return "", false
+	}
+}
+
+func MissingRouteKinds(queues QueueURLs) []QueueKind {
+	queues = normalizeQueueURLs(queues)
+	missing := make([]QueueKind, 0, 3)
+	for _, kind := range []QueueKind{QueueKindStory, QueueKindVideo, QueueKindRender} {
+		if queueURLForKind(kind, queues) == "" && queues.Processing == "" {
+			missing = append(missing, kind)
+		}
+	}
+	return missing
+}
+
+func queueURLForKind(kind QueueKind, queues QueueURLs) string {
+	switch kind {
+	case QueueKindStory:
+		return queues.Story
+	case QueueKindVideo:
+		return queues.Video
+	case QueueKindRender:
+		return queues.Render
+	case QueueKindProcessing:
+		return queues.Processing
+	default:
+		return ""
+	}
+}
+
+func normalizeQueueURLs(queues QueueURLs) QueueURLs {
+	return QueueURLs{
+		Processing: strings.TrimSpace(queues.Processing),
+		Story:      strings.TrimSpace(queues.Story),
+		Video:      strings.TrimSpace(queues.Video),
+		Render:     strings.TrimSpace(queues.Render),
+	}
+}
+
+func uniqueQueueURLs(queues QueueURLs) []string {
+	queues = normalizeQueueURLs(queues)
+	seen := make(map[string]struct{}, 4)
+	result := make([]string, 0, 4)
+	for _, queueURL := range []string{queues.Story, queues.Video, queues.Render, queues.Processing} {
+		if queueURL == "" {
+			continue
+		}
+		if _, ok := seen[queueURL]; ok {
+			continue
+		}
+		seen[queueURL] = struct{}{}
+		result = append(result, queueURL)
+	}
+	return result
 }
 
 type SQSConsumer struct {

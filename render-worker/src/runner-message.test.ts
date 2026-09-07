@@ -48,7 +48,7 @@ test('deletes queue messages whose jobs no longer exist', async () => {
   assert.deepEqual(calls, ['jobStatus:job-missing', 'delete:receipt-job-missing']);
 });
 
-test('defers active non-render messages', async () => {
+test('releases active non-render messages without delaying the queue', async () => {
   const calls: string[] = [];
   const received = renderMessage({jobId: 'job-story-plan', jobType: 'STORY_PLAN', receiveCount: 5});
   const handled = await handleMessage(received, {
@@ -59,7 +59,7 @@ test('defers active non-render messages', async () => {
   });
 
   assert.equal(handled, false);
-  assert.deepEqual(calls, ['jobStatus:job-story-plan', 'defer:receipt-job-story-plan:1']);
+  assert.deepEqual(calls, ['jobStatus:job-story-plan', 'defer:receipt-job-story-plan:0']);
 });
 
 test('defers active non-target render messages in run-once mode', async () => {

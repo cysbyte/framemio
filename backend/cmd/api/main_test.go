@@ -81,6 +81,44 @@ func TestLoadConfigurationStoryPlannerFallsBackToOpenAIEnv(t *testing.T) {
 	}
 }
 
+func TestLoadConfigurationUsesSpecificSQSQueues(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("S3_MEDIA_BUCKET", "bucket")
+	t.Setenv("SQS_PROCESSING_QUEUE_URL", "processing-queue")
+	t.Setenv("SQS_STORY_QUEUE_URL", "story-queue")
+	t.Setenv("SQS_VIDEO_QUEUE_URL", "video-queue")
+	t.Setenv("SQS_RENDER_QUEUE_URL", "render-queue")
+	t.Setenv("AUTH_HMAC_SECRET", "12345678901234567890123456789012")
+	t.Setenv("INTERNAL_API_TOKEN", "12345678901234567890123456789012")
+
+	config, err := loadConfiguration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.SQSQueueURL != "story-queue" {
+		t.Fatalf("story worker queue = %q, want story-queue", config.SQSQueueURL)
+	}
+	if config.SQSQueueURLs.Story != "story-queue" || config.SQSQueueURLs.Video != "video-queue" || config.SQSQueueURLs.Render != "render-queue" || config.SQSQueueURLs.Processing != "processing-queue" {
+		t.Fatalf("specific SQS queues were not loaded: %+v", config.SQSQueueURLs)
+	}
+}
+
+func TestLoadConfigurationAllowsProcessingQueueFallback(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("S3_MEDIA_BUCKET", "bucket")
+	t.Setenv("SQS_PROCESSING_QUEUE_URL", "processing-queue")
+	t.Setenv("AUTH_HMAC_SECRET", "12345678901234567890123456789012")
+	t.Setenv("INTERNAL_API_TOKEN", "12345678901234567890123456789012")
+
+	config, err := loadConfiguration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.SQSQueueURL != "processing-queue" || config.SQSQueueURLs.Processing != "processing-queue" {
+		t.Fatalf("processing fallback was not loaded: %+v", config)
+	}
+}
+
 func TestLoadConfigurationRejectsIncompleteExternalStoryPlanner(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://example")
 	t.Setenv("S3_MEDIA_BUCKET", "bucket")

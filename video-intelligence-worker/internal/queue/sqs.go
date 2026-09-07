@@ -303,21 +303,20 @@ func (c *Consumer) deferUnsupported(ctx context.Context, received types.Message,
 	if received.ReceiptHandle == nil {
 		return
 	}
-	deferSeconds := int32(1)
+	releaseSeconds := int32(0)
 	receiveCount := 1
 	if value := received.Attributes[string(types.MessageSystemAttributeNameApproximateReceiveCount)]; value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
 			receiveCount = parsed
 		}
 	}
-	c.logger.Info("defer non-video-analysis message", slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID), slog.String("job_type", message.JobType), slog.Int("receive_count", receiveCount), slog.Int("defer_seconds", int(deferSeconds)))
+	c.logger.Warn("video worker ignoring unsupported queue message", slog.String("job_id", message.JobID), slog.String("project_id", message.ProjectID), slog.String("job_type", message.JobType), slog.Int("receive_count", receiveCount), slog.Int("release_seconds", int(releaseSeconds)))
 	_, err := c.client.ChangeMessageVisibility(ctx, &sqs.ChangeMessageVisibilityInput{
-		QueueUrl: aws.String(c.queueURL), ReceiptHandle: received.ReceiptHandle, VisibilityTimeout: deferSeconds,
+		QueueUrl: aws.String(c.queueURL), ReceiptHandle: received.ReceiptHandle, VisibilityTimeout: releaseSeconds,
 	})
 	if err != nil && ctx.Err() == nil {
-		c.logger.Warn("defer unmatched video analysis message", slog.Any("error", err))
+		c.logger.Warn("release unsupported video queue message", slog.Any("error", err))
 	}
-	_ = sleep(ctx, 1500*time.Millisecond)
 }
 
 func (c *Consumer) delete(ctx context.Context, receiptHandle string) {

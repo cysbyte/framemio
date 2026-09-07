@@ -66,7 +66,7 @@ func Load() (Config, error) {
 	configuration := Config{
 		DatabaseURL:                       os.Getenv("DATABASE_URL"),
 		S3Bucket:                          os.Getenv("S3_MEDIA_BUCKET"),
-		QueueURL:                          os.Getenv("SQS_VIDEO_ANALYSIS_QUEUE_URL"),
+		QueueURL:                          environmentFirst([]string{"SQS_VIDEO_QUEUE_URL", "SQS_VIDEO_ANALYSIS_QUEUE_URL", "SQS_PROCESSING_QUEUE_URL"}, ""),
 		AWSRegion:                         os.Getenv("AWS_REGION"),
 		FFmpegPath:                        environment("FFMPEG_PATH", "ffmpeg"),
 		FFprobePath:                       environment("FFPROBE_PATH", "ffprobe"),
@@ -115,7 +115,7 @@ func Load() (Config, error) {
 		InternalToken:                     os.Getenv("INTERNAL_API_TOKEN"),
 	}
 	if configuration.DatabaseURL == "" || configuration.S3Bucket == "" || configuration.QueueURL == "" {
-		return Config{}, errors.New("DATABASE_URL, S3_MEDIA_BUCKET, and SQS_VIDEO_ANALYSIS_QUEUE_URL are required")
+		return Config{}, errors.New("DATABASE_URL, S3_MEDIA_BUCKET, and SQS_VIDEO_QUEUE_URL or SQS_PROCESSING_QUEUE_URL are required")
 	}
 	if !configuration.UsesLocalUnderstanding() && !configuration.UsesDirectUnderstanding() && configuration.UnderstandingURL == "" {
 		return Config{}, errors.New("VIDEO_UNDERSTANDING_API_URL is required")

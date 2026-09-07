@@ -121,7 +121,10 @@ Required environment variables:
 ```text
 DATABASE_URL
 S3_MEDIA_BUCKET
-SQS_PROCESSING_QUEUE_URL
+SQS_STORY_QUEUE_URL       # preferred story/orchestration queue
+SQS_VIDEO_QUEUE_URL       # preferred video-analysis queue
+SQS_RENDER_QUEUE_URL      # preferred render queue
+SQS_PROCESSING_QUEUE_URL  # backwards-compatible fallback if a specific queue URL is unset
 AUTH_HMAC_SECRET          # at least 32 characters
 INTERNAL_API_TOKEN        # at least 32 characters
 ```

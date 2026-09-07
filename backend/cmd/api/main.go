@@ -56,7 +56,7 @@ func main() {
 		logger.Error("configure media download base url", slog.Any("error", err))
 		os.Exit(1)
 	}
-	publisher, err := queue.NewSQSPublisher(ctx, configuration.SQSQueueURL)
+	publisher, err := queue.NewRoutingSQSPublisher(ctx, configuration.SQSQueueURLs, logger)
 	if err != nil {
 		logger.Error("configure queue", slog.Any("error", err))
 		os.Exit(1)
@@ -127,6 +127,7 @@ type configuration struct {
 	S3Bucket                     string
 	MediaDownloadBaseURL         string
 	SQSQueueURL                  string
+	SQSQueueURLs                 queue.QueueURLs
 	AuthHMACSecret               string
 	InternalAPIToken             string
 	PartSizeBytes                int64
@@ -164,11 +165,17 @@ type configuration struct {
 
 func loadConfiguration() (configuration, error) {
 	result := configuration{
-		Port:                         environment("PORT", "8080"),
-		DatabaseURL:                  os.Getenv("DATABASE_URL"),
-		S3Bucket:                     os.Getenv("S3_MEDIA_BUCKET"),
-		MediaDownloadBaseURL:         environment("MEDIA_DOWNLOAD_BASE_URL", os.Getenv("MEDIA_CDN_BASE_URL")),
-		SQSQueueURL:                  os.Getenv("SQS_PROCESSING_QUEUE_URL"),
+		Port:                 environment("PORT", "8080"),
+		DatabaseURL:          os.Getenv("DATABASE_URL"),
+		S3Bucket:             os.Getenv("S3_MEDIA_BUCKET"),
+		MediaDownloadBaseURL: environment("MEDIA_DOWNLOAD_BASE_URL", os.Getenv("MEDIA_CDN_BASE_URL")),
+		SQSQueueURL:          environment("SQS_STORY_QUEUE_URL", os.Getenv("SQS_PROCESSING_QUEUE_URL")),
+		SQSQueueURLs: queue.QueueURLs{
+			Processing: os.Getenv("SQS_PROCESSING_QUEUE_URL"),
+			Story:      os.Getenv("SQS_STORY_QUEUE_URL"),
+			Video:      os.Getenv("SQS_VIDEO_QUEUE_URL"),
+			Render:     os.Getenv("SQS_RENDER_QUEUE_URL"),
+		},
 		AuthHMACSecret:               os.Getenv("AUTH_HMAC_SECRET"),
 		InternalAPIToken:             os.Getenv("INTERNAL_API_TOKEN"),
 		PartSizeBytes:                environmentInt64("UPLOAD_PART_SIZE_BYTES", 8*1024*1024),
@@ -203,8 +210,11 @@ func loadConfiguration() (configuration, error) {
 		WorkerWaitTimeout:            environmentDuration("WORKER_RUN_ONCE_WAIT_TIMEOUT", 6*time.Minute),
 		WorkerVisibilityTimeout:      environmentDuration("SQS_VISIBILITY_TIMEOUT", 5*time.Minute),
 	}
-	if result.DatabaseURL == "" || result.S3Bucket == "" || result.SQSQueueURL == "" {
-		return configuration{}, errors.New("DATABASE_URL, S3_MEDIA_BUCKET, and SQS_PROCESSING_QUEUE_URL are required")
+	if result.DatabaseURL == "" || result.S3Bucket == "" {
+		return configuration{}, errors.New("DATABASE_URL and S3_MEDIA_BUCKET are required")
+	}
+	if missing := queue.MissingRouteKinds(result.SQSQueueURLs); len(missing) > 0 {
+		return configuration{}, errors.New("SQS_STORY_QUEUE_URL, SQS_VIDEO_QUEUE_URL, SQS_RENDER_QUEUE_URL, or SQS_PROCESSING_QUEUE_URL fallback are required")
 	}
 	if len(result.AuthHMACSecret) < 32 {
 		return configuration{}, errors.New("AUTH_HMAC_SECRET must contain at least 32 characters")

@@ -4,6 +4,24 @@ Deployment boundary for Docker images, AWS ECS/Fargate services, ECR, S3, SQS, P
 
 The API, video intelligence worker, and render worker must remain separate deployable workloads with independent scaling characteristics. See `../docs/DB_ECS_DEPLOYMENT_SCALING.md` for current database, ECS deployment, and scale-to-zero operations.
 
+## SQS Queues
+
+Production uses separate SQS queues per worker type so workers do not consume or defer each other's messages:
+
+- `framemio-story-processing` via `SQS_STORY_QUEUE_URL` for `STORY_PLAN`, story revision, and backend orchestration jobs.
+- `framemio-video-analysis` via `SQS_VIDEO_QUEUE_URL` for `MEDIA_PREPROCESS`, `TRANSCRIBE`, and `VIDEO_UNDERSTAND`.
+- `framemio-render-processing` via `SQS_RENDER_QUEUE_URL` for `VIDEO_RENDER`.
+- `framemio-processing` via `SQS_PROCESSING_QUEUE_URL` remains a local/dev and migration fallback only.
+
+Autoscaling alarms must target the queue owned by the service: video worker alarms use `SQS_VIDEO_QUEUE_URL`, render worker alarms use `SQS_RENDER_QUEUE_URL`, and backend story one-off activation reads `SQS_STORY_QUEUE_URL`.
+
+Migration order:
+
+1. Create the three new queues and any matching dead-letter queues/policies.
+2. Deploy the backend first so new jobs publish to type-specific queues.
+3. Deploy video, render, and backend story workers with their new queue env vars.
+4. Confirm `framemio-processing` has no remaining old messages, then drain or purge it.
+
 ## Video Intelligence Worker
 
 - Build and publish `video-intelligence-worker/Dockerfile` as its own ECR image.

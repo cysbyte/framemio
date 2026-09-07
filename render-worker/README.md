@@ -29,11 +29,11 @@ For the same `StoryPlan`, source asset metadata, and renderer version, the worke
 
 ## Runtime
 
-The production entrypoint is `npm start`. It polls the shared processing SQS queue for `VIDEO_RENDER` messages, fetches render input from `GET /internal/jobs/:id/render-input`, downloads source objects from S3, uploads the MP4 output to S3, and reports completion through `POST /internal/jobs/:id/status`.
+The production entrypoint is `npm start`. It polls `SQS_RENDER_QUEUE_URL` / `framemio-render-processing` for `VIDEO_RENDER` messages, fetches render input from `GET /internal/jobs/:id/render-input`, downloads source objects from S3, uploads the MP4 output to S3, and reports completion through `POST /internal/jobs/:id/status`.
 
 Required ECS environment variables:
 
-- `SQS_PROCESSING_QUEUE_URL`
+- `SQS_RENDER_QUEUE_URL` (preferred), with fallback to `SQS_PROCESSING_QUEUE_URL`
 - `BACKEND_INTERNAL_API_URL`
 - `INTERNAL_API_TOKEN`
 - `S3_MEDIA_BUCKET`

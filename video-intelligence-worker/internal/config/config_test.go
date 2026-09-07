@@ -94,7 +94,7 @@ func TestLoadRequiresDirectTranscriptionAPIKey(t *testing.T) {
 func TestLoadAllowsDeepgramTranscriptionWithoutAdapterURL(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://framemio_app@example.test/postgres")
 	t.Setenv("S3_MEDIA_BUCKET", "framemio-media")
-	t.Setenv("SQS_VIDEO_ANALYSIS_QUEUE_URL", "https://sqs.example.test/queue")
+	t.Setenv("SQS_VIDEO_QUEUE_URL", "https://sqs.example.test/video")
 	t.Setenv("VIDEO_UNDERSTANDING_PROVIDER", "local")
 	t.Setenv("ENABLE_TRANSCRIPTION", "true")
 	t.Setenv("TRANSCRIPTION_PROVIDER", "deepgram")
@@ -112,6 +112,55 @@ func TestLoadAllowsDeepgramTranscriptionWithoutAdapterURL(t *testing.T) {
 	}
 	if configuration.TranscriptionAPIKey != "deepgram-secret" || configuration.TranscriptionModel != "nova-3" || configuration.TranscriptionUpstreamBaseURL != "" {
 		t.Fatalf("deepgram settings were not loaded: %+v", configuration)
+	}
+}
+
+func TestLoadPrefersVideoQueueURL(t *testing.T) {
+	setRequiredEnvironment(t)
+	t.Setenv("SQS_VIDEO_QUEUE_URL", "https://sqs.example.test/video")
+	t.Setenv("SQS_VIDEO_ANALYSIS_QUEUE_URL", "https://sqs.example.test/video-analysis")
+	t.Setenv("SQS_PROCESSING_QUEUE_URL", "https://sqs.example.test/processing")
+	t.Setenv("VIDEO_UNDERSTANDING_PROVIDER", "local")
+
+	configuration, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configuration.QueueURL != "https://sqs.example.test/video" {
+		t.Fatalf("QueueURL = %q, want video queue", configuration.QueueURL)
+	}
+}
+
+func TestLoadFallsBackToVideoAnalysisQueueURL(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://framemio_app@example.test/postgres")
+	t.Setenv("S3_MEDIA_BUCKET", "framemio-media")
+	t.Setenv("SQS_VIDEO_ANALYSIS_QUEUE_URL", "https://sqs.example.test/video-analysis")
+	t.Setenv("SQS_PROCESSING_QUEUE_URL", "https://sqs.example.test/processing")
+	t.Setenv("VIDEO_UNDERSTANDING_PROVIDER", "local")
+	t.Setenv("ENABLE_TRANSCRIPTION", "false")
+
+	configuration, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configuration.QueueURL != "https://sqs.example.test/video-analysis" {
+		t.Fatalf("QueueURL = %q, want video-analysis fallback", configuration.QueueURL)
+	}
+}
+
+func TestLoadFallsBackToProcessingQueueURL(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://framemio_app@example.test/postgres")
+	t.Setenv("S3_MEDIA_BUCKET", "framemio-media")
+	t.Setenv("SQS_PROCESSING_QUEUE_URL", "https://sqs.example.test/processing")
+	t.Setenv("VIDEO_UNDERSTANDING_PROVIDER", "local")
+	t.Setenv("ENABLE_TRANSCRIPTION", "false")
+
+	configuration, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configuration.QueueURL != "https://sqs.example.test/processing" {
+		t.Fatalf("QueueURL = %q, want processing fallback", configuration.QueueURL)
 	}
 }
 
@@ -161,7 +210,7 @@ func setRequiredEnvironment(t *testing.T) {
 	t.Helper()
 	t.Setenv("DATABASE_URL", "postgres://framemio_app@example.test/postgres")
 	t.Setenv("S3_MEDIA_BUCKET", "framemio-media")
-	t.Setenv("SQS_VIDEO_ANALYSIS_QUEUE_URL", "https://sqs.example.test/queue")
+	t.Setenv("SQS_VIDEO_QUEUE_URL", "https://sqs.example.test/video")
 	t.Setenv("TRANSCRIPTION_API_URL", "http://localhost:9001")
 	t.Setenv("ENABLE_TRANSCRIPTION", "false")
 	t.Setenv("MULTIMODAL_API_URL", "")

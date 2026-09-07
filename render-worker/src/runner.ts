@@ -9,7 +9,7 @@ import {AwsCliObjectStore} from './storage/object-store.js';
 import {DeterministicRenderWorker} from './pipeline/render-worker.js';
 import type {RenderInput} from './types.js';
 
-const unsupportedMessageVisibilitySeconds = 1;
+const unsupportedMessageVisibilitySeconds = 0;
 const nonTargetMessageVisibilitySeconds = 1;
 const defaultShutdownReleaseVisibilitySeconds = 15;
 
@@ -175,7 +175,7 @@ export async function handleMessage(received: ReceivedJobMessage, dependencies: 
     return false;
   }
   if (message.jobType !== 'VIDEO_RENDER') {
-    console.info(JSON.stringify({level: 'info', msg: 'render worker deferring non-render message', target_job_id: config.jobID ?? '', job_id: message.jobId, project_id: message.projectId, job_type: message.jobType, receive_count: received.receiveCount, defer_seconds: unsupportedMessageVisibilitySeconds}));
+    console.warn(JSON.stringify({level: 'warn', msg: 'render worker ignoring unsupported queue message', target_job_id: config.jobID ?? '', job_id: message.jobId, project_id: message.projectId, job_type: message.jobType, receive_count: received.receiveCount, release_seconds: unsupportedMessageVisibilitySeconds}));
     await queue.defer(received.receiptHandle, unsupportedMessageVisibilitySeconds);
     return false;
   }
@@ -226,7 +226,7 @@ export function loadConfig(environment = process.env): RunnerConfig {
     throw new Error('RENDERER_MODE must be ffmpeg or remotion');
   }
   return {
-    queueURL: required(first(environment.SQS_RENDER_QUEUE_URL, environment.SQS_PROCESSING_QUEUE_URL, environment.SQS_VIDEO_ANALYSIS_QUEUE_URL), 'SQS_PROCESSING_QUEUE_URL'),
+    queueURL: required(first(environment.SQS_RENDER_QUEUE_URL, environment.SQS_PROCESSING_QUEUE_URL), 'SQS_RENDER_QUEUE_URL or SQS_PROCESSING_QUEUE_URL'),
     backendURL: required(first(environment.BACKEND_INTERNAL_API_URL, environment.BACKEND_URL, environment.API_BASE_URL), 'BACKEND_INTERNAL_API_URL'),
     internalToken: required(environment.INTERNAL_API_TOKEN, 'INTERNAL_API_TOKEN'),
     bucket: required(environment.S3_MEDIA_BUCKET, 'S3_MEDIA_BUCKET'),

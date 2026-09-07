@@ -73,7 +73,7 @@ The original media remains at the key recorded by the backend. Temporary local w
 
 ## Queue Contract
 
-`SQS_VIDEO_ANALYSIS_QUEUE_URL` must point to a queue containing only video-analysis jobs:
+`SQS_VIDEO_QUEUE_URL` must point to `framemio-video-analysis`, a queue containing only video jobs. `SQS_VIDEO_ANALYSIS_QUEUE_URL` and then `SQS_PROCESSING_QUEUE_URL` are supported fallbacks for local/dev compatibility:
 
 ```json
 {
@@ -158,7 +158,7 @@ Required:
 
 - `DATABASE_URL`
 - `S3_MEDIA_BUCKET`
-- `SQS_VIDEO_ANALYSIS_QUEUE_URL`
+- `SQS_VIDEO_QUEUE_URL` (preferred), with fallback to `SQS_VIDEO_ANALYSIS_QUEUE_URL` and `SQS_PROCESSING_QUEUE_URL`
 - `VIDEO_UNDERSTANDING_API_URL` unless `VIDEO_UNDERSTANDING_DIRECT=true`
 - `VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL` and API key when `VIDEO_UNDERSTANDING_DIRECT=true`
 - `TRANSCRIPTION_API_URL` when `ENABLE_TRANSCRIPTION=true` and no direct provider such as Deepgram/OpenAI-compatible STT is selected
