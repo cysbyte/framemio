@@ -7,6 +7,9 @@ struct FrameMioApp: App {
     var body: some Scene {
         WindowGroup {
             AppRootView(dependencies: dependencies)
+                .task {
+                    await warmStoreKitProductCaches()
+                }
         }
     }
 }

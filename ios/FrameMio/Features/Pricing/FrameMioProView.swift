@@ -35,6 +35,28 @@ private func loadStoreKitProducts(productIDs: [String], timeoutSeconds: Int, log
         return products
     }
 }
+
+
+@MainActor
+func warmStoreKitProductCaches() async {
+    let productGroups: [(label: String, productIDs: [String])] = [
+        ("pro", FrameMioProCatalog.productIDs),
+        ("credit_packs", [FrameMioCreditPackCatalog.smallProductID, FrameMioCreditPackCatalog.mediumProductID, FrameMioCreditPackCatalog.largeProductID])
+    ]
+    for group in productGroups {
+        do {
+            let products = try await loadStoreKitProducts(productIDs: group.productIDs, timeoutSeconds: 20, logPrefix: "warm_\(group.label)")
+            pricingDebugLog("warm_storekit_cache_loaded label=\(group.label) returned=\(products.map(\.id).sorted().joined(separator: ",")) count=\(products.count)")
+            if group.label == "pro" {
+                FrameMioProViewModel.cachedProductsByID = Dictionary(uniqueKeysWithValues: products.map { ($0.id, $0) })
+            } else {
+                FrameMioCreditPacksViewModel.cachedProductsByID = Dictionary(uniqueKeysWithValues: products.map { ($0.id, $0) })
+            }
+        } catch {
+            pricingDebugLog("warm_storekit_cache_failed label=\(group.label) error=\(error.localizedDescription)")
+        }
+    }
+}
 import UIKit
 
 enum FrameMioProPlanKind: String, CaseIterable, Identifiable, Sendable {
@@ -136,6 +158,7 @@ final class FrameMioProViewModel: ObservableObject {
     @Published private(set) var balance: Int?
     @Published private(set) var reservedBalance = 0
     @Published private(set) var isSubscribed = false
+    @Published private(set) var isAutoRenewingSubscription = false
     @Published private(set) var renewalDate: Date?
     @Published private(set) var isLoading = false
     @Published private(set) var isPurchasing = false
@@ -152,6 +175,7 @@ final class FrameMioProViewModel: ObservableObject {
     private let onBalanceUpdated: () -> Void
     private var loadTask: Task<Void, Never>?
     private var updatesTask: Task<Void, Never>?
+    fileprivate static var cachedProductsByID: [String: Product] = [:]
 
     init(
         source: PricingEntryPoint,
@@ -198,7 +222,7 @@ final class FrameMioProViewModel: ObservableObject {
 
     var primaryButtonTitle: String {
         if isSubscribed {
-            return "Manage Subscription"
+            return isAutoRenewingSubscription ? "Manage Subscription" : "Renew Subscription"
         }
         guard canPurchaseSelectedPlan else {
             return isLoading ? "Loading FrameMio Pro…" : "Retry Loading Plans"
@@ -207,7 +231,7 @@ final class FrameMioProViewModel: ObservableObject {
     }
 
     var canPurchaseSelectedPlan: Bool {
-        isSubscribed || product(for: selectedPlan) != nil || shouldSimulatePurchaseSuccess
+        (!isSubscribed || isAutoRenewingSubscription) && (product(for: selectedPlan) != nil || shouldSimulatePurchaseSuccess)
     }
 
     var primaryButtonIsLoading: Bool {
@@ -221,7 +245,7 @@ final class FrameMioProViewModel: ObservableObject {
     var primaryButtonDisabledReason: String {
         if isPurchasing { return "purchasing" }
         if isRestoring { return "restoring" }
-        if isSubscribed { return "subscribed_manage_enabled" }
+        if isSubscribed { return isAutoRenewingSubscription ? "subscribed_manage_enabled" : "subscription_renew_enabled" }
         if canPurchaseSelectedPlan { return "enabled" }
         if isLoading { return "loading_storekit_products" }
         if monthlyProduct == nil && yearlyProduct == nil { return "storekit_products_unavailable_retry_enabled" }
@@ -229,7 +253,7 @@ final class FrameMioProViewModel: ObservableObject {
     }
 
     var primaryButtonDebugState: String {
-        "selected=\(selectedPlan.rawValue) disabled=\(primaryButtonIsDisabled) reason=\(primaryButtonDisabledReason) loading=\(isLoading) purchasing=\(isPurchasing) restoring=\(isRestoring) subscribed=\(isSubscribed) monthly_loaded=\(monthlyProduct != nil) yearly_loaded=\(yearlyProduct != nil) simulate=\(shouldSimulatePurchaseSuccess)"
+        "selected=\(selectedPlan.rawValue) disabled=\(primaryButtonIsDisabled) reason=\(primaryButtonDisabledReason) loading=\(isLoading) purchasing=\(isPurchasing) restoring=\(isRestoring) subscribed=\(isSubscribed) auto_renewing=\(isAutoRenewingSubscription) monthly_loaded=\(monthlyProduct != nil) yearly_loaded=\(yearlyProduct != nil) simulate=\(shouldSimulatePurchaseSuccess)"
     }
 
     func load() {
@@ -258,12 +282,26 @@ final class FrameMioProViewModel: ObservableObject {
                     pricingDebugLog("load_complete_debug subscribed=\(isSubscribed) balance=\(balance.map(String.init) ?? "nil") renewal=\(renewalDate?.description ?? "nil")")
                 } else {
                     async let balanceTask: Void = fetchBalance()
-                    let products = try await loadStoreKitProducts(productIDs: FrameMioProCatalog.productIDs, timeoutSeconds: 8, logPrefix: "pro")
-                    let loadedProductIDs = products.map(\.id).sorted()
-                    pricingDebugLog("load_products_requested ids=\(FrameMioProCatalog.productIDs.joined(separator: ",")) returned=\(loadedProductIDs.joined(separator: ",")) count=\(products.count)")
-                    monthlyProduct = products.first { $0.id == FrameMioProCatalog.monthlyProductID }
-                    yearlyProduct = products.first { $0.id == FrameMioProCatalog.yearlyProductID }
-                    pricingDebugLog("load_products_loaded monthly=\(monthlyProduct != nil) yearly=\(yearlyProduct != nil)")
+                    let productIDs = FrameMioProCatalog.productIDs
+                    let cachedProducts = cachedProducts(for: productIDs)
+                    if cachedProducts.count == productIDs.count {
+                        monthlyProduct = cachedProducts[FrameMioProCatalog.monthlyProductID]
+                        yearlyProduct = cachedProducts[FrameMioProCatalog.yearlyProductID]
+                        pricingDebugLog("load_products_cache_applied returned=\(cachedProducts.keys.sorted().joined(separator: ",")) count=\(cachedProducts.count) skipped_storekit_fetch=true")
+                    } else {
+                        if !cachedProducts.isEmpty {
+                            monthlyProduct = cachedProducts[FrameMioProCatalog.monthlyProductID]
+                            yearlyProduct = cachedProducts[FrameMioProCatalog.yearlyProductID]
+                            pricingDebugLog("load_products_cache_applied returned=\(cachedProducts.keys.sorted().joined(separator: ",")) count=\(cachedProducts.count)")
+                        }
+                        let products = try await loadStoreKitProducts(productIDs: productIDs, timeoutSeconds: 20, logPrefix: "pro")
+                        let loadedProductIDs = products.map(\.id).sorted()
+                        pricingDebugLog("load_products_requested ids=\(FrameMioProCatalog.productIDs.joined(separator: ",")) returned=\(loadedProductIDs.joined(separator: ",")) count=\(products.count)")
+                        monthlyProduct = products.first { $0.id == FrameMioProCatalog.monthlyProductID }
+                        yearlyProduct = products.first { $0.id == FrameMioProCatalog.yearlyProductID }
+                        cacheProducts(products)
+                        pricingDebugLog("load_products_loaded monthly=\(monthlyProduct != nil) yearly=\(yearlyProduct != nil)")
+                    }
                     _ = await balanceTask
                     await refreshEntitlements()
                     if isSubscribed {
@@ -296,15 +334,16 @@ final class FrameMioProViewModel: ObservableObject {
                     pricingDebugLog("load_cancelled error=\(error.localizedDescription)")
                     return
                 }
-#if DEBUG
-                errorMessage = nil
-                statusMessage = "Could not load App Store plans. Tap Retry Loading Plans."
-                pricingDebugLog("load_failed_debug suppressed_alert error=\(error.localizedDescription) mapped=\(AppError.from(error).localizedDescription) \(primaryButtonDebugState)")
-#else
-                errorMessage = nil
-                statusMessage = "Could not load App Store plans. Tap Retry Loading Plans."
-                pricingDebugLog("load_failed error=\(error.localizedDescription) mapped=\(AppError.from(error).localizedDescription) \(primaryButtonDebugState)")
-#endif
+                let appError = AppError.from(error).localizedDescription
+                if monthlyProduct == nil && yearlyProduct == nil {
+                    errorMessage = nil
+                    statusMessage = "Could not load App Store plans. Tap Retry Loading Plans."
+                    pricingDebugLog("load_failed error=\(error.localizedDescription) mapped=\(appError) using_cached_products=false \(primaryButtonDebugState)")
+                } else {
+                    errorMessage = nil
+                    statusMessage = "App Store prices are taking longer than usual."
+                    pricingDebugLog("load_failed error=\(error.localizedDescription) mapped=\(appError) using_cached_products=true \(primaryButtonDebugState)")
+                }
             }
         }
     }
@@ -437,6 +476,26 @@ final class FrameMioProViewModel: ObservableObject {
         }
     }
 
+    private func cachedProducts(for productIDs: [String]) -> [String: Product] {
+        let productIDSet = Set(productIDs)
+        return Self.cachedProductsByID.filter { productIDSet.contains($0.key) }
+    }
+
+    private func cacheProducts(_ loadedProducts: [Product]) {
+        for product in loadedProducts {
+            Self.cachedProductsByID[product.id] = product
+        }
+    }
+
+    private func verifiedRenewalInfo(from result: VerificationResult<Product.SubscriptionInfo.RenewalInfo>) throws -> Product.SubscriptionInfo.RenewalInfo {
+        switch result {
+        case let .verified(value):
+            return value
+        case let .unverified(_, error):
+            throw error
+        }
+    }
+
     private func verifiedTransaction<T>(from result: VerificationResult<T>) throws -> T {
         switch result {
         case let .verified(value):
@@ -449,6 +508,7 @@ final class FrameMioProViewModel: ObservableObject {
     private func refreshEntitlements() async {
         var activeSubscriptionDate: Date?
         var subscriptionActive = false
+        var autoRenewingSubscription = false
         pricingDebugLog("refresh_entitlements_start")
         for await result in StoreKit.Transaction.currentEntitlements {
             guard let transaction = try? verifiedTransaction(from: result) else { continue }
@@ -463,10 +523,20 @@ final class FrameMioProViewModel: ObservableObject {
                     activeSubscriptionDate = expirationDate
                 }
             }
+            if let status = await transaction.subscriptionStatus {
+                do {
+                    let renewalInfo = try verifiedRenewalInfo(from: status.renewalInfo)
+                    autoRenewingSubscription = autoRenewingSubscription || renewalInfo.willAutoRenew
+                    pricingDebugLog("refresh_entitlements_subscription_status product=\(transaction.productID) state=\(String(describing: status.state)) will_auto_renew=\(renewalInfo.willAutoRenew)")
+                } catch {
+                    pricingDebugLog("refresh_entitlements_subscription_status_unverified product=\(transaction.productID) error=\(error.localizedDescription)")
+                }
+            }
         }
         isSubscribed = subscriptionActive
+        isAutoRenewingSubscription = autoRenewingSubscription
         renewalDate = activeSubscriptionDate
-        pricingDebugLog("refresh_entitlements_complete subscribed=\(subscriptionActive) renewal=\(activeSubscriptionDate?.description ?? "nil")")
+        pricingDebugLog("refresh_entitlements_complete subscribed=\(subscriptionActive) auto_renewing=\(autoRenewingSubscription) renewal=\(activeSubscriptionDate?.description ?? "nil")")
     }
 
     private func fetchBalance() async {
@@ -650,7 +720,7 @@ struct FrameMioProView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 if viewModel.isSubscribed {
-                    Button("Manage") {
+                    Button(viewModel.isAutoRenewingSubscription ? "Manage" : "Renew") {
                         viewModel.manageSubscription()
                     }
                 }
@@ -887,6 +957,7 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
     private let onBalanceUpdated: () -> Void
     private var loadTask: Task<Void, Never>?
     private var updatesTask: Task<Void, Never>?
+    fileprivate static var cachedProductsByID: [String: Product] = [:]
 
     private var shouldSimulatePurchaseSuccess: Bool {
         let environment = ProcessInfo.processInfo.environment["FRAMEMIO_SIMULATE_PURCHASE_SUCCESS"]?.lowercased()
@@ -973,6 +1044,17 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
         pack.productID ?? FrameMioCreditPackCatalog.productID(for: pack.id)
     }
 
+    private func cachedProducts(for productIDs: [String]) -> [String: Product] {
+        let productIDSet = Set(productIDs)
+        return Self.cachedProductsByID.filter { productIDSet.contains($0.key) }
+    }
+
+    private func cacheProducts(_ loadedProducts: [Product]) {
+        for product in loadedProducts {
+            Self.cachedProductsByID[product.id] = product
+        }
+    }
+
     func load() {
         if isLoading {
             pricingDebugLog("credit_packs_load_ignored reason=already_loading \(primaryButtonDebugState)")
@@ -1009,15 +1091,33 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
                 } else {
                     let productIDs = loadedPacks.compactMap { self.productID(for: $0) }
                     pricingDebugLog("credit_packs_products_requested ids=\(productIDs.joined(separator: ","))")
-                    let loadedProducts = try await loadStoreKitProducts(productIDs: productIDs, timeoutSeconds: 8, logPrefix: "credit_packs")
-                    products = Dictionary(uniqueKeysWithValues: loadedProducts.map { ($0.id, $0) })
-                    pricingDebugLog("credit_packs_products_loaded returned=\(loadedProducts.map(\.id).sorted().joined(separator: ",")) count=\(loadedProducts.count) \(primaryButtonDebugState)")
+                    let cachedProducts = cachedProducts(for: productIDs)
+                    if cachedProducts.count == productIDs.count {
+                        products = cachedProducts
+                        pricingDebugLog("credit_packs_products_cache_applied returned=\(cachedProducts.keys.sorted().joined(separator: ",")) count=\(cachedProducts.count) skipped_storekit_fetch=true")
+                    } else {
+                        if !cachedProducts.isEmpty {
+                            products = cachedProducts
+                            pricingDebugLog("credit_packs_products_cache_applied returned=\(cachedProducts.keys.sorted().joined(separator: ",")) count=\(cachedProducts.count)")
+                        }
+                        let loadedProducts = try await loadStoreKitProducts(productIDs: productIDs, timeoutSeconds: 20, logPrefix: "credit_packs")
+                        products = Dictionary(uniqueKeysWithValues: loadedProducts.map { ($0.id, $0) })
+                        cacheProducts(loadedProducts)
+                        pricingDebugLog("credit_packs_products_loaded returned=\(loadedProducts.map(\.id).sorted().joined(separator: ",")) count=\(loadedProducts.count) \(primaryButtonDebugState)")
+                    }
                 }
                 errorMessage = nil
             } catch {
-                errorMessage = nil
-                statusMessage = "Could not load App Store credit packs. Tap Retry Loading Credit Packs."
-                pricingDebugLog("credit_packs_load_failed error=\(error.localizedDescription) mapped=\(AppError.from(error).localizedDescription) \(primaryButtonDebugState)")
+                let appError = AppError.from(error).localizedDescription
+                if products.isEmpty {
+                    errorMessage = nil
+                    statusMessage = "Could not load App Store credit packs. Tap Retry Loading Credit Packs."
+                    pricingDebugLog("credit_packs_load_failed error=\(error.localizedDescription) mapped=\(appError) using_cached_products=false \(primaryButtonDebugState)")
+                } else {
+                    errorMessage = nil
+                    statusMessage = "App Store prices are taking longer than usual."
+                    pricingDebugLog("credit_packs_load_failed error=\(error.localizedDescription) mapped=\(appError) using_cached_products=true \(primaryButtonDebugState)")
+                }
             }
         }
     }

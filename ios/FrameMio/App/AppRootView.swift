@@ -1,3 +1,4 @@
+import StoreKit
 import SwiftUI
 
 private func purchaseRoutingDebugLog(_ message: @autoclosure () -> String) {
@@ -135,22 +136,50 @@ struct AppRootView: View {
     }
 
     private func openPurchaseDestination(_ source: PricingEntryPoint) {
-        if let balance = creditStore.balance, balance.hasActiveSubscriptionCycle {
-            purchaseRoutingDebugLog("destination=credit_packs source=\(source.rawValue) reason=cached_subscription_cycle available=\(balance.available) reserved=\(balance.reserved) subscription_display=\(balance.displaySubscriptionCredits)")
-            purchaseDestination = .creditPacks(source)
-            return
-        }
-
-        purchaseRoutingDebugLog("destination_lookup_started source=\(source.rawValue) cached_balance=\(creditStore.balance?.available.description ?? "nil") cached_reserved=\(creditStore.balance?.reserved.description ?? "nil")")
         Task { @MainActor in
+            let shouldShowCreditPacks = await shouldShowCreditPacksForPurchase()
             let balance = (try? await dependencies.creditService.balance()) ?? creditStore.balance
-            if let balance, balance.hasActiveSubscriptionCycle {
-                purchaseRoutingDebugLog("destination=credit_packs source=\(source.rawValue) reason=fetched_subscription_cycle available=\(balance.available) reserved=\(balance.reserved) subscription_display=\(balance.displaySubscriptionCredits)")
+            purchaseRoutingDebugLog("destination_lookup_complete source=\(source.rawValue) show_credit_packs=\(shouldShowCreditPacks) available=\(balance?.available.description ?? "nil") reserved=\(balance?.reserved.description ?? "nil")")
+            if shouldShowCreditPacks {
+                purchaseRoutingDebugLog("destination=credit_packs source=\(source.rawValue) reason=active_and_renewing_subscription available=\(balance?.available.description ?? "nil") reserved=\(balance?.reserved.description ?? "nil")")
                 purchaseDestination = .creditPacks(source)
             } else {
-                purchaseRoutingDebugLog("destination=pro source=\(source.rawValue) reason=no_subscription_cycle available=\(balance?.available.description ?? "nil") reserved=\(balance?.reserved.description ?? "nil")")
+                purchaseRoutingDebugLog("destination=pro source=\(source.rawValue) reason=cancelled_or_not_renewing_subscription available=\(balance?.available.description ?? "nil") reserved=\(balance?.reserved.description ?? "nil")")
                 purchaseDestination = .pro(source)
             }
+        }
+    }
+
+    private func shouldShowCreditPacksForPurchase() async -> Bool {
+        for await result in Transaction.currentEntitlements {
+            guard case let .verified(transaction) = result,
+                  FrameMioProCatalog.productIDs.contains(transaction.productID),
+                  transaction.revocationDate == nil else {
+                continue
+            }
+            guard let status = await transaction.subscriptionStatus else {
+                purchaseRoutingDebugLog("subscription_route_status_unavailable product=\(transaction.productID)")
+                return true
+            }
+            do {
+                let renewalInfo = try verifiedRenewalInfo(from: status.renewalInfo)
+                let shouldShowCreditPacks = renewalInfo.willAutoRenew
+                purchaseRoutingDebugLog("subscription_route_status product=\(transaction.productID) state=\(String(describing: status.state)) will_auto_renew=\(renewalInfo.willAutoRenew) result=\(shouldShowCreditPacks ? "credit_packs" : "pro")")
+                return shouldShowCreditPacks
+            } catch {
+                purchaseRoutingDebugLog("subscription_route_status_unverified product=\(transaction.productID) error=\(error.localizedDescription)")
+                return true
+            }
+        }
+        return false
+    }
+
+    private func verifiedRenewalInfo(from result: VerificationResult<Product.SubscriptionInfo.RenewalInfo>) throws -> Product.SubscriptionInfo.RenewalInfo {
+        switch result {
+        case let .verified(value):
+            return value
+        case let .unverified(_, error):
+            throw error
         }
     }
 
