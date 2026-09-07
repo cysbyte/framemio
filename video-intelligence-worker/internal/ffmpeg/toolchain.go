@@ -74,7 +74,7 @@ func (t Toolchain) Probe(ctx context.Context, sourcePath string) (domain.VideoMe
 }
 
 func (t Toolchain) DetectScenes(ctx context.Context, sourcePath string, threshold float64, maxBoundaries int) ([]domain.SceneBoundary, error) {
-	filter := fmt.Sprintf("select=gt(scene\\,%.6f),metadata=print", threshold)
+	filter := fmt.Sprintf("fps=2,scale=min(360\\,iw):-2,select=gt(scene\\,%.6f),metadata=print", threshold)
 	_, stderr, err := t.runner().Run(ctx, t.FFmpegPath,
 		"-hide_banner", "-nostdin", "-i", sourcePath, "-map", "0:v:0", "-vf", filter, "-an", "-f", "null", "-",
 	)

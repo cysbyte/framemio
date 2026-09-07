@@ -284,6 +284,11 @@ final class StoryLaunchCoordinator: ObservableObject {
         analysisService: MediaAnalysisService,
         timeout: Duration
     ) async throws -> MediaAnalysis {
+        if asset.isVideo {
+            storyLaunchDebugLog("phase=analysis_video_fallback asset=\(asset.id) kind=\(asset.kind.rawValue) reason=server_video_intelligence")
+            return fallbackAnalysis(for: asset)
+        }
+
         let race = StoryLaunchAnalysisRace()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
