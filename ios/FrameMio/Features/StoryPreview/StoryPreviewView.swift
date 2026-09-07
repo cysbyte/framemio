@@ -194,7 +194,9 @@ struct StoryPreviewView: View {
             Text(storyDisplayTitle(story))
                 .font(FrameMioTypography.display)
                 .foregroundStyle(FrameMioColors.ink)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(2)
+                .minimumScaleFactor(0.86)
+                .truncationMode(.tail)
 
             Text(storyDateDuration(story))
                 .font(FrameMioTypography.body)

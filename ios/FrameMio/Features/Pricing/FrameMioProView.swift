@@ -5,6 +5,10 @@ private func pricingDebugLog(_ message: @autoclosure () -> String) {
     print("[FrameMio][Pricing] \(message())")
 }
 
+private func storeKitTransactionKey(_ transaction: StoreKit.Transaction) -> String {
+    "\(transaction.productID):\(transaction.id)"
+}
+
 private enum StoreKitProductLoadError: LocalizedError {
     case timedOut(seconds: Int)
 
@@ -175,6 +179,7 @@ final class FrameMioProViewModel: ObservableObject {
     private let onBalanceUpdated: () -> Void
     private var loadTask: Task<Void, Never>?
     private var updatesTask: Task<Void, Never>?
+    private var handledTransactionKeys: Set<String> = []
     fileprivate static var cachedProductsByID: [String: Product] = [:]
 
     init(
@@ -633,6 +638,12 @@ final class FrameMioProViewModel: ObservableObject {
                     continue
                 }
                 do {
+                    let transactionKey = storeKitTransactionKey(transaction)
+                    guard handledTransactionKeys.insert(transactionKey).inserted else {
+                        pricingDebugLog("transaction_update_ignored product=\(transaction.productID) transaction=\(transaction.id) reason=duplicate")
+                        await transaction.finish()
+                        continue
+                    }
                     await refreshEntitlements()
                     try await syncSubscriptionCycleCredits(for: transaction, source: "transaction_update")
                     await transaction.finish()
@@ -957,6 +968,7 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
     private let onBalanceUpdated: () -> Void
     private var loadTask: Task<Void, Never>?
     private var updatesTask: Task<Void, Never>?
+    private var handledTransactionKeys: Set<String> = []
     fileprivate static var cachedProductsByID: [String: Product] = [:]
 
     private var shouldSimulatePurchaseSuccess: Bool {
@@ -1180,6 +1192,7 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
                     switch result {
                     case let .success(verificationResult):
                         let transaction = try verifiedTransaction(from: verificationResult)
+                        handledTransactionKeys.insert(storeKitTransactionKey(transaction))
                         balance = try await creditService?.grantPurchasedCredits(packID: pack.id, purchaseID: String(transaction.id))
                         await transaction.finish()
                         statusMessage = "Credits added."
@@ -1222,6 +1235,12 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
                     pricingDebugLog("credit_pack_transaction_update_ignored product=\(transaction.productID) reason=revoked")
                     continue
                 }
+                let transactionKey = storeKitTransactionKey(transaction)
+                guard handledTransactionKeys.insert(transactionKey).inserted else {
+                    pricingDebugLog("credit_pack_transaction_update_ignored product=\(transaction.productID) transaction=\(transaction.id) reason=duplicate")
+                    await transaction.finish()
+                    continue
+                }
                 if let purchase = FrameMioCreditPackPurchase(productID: transaction.productID, packs: packs) {
                     do {
                         balance = try await creditService?.grantPurchasedCredits(packID: purchase.packID, purchaseID: String(transaction.id))
@@ -1235,22 +1254,8 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
                         pricingDebugLog("credit_pack_transaction_update_failed product=\(transaction.productID) error=\(error.localizedDescription)")
                     }
                 } else if let plan = FrameMioProPlanKind(productID: transaction.productID) {
-                    do {
-                        pricingDebugLog("credit_pack_subscription_transaction_sync_start plan=\(plan.rawValue) product=\(transaction.productID) transaction=\(transaction.id) expires=\(transaction.expirationDate?.description ?? "nil")")
-                        balance = try await creditService?.grantSubscriptionCycleCredits(
-                            plan: transaction.productID,
-                            purchaseID: String(transaction.id),
-                            expiresAt: transaction.expirationDate
-                        )
-                        await transaction.finish()
-                        onBalanceUpdated()
-                        onPurchaseCompleted()
-                        pricingDebugLog("credit_pack_subscription_transaction_sync_success plan=\(plan.rawValue) product=\(transaction.productID) transaction=\(transaction.id) balance=\(balance?.available.description ?? "nil") subscription=\(balance?.subscriptionCredits.description ?? "nil")")
-                    } catch {
-                        errorMessage = AppError.from(error).localizedDescription
-                        statusMessage = nil
-                        pricingDebugLog("credit_pack_subscription_transaction_sync_failed product=\(transaction.productID) transaction=\(transaction.id) error=\(error.localizedDescription)")
-                    }
+                    pricingDebugLog("credit_pack_transaction_update_ignored product=\(transaction.productID) transaction=\(transaction.id) plan=\(plan.rawValue) reason=subscription_update_not_credit_pack")
+                    await transaction.finish()
                 } else {
                     pricingDebugLog("credit_pack_transaction_update_ignored product=\(transaction.productID) reason=unknown_product packs=\(packs.count)")
                 }

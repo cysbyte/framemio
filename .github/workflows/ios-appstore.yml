@@ -64,6 +64,17 @@ jobs:
           echo "BUILD_NUMBER=${BUILD_NUMBER}" >> "${GITHUB_ENV}"
           echo "Using version ${{ inputs.marketing_version }} (${BUILD_NUMBER})"
 
+      - name: Create local iOS environment file
+        run: |
+          set -euo pipefail
+
+          ENV_FILE="ios/FrameMio/Resources/FrameMio.env"
+          mkdir -p "$(dirname "${ENV_FILE}")"
+          cat > "${ENV_FILE}" <<'EOF'
+          # Generated in CI. Production live transcription uses backend-issued Deepgram tokens.
+          DEEPGRAM_API_KEY=dg-mock-replace-with-real-key
+          EOF
+
       - name: Install signing certificate and profile
         env:
           CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}

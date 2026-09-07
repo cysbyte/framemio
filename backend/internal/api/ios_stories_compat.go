@@ -20,6 +20,7 @@ import (
 )
 
 const iosMaxStoryUploadBytes int64 = 1_000_000_000
+const iosStoryTitleMaxLength = 30
 const iosStoryVideoURLExpiry = 2 * time.Hour
 const iosStoryDescriptionMaxLength = 240
 
@@ -1929,26 +1930,43 @@ func fallbackIOSMomentTitle(_ string, index int) string {
 
 func iosDisplayStoryTitle(title string, moments []iosStoryMoment, context string) string {
 	if trimmed := strings.TrimSpace(title); trimmed != "" && !isGenericIOSMomentText(trimmed) {
-		return truncateIOSConfigValue(trimmed, 42)
+		return truncateIOSStoryTitle(trimmed)
 	}
 	if title := iosStoryTitleFromMoments(moments); title != "" {
 		return title
 	}
 	if trimmed := strings.TrimSpace(context); trimmed != "" && !isGenericIOSMomentText(trimmed) {
-		return truncateIOSConfigValue(trimmed, 42)
+		return truncateIOSStoryTitle(trimmed)
 	}
 	return "Your Story"
+}
+
+func truncateIOSStoryTitle(title string) string {
+	trimmed := truncateIOSConfigValue(strings.TrimSpace(title), iosStoryTitleMaxLength)
+	for {
+		words := strings.Fields(trimmed)
+		if len(words) <= 1 {
+			return trimmed
+		}
+		lastWord := strings.ToLower(strings.Trim(words[len(words)-1], " .,!?:;…"))
+		switch lastWord {
+		case "a", "an", "the", "and", "or", "of", "over", "by", "to", "in", "on", "at", "for", "with":
+			trimmed = strings.Join(words[:len(words)-1], " ")
+		default:
+			return trimmed
+		}
+	}
 }
 
 func iosStoryTitleFromMoments(moments []iosStoryMoment) string {
 	for _, moment := range moments {
 		if title := iosHumanMomentTitle(moment.Description); title != "" {
-			return truncateIOSConfigValue(title, 42)
+			return truncateIOSStoryTitle(title)
 		}
 	}
 	for _, moment := range moments {
 		if title := iosHumanMomentTitle(moment.Title); title != "" {
-			return truncateIOSConfigValue(title, 42)
+			return truncateIOSStoryTitle(title)
 		}
 	}
 	return ""
@@ -2164,10 +2182,7 @@ func iosStoryTitle(context string, assets []resolvedIOSStoryAsset) string {
 	if context == "" {
 		context = "Story"
 	}
-	if len(assets) == 1 {
-		return fmt.Sprintf("%s story", context)
-	}
-	return fmt.Sprintf("%s story", context)
+	return truncateIOSStoryTitle(fmt.Sprintf("%s story", context))
 }
 
 func stableIOSStoryKey(userID, context string, mediaIDs []string) string {

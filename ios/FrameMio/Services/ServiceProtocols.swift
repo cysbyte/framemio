@@ -477,17 +477,33 @@ final class CreditBalanceStore: ObservableObject {
 
     func refresh() {
         guard let creditService else { return }
-        refreshTask?.cancel()
+        guard refreshTask == nil else { return }
+        let shouldShowLoading = balance == nil
+        if shouldShowLoading {
+            isLoading = true
+        }
         refreshTask = Task { [weak self] in
             guard let self else { return }
-            isLoading = true
-            defer { isLoading = false }
+            defer {
+                if shouldShowLoading {
+                    isLoading = false
+                }
+                refreshTask = nil
+            }
             do {
-                balance = try await creditService.balance()
-                errorMessage = nil
+                let latestBalance = try await creditService.balance()
+                if balance != latestBalance {
+                    balance = latestBalance
+                }
+                if errorMessage != nil {
+                    errorMessage = nil
+                }
             } catch is CancellationError {
             } catch {
-                errorMessage = AppError.from(error).localizedDescription
+                let latestErrorMessage = AppError.from(error).localizedDescription
+                if errorMessage != latestErrorMessage {
+                    errorMessage = latestErrorMessage
+                }
             }
         }
     }
