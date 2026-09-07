@@ -138,25 +138,6 @@ struct HomeView: View {
 
     private var hero: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.xl) {
-            HStack(alignment: .center, spacing: FrameMioSpacing.sm) {
-                Image("AppLogo")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 48, height: 48)
-                    .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.medium, style: .continuous))
-                    .accessibilityHidden(true)
-
-                VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
-                    Text("FrameMio")
-                        .font(FrameMioTypography.headline)
-                        .foregroundStyle(FrameMioColors.ink)
-                    Text("Memory stories")
-                        .font(FrameMioTypography.eyebrow)
-                        .foregroundStyle(FrameMioColors.accent)
-                        .textCase(.uppercase)
-                }
-            }
-
             VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
                 Text("Turn your moments into cinematic memory stories.")
                     .font(FrameMioTypography.display)
