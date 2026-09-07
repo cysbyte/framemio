@@ -3,6 +3,7 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {AwsCliQueue, type ReceivedJobMessage} from './aws-cli.js';
 import {BackendClient, isBackendRequestError, isRetryableBackendError} from './backend-client.js';
+import {EcsTaskProtectionClient, type TaskProtectionClient} from './ecs-task-protection.js';
 import {ShellFfmpegClient} from './ffmpeg/client.js';
 import {FfmpegCompositionRenderer, RemotionCliRenderer} from './remotion/renderer.js';
 import {AwsCliObjectStore} from './storage/object-store.js';
@@ -40,7 +41,9 @@ export async function runRenderWorker(config = loadConfig()): Promise<void> {
       ? new RemotionCliRenderer({entryPoint: config.remotionEntryPoint})
       : new FfmpegCompositionRenderer(),
     workRoot: config.workRoot,
+    compositionOutputIsFinal: config.rendererMode === 'ffmpeg',
   });
+  const taskProtection = new EcsTaskProtectionClient();
   let idleDeadline = Date.now() + config.waitTimeoutMs;
   let activeMessage: ReceivedJobMessage | undefined;
   const releasedReceiptHandles = new Set<string>();
@@ -73,7 +76,7 @@ export async function runRenderWorker(config = loadConfig()): Promise<void> {
         activeMessage = message;
         let handledCurrentMessage = false;
         try {
-          handledCurrentMessage = await handleMessage(message, {queue, backend, worker, config});
+          handledCurrentMessage = await handleMessage(message, {queue, backend, worker, taskProtection, config});
         } finally {
           if (activeMessage?.receiptHandle === message.receiptHandle) {
             activeMessage = undefined;
@@ -151,9 +154,10 @@ export async function handleMessage(received: ReceivedJobMessage, dependencies: 
   queue: RenderQueueClient;
   backend: RenderBackendClient;
   worker: RenderWorkerClient;
+  taskProtection?: TaskProtectionClient;
   config: RunnerConfig;
 }): Promise<boolean> {
-  const {queue, backend, worker, config} = dependencies;
+  const {queue, backend, worker, taskProtection, config} = dependencies;
   const message = received.message;
   try {
     const status = await backend.jobStatus(message.jobId);
@@ -181,6 +185,19 @@ export async function handleMessage(received: ReceivedJobMessage, dependencies: 
     console.warn(JSON.stringify({level: 'warn', msg: 'render worker ignoring unsupported queue message', target_job_id: config.jobID ?? '', job_id: message.jobId, project_id: message.projectId, job_type: message.jobType, receive_count: received.receiveCount, release_seconds: unsupportedMessageVisibilitySeconds}));
     await queue.defer(received.receiptHandle, unsupportedMessageVisibilitySeconds);
     return false;
+  }
+  let taskProtected = false;
+  if (taskProtection) {
+    try {
+      taskProtected = await taskProtection.protect();
+      if (taskProtected) {
+        console.info(JSON.stringify({level: 'info', msg: 'render task scale-in protection enabled', job_id: message.jobId, project_id: message.projectId, receive_count: received.receiveCount}));
+      }
+    } catch (error) {
+      console.error(JSON.stringify({level: 'error', msg: 'render task scale-in protection failed; deferring message', job_id: message.jobId, project_id: message.projectId, receive_count: received.receiveCount, retry_visibility_seconds: backendRetryMessageVisibilitySeconds, error: error instanceof Error ? error.message : String(error)}));
+      await queue.defer(received.receiptHandle, backendRetryMessageVisibilitySeconds);
+      return false;
+    }
   }
   const startedAt = Date.now();
   let completionCallbackPending = false;
@@ -225,6 +242,15 @@ export async function handleMessage(received: ReceivedJobMessage, dependencies: 
     }
     await queue.delete(received.receiptHandle);
     return true;
+  } finally {
+    if (taskProtected && taskProtection) {
+      try {
+        await taskProtection.unprotect();
+        console.info(JSON.stringify({level: 'info', msg: 'render task scale-in protection disabled', job_id: message.jobId, project_id: message.projectId}));
+      } catch (error) {
+        console.error(JSON.stringify({level: 'error', msg: 'render task scale-in protection release failed', job_id: message.jobId, project_id: message.projectId, error: error instanceof Error ? error.message : String(error)}));
+      }
+    }
   }
 }
 

@@ -128,17 +128,76 @@ test('retains rendered message when completion callback is transiently unavailab
     worker: {
       async render(): Promise<{record: {s3_key: string}}> { calls.push('render'); return {record: {s3_key: 'renders/completed.mp4'}}; },
     },
+    taskProtection: taskProtectionSpy(calls),
     config: baseConfig,
   });
 
   assert.equal(handled, false);
   assert.deepEqual(calls, [
     'jobStatus:job-completion-retry',
+    'protect',
     'markRunning:job-completion-retry',
     'renderInput:job-completion-retry',
     'render',
     'markCompleted:job-completion-retry',
     'defer:receipt-job-completion-retry:30',
+    'unprotect',
+  ]);
+});
+
+test('protects the ECS task before rendering and releases protection after success', async () => {
+  const calls: string[] = [];
+  const received = renderMessage({jobId: 'job-protected-render', receiveCount: 1});
+  const handled = await handleMessage(received, {
+    queue: queueSpy(calls),
+    backend: successfulBackendSpy(calls),
+    worker: {
+      async render(): Promise<{record: {s3_key: string}}> {
+        calls.push('render');
+        return {record: {s3_key: 'renders/protected.mp4'}};
+      },
+    },
+    taskProtection: taskProtectionSpy(calls),
+    config: baseConfig,
+  });
+
+  assert.equal(handled, true);
+  assert.deepEqual(calls, [
+    'jobStatus:job-protected-render',
+    'protect',
+    'markRunning:job-protected-render',
+    'renderInput:job-protected-render',
+    'render',
+    'markCompleted:job-protected-render:renders/protected.mp4',
+    'delete:receipt-job-protected-render',
+    'unprotect',
+  ]);
+});
+
+test('defers the render message when ECS task protection cannot be enabled', async () => {
+  const calls: string[] = [];
+  const received = renderMessage({jobId: 'job-protection-failed', receiveCount: 1});
+  const handled = await handleMessage(received, {
+    queue: queueSpy(calls),
+    backend: successfulBackendSpy(calls),
+    worker: workerSpy(calls),
+    taskProtection: {
+      async protect(): Promise<boolean> {
+        calls.push('protect');
+        throw new Error('task protection unavailable');
+      },
+      async unprotect(): Promise<void> {
+        calls.push('unprotect');
+      },
+    },
+    config: baseConfig,
+  });
+
+  assert.equal(handled, false);
+  assert.deepEqual(calls, [
+    'jobStatus:job-protection-failed',
+    'protect',
+    'defer:receipt-job-protection-failed:30',
   ]);
 });
 
@@ -192,6 +251,46 @@ function workerSpy(calls: string[]) {
     async render(): Promise<{record: {s3_key: string}}> {
       calls.push('render');
       throw new Error('render should not be called');
+    },
+  };
+}
+
+function successfulBackendSpy(calls: string[]) {
+  return {
+    async jobStatus(jobID: string): Promise<{status: string}> {
+      calls.push(`jobStatus:${jobID}`);
+      return {status: 'QUEUED'};
+    },
+    async markRunning(jobID: string): Promise<void> {
+      calls.push(`markRunning:${jobID}`);
+    },
+    async renderInput(jobID: string): Promise<RenderInput> {
+      calls.push(`renderInput:${jobID}`);
+      return {
+        job_id: jobID,
+        project_id: 'project-1',
+        output_s3_key: 'renders/protected.mp4',
+        story_plan: {id: 'story-plan-1', moments: [], captions: []},
+        media_assets: [],
+      } as unknown as RenderInput;
+    },
+    async markCompleted(jobID: string, artifactS3Key: string): Promise<void> {
+      calls.push(`markCompleted:${jobID}:${artifactS3Key}`);
+    },
+    async markFailed(jobID: string): Promise<void> {
+      calls.push(`markFailed:${jobID}`);
+    },
+  };
+}
+
+function taskProtectionSpy(calls: string[]) {
+  return {
+    async protect(): Promise<boolean> {
+      calls.push('protect');
+      return true;
+    },
+    async unprotect(): Promise<void> {
+      calls.push('unprotect');
     },
   };
 }

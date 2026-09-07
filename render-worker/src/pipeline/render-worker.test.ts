@@ -12,7 +12,7 @@ import {DeterministicRenderWorker} from './render-worker.js';
 import {buildComposition} from './timeline.js';
 import {fixtureMediaAssets, fixtureRenderInput, fixtureStoryPlan} from '../__fixtures__/story-plan.js';
 
-async function createHarness() {
+async function createHarness(compositionOutputIsFinal = false) {
   const root = await mkdtemp(path.join(tmpdir(), 'framemio-render-test-'));
   const objectStore = new LocalFixtureObjectStore(path.join(root, 'object-store'));
   await objectStore.putText('source/photo-1.jpg', 'fixture photo bytes');
@@ -25,6 +25,7 @@ async function createHarness() {
     ffmpeg,
     remotion,
     workRoot: path.join(root, 'work'),
+    compositionOutputIsFinal,
     now: () => new Date('2026-08-21T12:00:00.000Z'),
   });
   return {root, objectStore, ffmpeg, remotion, worker};
@@ -117,6 +118,20 @@ test('renders a validated story plan deterministically', async () => {
 
   const output = await readFile(harness.objectStore.localPath(input.output_s3_key), 'utf8');
   assert.match(output, /fixture mp4/);
+});
+
+test('uploads the ffmpeg composition output without a redundant encode', async () => {
+  const harness = await createHarness(true);
+  const input = fixtureRenderInput();
+
+  const result = await harness.worker.render(input);
+
+  assert.equal(harness.ffmpeg.operations.some((operation) => operation.name === 'encodeMp4'), false);
+  assert.equal(await harness.objectStore.objectExists(input.output_s3_key), true);
+  assert.equal(
+    await readFile(harness.objectStore.localPath(input.output_s3_key), 'utf8'),
+    canonicalJson(result.composition),
+  );
 });
 
 test('preprocesses video clips with exact source timestamps and audio settings', async () => {

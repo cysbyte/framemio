@@ -196,7 +196,7 @@ func loadConfiguration() (configuration, error) {
 		StoryPlannerWireAPI:          environment("STORY_PLANNER_WIRE_API", "responses"),
 		StoryPlannerMaxTokens:        environmentInt("STORY_PLANNER_MAX_OUTPUT_TOKENS", 6000),
 		StoryPlannerTimeout:          environmentDuration("STORY_PLANNER_TIMEOUT", 90*time.Second),
-		StoryPlannerFallbackTimeout:  environmentDuration("STORY_PLANNER_FALLBACK_TIMEOUT", 10*time.Second),
+		StoryPlannerFallbackTimeout:  environmentDuration("STORY_PLANNER_FALLBACK_TIMEOUT", 45*time.Second),
 		StoryRevisionProvider:        environment("STORY_REVISION_PROVIDER", "local"),
 		StoryRevisionBaseURL:         environment("STORY_REVISION_BASE_URL", os.Getenv("OPENAI_BASE_URL")),
 		StoryRevisionAPIKey:          environment("STORY_REVISION_API_KEY", os.Getenv("OPENAI_API_KEY")),

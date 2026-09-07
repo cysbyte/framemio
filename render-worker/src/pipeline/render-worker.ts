@@ -1,4 +1,4 @@
-import {mkdir, writeFile} from 'node:fs/promises';
+import {mkdir, rename, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {DEFAULT_FPS, ensureRenderDirs, renderFingerprint, stableBRollClipId, stableClipId} from '../determinism.js';
 import type {FfmpegClient} from '../ffmpeg/client.js';
@@ -14,6 +14,7 @@ export interface RenderWorkerDependencies {
   ffmpeg: FfmpegClient;
   remotion: RemotionRenderer;
   workRoot: string;
+  compositionOutputIsFinal?: boolean;
   now?: () => Date;
 }
 
@@ -38,22 +39,28 @@ export class DeterministicRenderWorker {
     const remotionIntermediate = path.join(paths.work_dir, 'remotion-output.mp4');
     await this.dependencies.remotion.renderComposition(composition, remotionIntermediate);
     console.info(JSON.stringify({level: 'info', msg: 'remotion render completed', job_id: input.job_id, project_id: input.project_id}));
-    const encodeStarted = Date.now();
-    console.info(JSON.stringify({level: 'info', msg: 'ffmpeg encode started', job_id: input.job_id, project_id: input.project_id, duration_ms: composition.duration_ms, width: composition.resolution.width, height: composition.resolution.height}));
-    try {
-      await this.dependencies.ffmpeg.encodeMp4({
-        compositionPath: paths.composition_file,
-        intermediateVideoPath: remotionIntermediate,
-        outputPath: paths.output_file,
-        width: composition.resolution.width,
-        height: composition.resolution.height,
-        durationMs: composition.duration_ms,
-      });
-    } catch (error) {
-      console.error(JSON.stringify({level: 'error', msg: 'ffmpeg encode failed', job_id: input.job_id, project_id: input.project_id, duration_ms: Date.now() - encodeStarted, error: error instanceof Error ? error.message : String(error)}));
-      throw error;
+    if (this.dependencies.compositionOutputIsFinal) {
+      const finalizeStarted = Date.now();
+      await rename(remotionIntermediate, paths.output_file);
+      console.info(JSON.stringify({level: 'info', msg: 'composition output finalized without re-encode', job_id: input.job_id, project_id: input.project_id, duration_ms: Date.now() - finalizeStarted}));
+    } else {
+      const encodeStarted = Date.now();
+      console.info(JSON.stringify({level: 'info', msg: 'ffmpeg encode started', job_id: input.job_id, project_id: input.project_id, duration_ms: composition.duration_ms, width: composition.resolution.width, height: composition.resolution.height}));
+      try {
+        await this.dependencies.ffmpeg.encodeMp4({
+          compositionPath: paths.composition_file,
+          intermediateVideoPath: remotionIntermediate,
+          outputPath: paths.output_file,
+          width: composition.resolution.width,
+          height: composition.resolution.height,
+          durationMs: composition.duration_ms,
+        });
+      } catch (error) {
+        console.error(JSON.stringify({level: 'error', msg: 'ffmpeg encode failed', job_id: input.job_id, project_id: input.project_id, duration_ms: Date.now() - encodeStarted, error: error instanceof Error ? error.message : String(error)}));
+        throw error;
+      }
+      console.info(JSON.stringify({level: 'info', msg: 'ffmpeg encode completed', job_id: input.job_id, project_id: input.project_id, duration_ms: Date.now() - encodeStarted}));
     }
-    console.info(JSON.stringify({level: 'info', msg: 'ffmpeg encode completed', job_id: input.job_id, project_id: input.project_id, duration_ms: Date.now() - encodeStarted}));
     const uploadStarted = Date.now();
     console.info(JSON.stringify({level: 'info', msg: 'render artifact upload started', job_id: input.job_id, project_id: input.project_id, output_s3_key: input.output_s3_key}));
     await this.dependencies.objectStore.uploadObject(paths.output_file, input.output_s3_key, 'video/mp4');
