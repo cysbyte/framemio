@@ -227,6 +227,59 @@ func TestStoryPlanHandlerPersistsExternalPlannerOutput(t *testing.T) {
 	}
 }
 
+func TestStoryPlanHandlerSanitizesExternalPlannerTransitionsBeforeValidation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore := store.NewMemoryStore()
+	now := time.Date(2026, time.September, 7, 15, 30, 0, 0, time.UTC)
+	photos := []models.MediaAsset{
+		{ID: "photo-transition-1", UserID: "user-1", Type: models.MediaTypePhoto, Status: models.MediaStatusReady, FileName: "IMG_0001.JPG", ContentType: "image/jpeg", FileSizeBytes: 100, S3Key: "source/photo-transition-1", UploadID: "upload-transition-1", CreatedAt: now, UpdatedAt: now},
+		{ID: "photo-transition-2", UserID: "user-1", Type: models.MediaTypePhoto, Status: models.MediaStatusReady, FileName: "IMG_0002.JPG", ContentType: "image/jpeg", FileSizeBytes: 100, S3Key: "source/photo-transition-2", UploadID: "upload-transition-2", CreatedAt: now, UpdatedAt: now},
+	}
+	for _, photo := range photos {
+		if err := memoryStore.CreateMediaUpload(ctx, photo, models.UploadSession{ID: photo.UploadID, UserID: photo.UserID, MediaID: photo.ID, S3Key: photo.S3Key, Strategy: models.UploadStrategySingle, CreatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	project := models.StoryProject{ID: "project-transition", UserID: "user-1", Title: "Transition", MediaIDs: []string{photos[0].ID, photos[1].ID}, Status: models.ProjectStatusAnalyzing, CreatedAt: now, UpdatedAt: now}
+	if _, _, err := memoryStore.CreateProject(ctx, project, "project-transition-key"); err != nil {
+		t.Fatal(err)
+	}
+	planner := fixedStoryPlanner{plan: models.StoryPlan{
+		SchemaVersion:       models.StoryPlanSchemaVersionV1,
+		ID:                  "plan-transition",
+		ProjectID:           project.ID,
+		Version:             1,
+		RequestedDurationMS: 4000,
+		StoryType:           models.StoryTypeTrip,
+		VisualStyle:         models.VisualStyleCinematic,
+		TitleText:           "Unsupported Transitions",
+		EndingText:          "Until next time.",
+		Moments: []models.StoryMoment{
+			{MomentID: "moment-transition-1", AssetID: photos[0].ID, MediaID: photos[0].ID, MediaType: models.MediaTypePhoto, Narrative: "Opening memory", DurationMS: 2000, CropIntent: "fit", Transition: "iris wipe", Reason: "AI-specific transition"},
+			{MomentID: "moment-transition-2", AssetID: photos[1].ID, MediaID: photos[1].ID, MediaType: models.MediaTypePhoto, Narrative: "Second memory", DurationMS: 2000, CropIntent: "fit", Transition: "push-left", Reason: "AI-specific transition"},
+		},
+		Output:          models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 4, Preset: "premium-memory"},
+		TotalDurationMS: 4000,
+		CreatedAt:       now,
+	}}
+	job := models.ProcessingJob{ID: "job-transition", UserID: project.UserID, ProjectID: project.ID, Type: models.JobTypeStoryPlan, Status: models.JobStatusRunning, CreatedAt: now, UpdatedAt: now}
+	handler := StoryPlanHandler{Store: memoryStore, Planner: planner, Validator: storyvalidation.New(memoryStore, storage.StaticObjectStorage{}, storyvalidation.DefaultConfig()), Now: func() time.Time { return now }}
+	if err := handler.HandleJob(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	latest, err := memoryStore.GetStoryPlan(ctx, project.UserID, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := latest.Moments[0].Transition; got != "fade_in" {
+		t.Fatalf("first unsupported transition = %q, want fade_in", got)
+	}
+	if got := latest.Moments[1].Transition; got != "cut" {
+		t.Fatalf("later unsupported transition = %q, want cut", got)
+	}
+}
+
 func TestStoryPlanHandlerRejectsExternalPlannerInvalidMedia(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

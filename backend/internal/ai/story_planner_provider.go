@@ -570,6 +570,15 @@ func sanitizeStoryPlannerTransition(transition string, momentIndex int) string {
 	}
 }
 
+func SanitizeStoryPlanTransitions(plan *models.StoryPlan) {
+	if plan == nil {
+		return
+	}
+	for index := range plan.Moments {
+		plan.Moments[index].Transition = sanitizeStoryPlannerTransition(plan.Moments[index].Transition, index)
+	}
+}
+
 func normalizeStoryPlannerMediaReferences(plan *models.StoryPlan, request Request) {
 	photoIDs := make(map[string]struct{}, len(request.PhotoAnalyses))
 	for _, photo := range request.PhotoAnalyses {
@@ -578,6 +587,7 @@ func normalizeStoryPlannerMediaReferences(plan *models.StoryPlan, request Reques
 		}
 	}
 	videoRefs := storyPlannerVideoReferences(request.VideoAnalyses)
+	SanitizeStoryPlanTransitions(plan)
 	for index := range plan.Moments {
 		moment := &plan.Moments[index]
 		mediaID := strings.TrimSpace(firstNonEmpty(moment.MediaID, moment.AssetID))
@@ -590,7 +600,6 @@ func normalizeStoryPlannerMediaReferences(plan *models.StoryPlan, request Reques
 		if strings.TrimSpace(moment.MediaID) == "" {
 			moment.MediaID = mediaID
 		}
-		moment.Transition = sanitizeStoryPlannerTransition(moment.Transition, index)
 		if _, ok := photoIDs[mediaID]; ok && moment.MediaType == "" {
 			moment.MediaType = models.MediaTypePhoto
 		}
