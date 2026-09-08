@@ -428,6 +428,7 @@ struct CreditPricing {
     static let removeMoment = 0
     static let preview = 0
     static let lowBalanceThreshold = 25
+    private static let dynamicStoryPricingThresholdSeconds = 120
     private static let maxDynamicStoryCredits = 80
 
     static func price(for action: CreditAction) -> Int {
@@ -465,8 +466,8 @@ struct CreditPricing {
         default:
             return fallback
         }
-        guard durationSeconds > 0 else { return fallback }
-        let curve = 1 - Foundation.exp(-Double(durationSeconds) / 45.0)
+        guard durationSeconds > dynamicStoryPricingThresholdSeconds else { return fallback }
+        let curve = 1 - Foundation.exp(-Double(durationSeconds - dynamicStoryPricingThresholdSeconds) / 45.0)
         let price = Double(fallback) + Double(maxDynamicStoryCredits - fallback) * curve
         return min(maxDynamicStoryCredits, max(fallback, Int(price.rounded())))
     }

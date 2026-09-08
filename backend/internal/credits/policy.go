@@ -41,7 +41,10 @@ type Policy struct {
 	CreditPacks                     []CreditPack
 }
 
-const maxDynamicStoryCredits = 80
+const (
+	dynamicStoryPricingThresholdSeconds = 120
+	maxDynamicStoryCredits              = 80
+)
 
 func DefaultPolicy() Policy {
 	return Policy{
@@ -164,10 +167,10 @@ func (p Policy) dynamicStoryPrice(action models.CreditAction, stats StoryMediaSt
 	default:
 		return fallback
 	}
-	if durationSeconds <= 0 {
+	if durationSeconds <= dynamicStoryPricingThresholdSeconds {
 		return fallback
 	}
-	curve := 1 - math.Exp(-float64(durationSeconds)/45.0)
+	curve := 1 - math.Exp(-float64(durationSeconds-dynamicStoryPricingThresholdSeconds)/45.0)
 	price := float64(fallback) + float64(maxDynamicStoryCredits-fallback)*curve
 	if price < float64(fallback) {
 		price = float64(fallback)

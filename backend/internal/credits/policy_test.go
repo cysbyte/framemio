@@ -18,12 +18,22 @@ func TestPolicyPriceUsesDynamicStoryCurveWhenEnabled(t *testing.T) {
 		t.Fatalf("base price = %d ok=%v", base, ok)
 	}
 
-	medium, ok := policy.Price(models.CreditActionCreateStory, StoryMediaStats{TotalVideoSeconds: 30})
+	short, ok := policy.Price(models.CreditActionCreateStory, StoryMediaStats{TotalVideoSeconds: 119})
+	if !ok || short != base {
+		t.Fatalf("short price = %d ok=%v", short, ok)
+	}
+
+	threshold, ok := policy.Price(models.CreditActionCreateStory, StoryMediaStats{TotalVideoSeconds: dynamicStoryPricingThresholdSeconds})
+	if !ok || threshold != base {
+		t.Fatalf("threshold price = %d ok=%v", threshold, ok)
+	}
+
+	medium, ok := policy.Price(models.CreditActionCreateStory, StoryMediaStats{TotalVideoSeconds: 150})
 	if !ok || medium <= base || medium >= maxDynamicStoryCredits {
 		t.Fatalf("medium price = %d ok=%v", medium, ok)
 	}
 
-	long, ok := policy.Price(models.CreditActionCreateStory, StoryMediaStats{TotalVideoSeconds: 300})
+	long, ok := policy.Price(models.CreditActionCreateStory, StoryMediaStats{TotalVideoSeconds: 420})
 	if !ok || long != maxDynamicStoryCredits {
 		t.Fatalf("long price = %d ok=%v", long, ok)
 	}
