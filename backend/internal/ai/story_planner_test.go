@@ -407,6 +407,35 @@ func TestPlannerUsesFadeBetweenDifferentMedia(t *testing.T) {
 	}
 }
 
+func TestPlannerUsesFadeAcrossVideoScenes(t *testing.T) {
+	t.Parallel()
+	planner := &Planner{Now: func() time.Time { return time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC) }}
+	plan, err := planner.Plan(context.Background(), Request{
+		ProjectID:        "project-scene-transition",
+		DesiredDuration:  12 * time.Second,
+		StoryType:        models.StoryTypeCustom,
+		VisualStyle:      models.VisualStyleCinematic,
+		SelectedMediaIDs: []string{"video-scenes"},
+		VideoAnalyses: []models.VideoAnalysis{{
+			ID: "video-analysis-scenes", VideoID: "video-scenes", ProjectID: "project-scene-transition", AnalysisVersion: "video-v1", DurationMicros: 12_000_000,
+			QualitySignals: models.VideoQualitySignals{OverallScore: 0.9},
+			Segments: []models.VideoSegment{
+				{SegmentID: "segment-1", SceneID: "scene-1", StartMicros: 0, EndMicros: 4_000_000, Description: "First scene", Importance: 0.95, VisualQuality: 0.9, MemoryValue: 0.9, EmotionalValue: 0.9, StoryRelevance: 0.9, Recommended: true, RecommendedUsage: "hero"},
+				{SegmentID: "segment-2", SceneID: "scene-2", StartMicros: 4_000_000, EndMicros: 8_000_000, Description: "Second scene", Importance: 0.94, VisualQuality: 0.9, MemoryValue: 0.9, EmotionalValue: 0.9, StoryRelevance: 0.9, Recommended: true, RecommendedUsage: "supporting"},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Moments) < 2 {
+		t.Fatalf("expected multiple moments, got %+v", plan.Moments)
+	}
+	if plan.Moments[1].Transition != "fade" {
+		t.Fatalf("expected fade across video scenes, got %+v", plan.Moments)
+	}
+}
+
 func TestPlannerHonorsSubtitleOptions(t *testing.T) {
 	t.Parallel()
 	disabled := false

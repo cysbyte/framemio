@@ -51,6 +51,7 @@ type candidate struct {
 	score         float64
 	repetition    string
 	mediaID       string
+	sceneID       string
 	clusterID     string
 	semanticTerms map[string]struct{}
 	isVideo       bool
@@ -165,6 +166,7 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 		TotalDurationMS: totalDuration,
 		CreatedAt:       now,
 	}
+	EnforceSceneTransitions(&plan, request.VideoAnalyses, visualStyle)
 	applyCaptionColorInstruction(&plan, request.UserInstructions)
 	if err := ValidateStoryPlan(plan); err != nil {
 		return models.StoryPlan{}, err
@@ -682,7 +684,7 @@ func buildCandidates(request Request, selected map[string]struct{}, clusters map
 				moment: moment, captionCues: transcriptCaptionCues(analysis.Transcript, segment.StartMicros, endMicros),
 				sourceTime: sourceTimelineMicros(mediaBaseTime, segmentTime), score: score,
 				repetition: repetitionKey(mediaID, clusterID, segmentTime, segment.SceneID),
-				mediaID:    mediaID, clusterID: clusterID, semanticTerms: videoSegmentSemanticTerms(segment), isVideo: true, isSelected: hasMedia(selected, mediaID),
+				mediaID:    mediaID, sceneID: segment.SceneID, clusterID: clusterID, semanticTerms: videoSegmentSemanticTerms(segment), isVideo: true, isSelected: hasMedia(selected, mediaID),
 			})
 		}
 	}
@@ -1266,9 +1268,74 @@ func cropIntentFor(analysis models.VideoAnalysis, segment models.VideoSegment) s
 }
 
 func transitionFor(previous, current candidate, style models.VisualStyle) string {
-	if previous.mediaID == current.mediaID {
-		return "soft_cut"
+	if previous.sceneID != "" && current.sceneID != "" && previous.sceneID != current.sceneID {
+		if style == models.VisualStyleCalm || style == models.VisualStyleMinimal {
+			return "crossfade"
+		}
+		return "fade"
 	}
+	if previous.mediaID == current.mediaID {
+		return "cut"
+	}
+	if style == models.VisualStyleCalm || style == models.VisualStyleMinimal {
+		return "crossfade"
+	}
+	return "fade"
+}
+
+func EnforceSceneTransitions(plan *models.StoryPlan, videoAnalyses []models.VideoAnalysis, style models.VisualStyle) {
+	if plan == nil || len(plan.Moments) < 2 {
+		return
+	}
+	videoScenes := videoSceneLookup(videoAnalyses)
+	for index := 1; index < len(plan.Moments); index++ {
+		previous := plan.Moments[index-1]
+		current := &plan.Moments[index]
+		previousMediaID := strings.TrimSpace(firstNonEmpty(previous.MediaID, previous.AssetID))
+		currentMediaID := strings.TrimSpace(firstNonEmpty(current.MediaID, current.AssetID))
+		if previousMediaID == "" || currentMediaID == "" || previousMediaID != currentMediaID {
+			continue
+		}
+		previousSceneID := sceneIDForRange(videoScenes[previousMediaID], previous.StartMicros, previous.EndMicros)
+		currentSceneID := sceneIDForRange(videoScenes[currentMediaID], current.StartMicros, current.EndMicros)
+		if previousSceneID == "" || currentSceneID == "" || previousSceneID == currentSceneID {
+			continue
+		}
+		current.Transition = sceneBoundaryTransition(style)
+	}
+}
+
+func videoSceneLookup(analyses []models.VideoAnalysis) map[string][]models.VideoScene {
+	result := make(map[string][]models.VideoScene, len(analyses))
+	for _, analysis := range analyses {
+		mediaID := strings.TrimSpace(analysis.VideoID)
+		if mediaID == "" || len(analysis.Scenes) == 0 {
+			continue
+		}
+		scenes := append([]models.VideoScene(nil), analysis.Scenes...)
+		sort.SliceStable(scenes, func(left, right int) bool { return scenes[left].StartMicros < scenes[right].StartMicros })
+		result[mediaID] = scenes
+	}
+	return result
+}
+
+func sceneIDForRange(scenes []models.VideoScene, startMicros, endMicros int64) string {
+	if len(scenes) == 0 || endMicros <= startMicros {
+		return ""
+	}
+	midpointMicros := midpoint(startMicros, endMicros)
+	for _, scene := range scenes {
+		if strings.TrimSpace(scene.SceneID) == "" {
+			continue
+		}
+		if midpointMicros >= scene.StartMicros && midpointMicros < scene.EndMicros {
+			return scene.SceneID
+		}
+	}
+	return ""
+}
+
+func sceneBoundaryTransition(style models.VisualStyle) string {
 	if style == models.VisualStyleCalm || style == models.VisualStyleMinimal {
 		return "crossfade"
 	}

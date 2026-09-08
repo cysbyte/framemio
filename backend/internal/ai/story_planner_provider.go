@@ -773,6 +773,7 @@ func normalizeStoryPlannerOutput(plan *models.StoryPlan, request Request) error 
 	plan.ProjectID = expectedProjectID
 	plan.Version = expectedVersion
 	normalizeStoryPlannerMediaReferences(plan, request)
+	EnforceSceneTransitions(plan, request.VideoAnalyses, normalizeVisualStyle(request.VisualStyle))
 	if strings.TrimSpace(plan.ID) == "" {
 		plan.ID = planID(request, plan.Moments)
 	}
