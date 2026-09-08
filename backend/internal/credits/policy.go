@@ -2,6 +2,7 @@ package credits
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -33,11 +34,14 @@ type CreditPack struct {
 type Policy struct {
 	Prices                          map[models.CreditAction]int
 	Limits                          Limits
+	DynamicStoryPricing             bool
 	InitialGrant                    int
 	MonthlySubscriptionCycleCredits int
 	YearlySubscriptionCycleCredits  int
 	CreditPacks                     []CreditPack
 }
+
+const maxDynamicStoryCredits = 80
 
 func DefaultPolicy() Policy {
 	return Policy{
@@ -64,6 +68,7 @@ func DefaultPolicy() Policy {
 			AIEditMaxMedia:                20,
 			AIEditMaxDurationSec:          60,
 		},
+		DynamicStoryPricing: false,
 		InitialGrant:                    100,
 		MonthlySubscriptionCycleCredits: 300,
 		YearlySubscriptionCycleCredits:  360,
@@ -101,6 +106,7 @@ func LoadPolicyFromEnv() Policy {
 	if value, ok := readIntEnv("CREDIT_SUBSCRIPTION_YEARLY_CYCLE_CREDITS"); ok {
 		policy.YearlySubscriptionCycleCredits = value
 	}
+	policy.DynamicStoryPricing = readBoolEnvOrDefault("CREDIT_DYNAMIC_STORY_PRICING", policy.DynamicStoryPricing)
 	policy.CreditPacks = loadCreditPacksFromEnv(policy.CreditPacks)
 	policy.Limits.CreateStoryMaxPhotos = readIntEnvOrDefault("CREDIT_CREATE_STORY_MAX_PHOTOS", policy.Limits.CreateStoryMaxPhotos)
 	policy.Limits.CreateStoryMaxVideoSeconds = readIntEnvOrDefault("CREDIT_CREATE_STORY_MAX_VIDEO_SECONDS", policy.Limits.CreateStoryMaxVideoSeconds)
@@ -115,9 +121,15 @@ func LoadPolicyFromEnv() Policy {
 	return policy
 }
 
-func (p Policy) Price(action models.CreditAction) (int, bool) {
+func (p Policy) Price(action models.CreditAction, stats StoryMediaStats) (int, bool) {
 	price, ok := p.Prices[action]
-	return price, ok
+	if !ok {
+		return 0, false
+	}
+	if !p.DynamicStoryPricing {
+		return price, true
+	}
+	return p.dynamicStoryPrice(action, stats, price), true
 }
 
 func (p Policy) CreditPack(id string) (CreditPack, bool) {
@@ -130,13 +142,40 @@ func (p Policy) CreditPack(id string) (CreditPack, bool) {
 	return CreditPack{}, false
 }
 
-func (p Policy) Quote(action models.CreditAction, balance int, eligible bool, reason string) models.CreditQuote {
-	price, _ := p.Price(action)
+func (p Policy) Quote(action models.CreditAction, balance int, eligible bool, reason string, stats StoryMediaStats) models.CreditQuote {
+	price, _ := p.Price(action, stats)
 	quote := models.CreditQuote{Action: action, Credits: price, Balance: balance, BalanceAfter: balance - price, Eligible: eligible}
 	if reason != "" {
 		quote.Reason = reason
 	}
 	return quote
+}
+
+func (p Policy) dynamicStoryPrice(action models.CreditAction, stats StoryMediaStats, fallback int) int {
+	if fallback <= 0 {
+		return 0
+	}
+	var durationSeconds int
+	switch action {
+	case models.CreditActionCreateStory:
+		durationSeconds = stats.TotalVideoSeconds
+	case models.CreditActionRegenerateStory, models.CreditActionAIEditStory:
+		durationSeconds = stats.StoryVideoSeconds
+	default:
+		return fallback
+	}
+	if durationSeconds <= 0 {
+		return fallback
+	}
+	curve := 1 - math.Exp(-float64(durationSeconds)/45.0)
+	price := float64(fallback) + float64(maxDynamicStoryCredits-fallback)*curve
+	if price < float64(fallback) {
+		price = float64(fallback)
+	}
+	if price > maxDynamicStoryCredits {
+		price = maxDynamicStoryCredits
+	}
+	return int(math.Round(price))
 }
 
 type StoryMediaStats struct {
@@ -204,6 +243,18 @@ func readIntEnv(name string) (int, bool) {
 		return 0, false
 	}
 	return parsed, true
+}
+
+func readBoolEnvOrDefault(name string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func readIntEnvOrDefault(name string, fallback int) int {

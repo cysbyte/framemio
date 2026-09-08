@@ -305,7 +305,7 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		"remove_media_ids", joinStringsOrUnset(cleanStringList(input.RemoveMediaIDs)),
 		"ordered_media_ids", joinStringsOrUnset(cleanStringList(input.OrderedMediaIDs)),
 		"instruction_present", strings.TrimSpace(input.Instruction) != "",
-		"credit_price", creditPricingForActions(creditActions),
+		"credit_price", creditPricingForActions(s.Credits.Policy, statsByAction, creditActions),
 		"add_media_count", stats.AddedMediaCount,
 		"add_photo_count", stats.AddedPhotoCount,
 		"add_video_seconds", stats.AddedVideoSeconds,
@@ -327,7 +327,7 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 				"project_id", project.ID,
 				"reference_id", referenceID,
 				"action", string(action),
-				"credit_price", creditPricingForAction(action),
+				"credit_price", creditPricingForAction(s.Credits.Policy, action, actionStats),
 				"add_media_count", actionStats.AddedMediaCount,
 				"story_media_count", actionStats.StoryMediaCount,
 				"story_video_seconds", actionStats.StoryVideoSeconds,
@@ -450,7 +450,7 @@ func (s *Server) regenerateIOSStory(response http.ResponseWriter, request *http.
 		"preferred_media_order", config["preferred_media_order"],
 		"excluded_media_ids", config["excluded_media_ids"],
 		"excluded_moment_ids", config["excluded_moment_ids"],
-		"credit_price", creditPricingForAction(models.CreditActionRegenerateStory),
+		"credit_price", creditPricingForAction(s.Credits.Policy, models.CreditActionRegenerateStory, stats),
 		"story_media_count", stats.StoryMediaCount,
 		"story_video_seconds", stats.StoryVideoSeconds,
 	)
@@ -995,17 +995,17 @@ func joinIOSStoryReplacementTargets(replacements []iosStoryMomentReplace) string
 	return joinStringsOrUnset(targets)
 }
 
-func creditPricingForAction(action models.CreditAction) int {
-	if price, ok := credits.DefaultPolicy().Price(action); ok {
+func creditPricingForAction(policy credits.Policy, action models.CreditAction, stats credits.StoryMediaStats) int {
+	if price, ok := policy.Price(action, stats); ok {
 		return price
 	}
 	return 0
 }
 
-func creditPricingForActions(actions []models.CreditAction) int {
+func creditPricingForActions(policy credits.Policy, statsByAction map[models.CreditAction]credits.StoryMediaStats, actions []models.CreditAction) int {
 	total := 0
 	for _, action := range uniqueCreditActions(actions) {
-		total += creditPricingForAction(action)
+		total += creditPricingForAction(policy, action, statsByAction[action])
 	}
 	return total
 }
@@ -2050,19 +2050,65 @@ func iosStoryProgressFromJobs(status models.ProjectStatus, jobs []models.Process
 		return iosStoryFallbackProgress(status)
 	}
 
-	sortedJobs := append([]models.ProcessingJob(nil), jobs...)
-	sort.SliceStable(sortedJobs, func(first, second int) bool {
-		if sortedJobs[first].UpdatedAt.Equal(sortedJobs[second].UpdatedAt) {
-			return sortedJobs[first].CreatedAt.Before(sortedJobs[second].CreatedAt)
-		}
-		return sortedJobs[first].UpdatedAt.Before(sortedJobs[second].UpdatedAt)
-	})
-
-	if job, ok := latestIOSStoryProgressJob(sortedJobs, models.JobStatusRunning); ok {
-		return iosStoryProgressForJob(job)
+	stages := []iosStoryProgressStage{
+		{
+			jobTypes:      []models.JobType{models.JobTypeMediaPreprocess},
+			title:         "Preparing video clips...",
+			queuedDetail:  "Your media is waiting for the next worker.",
+			runningDetail: "Reading photos and videos before choosing moments.",
+			valueStart:    0.25,
+			valueSpan:     0.10,
+		},
+		{
+			jobTypes:      []models.JobType{models.JobTypeTranscribe},
+			title:         "Listening for voices...",
+			queuedDetail:  "Audio transcription is queued for this story.",
+			runningDetail: "Capturing spoken moments from video clips.",
+			valueStart:    0.40,
+			valueSpan:     0.10,
+		},
+		{
+			jobTypes:      []models.JobType{models.JobTypeVideoUnderstand},
+			title:         "Finding the best parts...",
+			queuedDetail:  "Visual understanding is queued; longer videos can take a bit.",
+			runningDetail: "Scanning scenes, motion, faces, and meaningful highlights.",
+			valueStart:    0.55,
+			valueSpan:     0.13,
+		},
+		{
+			jobTypes:      []models.JobType{models.JobTypeStoryPlan},
+			title:         "Writing story...",
+			queuedDetail:  "The story planner is waiting for the analyzed moments.",
+			runningDetail: "Choosing the rhythm, captions, and moment order.",
+			valueStart:    0.72,
+			valueSpan:     0.08,
+		},
+		{
+			jobTypes:      []models.JobType{models.JobTypeStoryValidate},
+			title:         "Checking the story flow...",
+			queuedDetail:  "FrameMio is preparing the render plan.",
+			runningDetail: "Making sure the planned story is ready to render.",
+			valueStart:    0.82,
+			valueSpan:     0.04,
+		},
+		{
+			jobTypes:      []models.JobType{models.JobTypeVideoRender},
+			title:         "Creating film...",
+			queuedDetail:  "The render worker is queued; first renders can take a moment to start.",
+			runningDetail: "Rendering the final video with timing, motion, and captions.",
+			valueStart:    0.88,
+			valueSpan:     0.10,
+		},
 	}
-	if job, ok := earliestIOSStoryProgressJob(sortedJobs, models.JobStatusQueued); ok {
-		return iosStoryProgressForJob(job)
+	for _, stage := range stages {
+		if progress, hasRunning, _ := iosStoryProgressForStage(jobs, stage); hasRunning {
+			return progress
+		}
+	}
+	for _, stage := range stages {
+		if progress, _, hasQueued := iosStoryProgressForStage(jobs, stage); hasQueued {
+			return progress
+		}
 	}
 	if status == models.ProjectStatusRendering || status == models.ProjectStatusStoryReady {
 		return iosStoryProgress{Title: "Preparing the final render...", Detail: "Your moments are selected; the video worker is getting the film ready.", Value: iosProgressValue(0.84)}
@@ -2070,60 +2116,61 @@ func iosStoryProgressFromJobs(status models.ProjectStatus, jobs []models.Process
 	return iosStoryFallbackProgress(status)
 }
 
-func latestIOSStoryProgressJob(jobs []models.ProcessingJob, status models.JobStatus) (models.ProcessingJob, bool) {
-	for index := len(jobs) - 1; index >= 0; index-- {
-		if jobs[index].Status == status {
-			return jobs[index], true
-		}
-	}
-	return models.ProcessingJob{}, false
+type iosStoryProgressStage struct {
+	jobTypes      []models.JobType
+	title         string
+	queuedDetail  string
+	runningDetail string
+	valueStart    float64
+	valueSpan     float64
 }
 
-func earliestIOSStoryProgressJob(jobs []models.ProcessingJob, status models.JobStatus) (models.ProcessingJob, bool) {
+func iosStoryProgressForStage(jobs []models.ProcessingJob, stage iosStoryProgressStage) (iosStoryProgress, bool, bool) {
+	total := 0
+	completed := 0
+	running := 0
+	queued := 0
+	runningProgress := 0.0
 	for _, job := range jobs {
-		if job.Status == status {
-			return job, true
+		if !containsIOSStoryJobType(stage.jobTypes, job.Type) {
+			continue
+		}
+		total++
+		switch job.Status {
+		case models.JobStatusCompleted:
+			completed++
+		case models.JobStatusRunning:
+			running++
+			runningProgress += clampIOSStoryJobProgress(job.Progress)
+		case models.JobStatusQueued:
+			queued++
 		}
 	}
-	return models.ProcessingJob{}, false
+	if total == 0 || completed == total {
+		return iosStoryProgress{}, false, false
+	}
+	if running == 0 && completed == 0 && queued > 0 {
+		return iosStoryProgress{Title: stage.title, Detail: stage.queuedDetail, Value: iosProgressValue(stage.valueStart)}, false, true
+	}
+	progressFraction := float64(completed)
+	if running > 0 {
+		progressFraction += runningProgress / float64(running)
+	}
+	progressFraction /= float64(total)
+	detail := stage.runningDetail
+	if total > 1 {
+		detail = fmt.Sprintf("%s (%d/%d complete).", stage.runningDetail, completed, total)
+	}
+	return iosStoryProgress{Title: stage.title, Detail: detail, Value: iosProgressValue(stage.valueStart + stage.valueSpan*progressFraction)}, true, queued > 0
 }
 
-func iosStoryProgressForJob(job models.ProcessingJob) iosStoryProgress {
-	progress := clampIOSStoryJobProgress(job.Progress)
-	switch job.Type {
-	case models.JobTypeMediaPreprocess:
-		if job.Status == models.JobStatusQueued {
-			return iosStoryProgress{Title: "Preparing video clips...", Detail: "Your media is waiting for the next worker.", Value: iosProgressValue(0.22)}
+func containsIOSStoryJobType(jobTypes []models.JobType, jobType models.JobType) bool {
+	for _, candidate := range jobTypes {
+		if candidate == jobType {
+			return true
 		}
-		return iosStoryProgress{Title: "Preparing video clips...", Detail: "Reading photos and videos before choosing moments.", Value: iosProgressValue(0.25 + progress*0.10)}
-	case models.JobTypeTranscribe:
-		if job.Status == models.JobStatusQueued {
-			return iosStoryProgress{Title: "Listening for voices...", Detail: "Audio transcription is queued for this story.", Value: iosProgressValue(0.36)}
-		}
-		return iosStoryProgress{Title: "Listening for voices...", Detail: "Capturing spoken moments from video clips.", Value: iosProgressValue(0.40 + progress*0.10)}
-	case models.JobTypeVideoUnderstand:
-		if job.Status == models.JobStatusQueued {
-			return iosStoryProgress{Title: "Finding the best parts...", Detail: "Visual understanding is queued; longer videos can take a bit.", Value: iosProgressValue(0.50)}
-		}
-		return iosStoryProgress{Title: "Finding the best parts...", Detail: "Scanning scenes, motion, faces, and meaningful highlights.", Value: iosProgressValue(0.55 + progress*0.13)}
-	case models.JobTypeStoryPlan:
-		if job.Status == models.JobStatusQueued {
-			return iosStoryProgress{Title: "Writing story...", Detail: "The story planner is waiting for the analyzed moments.", Value: iosProgressValue(0.68)}
-		}
-		return iosStoryProgress{Title: "Writing story...", Detail: "Choosing the rhythm, captions, and moment order.", Value: iosProgressValue(0.72 + progress*0.08)}
-	case models.JobTypeStoryValidate:
-		if job.Status == models.JobStatusQueued {
-			return iosStoryProgress{Title: "Checking the story flow...", Detail: "FrameMio is preparing the render plan.", Value: iosProgressValue(0.80)}
-		}
-		return iosStoryProgress{Title: "Checking the story flow...", Detail: "Making sure the planned story is ready to render.", Value: iosProgressValue(0.82 + progress*0.04)}
-	case models.JobTypeVideoRender:
-		if job.Status == models.JobStatusQueued {
-			return iosStoryProgress{Title: "Creating film...", Detail: "The render worker is queued; first renders can take a moment to start.", Value: iosProgressValue(0.86)}
-		}
-		return iosStoryProgress{Title: "Creating film...", Detail: "Rendering the final video with timing, motion, and captions.", Value: iosProgressValue(0.88 + progress*0.10)}
-	default:
-		return iosStoryFallbackProgress(models.ProjectStatusAnalyzing)
 	}
+	return false
 }
 
 func iosStoryFallbackProgress(status models.ProjectStatus) iosStoryProgress {

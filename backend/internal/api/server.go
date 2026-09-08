@@ -623,6 +623,7 @@ func (s *Server) listCreditPacks(response http.ResponseWriter, request *http.Req
 	}
 	s.writeJSON(response, http.StatusOK, map[string]any{
 		"packs":                              s.Credits.Policy.CreditPacks,
+		"dynamic_story_pricing":             s.Credits.Policy.DynamicStoryPricing,
 		"initial_credit_grant":               s.Credits.Policy.InitialGrant,
 		"monthly_subscription_cycle_credits": s.Credits.Policy.MonthlySubscriptionCycleCredits,
 		"yearly_subscription_cycle_credits":  s.Credits.Policy.YearlySubscriptionCycleCredits,

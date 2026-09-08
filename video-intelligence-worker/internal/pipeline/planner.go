@@ -2,8 +2,6 @@ package pipeline
 
 import (
 	"fmt"
-	"math"
-	"sort"
 	"time"
 
 	"github.com/framemio/video-intelligence-worker/internal/domain"
@@ -16,6 +14,10 @@ type PlannerConfig struct {
 	MaxFramesShort     int
 	MaxFramesLong      int
 }
+
+const (
+	defaultStorySegmentDuration = 5 * time.Second
+)
 
 func BuildScenes(metadata domain.VideoMetadata, boundaries []domain.SceneBoundary, minimumDuration time.Duration) []domain.VideoScene {
 	duration := metadata.DurationMicros
@@ -54,8 +56,6 @@ func BuildScenes(metadata domain.VideoMetadata, boundaries []domain.SceneBoundar
 	}
 	return scenes
 }
-
-const defaultStorySegmentDuration = 5 * time.Second
 
 func BuildSegments(scenes []domain.VideoScene, maximumDuration time.Duration) []domain.CandidateSegment {
 	maximum := maximumDuration.Microseconds()

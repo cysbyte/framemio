@@ -55,7 +55,7 @@ func (s *Service) Quote(ctx context.Context, userID string, action models.Credit
 		return models.CreditQuote{}, err
 	}
 	eligible, reason := s.Policy.Validate(action, stats)
-	price, ok := s.Policy.Price(action)
+	price, ok := s.Policy.Price(action, stats)
 	if !ok {
 		return models.CreditQuote{}, fmt.Errorf("unknown credit action: %s", action)
 	}

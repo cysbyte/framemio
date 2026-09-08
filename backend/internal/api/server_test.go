@@ -580,6 +580,47 @@ func TestIOSStoryIncludesBackendJobProgress(t *testing.T) {
 	}
 }
 
+func TestIOSStoryProgressUsesEarliestActiveStage(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.August, 19, 10, 1, 0, 0, time.UTC)
+	progress := iosStoryProgressFromJobs(models.ProjectStatusAnalyzing, []models.ProcessingJob{
+		{
+			ID:        "job-preprocess-1",
+			Type:      models.JobTypeMediaPreprocess,
+			Status:    models.JobStatusRunning,
+			Progress:  0.5,
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+		{
+			ID:        "job-preprocess-2",
+			Type:      models.JobTypeMediaPreprocess,
+			Status:    models.JobStatusCompleted,
+			Progress:  1,
+			CreatedAt: now.Add(time.Second),
+			UpdatedAt: now.Add(time.Second),
+		},
+		{
+			ID:        "job-story-plan",
+			Type:      models.JobTypeStoryPlan,
+			Status:    models.JobStatusQueued,
+			CreatedAt: now.Add(2 * time.Second),
+			UpdatedAt: now.Add(2 * time.Second),
+		},
+	})
+
+	if progress.Title != "Preparing video clips..." {
+		t.Fatalf("progress title = %q", progress.Title)
+	}
+	if progress.Detail == "" || !strings.Contains(progress.Detail, "1/2 complete") {
+		t.Fatalf("progress detail = %q", progress.Detail)
+	}
+	if progress.Value == nil || *progress.Value <= 0.25 || *progress.Value >= 0.36 {
+		t.Fatalf("progress value = %v", progress.Value)
+	}
+}
+
 func TestIOSStoriesCompatibilityDeletesStory(t *testing.T) {
 	t.Parallel()
 
