@@ -125,15 +125,15 @@ struct StoryPreviewView: View {
                 )
             }
         }
+        .overlay {
+            if let saveState = viewModel.saveVideoState {
+                saveVideoModal(state: saveState)
+            }
+        }
         .alert("Couldn’t update story", isPresented: errorBinding) {
             Button("Dismiss", role: .cancel) { viewModel.errorMessage = nil }
         } message: {
             Text(viewModel.errorMessage ?? "")
-        }
-        .alert("Saved", isPresented: confirmationBinding) {
-            Button("OK", role: .cancel) { viewModel.confirmationMessage = nil }
-        } message: {
-            Text(viewModel.confirmationMessage ?? "")
         }
         .alert("Remove Story?", isPresented: $isShowingDeleteConfirmation) {
             Button("Cancel", role: .cancel) {}
@@ -642,11 +642,64 @@ struct StoryPreviewView: View {
         )
     }
 
-    private var confirmationBinding: Binding<Bool> {
-        Binding(
-            get: { viewModel.confirmationMessage != nil },
-            set: { if !$0 { viewModel.confirmationMessage = nil } }
-        )
+    @ViewBuilder
+    private func saveVideoModal(state: StoryPreviewSaveVideoState) -> some View {
+        ZStack {
+            Color.black.opacity(0.28)
+                .ignoresSafeArea()
+
+            VStack(spacing: FrameMioSpacing.lg) {
+                HStack(spacing: FrameMioSpacing.md) {
+                    Image(systemName: state.showsDoneButton ? "checkmark.circle.fill" : "arrow.down.circle.fill")
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(FrameMioColors.accent)
+                        .accessibilityHidden(true)
+
+                    VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
+                        Text(state.title)
+                            .font(FrameMioTypography.headline)
+                            .foregroundStyle(FrameMioColors.ink)
+                        Text(state.showsDoneButton ? "Your story video is ready." : "Saving your story video to Photos.")
+                            .font(FrameMioTypography.footnote)
+                            .foregroundStyle(FrameMioColors.secondaryInk)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
+                if state.showsDoneButton {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(FrameMioColors.accent)
+                        .accessibilityHidden(true)
+                } else {
+                    FrameMioProgressView(value: state.progress, title: "Downloading")
+                }
+
+                Text(state.message)
+                    .font(FrameMioTypography.footnote)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if state.showsDoneButton {
+                    PrimaryButton(title: "Done", systemImage: "checkmark") {
+                        viewModel.dismissSaveVideoState()
+                    }
+                }
+            }
+            .padding(FrameMioSpacing.xl)
+            .frame(maxWidth: 360)
+            .background(
+                FrameMioColors.surface.opacity(0.96),
+                in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                    .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+            }
+            .frameMioElevation(.subtle)
+            .padding(.horizontal, FrameMioSpacing.xl)
+        }
     }
 }
 

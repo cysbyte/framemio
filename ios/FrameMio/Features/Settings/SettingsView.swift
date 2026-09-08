@@ -20,7 +20,6 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
-                header
                 purchasesSection
                 photoLibrarySection
                 appSection
@@ -47,14 +46,6 @@ struct SettingsView: View {
         }
     }
 
-    private var header: some View {
-        FrameMioBannerArtwork(assetName: "FrameMioSettingsBanner")
-            .frame(maxWidth: .infinity)
-            .frame(height: 130)
-            .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
-            .accessibilityLabel("Settings banner")
-    }
-
     private var purchasesSection: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
             SectionHeader(title: "Purchases", subtitle: "Manage FrameMio Pro and credits")
@@ -62,7 +53,7 @@ struct SettingsView: View {
                 FrameMioHaptics.secondaryAction()
                 onBuyCredits()
             }
-            .accessibilityLabel("Buy Credits. Opens extra credit packs.")
+            .accessibilityLabel("Buy Credits. Opens purchase options.")
             SettingsActionRow(
                 title: viewModel.isRestoringPurchases ? "Restoring Purchases" : "Restore Purchases",
                 subtitle: viewModel.statusMessage ?? "Sync purchases from the App Store",

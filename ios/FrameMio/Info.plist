@@ -26,6 +26,8 @@
 	<string>$(FrameMioDeepgramAPIKey)</string>
 	<key>FrameMioDeepgramLanguage</key>
 	<string>$(FrameMioDeepgramLanguage)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.photo-video</string>
 	<key>LSRequiresIPhoneOS</key>

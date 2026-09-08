@@ -14,7 +14,6 @@ struct ProfileView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: FrameMioSpacing.lg) {
-                header
                 creditCard
                 buyCreditsButton
                 belowBuyCreditsCard
@@ -40,14 +39,6 @@ struct ProfileView: View {
             creditStore.refresh()
             viewModel.refreshEntitlements()
         }
-    }
-
-    private var header: some View {
-        FrameMioBannerArtwork(assetName: "FrameMioProfileBanner")
-            .frame(maxWidth: .infinity)
-            .frame(height: 130)
-            .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
-            .accessibilityLabel("Profile banner")
     }
 
     private var creditCard: some View {
@@ -107,7 +98,7 @@ struct ProfileView: View {
             FrameMioHaptics.secondaryAction()
             onBuyCredits()
         }
-        .accessibilityLabel("Buy Credits. Opens extra credit packs.")
+        .accessibilityLabel("Buy Credits. Opens purchase options.")
     }
 
     private var planTitle: String {

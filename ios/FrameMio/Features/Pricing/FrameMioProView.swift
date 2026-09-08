@@ -774,7 +774,7 @@ struct FrameMioProView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: FrameMioSpacing.xl) {
-                    header(cardWidth: cardWidth)
+                    creditsCard
                     plansSection(cardWidth: cardWidth)
                     primaryActionSection
                     restoreAction
@@ -833,50 +833,43 @@ struct FrameMioProView: View {
         }
     }
 
-    private func header(cardWidth: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            heroImagePlaceholder(width: cardWidth)
-
-            VStack(alignment: .leading, spacing: FrameMioSpacing.xs) {
-                Text(viewModel.currentBalanceText)
-                    .font(FrameMioTypography.body)
+    private var creditsCard: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.xs) {
+            Text("Available Credits")
+                .font(FrameMioTypography.footnote)
+                .foregroundStyle(FrameMioColors.secondaryInk)
+            Text("✦ \(viewModel.balance.map { $0.formatted() } ?? "—")")
+                .font(FrameMioTypography.display)
+                .foregroundStyle(FrameMioColors.ink)
+            Text(viewModel.currentBalanceText)
+                .font(FrameMioTypography.body)
+                .foregroundStyle(FrameMioColors.secondaryInk)
+                .fixedSize(horizontal: false, vertical: true)
+            if let renewalText = viewModel.renewalText {
+                Text(renewalText)
+                    .font(FrameMioTypography.footnote)
                     .foregroundStyle(FrameMioColors.secondaryInk)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let renewalText = viewModel.renewalText {
-                    Text(renewalText)
-                        .font(FrameMioTypography.footnote)
-                        .foregroundStyle(FrameMioColors.secondaryInk)
-                }
-                if let reservedBalanceText = viewModel.reservedBalanceText {
-                    Text(reservedBalanceText)
-                        .font(FrameMioTypography.footnote)
-                        .foregroundStyle(FrameMioColors.secondaryInk)
-                }
-                if let statusMessage = viewModel.statusMessage {
-                    Text(statusMessage)
-                        .font(FrameMioTypography.footnote)
-                        .foregroundStyle(FrameMioColors.accent)
-                }
             }
-            .padding(.horizontal, FrameMioSpacing.xs)
+            if let reservedBalanceText = viewModel.reservedBalanceText {
+                Text(reservedBalanceText)
+                    .font(FrameMioTypography.footnote)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+            }
+            if let statusMessage = viewModel.statusMessage {
+                Text(statusMessage)
+                    .font(FrameMioTypography.footnote)
+                    .foregroundStyle(FrameMioColors.accent)
+            }
         }
-    }
-
-    private func heroImagePlaceholder(width: CGFloat) -> some View {
-        FrameMioBannerArtwork(assetName: "FrameMioProBanner")
-            .frame(width: width)
-            .frame(height: 176)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
-            .background {
-                GeometryReader { proxy in
-                    Color.clear
-                        .onAppear {
-                            pricingDebugLog("hero_banner width=\(Int(proxy.size.width)) height=\(Int(proxy.size.height))")
-                        }
-                }
-            }
-            .accessibilityLabel("FrameMio Pro story image")
+        .padding(FrameMioSpacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(FrameMioColors.surface.opacity(0.86), in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                .stroke(FrameMioColors.divider.opacity(0.55), lineWidth: FrameMioMetrics.borderWidth)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(viewModel.balance.map { "\($0) credits available" } ?? "Loading credits")
     }
 
     private func plansSection(cardWidth: CGFloat) -> some View {

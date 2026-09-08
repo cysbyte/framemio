@@ -75,7 +75,7 @@ final class StoryPreviewViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var activeAction: StoryPreviewAction?
     @Published var errorMessage: String?
-    @Published var confirmationMessage: String?
+    @Published private(set) var saveVideoState: StoryPreviewSaveVideoState?
     @Published var didDeleteStory = false
     @Published var isPlayingVideo = false
     @Published private(set) var momentAssets: [String: MediaAsset] = [:]
@@ -1022,19 +1022,32 @@ final class StoryPreviewViewModel: ObservableObject {
             guard let self else { return }
             activeAction = .saveVideo
             errorMessage = nil
-            confirmationMessage = nil
+            saveVideoState = .downloading(progress: nil)
             defer { activeAction = nil }
             do {
                 try await Self.withTimeout(seconds: 150) {
-                    try await Self.saveVideoToPhotoLibrary(from: videoURL)
+                    try await Self.saveVideoToPhotoLibrary(
+                        from: videoURL,
+                        progress: { [weak self] progress in
+                            DispatchQueue.main.async { [weak self] in
+                                self?.saveVideoState = .downloading(progress: progress)
+                            }
+                        }
+                    )
                 }
-                confirmationMessage = "Saved to Photos."
+                saveVideoState = .completed(message: "Saved to your Photos library. Open Photos to find it in Recents.")
                 FrameMioHaptics.success()
             } catch is CancellationError {
+                saveVideoState = nil
             } catch {
+                saveVideoState = nil
                 errorMessage = AppError.from(error).localizedDescription
             }
         }
+    }
+
+    func dismissSaveVideoState() {
+        saveVideoState = nil
     }
 
     func replaceMoment(assetID: String) {
@@ -1289,14 +1302,21 @@ final class StoryPreviewViewModel: ObservableObject {
         }
     }
 
-    private nonisolated static func saveVideoToPhotoLibrary(from remoteURL: URL) async throws {
+    private nonisolated static func saveVideoToPhotoLibrary(
+        from remoteURL: URL,
+        progress: (@Sendable (Double?) -> Void)?
+    ) async throws {
         let authorization = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
         guard authorization == .authorized || authorization == .limited else {
             throw AppError.message("Allow FrameMio to add videos to Photos to save your story.")
         }
 
-        let localURL = try await downloadVideoForSaving(from: remoteURL)
-        defer { try? FileManager.default.removeItem(at: localURL) }
+        let localURL = try await downloadVideoForSaving(from: remoteURL, progress: progress)
+        defer {
+            if localURL != remoteURL {
+                try? FileManager.default.removeItem(at: localURL)
+            }
+        }
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             PHPhotoLibrary.shared().performChanges {
@@ -1329,8 +1349,12 @@ final class StoryPreviewViewModel: ObservableObject {
         return data
     }
 
-    private nonisolated static func downloadVideoForSaving(from remoteURL: URL) async throws -> URL {
+    private nonisolated static func downloadVideoForSaving(
+        from remoteURL: URL,
+        progress: (@Sendable (Double?) -> Void)?
+    ) async throws -> URL {
         if remoteURL.isFileURL {
+            progress?(1)
             return remoteURL
         }
 
@@ -1340,19 +1364,13 @@ final class StoryPreviewViewModel: ObservableObject {
         configuration.waitsForConnectivity = true
         configuration.timeoutIntervalForRequest = 30
         configuration.timeoutIntervalForResource = 120
-        let session = URLSession(configuration: configuration)
-        defer { session.finishTasksAndInvalidate() }
-
-        let (downloadedURL, response) = try await session.download(from: remoteURL)
-        if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-            throw AppError.server(statusCode: httpResponse.statusCode)
-        }
-
-        let localURL = FileManager.default.temporaryDirectory
+        let destinationURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("framemio-story-\(UUID().uuidString)")
-            .appendingPathExtension("mp4")
-        try FileManager.default.moveItem(at: downloadedURL, to: localURL)
-        return localURL
+            .appendingPathExtension(remoteURL.pathExtension.isEmpty ? "mp4" : remoteURL.pathExtension)
+        let delegate = VideoDownloadProgressDelegate(destinationURL: destinationURL, progress: progress)
+        let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        return try await delegate.download(from: remoteURL, session: session)
     }
 
     private nonisolated static func withTimeout<T: Sendable>(
@@ -1489,6 +1507,130 @@ enum StoryPreviewAction: Hashable, Sendable {
         case .retry, .renderAgain, .saveVideo, .deleteStory:
             [.preview]
         }
+    }
+}
+
+enum StoryPreviewSaveVideoState: Equatable, Sendable {
+    case downloading(progress: Double?)
+    case completed(message: String)
+
+    var title: String {
+        switch self {
+        case .downloading:
+            "Downloading video"
+        case .completed:
+            "Saved"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .downloading:
+            "FrameMio is preparing your story for Photos."
+        case .completed(let message):
+            message
+        }
+    }
+
+    var progress: Double? {
+        switch self {
+        case .downloading(let progress):
+            progress
+        case .completed:
+            nil
+        }
+    }
+
+    var showsDoneButton: Bool {
+        if case .completed = self {
+            true
+        } else {
+            false
+        }
+    }
+}
+
+private final class VideoDownloadProgressDelegate: NSObject, URLSessionDownloadDelegate, URLSessionTaskDelegate {
+    private let destinationURL: URL
+    private let fileManager: FileManager
+    private let progressHandler: (@Sendable (Double?) -> Void)?
+    private var continuation: CheckedContinuation<URL, Error>?
+    private var task: URLSessionDownloadTask?
+
+    init(
+        destinationURL: URL,
+        fileManager: FileManager = .default,
+        progress: (@Sendable (Double?) -> Void)?
+    ) {
+        self.destinationURL = destinationURL
+        self.fileManager = fileManager
+        progressHandler = progress
+    }
+
+    func download(from remoteURL: URL, session: URLSession) async throws -> URL {
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                self.continuation = continuation
+                let task = session.downloadTask(with: remoteURL)
+                self.task = task
+                task.resume()
+            }
+        } onCancel: {
+            task?.cancel()
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        guard totalBytesExpectedToWrite > 0 else {
+            progressHandler?(nil)
+            return
+        }
+        let progress = min(max(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite), 0), 1)
+        progressHandler?(progress)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        do {
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                try fileManager.removeItem(at: destinationURL)
+            }
+            try fileManager.moveItem(at: location, to: destinationURL)
+            resume(returning: destinationURL)
+        } catch {
+            resume(throwing: error)
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didCompleteWithError error: Error?
+    ) {
+        if let error {
+            resume(throwing: error)
+        }
+    }
+
+    private func resume(returning url: URL) {
+        guard let continuation else { return }
+        self.continuation = nil
+        continuation.resume(returning: url)
+    }
+
+    private func resume(throwing error: Error) {
+        guard let continuation else { return }
+        self.continuation = nil
+        continuation.resume(throwing: error)
     }
 }
 
