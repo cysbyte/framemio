@@ -121,7 +121,7 @@ final class StoryLaunchCoordinator: ObservableObject {
             defer { isPreparing = false }
 
             do {
-                try await verifyCredits(for: .createStory)
+                try await verifyCredits(for: .createStory, assets: assets)
                 let selection = MediaSelection(explicitlySelectedAssetIDs: assets.map(\.id))
                 phaseTitle = "Uploading your photos and videos..."
                 phaseDetail = "Uploading originals to FrameMio. Large videos and iCloud downloads can take longer."
@@ -187,8 +187,15 @@ final class StoryLaunchCoordinator: ObservableObject {
         }
     }
 
-    private func verifyCredits(for action: CreditAction) async throws {
+    private func verifyCredits(for action: CreditAction, assets: [MediaAsset]) async throws {
         guard let creditService else { return }
+        if action == .createStory {
+            let quote = try await creditService.quote(action: action, stats: .createStory(assets: assets))
+            guard quote.eligible, quote.balance >= quote.credits else {
+                throw AppError.insufficientCredits(required: quote.credits, available: quote.balance)
+            }
+            return
+        }
         let balance = try await creditService.balance()
         if let issue = CreditPreflight.issue(for: action, balance: balance) {
             throw AppError.insufficientCredits(required: issue.required, available: issue.available)

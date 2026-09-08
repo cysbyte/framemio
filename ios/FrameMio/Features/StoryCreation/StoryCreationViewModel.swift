@@ -22,6 +22,7 @@ final class StoryCreationViewModel: ObservableObject {
     @Published private(set) var story: Story?
     @Published private(set) var thumbnails: [String: UIImage] = [:]
     @Published private(set) var creditBalance: Int?
+    @Published private(set) var createStoryCreditCost: Int
     @Published var insufficientCredits: CreditIssue?
     @Published var errorMessage: String?
 
@@ -54,6 +55,7 @@ final class StoryCreationViewModel: ObservableObject {
         self.storyService = storyService
         self.creditService = creditService
         self.onCreditsUpdated = onCreditsUpdated
+        self.createStoryCreditCost = CreditPricing.price(for: .createStory, stats: Self.createStoryCreditStats(for: assets))
     }
 
     func image(for asset: MediaAsset) -> Image? {
@@ -89,15 +91,22 @@ final class StoryCreationViewModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             do {
-                let balance = try await creditService.balance()
+                async let balanceTask = creditService.balance()
+                async let quoteTask = creditService.quote(action: .createStory, stats: createStoryCreditStats)
+                let (balance, quote) = try await (balanceTask, quoteTask)
                 creditBalance = balance.displayCredits
+                createStoryCreditCost = quote.credits
             } catch {
             }
         }
     }
 
-    var createStoryCreditCost: Int {
-        CreditPricing.price(for: .createStory)
+    private var createStoryCreditStats: CreditMediaStats {
+        Self.createStoryCreditStats(for: assets)
+    }
+
+    private static func createStoryCreditStats(for assets: [MediaAsset]) -> CreditMediaStats {
+        CreditMediaStats.createStory(assets: assets)
     }
 
     func requestCreateStory(onReady: @escaping @MainActor () -> Void) {
@@ -114,15 +123,16 @@ final class StoryCreationViewModel: ObservableObject {
             guard let self else { return }
             defer { isCheckingCredits = false }
             do {
-                let balance = try await creditService.balance()
-                creditBalance = balance.displayCredits
-                if let issue = CreditPreflight.issue(for: .createStory, balance: balance) {
+                let quote = try await creditService.quote(action: .createStory, stats: createStoryCreditStats)
+                creditBalance = quote.balance
+                createStoryCreditCost = quote.credits
+                if let issue = Self.creditIssue(from: quote, action: .createStory) {
                     storyCreationDebugLog("createStory preflight_insufficient_credits required=\(issue.required) available=\(issue.available)")
                     insufficientCredits = issue
                     phaseTitle = "Not enough credits"
                     return
                 }
-                storyCreationDebugLog("createStory preflight_ok balance=\(balance.displayCredits)")
+                storyCreationDebugLog("createStory preflight_ok required=\(quote.credits) balance=\(quote.balance)")
                 onReady()
             } catch {
                 errorMessage = AppError.from(error).localizedDescription
@@ -252,11 +262,27 @@ final class StoryCreationViewModel: ObservableObject {
 
     private func verifyCredits(for action: CreditAction) async throws {
         guard let creditService else { return }
+        if action == .createStory {
+            let quote = try await creditService.quote(action: action, stats: createStoryCreditStats)
+            creditBalance = quote.balance
+            createStoryCreditCost = quote.credits
+            if let issue = Self.creditIssue(from: quote, action: action) {
+                throw AppError.insufficientCredits(required: issue.required, available: issue.available)
+            }
+            return
+        }
         let balance = try await creditService.balance()
         creditBalance = balance.displayCredits
         if let issue = CreditPreflight.issue(for: action, balance: balance) {
             throw AppError.insufficientCredits(required: issue.required, available: issue.available)
         }
+    }
+
+    private static func creditIssue(from quote: CreditQuote, action: CreditAction) -> CreditIssue? {
+        guard quote.eligible, quote.balance >= quote.credits else {
+            return CreditIssue(action: action, required: quote.credits, available: quote.balance)
+        }
+        return nil
     }
 
     private func shouldRetryAfterStaleUploadCache(_ error: Error) -> Bool {

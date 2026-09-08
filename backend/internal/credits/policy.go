@@ -68,7 +68,7 @@ func DefaultPolicy() Policy {
 			AIEditMaxMedia:                20,
 			AIEditMaxDurationSec:          60,
 		},
-		DynamicStoryPricing: false,
+		DynamicStoryPricing:             false,
 		InitialGrant:                    100,
 		MonthlySubscriptionCycleCredits: 300,
 		YearlySubscriptionCycleCredits:  360,
@@ -179,18 +179,18 @@ func (p Policy) dynamicStoryPrice(action models.CreditAction, stats StoryMediaSt
 }
 
 type StoryMediaStats struct {
-	PhotoCount         int
-	VideoCount         int
-	TotalMediaCount    int
-	TotalVideoSeconds  int
-	TotalBytes         int64
-	StoryMediaCount    int
-	StoryVideoSeconds  int
-	AddedPhotoCount    int
-	AddedVideoSeconds  int
-	AddedMediaCount    int
-	HasAIInstruction   bool
-	HasCaptionOnlyEdit bool
+	PhotoCount         int   `json:"photo_count,omitempty"`
+	VideoCount         int   `json:"video_count,omitempty"`
+	TotalMediaCount    int   `json:"total_media_count,omitempty"`
+	TotalVideoSeconds  int   `json:"total_video_seconds,omitempty"`
+	TotalBytes         int64 `json:"total_bytes,omitempty"`
+	StoryMediaCount    int   `json:"story_media_count,omitempty"`
+	StoryVideoSeconds  int   `json:"story_video_seconds,omitempty"`
+	AddedPhotoCount    int   `json:"added_photo_count,omitempty"`
+	AddedVideoSeconds  int   `json:"added_video_seconds,omitempty"`
+	AddedMediaCount    int   `json:"added_media_count,omitempty"`
+	HasAIInstruction   bool  `json:"has_ai_instruction,omitempty"`
+	HasCaptionOnlyEdit bool  `json:"has_caption_only_edit,omitempty"`
 }
 
 func (p Policy) Validate(action models.CreditAction, stats StoryMediaStats) (bool, string) {

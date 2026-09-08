@@ -308,6 +308,85 @@ struct CreditIssue: Identifiable, Hashable, Sendable {
     let available: Int
 }
 
+struct CreditMediaStats: Codable, Hashable, Sendable {
+    let photoCount: Int
+    let videoCount: Int
+    let totalMediaCount: Int
+    let totalVideoSeconds: Int
+    let totalBytes: Int64
+    let storyMediaCount: Int
+    let storyVideoSeconds: Int
+    let addedPhotoCount: Int
+    let addedVideoSeconds: Int
+    let addedMediaCount: Int
+    let hasAIInstruction: Bool
+    let hasCaptionOnlyEdit: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case photoCount = "photo_count"
+        case videoCount = "video_count"
+        case totalMediaCount = "total_media_count"
+        case totalVideoSeconds = "total_video_seconds"
+        case totalBytes = "total_bytes"
+        case storyMediaCount = "story_media_count"
+        case storyVideoSeconds = "story_video_seconds"
+        case addedPhotoCount = "added_photo_count"
+        case addedVideoSeconds = "added_video_seconds"
+        case addedMediaCount = "added_media_count"
+        case hasAIInstruction = "has_ai_instruction"
+        case hasCaptionOnlyEdit = "has_caption_only_edit"
+    }
+
+    init(
+        photoCount: Int = 0,
+        videoCount: Int = 0,
+        totalMediaCount: Int = 0,
+        totalVideoSeconds: Int = 0,
+        totalBytes: Int64 = 0,
+        storyMediaCount: Int = 0,
+        storyVideoSeconds: Int = 0,
+        addedPhotoCount: Int = 0,
+        addedVideoSeconds: Int = 0,
+        addedMediaCount: Int = 0,
+        hasAIInstruction: Bool = false,
+        hasCaptionOnlyEdit: Bool = false
+    ) {
+        self.photoCount = photoCount
+        self.videoCount = videoCount
+        self.totalMediaCount = totalMediaCount
+        self.totalVideoSeconds = totalVideoSeconds
+        self.totalBytes = totalBytes
+        self.storyMediaCount = storyMediaCount
+        self.storyVideoSeconds = storyVideoSeconds
+        self.addedPhotoCount = addedPhotoCount
+        self.addedVideoSeconds = addedVideoSeconds
+        self.addedMediaCount = addedMediaCount
+        self.hasAIInstruction = hasAIInstruction
+        self.hasCaptionOnlyEdit = hasCaptionOnlyEdit
+    }
+
+    static func createStory(assets: [MediaAsset]) -> CreditMediaStats {
+        let videos = assets.filter(\.isVideo)
+        return CreditMediaStats(
+            photoCount: assets.count - videos.count,
+            videoCount: videos.count,
+            totalMediaCount: assets.count,
+            totalVideoSeconds: videos.reduce(0) { total, asset in
+                total + max(0, Int(asset.duration + 0.5))
+            }
+        )
+    }
+}
+
+struct CreditQuote: Codable, Hashable, Sendable {
+    let action: CreditAction
+    let credits: Int
+    let balance: Int
+    let balanceAfter: Int
+    let eligible: Bool
+    let reason: String?
+}
+
 struct FrameMioProCatalog {
     static let monthlyProductID = "com.framemio.pro.monthly"
     static let yearlyProductID = "com.framemio.pro.yearly"
@@ -349,6 +428,7 @@ struct CreditPricing {
     static let removeMoment = 0
     static let preview = 0
     static let lowBalanceThreshold = 25
+    private static let maxDynamicStoryCredits = 80
 
     static func price(for action: CreditAction) -> Int {
         switch action {
@@ -371,6 +451,24 @@ struct CreditPricing {
         case .preview:
             return preview
         }
+    }
+
+    static func price(for action: CreditAction, stats: CreditMediaStats) -> Int {
+        let fallback = price(for: action)
+        guard fallback > 0 else { return 0 }
+        let durationSeconds: Int
+        switch action {
+        case .createStory:
+            durationSeconds = stats.totalVideoSeconds
+        case .regenerateStory, .aiEditStory:
+            durationSeconds = stats.storyVideoSeconds
+        default:
+            return fallback
+        }
+        guard durationSeconds > 0 else { return fallback }
+        let curve = 1 - Foundation.exp(-Double(durationSeconds) / 45.0)
+        let price = Double(fallback) + Double(maxDynamicStoryCredits - fallback) * curve
+        return min(maxDynamicStoryCredits, max(fallback, Int(price.rounded())))
     }
 }
 
@@ -416,6 +514,7 @@ extension StoryEditRequest {
 
 protocol CreditService: Sendable {
     func balance() async throws -> CreditBalance
+    func quote(action: CreditAction, stats: CreditMediaStats) async throws -> CreditQuote
     func creditPacks() async throws -> [CreditPack]
     func grantPurchasedCredits(packID: String, purchaseID: String) async throws -> CreditBalance
     func grantSubscriptionCycleCredits(plan: String, purchaseID: String, expiresAt: Date?) async throws -> CreditBalance

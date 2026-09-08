@@ -107,7 +107,7 @@ struct ProfileView: View {
             FrameMioHaptics.secondaryAction()
             onBuyCredits()
         }
-        .accessibilityLabel("Buy Credits. Opens subscription or extra credit packs.")
+        .accessibilityLabel("Buy Credits. Opens extra credit packs.")
     }
 
     private var planTitle: String {

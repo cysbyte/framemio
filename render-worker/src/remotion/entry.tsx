@@ -43,9 +43,9 @@ export const FrameMioStory: React.FC<StoryProps> = ({composition}) => {
   const {fps} = useVideoConfig();
   return (
     <AbsoluteFill style={{backgroundColor: '#0f0f12', overflow: 'hidden'}}>
-      {composition.clips.map((clip) => (
+      {composition.clips.map((clip, index) => (
         <Sequence key={clip.clip_id} from={clip.start_frame} durationInFrames={clip.duration_frames}>
-          <MomentLayer clip={clip} />
+          <MomentLayer clip={clip} index={index} clips={composition.clips} fps={fps} />
         </Sequence>
       ))}
       {composition.broll.map((overlay) => (
@@ -59,12 +59,43 @@ export const FrameMioStory: React.FC<StoryProps> = ({composition}) => {
   );
 };
 
-const MomentLayer: React.FC<{clip: TimelineClip}> = ({clip}) => {
-  if (clip.media_type === 'video') {
-    return <OffthreadVideo src={sourceURL(clip.prepared_path)} muted={clip.volume <= 0} volume={clip.volume} style={mediaStyle(clip.crop_intent)} />;
-  }
-  return <PhotoLayer clip={clip} />;
+const MomentLayer: React.FC<{clip: TimelineClip; index: number; clips: TimelineClip[]; fps: number}> = ({clip, index, clips, fps}) => {
+  const opacity = useTransitionOpacity(clip, index, clips, fps);
+  const style: React.CSSProperties = {opacity};
+  return (
+    <AbsoluteFill style={style}>
+      {clip.media_type === 'video'
+        ? <OffthreadVideo src={sourceURL(clip.prepared_path)} muted={clip.volume <= 0} volume={clip.volume} style={mediaStyle(clip.crop_intent)} />
+        : <PhotoLayer clip={clip} />}
+    </AbsoluteFill>
+  );
 };
+
+function useTransitionOpacity(clip: TimelineClip, index: number, clips: TimelineClip[], fps: number): number {
+  const frame = useCurrentFrame();
+  const fadeFrames = fadeDurationFrames(clip, fps);
+  if (fadeFrames <= 0) {
+    return 1;
+  }
+  const fadeIn = index > 0 && isFadeTransition(clip.transition)
+    ? interpolate(frame, [0, fadeFrames], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})
+    : 1;
+  const nextClip = clips[index + 1];
+  const fadeOutStart = Math.max(0, clip.duration_frames - fadeFrames);
+  const fadeOut = nextClip && isFadeTransition(nextClip.transition)
+    ? interpolate(frame, [fadeOutStart, clip.duration_frames], [1, 0], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})
+    : 1;
+  return Math.min(fadeIn, fadeOut);
+}
+
+function isFadeTransition(transition?: string): boolean {
+  return transition === 'fade' || transition === 'dissolve' || transition === 'crossfade';
+}
+
+function fadeDurationFrames(clip: TimelineClip, fps: number): number {
+  const fadeSeconds = Math.max(0.001, Math.min(0.45, Math.max(0.001, clip.duration_ms / 3000)));
+  return Math.max(1, Math.round(fadeSeconds * fps));
+}
 
 const BRollLayer: React.FC<{overlay: TimelineBRoll}> = ({overlay}) => {
   if (overlay.media_type === 'video') {

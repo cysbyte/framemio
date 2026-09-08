@@ -4,7 +4,7 @@ import {DEFAULT_FPS, ensureRenderDirs, renderFingerprint, stableBRollClipId, sta
 import type {FfmpegClient} from '../ffmpeg/client.js';
 import type {RemotionRenderer} from '../remotion/renderer.js';
 import type {ObjectStore} from '../storage/object-store.js';
-import type {RenderInput, RenderRecord, RenderResult, SourceMediaAsset} from '../types.js';
+import type {CompositionSpec, RenderInput, RenderRecord, RenderResult, SourceMediaAsset} from '../types.js';
 import {RENDER_VERSION} from '../types.js';
 import {RenderAssetError, RenderInputError} from './errors.js';
 import {buildComposition, mediaExtension} from './timeline.js';
@@ -35,7 +35,7 @@ export class DeterministicRenderWorker {
     console.info(JSON.stringify({level: 'info', msg: 'render clips prepared', job_id: input.job_id, project_id: input.project_id, prepared_count: preparedPaths.size}));
     const composition = buildComposition(input.story_plan, input.media_assets, assetPaths, preparedPaths, paths, {rendererVersion, fps: DEFAULT_FPS});
     await writeFile(paths.composition_file, JSON.stringify(composition, null, 2), 'utf8');
-    console.info(JSON.stringify({level: 'info', msg: 'render composition built', job_id: input.job_id, project_id: input.project_id, duration_ms: composition.duration_ms, width: composition.resolution.width, height: composition.resolution.height, clip_count: composition.clips.length, broll_count: composition.broll.length, caption_count: composition.captions.length}));
+    console.info(JSON.stringify({level: 'info', msg: 'render composition built', job_id: input.job_id, project_id: input.project_id, duration_ms: composition.duration_ms, width: composition.resolution.width, height: composition.resolution.height, clip_count: composition.clips.length, broll_count: composition.broll.length, caption_count: composition.captions.length, transition_summary: transitionSummary(composition)}));
     const remotionIntermediate = path.join(paths.work_dir, 'remotion-output.mp4');
     await this.dependencies.remotion.renderComposition(composition, remotionIntermediate);
     console.info(JSON.stringify({level: 'info', msg: 'remotion render completed', job_id: input.job_id, project_id: input.project_id}));
@@ -173,6 +173,10 @@ export class DeterministicRenderWorker {
   private nowISO(): string {
     return (this.dependencies.now?.() ?? new Date()).toISOString();
   }
+}
+
+function transitionSummary(composition: CompositionSpec): string {
+  return composition.clips.map((clip, index) => `${index + 1}:${clip.asset_id}:${clip.transition}`).join(',');
 }
 
 function validateInput(input: RenderInput, rendererVersion: string): void {

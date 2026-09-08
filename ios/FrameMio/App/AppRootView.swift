@@ -131,8 +131,8 @@ struct AppRootView: View {
     }
 
     private func openBuyCredits(_ source: PricingEntryPoint) {
-        purchaseRoutingDebugLog("buy_credits_tapped source=\(source.rawValue) cached_balance=\(creditStore.balance?.available.description ?? "nil") cached_reserved=\(creditStore.balance?.reserved.description ?? "nil") cached_has_subscription_cycle=\(creditStore.balance?.hasActiveSubscriptionCycle.description ?? "nil")")
-        openPurchaseDestination(source)
+        purchaseRoutingDebugLog("buy_credits_tapped source=\(source.rawValue) destination=credit_packs cached_balance=\(creditStore.balance?.available.description ?? "nil") cached_reserved=\(creditStore.balance?.reserved.description ?? "nil") cached_has_subscription_cycle=\(creditStore.balance?.hasActiveSubscriptionCycle.description ?? "nil")")
+        purchaseDestination = .creditPacks(source)
     }
 
     private func openPurchaseDestination(_ source: PricingEntryPoint) {

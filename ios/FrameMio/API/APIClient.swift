@@ -352,6 +352,17 @@ final class RemoteCreditService: CreditService, @unchecked Sendable {
         return try decoder.decode(CreditBalance.self, from: data)
     }
 
+    func quote(action: CreditAction, stats: CreditMediaStats) async throws -> CreditQuote {
+        struct Request: Encodable {
+            let action: CreditAction
+            let stats: CreditMediaStats
+        }
+
+        let body = try encoder.encode(Request(action: action, stats: stats))
+        let data = try await apiClient.data(for: APIRequest(method: .post, path: "/v1/credit-quote", body: body))
+        return try decoder.decode(CreditQuote.self, from: data)
+    }
+
     func creditPacks() async throws -> [CreditPack] {
         struct Response: Decodable {
             let packs: [CreditPack]
@@ -455,6 +466,18 @@ final class MockCreditService: CreditService, @unchecked Sendable {
 
     func balance() async throws -> CreditBalance {
         balanceValue
+    }
+
+    func quote(action: CreditAction, stats: CreditMediaStats) async throws -> CreditQuote {
+        let credits = CreditPricing.price(for: action, stats: stats)
+        return CreditQuote(
+            action: action,
+            credits: credits,
+            balance: balanceValue.spendableCredits,
+            balanceAfter: balanceValue.spendableCredits - credits,
+            eligible: true,
+            reason: nil
+        )
     }
 
     func creditPacks() async throws -> [CreditPack] {

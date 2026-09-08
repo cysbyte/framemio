@@ -62,7 +62,7 @@ struct SettingsView: View {
                 FrameMioHaptics.secondaryAction()
                 onBuyCredits()
             }
-            .accessibilityLabel("Buy Credits. Opens subscription or extra credit packs.")
+            .accessibilityLabel("Buy Credits. Opens extra credit packs.")
             SettingsActionRow(
                 title: viewModel.isRestoringPurchases ? "Restoring Purchases" : "Restore Purchases",
                 subtitle: viewModel.statusMessage ?? "Sync purchases from the App Store",

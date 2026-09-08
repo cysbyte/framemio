@@ -1,6 +1,7 @@
 package credits
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/framemio/backend/internal/models"
@@ -45,5 +46,17 @@ func TestLoadPolicyFromEnvCanToggleDynamicStoryPricing(t *testing.T) {
 	policy := LoadPolicyFromEnv()
 	if !policy.DynamicStoryPricing {
 		t.Fatal("expected dynamic story pricing to be enabled")
+	}
+}
+
+func TestStoryMediaStatsDecodesJSONQuotePayload(t *testing.T) {
+	t.Parallel()
+
+	var stats StoryMediaStats
+	if err := json.Unmarshal([]byte(`{"total_video_seconds":300,"total_media_count":5,"video_count":2}`), &stats); err != nil {
+		t.Fatalf("decode stats: %v", err)
+	}
+	if stats.TotalVideoSeconds != 300 || stats.TotalMediaCount != 5 || stats.VideoCount != 2 {
+		t.Fatalf("stats = %+v", stats)
 	}
 }
