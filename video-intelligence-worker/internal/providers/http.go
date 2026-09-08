@@ -76,6 +76,24 @@ type HTTPVideoUnderstandingProvider struct {
 	Client       *http.Client
 }
 
+func (p HTTPVideoUnderstandingProvider) DetectScenes(ctx context.Context, input domain.VideoUnderstandingInputV1) (domain.VideoSceneDetectionResponseV1, error) {
+	type requestEnvelope struct {
+		Model          string                           `json:"model"`
+		ResponseSchema string                           `json:"response_schema"`
+		Input          domain.VideoUnderstandingInputV1 `json:"input"`
+	}
+	request := requestEnvelope{Model: p.ModelName, ResponseSchema: domain.VideoSceneAnalysisSchemaV1, Input: input}
+	raw, err := postJSONBytes(ctx, p.Client, p.URL, p.APIKey, request, 10<<20)
+	if err != nil {
+		return domain.VideoSceneDetectionResponseV1{}, fmt.Errorf("video scene detection request: %w", err)
+	}
+	response, err := understanding.DecodeSceneResponseV1(raw)
+	if err != nil {
+		return domain.VideoSceneDetectionResponseV1{}, err
+	}
+	return response, nil
+}
+
 func (p HTTPVideoUnderstandingProvider) Understand(ctx context.Context, input domain.VideoUnderstandingInputV1) (domain.VideoUnderstandingResponseV1, error) {
 	type requestEnvelope struct {
 		Model          string                           `json:"model"`

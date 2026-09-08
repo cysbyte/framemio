@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -36,10 +37,23 @@ var requiredCandidateFieldsV1 = []string{
 	"story_relevance_score", "recommended_usage", "reason",
 }
 
+var requiredSceneFieldsV1 = []string{"segment_ids", "description", "reason"}
+
 type VideoUnderstandingProvider interface {
 	Understand(ctx context.Context, input domain.VideoUnderstandingInputV1) (domain.VideoUnderstandingResponseV1, error)
 	Name() string
 	Model() string
+}
+
+type VideoSceneDetectionProvider interface {
+	DetectScenes(ctx context.Context, input domain.VideoUnderstandingInputV1) (domain.VideoSceneDetectionResponseV1, error)
+	Name() string
+	Model() string
+}
+
+type SemanticSceneProvider interface {
+	VideoSceneDetectionProvider
+	VideoUnderstandingProvider
 }
 
 type Repository interface {
@@ -89,6 +103,12 @@ type Service struct {
 	Now            func() time.Time
 }
 
+type sceneDetectionResult struct {
+	input    domain.VideoUnderstandingInputV1
+	evidence domain.VideoEvidence
+	err      error
+}
+
 func DecodeResponseV1(data []byte) (domain.VideoUnderstandingResponseV1, error) {
 	var response domain.VideoUnderstandingResponseV1
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -118,6 +138,174 @@ func DecodeResponseV1(data []byte) (domain.VideoUnderstandingResponseV1, error) 
 		}
 	}
 	return response, nil
+}
+
+func DecodeSceneResponseV1(data []byte) (domain.VideoSceneDetectionResponseV1, error) {
+	var response domain.VideoSceneDetectionResponseV1
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&response); err != nil {
+		return domain.VideoSceneDetectionResponseV1{}, fmt.Errorf("decode %s response: %w", domain.VideoSceneAnalysisSchemaV1, err)
+	}
+	if err := ensureJSONEnd(decoder); err != nil {
+		return domain.VideoSceneDetectionResponseV1{}, err
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(data, &document); err != nil {
+		return domain.VideoSceneDetectionResponseV1{}, err
+	}
+	if missingJSONField(document, "schema_version") || missingJSONField(document, "scenes") {
+		return domain.VideoSceneDetectionResponseV1{}, fmt.Errorf("%w: schema_version and scenes are required", domain.ErrInvalidModelOutput)
+	}
+	var scenes []map[string]json.RawMessage
+	if err := json.Unmarshal(document["scenes"], &scenes); err != nil {
+		return domain.VideoSceneDetectionResponseV1{}, fmt.Errorf("%w: scenes must be an array", domain.ErrInvalidModelOutput)
+	}
+	for index, scene := range scenes {
+		for _, field := range requiredSceneFieldsV1 {
+			if missingJSONField(scene, field) {
+				return domain.VideoSceneDetectionResponseV1{}, fmt.Errorf("%w: scene %d is missing required field %s", domain.ErrInvalidModelOutput, index, field)
+			}
+		}
+	}
+	return response, nil
+}
+
+func ValidateSceneResponseV1(response domain.VideoSceneDetectionResponseV1, input domain.VideoUnderstandingInputV1) (domain.VideoSceneDetectionResponseV1, error) {
+	if response.SchemaVersion != domain.VideoSceneAnalysisSchemaV1 {
+		return domain.VideoSceneDetectionResponseV1{}, fmt.Errorf("%w: schema_version must be %s", domain.ErrInvalidModelOutput, domain.VideoSceneAnalysisSchemaV1)
+	}
+	if len(response.Scenes) == 0 {
+		return domain.VideoSceneDetectionResponseV1{}, fmt.Errorf("%w: scenes are required", domain.ErrInvalidModelOutput)
+	}
+	segmentIndex := make(map[string]int, len(input.Segments))
+	segmentByID := make(map[string]domain.CandidateSegment, len(input.Segments))
+	frameByID := make(map[string]domain.VideoUnderstandingFrameV1, len(input.Frames))
+	for index, segment := range input.Segments {
+		segmentIndex[segment.ID] = index
+		segmentByID[segment.ID] = segment
+	}
+	for _, frame := range input.Frames {
+		frameByID[frame.ID] = frame
+	}
+	assigned := make(map[string]struct{}, len(input.Segments))
+	for sceneIndex, sceneGroup := range response.Scenes {
+		if len(sceneGroup.SegmentIDs) == 0 {
+			return domain.VideoSceneDetectionResponseV1{}, fmt.Errorf("%w: scene %d requires segment_ids", domain.ErrInvalidModelOutput, sceneIndex)
+		}
+		if strings.TrimSpace(sceneGroup.Description) == "" || strings.TrimSpace(sceneGroup.Reason) == "" {
+			return domain.VideoSceneDetectionResponseV1{}, fmt.Errorf("%w: scene %d requires description and reason", domain.ErrInvalidModelOutput, sceneIndex)
+		}
+		positions := make([]int, 0, len(sceneGroup.SegmentIDs))
+		seenInScene := make(map[string]struct{}, len(sceneGroup.SegmentIDs))
+		for _, segmentID := range sceneGroup.SegmentIDs {
+			segment, exists := segmentByID[segmentID]
+			if !exists {
+				return domain.VideoSceneDetectionResponseV1{}, fmt.Errorf("%w: scene %d references unknown segment %s", domain.ErrInvalidModelOutput, sceneIndex, segmentID)
+			}
+			if _, duplicate := assigned[segmentID]; duplicate {
+				return domain.VideoSceneDetectionResponseV1{}, fmt.Errorf("%w: segment %s appears in more than one scene", domain.ErrInvalidModelOutput, segmentID)
+			}
+			if _, duplicate := seenInScene[segmentID]; duplicate {
+				return domain.VideoSceneDetectionResponseV1{}, fmt.Errorf("%w: scene %d duplicates segment %s", domain.ErrInvalidModelOutput, sceneIndex, segmentID)
+			}
+			seenInScene[segmentID] = struct{}{}
+			positions = append(positions, segmentIndex[segmentID])
+			_ = segment
+		}
+		sort.Ints(positions)
+		for index := 1; index < len(positions); index++ {
+			if positions[index] != positions[index-1]+1 {
+				return domain.VideoSceneDetectionResponseV1{}, fmt.Errorf("%w: scene %d segment_ids must be contiguous", domain.ErrInvalidModelOutput, sceneIndex)
+			}
+		}
+		for _, segmentID := range sceneGroup.SegmentIDs {
+			assigned[segmentID] = struct{}{}
+		}
+		for _, frameID := range sceneGroup.FrameIDs {
+			frame, exists := frameByID[frameID]
+			if !exists {
+				return domain.VideoSceneDetectionResponseV1{}, fmt.Errorf("%w: scene %d references unknown frame %s", domain.ErrInvalidModelOutput, sceneIndex, frameID)
+			}
+			if _, exists := segmentByID[frame.SegmentID]; !exists {
+				return domain.VideoSceneDetectionResponseV1{}, fmt.Errorf("%w: scene %d references frame %s from unknown segment", domain.ErrInvalidModelOutput, sceneIndex, frameID)
+			}
+		}
+	}
+	if len(assigned) != len(input.Segments) {
+		return domain.VideoSceneDetectionResponseV1{}, fmt.Errorf("%w: scene detection must cover every segment", domain.ErrInvalidModelOutput)
+	}
+	return response, nil
+}
+
+func remapForSceneDetection(input domain.VideoUnderstandingInputV1, evidence domain.VideoEvidence, response domain.VideoSceneDetectionResponseV1) (domain.VideoUnderstandingInputV1, domain.VideoEvidence, error) {
+	validated, err := ValidateSceneResponseV1(response, input)
+	if err != nil {
+		return domain.VideoUnderstandingInputV1{}, domain.VideoEvidence{}, err
+	}
+	segmentIndex := make(map[string]int, len(input.Segments))
+	for index, segment := range input.Segments {
+		segmentIndex[segment.ID] = index
+	}
+	remappedInput := input
+	remappedEvidence := evidence
+	remappedScenes := make([]domain.VideoScene, 0, len(validated.Scenes))
+	remappedSegments := make([]domain.CandidateSegment, len(input.Segments))
+	remappedFrames := make([]domain.VideoUnderstandingFrameV1, len(input.Frames))
+	remappedEvidenceFrames := make([]domain.SelectedFrame, len(evidence.Frames))
+	for index, sceneGroup := range validated.Scenes {
+		sceneID := fmt.Sprintf("scene-%04d", index+1)
+		positions := make([]int, 0, len(sceneGroup.SegmentIDs))
+		for _, segmentID := range sceneGroup.SegmentIDs {
+			positions = append(positions, segmentIndex[segmentID])
+		}
+		sort.Ints(positions)
+		start := input.Segments[positions[0]].StartMicros
+		end := input.Segments[positions[len(positions)-1]].EndMicros
+		representativeFrames := make([]domain.Frame, 0)
+		for _, position := range positions {
+			segment := input.Segments[position]
+			remappedSegment := segment
+			remappedSegment.SceneID = sceneID
+			remappedSegments[position] = remappedSegment
+			for frameIndex, frame := range input.Frames {
+				if frame.SegmentID != segment.ID {
+					continue
+				}
+				remappedFrame := frame
+				remappedFrame.SceneID = sceneID
+				remappedFrames[frameIndex] = remappedFrame
+				representativeFrames = append(representativeFrames, domain.Frame{FrameID: frame.ID, TimestampMicros: frame.TimestampMicros, S3Key: frame.URL})
+			}
+			for frameIndex, frame := range evidence.Frames {
+				if frame.SegmentID != segment.ID {
+					continue
+				}
+				remappedEvidenceFrame := frame
+				remappedEvidenceFrame.SceneID = sceneID
+				remappedEvidenceFrames[frameIndex] = remappedEvidenceFrame
+			}
+		}
+		sort.Slice(representativeFrames, func(left, right int) bool {
+			return representativeFrames[left].TimestampMicros < representativeFrames[right].TimestampMicros
+		})
+		_ = representativeFrames
+		remappedScenes = append(remappedScenes, domain.VideoScene{ID: sceneID, StartMicros: start, EndMicros: end, ChangeScore: 1})
+	}
+	remappedInput.Scenes = remappedScenes
+	remappedInput.Segments = remappedSegments
+	remappedInput.Frames = remappedFrames
+	if len(remappedScenes) > 0 {
+		durationMinutes := math.Max(float64(remappedInput.Metadata.DurationMicros)/60_000_000, 1.0/60)
+		remappedInput.Quality.SceneChangesPM = float64(max(0, len(remappedScenes)-1)) / durationMinutes
+		if len(remappedScenes) == 1 {
+			remappedInput.Quality.LikelyStatic = true
+		}
+	}
+	remappedEvidence.Scenes = remappedScenes
+	remappedEvidence.Segments = remappedSegments
+	remappedEvidence.Frames = remappedEvidenceFrames
+	return remappedInput, remappedEvidence, nil
 }
 
 func (s *Service) FindCached(ctx context.Context, request CacheRequest) (Result, error) {
@@ -154,6 +342,20 @@ func (s *Service) Analyze(ctx context.Context, request Request) (Result, error) 
 	input, err := s.makeInput(ctx, request)
 	if err != nil {
 		return Result{}, err
+	}
+	if semanticProvider, ok := s.Provider.(SemanticSceneProvider); ok {
+		detection, detectionErr := semanticProvider.DetectScenes(ctx, input)
+		if detectionErr != nil {
+			return Result{}, fmt.Errorf("video scene detection provider %s failed: %w", s.Provider.Name(), detectionErr)
+		}
+		input, request.Evidence, err = remapForSceneDetection(input, request.Evidence, detection)
+		if err != nil {
+			wrapped := fmt.Errorf("video scene detection provider %s failed: %w", s.Provider.Name(), err)
+			if errors.Is(err, domain.ErrInvalidModelOutput) {
+				return Result{}, domain.Permanent(wrapped)
+			}
+			return Result{}, wrapped
+		}
 	}
 	var response domain.VideoUnderstandingResponseV1
 	if err := s.retry(ctx, request, input, func() error {

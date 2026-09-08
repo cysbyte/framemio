@@ -2,7 +2,9 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"sort"
+	"strings"
 
 	"github.com/framemio/video-intelligence-worker/internal/domain"
 )
@@ -52,6 +54,62 @@ func (p HeuristicVideoUnderstandingProvider) Understand(_ context.Context, input
 		})
 	}
 	return domain.VideoUnderstandingResponseV1{SchemaVersion: domain.VideoAnalysisSchemaV1, Candidates: candidates}, nil
+}
+
+func (p HeuristicVideoUnderstandingProvider) DetectScenes(_ context.Context, input domain.VideoUnderstandingInputV1) (domain.VideoSceneDetectionResponseV1, error) {
+	if len(input.Segments) == 0 {
+		return domain.VideoSceneDetectionResponseV1{}, domain.Permanent(errors.New("missing segments"))
+	}
+	if input.Quality.LikelyStatic || input.Quality.SceneChangesPM < 1 {
+		segmentIDs := make([]string, 0, len(input.Segments))
+		frameIDs := make([]string, 0, len(input.Frames))
+		for _, segment := range input.Segments {
+			segmentIDs = append(segmentIDs, segment.ID)
+		}
+		for _, frame := range input.Frames {
+			frameIDs = append(frameIDs, frame.ID)
+		}
+		return domain.VideoSceneDetectionResponseV1{SchemaVersion: domain.VideoSceneAnalysisSchemaV1, Scenes: []domain.VideoSceneGroupV1{{
+			SegmentIDs:  segmentIDs,
+			Description: "Single stable scene",
+			Reason:      "The clip appears visually stable, so one scene better matches the content than multiple artificial cuts.",
+			FrameIDs:    frameIDs,
+		}}}, nil
+	}
+	scenes := make([]domain.VideoSceneGroupV1, 0)
+	currentSceneID := strings.TrimSpace(input.Segments[0].SceneID)
+	currentSegments := make([]string, 0)
+	currentFrames := make([]string, 0)
+	flush := func() {
+		if len(currentSegments) == 0 {
+			return
+		}
+		scenes = append(scenes, domain.VideoSceneGroupV1{
+			SegmentIDs:  append([]string(nil), currentSegments...),
+			Description: "Scene inferred from nearby visual evidence",
+			Reason:      "Segment boundaries align with detected visual changes and representative frames.",
+			FrameIDs:    append([]string(nil), currentFrames...),
+		})
+		currentSegments = currentSegments[:0]
+		currentFrames = currentFrames[:0]
+	}
+	for _, segment := range input.Segments {
+		if currentSceneID != "" && segment.SceneID != currentSceneID {
+			flush()
+			currentSceneID = segment.SceneID
+		}
+		currentSegments = append(currentSegments, segment.ID)
+		for _, frame := range input.Frames {
+			if frame.SegmentID == segment.ID {
+				currentFrames = append(currentFrames, frame.ID)
+			}
+		}
+	}
+	flush()
+	if len(scenes) == 0 {
+		return domain.VideoSceneDetectionResponseV1{}, domain.Permanent(errors.New("could not infer scenes"))
+	}
+	return domain.VideoSceneDetectionResponseV1{SchemaVersion: domain.VideoSceneAnalysisSchemaV1, Scenes: scenes}, nil
 }
 
 func (p HeuristicVideoUnderstandingProvider) Name() string {

@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"fmt"
+	"math"
+	"sort"
 	"time"
 
 	"github.com/framemio/video-intelligence-worker/internal/domain"

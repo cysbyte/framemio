@@ -204,6 +204,7 @@ type PreprocessingArtifact struct {
 const (
 	VideoUnderstandingInputSchemaV1 = "video-understanding-input.v1"
 	VideoAnalysisSchemaV1           = "video-analysis.v1"
+	VideoSceneAnalysisSchemaV1      = "video-scene-analysis.v1"
 	VideoAnalysisStatusCompleted    = "completed"
 	RecommendedUsageHero            = "hero"
 	RecommendedUsageSupporting      = "supporting"
@@ -274,6 +275,18 @@ type VideoSegmentAnalysisV1 struct {
 type VideoUnderstandingResponseV1 struct {
 	SchemaVersion string                   `json:"schema_version"`
 	Candidates    []VideoSegmentAnalysisV1 `json:"candidates"`
+}
+
+type VideoSceneGroupV1 struct {
+	SegmentIDs  []string `json:"segment_ids"`
+	Description string   `json:"description"`
+	Reason      string   `json:"reason"`
+	FrameIDs    []string `json:"frame_ids,omitempty"`
+}
+
+type VideoSceneDetectionResponseV1 struct {
+	SchemaVersion string              `json:"schema_version"`
+	Scenes        []VideoSceneGroupV1 `json:"scenes"`
 }
 
 type Frame struct {

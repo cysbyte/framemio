@@ -40,6 +40,20 @@ Return only strict JSON matching this schema:
 Return exactly one candidate for every input segment. Do not invent segment IDs, scene IDs, timestamps, frame IDs, or transcript indexes. Ground visual claims in frame_ids and speech/audio claims in transcript_segment_indexes.
 Write descriptions and reasons for a personal memory app: warm, concise, and user-centered. Avoid detached surveillance-style wording like "a woman", "a man", "a child", or "people visible" when a memory-oriented phrase such as "a family moment", "a lakeside picnic", or "a happy everyday moment" is more appropriate. Do not claim identity or say "you" unless the evidence explicitly supports it.`
 
+const directVideoScenePrompt = `You are FrameMio's video scene detection model. Analyze the provided iPhone video evidence and return only strict JSON matching this schema:
+{
+  "schema_version": "video-scene-analysis.v1",
+  "scenes": [
+    {
+      "segment_ids": ["existing segment id"],
+      "description": "string",
+      "reason": "string",
+      "frame_ids": ["existing frame id"]
+    }
+  ]
+}
+Return at least one scene and cover every input segment exactly once. Use segment_ids from the supplied evidence only. Prefer one scene for static content, and more scenes only when the content actually changes. Ground scene descriptions in supplied frame_ids and transcript evidence when available. Do not invent timestamps, frames, or segment IDs.`
+
 type OpenAICompatibleVideoUnderstandingProvider struct {
 	BaseURL         string
 	APIKey          string
@@ -49,6 +63,32 @@ type OpenAICompatibleVideoUnderstandingProvider struct {
 	ImageDetail     string
 	MaxOutputTokens int
 	Client          *http.Client
+}
+
+func (p OpenAICompatibleVideoUnderstandingProvider) DetectScenes(ctx context.Context, input domain.VideoUnderstandingInputV1) (domain.VideoSceneDetectionResponseV1, error) {
+	wireAPI := normalizeWireAPI(p.WireAPI)
+	var raw []byte
+	var err error
+	switch wireAPI {
+	case "responses":
+		raw, err = p.postSceneResponses(ctx, input)
+	case "chat_completions":
+		raw, err = p.postChatSceneCompletions(ctx, input)
+	default:
+		return domain.VideoSceneDetectionResponseV1{}, domain.Permanent(fmt.Errorf("unsupported direct video understanding wire API %q", p.WireAPI))
+	}
+	if err != nil {
+		return domain.VideoSceneDetectionResponseV1{}, fmt.Errorf("direct video scene detection request: %w", err)
+	}
+	text, err := extractModelText(raw, wireAPI)
+	if err != nil {
+		return domain.VideoSceneDetectionResponseV1{}, err
+	}
+	responseJSON, err := extractJSONObject([]byte(text))
+	if err != nil {
+		return domain.VideoSceneDetectionResponseV1{}, fmt.Errorf("extract direct video scene JSON: %w", err)
+	}
+	return understanding.DecodeSceneResponseV1(responseJSON)
 }
 
 func (p OpenAICompatibleVideoUnderstandingProvider) Understand(ctx context.Context, input domain.VideoUnderstandingInputV1) (domain.VideoUnderstandingResponseV1, error) {
@@ -157,6 +197,92 @@ func (p OpenAICompatibleVideoUnderstandingProvider) postResponses(ctx context.Co
 		},
 	}
 	return postJSONBytes(ctx, p.Client, endpointFor(p.BaseURL, "responses"), p.APIKey, request, 16<<20)
+}
+
+func (p OpenAICompatibleVideoUnderstandingProvider) postChatSceneCompletions(ctx context.Context, input domain.VideoUnderstandingInputV1) ([]byte, error) {
+	type textPart struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	type imageURL struct {
+		URL    string `json:"url"`
+		Detail string `json:"detail,omitempty"`
+	}
+	type imagePart struct {
+		Type     string   `json:"type"`
+		ImageURL imageURL `json:"image_url"`
+	}
+	type message struct {
+		Role    string `json:"role"`
+		Content any    `json:"content"`
+	}
+	content := make([]any, 0, 1+len(input.Frames)*2)
+	content = append(content, textPart{Type: "text", Text: scenePrompt(input)})
+	for _, frame := range input.Frames {
+		content = append(content, textPart{Type: "text", Text: frameReferenceText(frame)})
+		content = append(content, imagePart{Type: "image_url", ImageURL: imageURL{URL: frame.URL, Detail: imageDetail(p.ImageDetail)}})
+	}
+	request := map[string]any{
+		"model":       p.ModelName,
+		"temperature": 0.1,
+		"max_tokens":  maxOutputTokens(p.MaxOutputTokens),
+		"response_format": map[string]string{
+			"type": "json_object",
+		},
+		"messages": []message{
+			{Role: "system", Content: directVideoScenePrompt},
+			{Role: "user", Content: content},
+		},
+	}
+	return postJSONBytes(ctx, p.Client, endpointFor(p.BaseURL, "chat/completions"), p.APIKey, request, 16<<20)
+}
+
+func (p OpenAICompatibleVideoUnderstandingProvider) postSceneResponses(ctx context.Context, input domain.VideoUnderstandingInputV1) ([]byte, error) {
+	type inputText struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	type inputImage struct {
+		Type     string `json:"type"`
+		ImageURL string `json:"image_url"`
+		Detail   string `json:"detail,omitempty"`
+	}
+	type inputMessage struct {
+		Role    string `json:"role"`
+		Content any    `json:"content"`
+	}
+	content := make([]any, 0, 1+len(input.Frames)*2)
+	content = append(content, inputText{Type: "input_text", Text: scenePrompt(input)})
+	for _, frame := range input.Frames {
+		content = append(content, inputText{Type: "input_text", Text: frameReferenceText(frame)})
+		content = append(content, inputImage{Type: "input_image", ImageURL: frame.URL, Detail: imageDetail(p.ImageDetail)})
+	}
+	request := map[string]any{
+		"model":             p.ModelName,
+		"temperature":       0.1,
+		"max_output_tokens": maxOutputTokens(p.MaxOutputTokens),
+		"text": map[string]any{
+			"format": map[string]string{"type": "json_object"},
+		},
+		"input": []inputMessage{
+			{Role: "system", Content: []inputText{{Type: "input_text", Text: directVideoScenePrompt}}},
+			{Role: "user", Content: content},
+		},
+	}
+	return postJSONBytes(ctx, p.Client, endpointFor(p.BaseURL, "responses"), p.APIKey, request, 16<<20)
+}
+
+func scenePrompt(input domain.VideoUnderstandingInputV1) string {
+	payload, err := json.Marshal(input)
+	if err != nil {
+		return input.Objective
+	}
+	return strings.Join([]string{
+		"Analyze this FrameMio video evidence and return the required JSON only.",
+		"Prefer one scene for static content, and more scenes only when the content actually changes.",
+		"Evidence JSON:",
+		string(payload),
+	}, "\n")
 }
 
 func userPrompt(input domain.VideoUnderstandingInputV1) string {
