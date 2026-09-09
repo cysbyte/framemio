@@ -28,6 +28,7 @@ type OpenAICompatibleStoryPlanner struct {
 	WireAPI         string
 	MaxOutputTokens int
 	Client          *http.Client
+	Logger          *slog.Logger
 }
 
 var _ StoryPlanner = (*Planner)(nil)
@@ -163,12 +164,16 @@ func (p OpenAICompatibleStoryPlanner) Plan(ctx context.Context, request Request)
 	if strings.TrimSpace(p.ModelName) == "" {
 		return models.StoryPlan{}, errors.New("story planner model is required")
 	}
+	started := time.Now()
+	if p.Logger != nil { p.Logger.Info("story_planner_external_request_started", slog.String("provider", p.Name()), slog.String("model", p.Model()), slog.String("wire_api", normalizeTypographyWireAPI(p.WireAPI))) }
 	raw, err := p.post(ctx, storyPlannerInputFromRequest(request))
 	if err != nil {
+		if p.Logger != nil { p.Logger.Warn("story_planner_external_request_failed", slog.String("provider", p.Name()), slog.String("model", p.Model()), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Any("error", err)) }
 		return models.StoryPlan{}, fmt.Errorf("story planner provider request: %w", err)
 	}
 	text, err := extractTypographyModelText(raw, normalizeTypographyWireAPI(p.WireAPI))
 	if err != nil {
+		if p.Logger != nil { p.Logger.Warn("story_planner_external_response_invalid", slog.String("provider", p.Name()), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Any("error", err)) }
 		return models.StoryPlan{}, err
 	}
 	responseJSON, err := extractTypographyJSONObject([]byte(text))
@@ -180,8 +185,10 @@ func (p OpenAICompatibleStoryPlanner) Plan(ctx context.Context, request Request)
 		return models.StoryPlan{}, fmt.Errorf("decode story plan JSON: %w", err)
 	}
 	if err := normalizeStoryPlannerOutput(&plan, request); err != nil {
+		if p.Logger != nil { p.Logger.Warn("story_planner_external_output_invalid", slog.String("provider", p.Name()), slog.String("model", p.Model()), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Any("error", err)) }
 		return models.StoryPlan{}, err
 	}
+	if p.Logger != nil { p.Logger.Info("story_planner_external_output_valid", slog.String("provider", p.Name()), slog.String("model", p.Model()), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.String("schema_version", plan.SchemaVersion), slog.Int("moment_count", len(plan.Moments))) }
 	return plan, nil
 }
 

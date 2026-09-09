@@ -1183,7 +1183,7 @@ Initial StoryPlan generation is selected by backend configuration only. iOS neve
 
 ```text
 STORY_PLANNER_PROVIDER=local|openai|openai-compatible|ai-gateway
-STORY_PLANNER_MODEL=gpt-5.5
+STORY_PLANNER_MODEL=gpt-5.6-luna
 STORY_PLANNER_BASE_URL=
 STORY_PLANNER_API_KEY=
 STORY_PLANNER_WIRE_API=chat_completions|responses

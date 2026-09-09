@@ -35,7 +35,7 @@ env:
   INTERNAL_API_TOKEN: ${{ secrets.INTERNAL_API_TOKEN }}
   DEEPGRAM_API_KEY: ${{ secrets.DEEPGRAM_API_KEY }}
   STORY_PLANNER_PROVIDER: ${{ vars.STORY_PLANNER_PROVIDER || 'openai-compatible' }}
-  STORY_PLANNER_MODEL: ${{ vars.STORY_PLANNER_MODEL || 'gpt-5.5' }}
+  STORY_PLANNER_MODEL: ${{ vars.STORY_PLANNER_MODEL || 'gpt-5.6-luna' }}
   STORY_PLANNER_BASE_URL: ${{ vars.STORY_PLANNER_BASE_URL || vars.OPENAI_BASE_URL || 'https://api2.65535.space' }}
   STORY_PLANNER_API_KEY: ${{ secrets.STORY_PLANNER_API_KEY || secrets.OPENAI_API_KEY }}
   STORY_PLANNER_WIRE_API: ${{ vars.STORY_PLANNER_WIRE_API || 'chat_completions' }}

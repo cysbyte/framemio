@@ -330,6 +330,7 @@ func configuredStoryPlanner(configuration configuration, logger *slog.Logger) (a
 			WireAPI:         configuration.StoryPlannerWireAPI,
 			MaxOutputTokens: configuration.StoryPlannerMaxTokens,
 			Client:          &http.Client{Timeout: configuration.StoryPlannerTimeout},
+			Logger:          logger,
 		}
 		return ai.FallbackStoryPlanner{
 			Primary:        primary,
