@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -207,12 +208,26 @@ func (p OpenAICompatibleStoryPlanner) Plan(ctx context.Context, request Request)
 	if err != nil {
 		return models.StoryPlan{}, fmt.Errorf("extract story plan JSON: %w", err)
 	}
+	responseJSON, jsonSanitization, err := sanitizeStoryPlannerResponseJSON(responseJSON)
+	if err != nil {
+		return models.StoryPlan{}, fmt.Errorf("sanitize story plan JSON: %w", err)
+	}
+	if p.Logger != nil && jsonSanitization.changed() {
+		p.Logger.Info("story_planner_external_json_sanitized",
+			slog.String("provider", p.Name()),
+			slog.String("model", p.Model()),
+			slog.Int64("latency_ms", time.Since(started).Milliseconds()),
+			slog.Bool("audio_original_audio_coerced", jsonSanitization.AudioOriginalAudioCoerced),
+			slog.Bool("audio_original_audio_dropped", jsonSanitization.AudioOriginalAudioDropped),
+		)
+	}
 	var plan models.StoryPlan
 	if err := json.Unmarshal(responseJSON, &plan); err != nil {
 		return models.StoryPlan{}, fmt.Errorf("decode story plan JSON: %w", err)
 	}
 	rawCaptionCount := len(plan.Captions)
 	rawInvalidCaptionCount := invalidStoryPlannerCaptionCount(plan)
+	rawInvalidVideoAnalysisVersionCount := invalidStoryPlannerVideoAnalysisVersionCount(plan, request)
 	if err := normalizeStoryPlannerOutput(&plan, request); err != nil {
 		if p.Logger != nil {
 			p.Logger.Warn("story_planner_external_output_invalid", slog.String("provider", p.Name()), slog.String("model", p.Model()), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Any("error", err))
@@ -220,13 +235,14 @@ func (p OpenAICompatibleStoryPlanner) Plan(ctx context.Context, request Request)
 		return models.StoryPlan{}, err
 	}
 	if p.Logger != nil {
-		if rawCaptionCount != len(plan.Captions) || rawInvalidCaptionCount > 0 {
+		if rawCaptionCount != len(plan.Captions) || rawInvalidCaptionCount > 0 || rawInvalidVideoAnalysisVersionCount > 0 {
 			p.Logger.Info("story_planner_external_output_sanitized",
 				slog.String("provider", p.Name()),
 				slog.String("model", p.Model()),
 				slog.Int64("latency_ms", time.Since(started).Milliseconds()),
 				slog.Int("raw_caption_count", rawCaptionCount),
 				slog.Int("raw_invalid_caption_count", rawInvalidCaptionCount),
+				slog.Int("raw_invalid_video_analysis_version_count", rawInvalidVideoAnalysisVersionCount),
 				slog.Int("final_caption_count", len(plan.Captions)),
 			)
 		}
@@ -896,6 +912,58 @@ func sanitizeStoryPlannerAudio(plan *models.StoryPlan) {
 	plan.Audio.OriginalVolume = clampFloat64(plan.Audio.OriginalVolume, 0, 1)
 }
 
+type storyPlannerJSONSanitization struct {
+	AudioOriginalAudioCoerced bool
+	AudioOriginalAudioDropped bool
+}
+
+func (s storyPlannerJSONSanitization) changed() bool {
+	return s.AudioOriginalAudioCoerced || s.AudioOriginalAudioDropped
+}
+
+func sanitizeStoryPlannerResponseJSON(input []byte) ([]byte, storyPlannerJSONSanitization, error) {
+	var root map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(input))
+	decoder.UseNumber()
+	if err := decoder.Decode(&root); err != nil {
+		return input, storyPlannerJSONSanitization{}, nil
+	}
+	audio, ok := root["audio"].(map[string]any)
+	if !ok {
+		return input, storyPlannerJSONSanitization{}, nil
+	}
+	var result storyPlannerJSONSanitization
+	switch value := audio["original_audio"].(type) {
+	case string:
+		if parsed, ok := storyPlannerBoolAlias(value); ok {
+			audio["original_audio"] = parsed
+			result.AudioOriginalAudioCoerced = true
+		} else {
+			delete(audio, "original_audio")
+			result.AudioOriginalAudioDropped = true
+		}
+	}
+	if !result.changed() {
+		return input, result, nil
+	}
+	output, err := json.Marshal(root)
+	if err != nil {
+		return input, result, err
+	}
+	return output, result, nil
+}
+
+func storyPlannerBoolAlias(value string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "yes", "y", "1", "on", "original", "enabled":
+		return true, true
+	case "false", "no", "n", "0", "off", "none", "muted", "disabled":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
 func synthesizeStoryPlannerCaptions(plan *models.StoryPlan, request Request) {
 	if plan == nil || len(plan.Captions) > 0 || storyPlannerSubtitlesDisabled(request) {
 		return
@@ -965,6 +1033,48 @@ func invalidStoryPlannerCaptionCount(plan models.StoryPlan) int {
 			continue
 		}
 		if _, exists := momentIDs[momentID]; !exists {
+			invalid++
+		}
+	}
+	return invalid
+}
+
+func invalidStoryPlannerVideoAnalysisVersionCount(plan models.StoryPlan, request Request) int {
+	videoVersions := make(map[string]string, len(request.VideoAnalyses))
+	for _, analysis := range request.VideoAnalyses {
+		mediaID := strings.TrimSpace(analysis.VideoID)
+		version := strings.TrimSpace(analysis.AnalysisVersion)
+		if mediaID != "" && version != "" {
+			videoVersions[mediaID] = version
+		}
+	}
+	if len(videoVersions) == 0 {
+		return 0
+	}
+	invalid := 0
+	for _, moment := range plan.Moments {
+		if moment.MediaType != "" && moment.MediaType != models.MediaTypeVideo {
+			continue
+		}
+		mediaID := strings.TrimSpace(firstNonEmpty(moment.MediaID, moment.AssetID))
+		expected, ok := videoVersions[mediaID]
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(moment.VideoAnalysisVersion) != expected {
+			invalid++
+		}
+	}
+	for _, overlay := range plan.BRoll {
+		if overlay.MediaType != "" && overlay.MediaType != models.MediaTypeVideo {
+			continue
+		}
+		mediaID := strings.TrimSpace(firstNonEmpty(overlay.MediaID, overlay.AssetID))
+		expected, ok := videoVersions[mediaID]
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(overlay.VideoAnalysisVersion) != expected {
 			invalid++
 		}
 	}
@@ -1272,9 +1382,7 @@ func storyPlannerVideoReferences(analyses []models.VideoAnalysis) map[string]sto
 }
 
 func normalizeStoryPlannerVideoMoment(moment *models.StoryMoment, ref storyPlannerVideoReference) {
-	if strings.TrimSpace(moment.VideoAnalysisVersion) == "" {
-		moment.VideoAnalysisVersion = ref.analysis.AnalysisVersion
-	}
+	moment.VideoAnalysisVersion = ref.analysis.AnalysisVersion
 	startMicros, endMicros := storyPlannerVideoRange(moment.StartMicros, moment.EndMicros, moment.DurationMS, ref)
 	moment.StartMicros = startMicros
 	moment.EndMicros = endMicros
@@ -1282,9 +1390,7 @@ func normalizeStoryPlannerVideoMoment(moment *models.StoryMoment, ref storyPlann
 }
 
 func normalizeStoryPlannerVideoBRoll(overlay *models.StoryBRoll, ref storyPlannerVideoReference) {
-	if strings.TrimSpace(overlay.VideoAnalysisVersion) == "" {
-		overlay.VideoAnalysisVersion = ref.analysis.AnalysisVersion
-	}
+	overlay.VideoAnalysisVersion = ref.analysis.AnalysisVersion
 	startMicros, endMicros := storyPlannerVideoRange(overlay.SourceStartMicros, overlay.SourceEndMicros, overlay.DurationMS, ref)
 	overlay.SourceStartMicros = startMicros
 	overlay.SourceEndMicros = endMicros

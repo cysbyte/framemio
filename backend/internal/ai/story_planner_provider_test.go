@@ -115,7 +115,7 @@ func TestOpenAICompatibleStoryPlannerSanitizesUnsupportedTransitions(t *testing.
 func TestOpenAICompatibleStoryPlannerNormalizesVideoMomentReferences(t *testing.T) {
 	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		planJSON := `{"schema_version":"story_plan_v1","id":"plan-gpt","project_id":"project-gpt","version":3,"requested_duration_ms":4000,"story_type":"trip","visual_style":"cinematic","title_text":"Video Story","ending_text":"Until next time.","moments":[{"moment_id":"moment-video","asset_id":"video-gpt","media_id":"video-gpt","media_type":"video","narrative":"A video moment","duration_ms":4000,"crop_intent":"fill","transition":"fade_in"}],"output":{"aspect_ratio":"9:16","max_duration_seconds":4,"preset":"premium-memory"},"total_duration_ms":4000}`
+		planJSON := `{"schema_version":"story_plan_v1","id":"plan-gpt","project_id":"project-gpt","version":3,"requested_duration_ms":4000,"story_type":"trip","visual_style":"cinematic","title_text":"Video Story","ending_text":"Until next time.","moments":[{"moment_id":"moment-video","asset_id":"video-gpt","media_id":"video-gpt","media_type":"video","video_analysis_version":"invented-analysis","narrative":"A video moment","duration_ms":4000,"crop_intent":"fill","transition":"fade_in"}],"broll":[{"broll_id":"broll-video","asset_id":"video-gpt","media_id":"video-gpt","media_type":"video","video_analysis_version":"invented-analysis","source_start_micros":0,"source_end_micros":4000000,"start_ms":0,"duration_ms":500,"crop_intent":"fill","confidence":0.8,"score":0.8}],"output":{"aspect_ratio":"9:16","max_duration_seconds":4,"preset":"premium-memory"},"total_duration_ms":4000}`
 		return typographyHTTPResponse(http.StatusOK, responsesTypographyResponse(planJSON)), nil
 	})}
 	request := storyPlannerProviderRequest()
@@ -139,6 +139,9 @@ func TestOpenAICompatibleStoryPlannerNormalizesVideoMomentReferences(t *testing.
 	moment := plan.Moments[0]
 	if moment.VideoAnalysisVersion != "video-v1" || moment.StartMicros != 500_000 || moment.EndMicros != 4_500_000 || moment.DurationMS != 4000 {
 		t.Fatalf("expected video references normalized from analysis, got %+v", moment)
+	}
+	if len(plan.BRoll) != 1 || plan.BRoll[0].VideoAnalysisVersion != "video-v1" {
+		t.Fatalf("expected b-roll analysis version normalized from analysis, got %+v", plan.BRoll)
 	}
 	if err := ValidateStoryPlan(plan); err != nil {
 		t.Fatalf("expected normalized plan to pass lightweight validation: %v", err)
@@ -175,6 +178,25 @@ func TestOpenAICompatibleStoryPlannerSynthesizesCaptionsWhenExternalPlanOmitsThe
 	}
 	if err := ValidateStoryPlan(plan); err != nil {
 		t.Fatalf("expected synthesized captions to pass lightweight validation: %v", err)
+	}
+}
+
+func TestOpenAICompatibleStoryPlannerCoercesStringOriginalAudio(t *testing.T) {
+	t.Parallel()
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		planJSON := strings.Replace(storyPlannerProviderPlanJSON(), `"original_audio":true`, `"original_audio":"true"`, 1)
+		return typographyHTTPResponse(http.StatusOK, responsesTypographyResponse(planJSON)), nil
+	})}
+	planner := OpenAICompatibleStoryPlanner{BaseURL: "https://planner.test", APIKey: "test-key", ProviderName: "openai-compatible", ModelName: "gpt-story", WireAPI: "responses", Client: client}
+	plan, err := planner.Plan(context.Background(), storyPlannerProviderRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Audio == nil || plan.Audio.OriginalAudio == nil || !*plan.Audio.OriginalAudio {
+		t.Fatalf("expected string original_audio to be coerced to true, got %+v", plan.Audio)
+	}
+	if err := ValidateStoryPlan(plan); err != nil {
+		t.Fatalf("expected coerced audio plan to pass lightweight validation: %v", err)
 	}
 }
 
