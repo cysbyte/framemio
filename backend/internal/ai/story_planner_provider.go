@@ -863,6 +863,45 @@ func sanitizeStoryPlannerAudio(plan *models.StoryPlan) {
 	plan.Audio.OriginalVolume = clampFloat64(plan.Audio.OriginalVolume, 0, 1)
 }
 
+func synthesizeStoryPlannerCaptions(plan *models.StoryPlan, request Request) {
+	if plan == nil || len(plan.Captions) > 0 || storyPlannerSubtitlesDisabled(request) {
+		return
+	}
+	videoAnalysesByMedia := make(map[string]models.VideoAnalysis, len(request.VideoAnalyses))
+	for _, analysis := range request.VideoAnalyses {
+		if mediaID := strings.TrimSpace(analysis.VideoID); mediaID != "" {
+			videoAnalysesByMedia[mediaID] = analysis
+		}
+	}
+	captions := make([]models.StoryCaption, 0, len(plan.Moments))
+	timelineStartMS := 0
+	for _, moment := range plan.Moments {
+		switch moment.MediaType {
+		case models.MediaTypeVideo:
+			mediaID := strings.TrimSpace(firstNonEmpty(moment.MediaID, moment.AssetID))
+			beforeMomentCaptions := len(captions)
+			analysis, ok := videoAnalysesByMedia[mediaID]
+			if ok {
+				cues := transcriptCaptionCues(analysis.Transcript, moment.StartMicros, moment.EndMicros)
+				captions = append(captions, timedStoryCaptions(moment, cues, timelineStartMS)...)
+			}
+			if len(captions) == beforeMomentCaptions && strings.TrimSpace(moment.Caption) != "" {
+				captions = append(captions, models.StoryCaption{MomentID: moment.MomentID, Text: truncateText(strings.TrimSpace(moment.Caption), maxStoryPlanCaptionLength), StartMS: timelineStartMS, EndMS: timelineStartMS + moment.DurationMS})
+			}
+		case models.MediaTypePhoto, models.MediaTypeLivePhoto:
+			if strings.TrimSpace(moment.Caption) != "" {
+				captions = append(captions, models.StoryCaption{MomentID: moment.MomentID, Text: truncateText(strings.TrimSpace(moment.Caption), maxStoryPlanCaptionLength), StartMS: timelineStartMS, EndMS: timelineStartMS + moment.DurationMS})
+			}
+		}
+		timelineStartMS += max(0, moment.DurationMS)
+	}
+	plan.Captions = captions
+}
+
+func storyPlannerSubtitlesDisabled(request Request) bool {
+	return request.SubtitlesEnabled != nil && !*request.SubtitlesEnabled
+}
+
 func validateStoryPlannerOutputMediaReferences(plan models.StoryPlan, request Request) error {
 	knownMediaTypes := make(map[string]models.MediaType, len(request.PhotoAnalyses)+len(request.VideoAnalyses))
 	for _, photo := range request.PhotoAnalyses {
@@ -1260,6 +1299,7 @@ func normalizeStoryPlannerOutput(plan *models.StoryPlan, request Request) error 
 		return err
 	}
 	EnforceSceneTransitions(plan, request.VideoAnalyses, normalizeVisualStyle(request.VisualStyle))
+	synthesizeStoryPlannerCaptions(plan, request)
 	if strings.TrimSpace(plan.ID) == "" {
 		plan.ID = planID(request, plan.Moments)
 	}

@@ -145,6 +145,39 @@ func TestOpenAICompatibleStoryPlannerNormalizesVideoMomentReferences(t *testing.
 	}
 }
 
+func TestOpenAICompatibleStoryPlannerSynthesizesCaptionsWhenExternalPlanOmitsThem(t *testing.T) {
+	t.Parallel()
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		planJSON := `{"schema_version":"story_plan_v1","id":"plan-gpt","project_id":"project-gpt","version":3,"requested_duration_ms":4000,"story_type":"trip","visual_style":"cinematic","title_text":"Video Story","ending_text":"Until next time.","moments":[{"moment_id":"moment-video","asset_id":"video-gpt","media_id":"video-gpt","media_type":"video","narrative":"A video moment","caption":"External planner put speech here.","start_micros":0,"end_micros":4000000,"duration_ms":4000,"crop_intent":"fill","transition":"fade_in"}],"output":{"aspect_ratio":"9:16","max_duration_seconds":4,"preset":"premium-memory"},"total_duration_ms":4000}`
+		return typographyHTTPResponse(http.StatusOK, responsesTypographyResponse(planJSON)), nil
+	})}
+	request := storyPlannerProviderRequest()
+	request.VideoAnalyses[0].Transcript = models.VideoTranscript{
+		HasSpeech: true,
+		Segments: []models.VideoTranscriptSegment{
+			{StartMicros: 0, EndMicros: 1_200_000, Text: "Look at the ducks by the water."},
+			{StartMicros: 1_200_000, EndMicros: 2_600_000, Text: "This is the best little picnic."},
+		},
+	}
+	planner := OpenAICompatibleStoryPlanner{BaseURL: "https://planner.test", APIKey: "test-key", ModelName: "gpt-story", WireAPI: "responses", Client: client}
+	plan, err := planner.Plan(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Captions) != 2 {
+		t.Fatalf("expected transcript captions to be synthesized, got %+v", plan.Captions)
+	}
+	if plan.Captions[0].Text != "Look at the ducks by the water" || plan.Captions[0].StartMS != 0 || plan.Captions[0].EndMS != 1200 {
+		t.Fatalf("unexpected first synthesized caption: %+v", plan.Captions[0])
+	}
+	if plan.Captions[1].Text != "This is the best little picnic" || plan.Captions[1].StartMS != 1200 || plan.Captions[1].EndMS != 2600 {
+		t.Fatalf("unexpected second synthesized caption: %+v", plan.Captions[1])
+	}
+	if err := ValidateStoryPlan(plan); err != nil {
+		t.Fatalf("expected synthesized captions to pass lightweight validation: %v", err)
+	}
+}
+
 func TestOpenAICompatibleStoryPlannerDeduplicatesRepeatedMomentReferences(t *testing.T) {
 	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
