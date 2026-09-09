@@ -165,15 +165,21 @@ func (p OpenAICompatibleStoryPlanner) Plan(ctx context.Context, request Request)
 		return models.StoryPlan{}, errors.New("story planner model is required")
 	}
 	started := time.Now()
-	if p.Logger != nil { p.Logger.Info("story_planner_external_request_started", slog.String("provider", p.Name()), slog.String("model", p.Model()), slog.String("wire_api", normalizeTypographyWireAPI(p.WireAPI))) }
+	if p.Logger != nil {
+		p.Logger.Info("story_planner_external_request_started", slog.String("provider", p.Name()), slog.String("model", p.Model()), slog.String("wire_api", normalizeTypographyWireAPI(p.WireAPI)))
+	}
 	raw, err := p.post(ctx, storyPlannerInputFromRequest(request))
 	if err != nil {
-		if p.Logger != nil { p.Logger.Warn("story_planner_external_request_failed", slog.String("provider", p.Name()), slog.String("model", p.Model()), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Any("error", err)) }
+		if p.Logger != nil {
+			p.Logger.Warn("story_planner_external_request_failed", slog.String("provider", p.Name()), slog.String("model", p.Model()), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Any("error", err))
+		}
 		return models.StoryPlan{}, fmt.Errorf("story planner provider request: %w", err)
 	}
 	text, err := extractTypographyModelText(raw, normalizeTypographyWireAPI(p.WireAPI))
 	if err != nil {
-		if p.Logger != nil { p.Logger.Warn("story_planner_external_response_invalid", slog.String("provider", p.Name()), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Any("error", err)) }
+		if p.Logger != nil {
+			p.Logger.Warn("story_planner_external_response_invalid", slog.String("provider", p.Name()), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Any("error", err))
+		}
 		return models.StoryPlan{}, err
 	}
 	responseJSON, err := extractTypographyJSONObject([]byte(text))
@@ -185,10 +191,14 @@ func (p OpenAICompatibleStoryPlanner) Plan(ctx context.Context, request Request)
 		return models.StoryPlan{}, fmt.Errorf("decode story plan JSON: %w", err)
 	}
 	if err := normalizeStoryPlannerOutput(&plan, request); err != nil {
-		if p.Logger != nil { p.Logger.Warn("story_planner_external_output_invalid", slog.String("provider", p.Name()), slog.String("model", p.Model()), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Any("error", err)) }
+		if p.Logger != nil {
+			p.Logger.Warn("story_planner_external_output_invalid", slog.String("provider", p.Name()), slog.String("model", p.Model()), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Any("error", err))
+		}
 		return models.StoryPlan{}, err
 	}
-	if p.Logger != nil { p.Logger.Info("story_planner_external_output_valid", slog.String("provider", p.Name()), slog.String("model", p.Model()), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.String("schema_version", plan.SchemaVersion), slog.Int("moment_count", len(plan.Moments))) }
+	if p.Logger != nil {
+		p.Logger.Info("story_planner_external_output_valid", slog.String("provider", p.Name()), slog.String("model", p.Model()), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.String("schema_version", plan.SchemaVersion), slog.Int("moment_count", len(plan.Moments)))
+	}
 	return plan, nil
 }
 
@@ -586,6 +596,341 @@ func SanitizeStoryPlanTransitions(plan *models.StoryPlan) {
 	}
 }
 
+func sanitizeStoryPlannerCropIntent(cropIntent string, mediaType models.MediaType) string {
+	normalized := strings.ToLower(strings.TrimSpace(cropIntent))
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+	normalized = strings.ReplaceAll(normalized, " ", "_")
+	switch normalized {
+	case "fit", "contain", "letterbox", "full", "full_frame", "original", "preserve", "no_crop":
+		return "fit"
+	case "fill", "cover", "crop", "center", "center_crop", "crop_to_fill", "zoom", "pan_and_scan":
+		return "fill"
+	default:
+		switch mediaType {
+		case models.MediaTypeVideo:
+			return "fill"
+		case models.MediaTypePhoto, models.MediaTypeLivePhoto:
+			return "fit"
+		default:
+			return "fit"
+		}
+	}
+}
+
+// SanitizeExternalStoryPlannerOutput repairs bounded renderer-facing aliases
+// commonly produced by external structured planners. It intentionally does not
+// repair identity or invented media references; those must still fail
+// validation and fall back before persistence/rendering.
+func SanitizeExternalStoryPlannerOutput(plan *models.StoryPlan) {
+	if plan == nil {
+		return
+	}
+	SanitizeStoryPlanTransitions(plan)
+	for index := range plan.Moments {
+		moment := &plan.Moments[index]
+		moment.Narrative = truncateText(strings.TrimSpace(moment.Narrative), 240)
+		moment.Caption = truncateText(strings.TrimSpace(moment.Caption), maxStoryPlanCaptionLength)
+		moment.Reason = truncateText(strings.TrimSpace(moment.Reason), 240)
+		moment.CropIntent = sanitizeStoryPlannerCropIntent(moment.CropIntent, moment.MediaType)
+		moment.Typography = nil
+	}
+	for index := range plan.BRoll {
+		overlay := &plan.BRoll[index]
+		overlay.Reason = truncateText(strings.TrimSpace(overlay.Reason), 120)
+		overlay.CropIntent = sanitizeStoryPlannerCropIntent(overlay.CropIntent, overlay.MediaType)
+		overlay.Confidence = clampFloat64(overlay.Confidence, 0, 1)
+		overlay.Score = clampFloat64(overlay.Score, 0, 1)
+		if overlay.Anchor != nil {
+			overlay.Anchor.Type = truncateText(strings.TrimSpace(overlay.Anchor.Type), 32)
+		}
+	}
+	sanitizeStoryPlannerCaptions(plan)
+	sanitizeStoryPlannerCaptionStyle(plan)
+	sanitizeStoryPlannerAudio(plan)
+	plan.TitleText = truncateText(strings.TrimSpace(plan.TitleText), 120)
+	plan.EndingText = truncateText(strings.TrimSpace(plan.EndingText), 180)
+	plan.UserInstructions = truncateText(strings.TrimSpace(plan.UserInstructions), 500)
+	if plan.Output.AspectRatio != "" {
+		plan.Output.AspectRatio = sanitizeStoryPlannerAspectRatio(plan.Output.AspectRatio)
+	}
+	plan.Output.Preset = truncateText(strings.TrimSpace(plan.Output.Preset), 64)
+}
+
+func sanitizeStoryPlannerCaptions(plan *models.StoryPlan) {
+	if plan == nil || len(plan.Captions) == 0 {
+		return
+	}
+	type momentRange struct {
+		start int
+		end   int
+	}
+	ranges := make(map[string]momentRange, len(plan.Moments))
+	cursor := 0
+	for _, moment := range plan.Moments {
+		momentID := strings.TrimSpace(moment.MomentID)
+		duration := max(0, moment.DurationMS)
+		if momentID != "" {
+			ranges[momentID] = momentRange{start: cursor, end: cursor + duration}
+		}
+		cursor += duration
+	}
+	sanitized := make([]models.StoryCaption, 0, len(plan.Captions))
+	seen := make(map[string]struct{}, len(plan.Captions))
+	for _, caption := range plan.Captions {
+		caption.MomentID = strings.TrimSpace(caption.MomentID)
+		caption.Text = truncateText(strings.TrimSpace(caption.Text), maxStoryPlanCaptionLength)
+		if caption.MomentID == "" || caption.Text == "" {
+			continue
+		}
+		momentRange, ok := ranges[caption.MomentID]
+		if !ok || momentRange.end <= momentRange.start {
+			continue
+		}
+		if caption.StartMS < 0 || caption.StartMS < momentRange.start || caption.StartMS >= momentRange.end {
+			caption.StartMS = momentRange.start
+		}
+		if caption.EndMS <= caption.StartMS || caption.EndMS > momentRange.end {
+			caption.EndMS = momentRange.end
+		}
+		if caption.EndMS <= caption.StartMS {
+			continue
+		}
+		key := fmt.Sprintf("%s:%d:%d:%s", caption.MomentID, caption.StartMS, caption.EndMS, caption.Text)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		sanitized = append(sanitized, caption)
+	}
+	plan.Captions = sanitized
+}
+
+func sanitizeStoryPlannerCaptionStyle(plan *models.StoryPlan) {
+	if plan == nil || plan.CaptionStyle == nil {
+		return
+	}
+	base := captionStyleFor(plan.StoryType, plan.VisualStyle)
+	if base == nil {
+		base = &models.CaptionStyle{Preset: "clean_minimal", FontFamily: "inter", FontSize: 42, TextColor: "#FFFFFF", StrokeColor: "#000000", Position: "bottom", MaxLines: 2, MaxCharactersPerLine: 34}
+	}
+	style := plan.CaptionStyle
+	style.Preset = sanitizeStoryPlannerCaptionPreset(style.Preset, base.Preset)
+	style.FontFamily = sanitizeStoryPlannerCaptionFont(style.FontFamily, base.FontFamily)
+	style.TextColor = sanitizeStoryPlannerColor(style.TextColor, base.TextColor)
+	style.StrokeColor = sanitizeStoryPlannerColor(style.StrokeColor, base.StrokeColor)
+	style.BackgroundColor = sanitizeStoryPlannerColor(style.BackgroundColor, base.BackgroundColor)
+	style.Position = sanitizeStoryPlannerCaptionPosition(style.Position, base.Position)
+	if style.FontSize <= 0 || style.FontSize > 96 {
+		style.FontSize = base.FontSize
+	}
+	style.StrokeWidth = clampInt(style.StrokeWidth, 0, 12)
+	style.BackgroundOpacity = clampFloat64(style.BackgroundOpacity, 0, 1)
+	style.BottomOffset = clampInt(style.BottomOffset, 0, 480)
+	if style.MaxLines <= 0 || style.MaxLines > 4 {
+		style.MaxLines = base.MaxLines
+	}
+	if style.MaxCharactersPerLine <= 0 || style.MaxCharactersPerLine > 48 {
+		style.MaxCharactersPerLine = base.MaxCharactersPerLine
+	}
+}
+
+func sanitizeStoryPlannerCaptionPreset(value, fallback string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+	normalized = strings.ReplaceAll(normalized, " ", "_")
+	switch normalized {
+	case "bold_social", "bold", "social":
+		return "bold_social"
+	case "cinematic_subtitle", "cinematic", "subtitle", "subtitles":
+		return "cinematic_subtitle"
+	case "clean_minimal", "clean", "minimal":
+		return "clean_minimal"
+	case "playful_pop", "playful", "pop":
+		return "playful_pop"
+	default:
+		if strings.TrimSpace(fallback) != "" {
+			return fallback
+		}
+		return "clean_minimal"
+	}
+}
+
+func sanitizeStoryPlannerCaptionFont(value, fallback string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = strings.ReplaceAll(normalized, "_", "-")
+	normalized = strings.Join(strings.Fields(normalized), "-")
+	switch normalized {
+	case "inter", "inter-bold", "system", "system-bold", "noto-sans", "noto-sans-bold":
+		return normalized
+	case "bold", "sans-bold":
+		return "inter-bold"
+	case "sans", "sans-serif", "sf-pro", "helvetica":
+		return "inter"
+	default:
+		if strings.TrimSpace(fallback) != "" {
+			return fallback
+		}
+		return "inter"
+	}
+}
+
+func sanitizeStoryPlannerCaptionPosition(value, fallback string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "bottom", "middle", "top":
+		return normalized
+	case "center", "centre":
+		return "middle"
+	default:
+		if strings.TrimSpace(fallback) != "" {
+			return fallback
+		}
+		return "bottom"
+	}
+}
+
+func sanitizeStoryPlannerColor(value, fallback string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return fallback
+	}
+	if hex, ok := firstHexColor(strings.ToLower(trimmed)); ok && len(trimmed) == 7 {
+		return strings.ToUpper(hex)
+	}
+	if color, ok := storyPlannerNamedColor(trimmed); ok {
+		return color
+	}
+	return fallback
+}
+
+func storyPlannerNamedColor(value string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "white":
+		return "#FFFFFF", true
+	case "black":
+		return "#000000", true
+	case "red":
+		return "#FF3B30", true
+	case "yellow", "gold":
+		return "#FFD60A", true
+	case "orange":
+		return "#FF9500", true
+	case "blue":
+		return "#4DA3FF", true
+	case "green":
+		return "#34C759", true
+	case "pink":
+		return "#FF2D55", true
+	case "purple":
+		return "#AF52DE", true
+	default:
+		return "", false
+	}
+}
+
+func sanitizeStoryPlannerAspectRatio(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = strings.ReplaceAll(normalized, " ", "")
+	switch normalized {
+	case "9:16", "16:9", "1:1", "4:5":
+		return normalized
+	case "vertical", "portrait", "reels", "tiktok", "shorts":
+		return "9:16"
+	case "landscape", "youtube":
+		return "16:9"
+	case "square":
+		return "1:1"
+	default:
+		return "9:16"
+	}
+}
+
+func sanitizeStoryPlannerAudio(plan *models.StoryPlan) {
+	if plan == nil || plan.Audio == nil {
+		return
+	}
+	source := strings.ToLower(strings.TrimSpace(plan.Audio.Source))
+	source = strings.ReplaceAll(source, "-", "_")
+	source = strings.ReplaceAll(source, " ", "_")
+	switch source {
+	case "", "original", "source", "camera_audio":
+		plan.Audio.Source = "original"
+	case "none", "muted", "mute", "silent", "off":
+		plan.Audio.Source = "none"
+	default:
+		plan.Audio.Source = "original"
+	}
+	plan.Audio.OriginalVolume = clampFloat64(plan.Audio.OriginalVolume, 0, 1)
+}
+
+func validateStoryPlannerOutputMediaReferences(plan models.StoryPlan, request Request) error {
+	knownMediaTypes := make(map[string]models.MediaType, len(request.PhotoAnalyses)+len(request.VideoAnalyses))
+	for _, photo := range request.PhotoAnalyses {
+		if mediaID := strings.TrimSpace(photo.PhotoID); mediaID != "" {
+			knownMediaTypes[mediaID] = models.MediaTypePhoto
+		}
+	}
+	for _, video := range request.VideoAnalyses {
+		if mediaID := strings.TrimSpace(video.VideoID); mediaID != "" {
+			knownMediaTypes[mediaID] = models.MediaTypeVideo
+		}
+	}
+	excludedMedia := make(map[string]struct{}, len(request.ExcludedMediaIDs))
+	for _, mediaID := range request.ExcludedMediaIDs {
+		if mediaID = strings.TrimSpace(mediaID); mediaID != "" {
+			excludedMedia[mediaID] = struct{}{}
+		}
+	}
+	excludedMoments := make(map[string]struct{}, len(request.ExcludedMomentIDs))
+	for _, momentID := range request.ExcludedMomentIDs {
+		if momentID = strings.TrimSpace(momentID); momentID != "" {
+			excludedMoments[momentID] = struct{}{}
+		}
+	}
+	for index, moment := range plan.Moments {
+		if momentID := strings.TrimSpace(moment.MomentID); momentID != "" {
+			if _, excluded := excludedMoments[momentID]; excluded {
+				return fmt.Errorf("story planner returned excluded moment %q", momentID)
+			}
+		}
+		mediaID := strings.TrimSpace(firstNonEmpty(moment.MediaID, moment.AssetID))
+		expectedType, ok := knownMediaTypes[mediaID]
+		if !ok {
+			return fmt.Errorf("story planner returned unknown moment media reference %q at index %d", mediaID, index)
+		}
+		if _, excluded := excludedMedia[mediaID]; excluded {
+			return fmt.Errorf("story planner returned excluded media reference %q at index %d", mediaID, index)
+		}
+		if moment.MediaType != "" && moment.MediaType != expectedType {
+			return fmt.Errorf("story planner returned media type %q for %s, expected %q", moment.MediaType, mediaID, expectedType)
+		}
+	}
+	for index, overlay := range plan.BRoll {
+		mediaID := strings.TrimSpace(firstNonEmpty(overlay.MediaID, overlay.AssetID))
+		expectedType, ok := knownMediaTypes[mediaID]
+		if !ok {
+			return fmt.Errorf("story planner returned unknown b-roll media reference %q at index %d", mediaID, index)
+		}
+		if _, excluded := excludedMedia[mediaID]; excluded {
+			return fmt.Errorf("story planner returned excluded b-roll media reference %q at index %d", mediaID, index)
+		}
+		if overlay.MediaType != "" && overlay.MediaType != expectedType {
+			return fmt.Errorf("story planner returned b-roll media type %q for %s, expected %q", overlay.MediaType, mediaID, expectedType)
+		}
+	}
+	return nil
+}
+
+func clampFloat64(value, lower, upper float64) float64 {
+	if value < lower {
+		return lower
+	}
+	if value > upper {
+		return upper
+	}
+	return value
+}
+
 func normalizeStoryPlannerMediaReferences(plan *models.StoryPlan, request Request) {
 	photoIDs := make(map[string]struct{}, len(request.PhotoAnalyses))
 	for _, photo := range request.PhotoAnalyses {
@@ -909,7 +1254,11 @@ func normalizeStoryPlannerOutput(plan *models.StoryPlan, request Request) error 
 	plan.ProjectID = expectedProjectID
 	plan.Version = expectedVersion
 	normalizeStoryPlannerMediaReferences(plan, request)
+	SanitizeExternalStoryPlannerOutput(plan)
 	deduplicateStoryPlanMoments(plan)
+	if err := validateStoryPlannerOutputMediaReferences(*plan, request); err != nil {
+		return err
+	}
 	EnforceSceneTransitions(plan, request.VideoAnalyses, normalizeVisualStyle(request.VisualStyle))
 	if strings.TrimSpace(plan.ID) == "" {
 		plan.ID = planID(request, plan.Moments)

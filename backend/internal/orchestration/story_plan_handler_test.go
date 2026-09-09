@@ -227,7 +227,7 @@ func TestStoryPlanHandlerPersistsExternalPlannerOutput(t *testing.T) {
 	}
 }
 
-func TestStoryPlanHandlerSanitizesExternalPlannerTransitionsBeforeValidation(t *testing.T) {
+func TestStoryPlanHandlerSanitizesExternalPlannerRendererValuesBeforeValidation(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	memoryStore := store.NewMemoryStore()
@@ -256,9 +256,15 @@ func TestStoryPlanHandlerSanitizesExternalPlannerTransitionsBeforeValidation(t *
 		TitleText:           "Unsupported Transitions",
 		EndingText:          "Until next time.",
 		Moments: []models.StoryMoment{
-			{MomentID: "moment-transition-1", AssetID: photos[0].ID, MediaID: photos[0].ID, MediaType: models.MediaTypePhoto, Narrative: "Opening memory", DurationMS: 2000, CropIntent: "fit", Transition: "iris wipe", Reason: "AI-specific transition"},
-			{MomentID: "moment-transition-2", AssetID: photos[1].ID, MediaID: photos[1].ID, MediaType: models.MediaTypePhoto, Narrative: "Second memory", DurationMS: 2000, CropIntent: "fit", Transition: "push-left", Reason: "AI-specific transition"},
+			{MomentID: "moment-transition-1", AssetID: photos[0].ID, MediaID: photos[0].ID, MediaType: models.MediaTypePhoto, Narrative: "Opening memory", DurationMS: 2000, CropIntent: "contain", Transition: "iris wipe", Reason: "AI-specific transition", Typography: &models.TextOverlay{Enabled: true, Type: models.TextOverlayMomentTitle, Title: "Opening", Style: models.TypographyStyleMinimal, Placement: models.TextPlacementBottomCenter, StartMS: 0, DurationMS: 1000, MaxWidth: 0.8, Animation: models.TextAnimationFade, Source: models.TextSourceAI}},
+			{MomentID: "moment-transition-2", AssetID: photos[1].ID, MediaID: photos[1].ID, MediaType: models.MediaTypePhoto, Narrative: "Second memory", DurationMS: 2000, CropIntent: "center crop", Transition: "push-left", Reason: "AI-specific transition"},
 		},
+		Captions: []models.StoryCaption{
+			{MomentID: "moment-transition-1", Text: "Opening memory", StartMS: -100, EndMS: 0},
+			{MomentID: "unknown-moment", Text: "Unknown moment", StartMS: 0, EndMS: 1000},
+		},
+		CaptionStyle:    &models.CaptionStyle{Preset: "cinematic", FontFamily: "Inter Bold", FontSize: 240, TextColor: "white", StrokeColor: "black", StrokeWidth: 40, BackgroundEnabled: true, BackgroundColor: "black", BackgroundOpacity: 2, Position: "center", BottomOffset: 999, MaxLines: 9, MaxCharactersPerLine: 99},
+		Audio:           &models.StoryAudio{Source: "camera audio", OriginalAudio: boolPtr(true), OriginalVolume: 2.2},
 		Output:          models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 4, Preset: "premium-memory"},
 		TotalDurationMS: 4000,
 		CreatedAt:       now,
@@ -277,6 +283,21 @@ func TestStoryPlanHandlerSanitizesExternalPlannerTransitionsBeforeValidation(t *
 	}
 	if got := latest.Moments[1].Transition; got != "cut" {
 		t.Fatalf("later unsupported transition = %q, want cut", got)
+	}
+	if latest.Moments[0].CropIntent != "fit" || latest.Moments[1].CropIntent != "fill" {
+		t.Fatalf("unsupported crop intents were not sanitized: %+v", latest.Moments)
+	}
+	if latest.Moments[0].Typography != nil {
+		t.Fatalf("external story planner typography should be stripped before first-release validation: %+v", latest.Moments[0].Typography)
+	}
+	if len(latest.Captions) != 1 || latest.Captions[0].StartMS != 0 || latest.Captions[0].EndMS != 2000 {
+		t.Fatalf("invalid captions were not repaired/dropped: %+v", latest.Captions)
+	}
+	if latest.CaptionStyle == nil || latest.CaptionStyle.Preset != "cinematic_subtitle" || latest.CaptionStyle.FontFamily != "inter-bold" || latest.CaptionStyle.TextColor != "#FFFFFF" || latest.CaptionStyle.Position != "middle" || latest.CaptionStyle.StrokeWidth != 12 || latest.CaptionStyle.BackgroundOpacity != 1 {
+		t.Fatalf("caption style aliases were not sanitized: %+v", latest.CaptionStyle)
+	}
+	if latest.Audio == nil || latest.Audio.Source != "original" || latest.Audio.OriginalVolume != 1 {
+		t.Fatalf("audio aliases were not sanitized: %+v", latest.Audio)
 	}
 }
 

@@ -97,7 +97,7 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		h.logger().Error("story_planner_failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.String("failure_category", "planner"), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Any("error", err))
 		return err
 	}
-	ai.SanitizeStoryPlanTransitions(&plan)
+	ai.SanitizeExternalStoryPlannerOutput(&plan)
 	ai.EnforceSceneTransitions(&plan, videoAnalyses, request.VisualStyle)
 	if plannerProvider != "local" {
 		h.logger().Info("story_planner_ai_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("story_plan_version", plan.Version), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Int("requested_duration_ms", plan.RequestedDurationMS), slog.Int("planned_duration_ms", plan.TotalDurationMS), slog.Int("output_max_duration_seconds", plan.Output.MaxDurationS), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)))
