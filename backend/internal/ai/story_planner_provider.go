@@ -654,6 +654,135 @@ func normalizeStoryPlannerMediaReferences(plan *models.StoryPlan, request Reques
 	}
 }
 
+type storyPlanTimelinePosition struct {
+	oldStart int
+	oldEnd   int
+	newStart int
+	newEnd   int
+}
+
+type storyPlanRemovedInterval struct {
+	start    int
+	end      int
+	duration int
+}
+
+func deduplicateStoryPlanMoments(plan *models.StoryPlan) {
+	if plan == nil || len(plan.Moments) < 2 {
+		return
+	}
+	seen := make(map[string]int, len(plan.Moments))
+	oldPositions := make(map[string]storyPlanTimelinePosition, len(plan.Moments))
+	momentIDTargets := make(map[string]string, len(plan.Moments))
+	retained := make([]models.StoryMoment, 0, len(plan.Moments))
+	removed := make([]storyPlanRemovedInterval, 0)
+	oldTimeline := 0
+	newTimeline := 0
+	changed := false
+
+	for _, moment := range plan.Moments {
+		duration := max(0, moment.DurationMS)
+		oldStart := oldTimeline
+		oldEnd := oldStart + duration
+		key := momentKey(moment)
+		if retainedIndex, exists := seen[key]; exists {
+			changed = true
+			removed = append(removed, storyPlanRemovedInterval{start: oldStart, end: oldEnd, duration: duration})
+			if momentID := strings.TrimSpace(moment.MomentID); momentID != "" {
+				momentIDTargets[momentID] = strings.TrimSpace(retained[retainedIndex].MomentID)
+				oldPositions[momentID] = storyPlanTimelinePosition{oldStart: oldStart, oldEnd: oldEnd}
+			}
+			oldTimeline = oldEnd
+			continue
+		}
+		seen[key] = len(retained)
+		retained = append(retained, moment)
+		if momentID := strings.TrimSpace(moment.MomentID); momentID != "" {
+			momentIDTargets[momentID] = momentID
+			oldPositions[momentID] = storyPlanTimelinePosition{oldStart: oldStart, oldEnd: oldEnd}
+		}
+		retained[len(retained)-1].DurationMS = duration
+		oldTimeline = oldEnd
+		newTimeline += duration
+	}
+	if !changed {
+		return
+	}
+
+	newPositions := make(map[string]storyPlanTimelinePosition, len(retained))
+	newTimelineCursor := 0
+	for _, moment := range retained {
+		duration := max(0, moment.DurationMS)
+		momentID := strings.TrimSpace(moment.MomentID)
+		if momentID != "" {
+			newPositions[momentID] = storyPlanTimelinePosition{
+				newStart: newTimelineCursor,
+				newEnd:   newTimelineCursor + duration,
+			}
+		}
+		newTimelineCursor += duration
+	}
+
+	for index := range plan.Captions {
+		caption := &plan.Captions[index]
+		oldPosition, hasOldPosition := oldPositions[strings.TrimSpace(caption.MomentID)]
+		targetID, hasTarget := momentIDTargets[strings.TrimSpace(caption.MomentID)]
+		if !hasOldPosition || !hasTarget || strings.TrimSpace(targetID) == "" {
+			continue
+		}
+		newPosition, hasNewPosition := newPositions[targetID]
+		if !hasNewPosition {
+			continue
+		}
+		caption.MomentID = targetID
+		caption.StartMS = clampInt(newPosition.newStart+caption.StartMS-oldPosition.oldStart, newPosition.newStart, newPosition.newEnd)
+		caption.EndMS = clampInt(newPosition.newStart+caption.EndMS-oldPosition.oldStart, caption.StartMS, newPosition.newEnd)
+	}
+
+	filteredCaptions := plan.Captions[:0]
+	for _, caption := range plan.Captions {
+		if caption.EndMS > caption.StartMS {
+			filteredCaptions = append(filteredCaptions, caption)
+		}
+	}
+	plan.Captions = filteredCaptions
+
+	for index := range plan.BRoll {
+		overlay := &plan.BRoll[index]
+		if overlay.Anchor != nil {
+			oldPosition, hasOldPosition := oldPositions[strings.TrimSpace(overlay.Anchor.MomentID)]
+			targetID, hasTarget := momentIDTargets[strings.TrimSpace(overlay.Anchor.MomentID)]
+			newPosition, hasNewPosition := newPositions[targetID]
+			if hasOldPosition && hasTarget && hasNewPosition && strings.TrimSpace(targetID) != "" {
+				overlay.Anchor.MomentID = targetID
+				overlay.Anchor.StartMS = clampInt(newPosition.newStart+overlay.Anchor.StartMS-oldPosition.oldStart, newPosition.newStart, newPosition.newEnd)
+				overlay.Anchor.EndMS = clampInt(newPosition.newStart+overlay.Anchor.EndMS-oldPosition.oldStart, overlay.Anchor.StartMS, newPosition.newEnd)
+				overlay.StartMS = clampInt(newPosition.newStart+overlay.StartMS-oldPosition.oldStart, 0, newTimeline)
+				continue
+			}
+		}
+		overlay.StartMS = shiftStoryPlanTimelineValue(overlay.StartMS, removed)
+	}
+
+	plan.Moments = retained
+	plan.TotalDurationMS = newTimeline
+}
+
+func shiftStoryPlanTimelineValue(value int, removed []storyPlanRemovedInterval) int {
+	shifted := value
+	for _, interval := range removed {
+		if value >= interval.end {
+			shifted -= interval.duration
+			continue
+		}
+		if value >= interval.start {
+			return interval.start
+		}
+		break
+	}
+	return max(0, shifted)
+}
+
 type storyPlannerVideoReference struct {
 	analysis   models.VideoAnalysis
 	segment    models.VideoSegment
@@ -773,6 +902,7 @@ func normalizeStoryPlannerOutput(plan *models.StoryPlan, request Request) error 
 	plan.ProjectID = expectedProjectID
 	plan.Version = expectedVersion
 	normalizeStoryPlannerMediaReferences(plan, request)
+	deduplicateStoryPlanMoments(plan)
 	EnforceSceneTransitions(plan, request.VideoAnalyses, normalizeVisualStyle(request.VisualStyle))
 	if strings.TrimSpace(plan.ID) == "" {
 		plan.ID = planID(request, plan.Moments)

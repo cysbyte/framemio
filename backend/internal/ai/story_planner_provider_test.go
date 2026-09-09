@@ -145,6 +145,28 @@ func TestOpenAICompatibleStoryPlannerNormalizesVideoMomentReferences(t *testing.
 	}
 }
 
+func TestOpenAICompatibleStoryPlannerDeduplicatesRepeatedMomentReferences(t *testing.T) {
+	t.Parallel()
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		planJSON := `{"schema_version":"story_plan_v1","id":"plan-gpt","project_id":"project-gpt","version":3,"requested_duration_ms":8000,"story_type":"trip","visual_style":"cinematic","title_text":"Beach Story","ending_text":"Until next time.","moments":[{"moment_id":"moment-video-1","asset_id":"video-gpt","media_id":"video-gpt","media_type":"video","duration_ms":4000,"crop_intent":"fill","transition":"fade_in"},{"moment_id":"moment-video-2","asset_id":"video-gpt","media_id":"video-gpt","media_type":"video","duration_ms":4000,"crop_intent":"fill","transition":"cut"}],"output":{"aspect_ratio":"9:16","max_duration_seconds":8,"preset":"premium-memory"},"total_duration_ms":8000}`
+		return typographyHTTPResponse(http.StatusOK, responsesTypographyResponse(planJSON)), nil
+	})}
+	planner := OpenAICompatibleStoryPlanner{BaseURL: "https://planner.test", APIKey: "test-key", ProviderName: "openai-compatible", ModelName: "gpt-story", WireAPI: "responses", Client: client}
+	plan, err := planner.Plan(context.Background(), storyPlannerProviderRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Moments) != 1 {
+		t.Fatalf("expected repeated moment reference to be removed, got %d moments", len(plan.Moments))
+	}
+	if plan.TotalDurationMS != 4000 {
+		t.Fatalf("expected duration to be recomputed after deduplication, got %d", plan.TotalDurationMS)
+	}
+	if err := ValidateStoryPlan(plan); err != nil {
+		t.Fatalf("expected deduplicated plan to pass lightweight validation: %v", err)
+	}
+}
+
 func TestOpenAICompatibleStoryPlannerRejectsInvalidJSON(t *testing.T) {
 	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
