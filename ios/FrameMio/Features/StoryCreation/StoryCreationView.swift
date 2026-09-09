@@ -7,20 +7,24 @@ private func storyCreationViewDebugLog(_ message: @autoclosure () -> String) {
 }
 
 struct StoryCreationView: View {
-    @ObservedObject private var viewModel: StoryCreationViewModel
+    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var viewModel: StoryCreationViewModel
     let onCreate: (StoryGenerationOptions) -> Void
     let onCreated: (Story) -> Void
     let onOpenPricing: (PricingEntryPoint) -> Void
+    let promptTranscriptionService: PromptTranscriptionService?
     @State private var generationOptions = StoryGenerationOptions.automatic
     @State private var isShowingCustomization = false
 
     init(
         viewModel: StoryCreationViewModel,
+        promptTranscriptionService: PromptTranscriptionService? = nil,
         onCreate: @escaping (StoryGenerationOptions) -> Void,
         onCreated: @escaping (Story) -> Void,
         onOpenPricing: @escaping (PricingEntryPoint) -> Void
     ) {
-        _viewModel = ObservedObject(wrappedValue: viewModel)
+        _viewModel = StateObject(wrappedValue: viewModel)
+        self.promptTranscriptionService = promptTranscriptionService
         self.onCreate = onCreate
         self.onCreated = onCreated
         self.onOpenPricing = onOpenPricing
@@ -60,19 +64,23 @@ struct StoryCreationView: View {
                     ForEach(viewModel.assets) { asset in
                         MediaThumbnail(
                             image: viewModel.image(for: asset),
+                            isLoading: viewModel.isThumbnailLoading(for: asset),
                             duration: asset.isVideo ? asset.duration : nil,
                             isLivePhoto: asset.isLivePhoto,
                             accessibilityTitle: asset.isVideo ? "Selected video" : "Selected photo"
                         )
                         .onAppear {
+                            storyCreationViewDebugLog("thumbnail cell appeared asset=\(asset.id) cached=\(viewModel.image(for: asset) != nil) loading=\(viewModel.isThumbnailLoading(for: asset))")
                             viewModel.loadThumbnail(
                                 for: asset,
                                 targetSize: FrameMioMetrics.mediaThumbnailRequestSize
                             )
                         }
                         .onDisappear {
+                            storyCreationViewDebugLog("thumbnail cell disappeared asset=\(asset.id) cached=\(viewModel.image(for: asset) != nil) loading=\(viewModel.isThumbnailLoading(for: asset))")
                             viewModel.cancelThumbnail(for: asset)
                         }
+                        .id(asset.id)
                     }
                 }
 
@@ -119,10 +127,20 @@ struct StoryCreationView: View {
             .ignoresSafeArea()
         }
         .navigationTitle("Create Story")
-        .task { viewModel.refreshCreditBalance() }
+        .onAppear {
+            storyCreationViewDebugLog("create view appeared assets=\(viewModel.assets.count) cached_thumbnails=\(viewModel.thumbnails.count)")
+            viewModel.loadMissingThumbnails(targetSize: FrameMioMetrics.mediaThumbnailRequestSize)
+        }
+        .task {
+            viewModel.refreshCreditBalance()
+        }
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $isShowingCustomization) {
-            StoryGenerationOptionsSheet(options: $generationOptions, assets: viewModel.assets)
+            StoryGenerationOptionsSheet(
+                options: $generationOptions,
+                assets: viewModel.assets,
+                promptTranscriptionService: promptTranscriptionService
+            )
         }
         .toolbar {
             if viewModel.isCreating {
@@ -136,6 +154,11 @@ struct StoryCreationView: View {
             storyCreationViewDebugLog("ui_redirect_to_pricing required=\(issue?.required ?? 0) available=\(issue?.available ?? 0)")
             viewModel.insufficientCredits = nil
             onOpenPricing(.insufficientCredits)
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            storyCreationViewDebugLog("create view scene became active cached_thumbnails=\(viewModel.thumbnails.count)")
+            viewModel.loadMissingThumbnails(targetSize: FrameMioMetrics.mediaThumbnailRequestSize)
         }
     }
 
@@ -258,6 +281,8 @@ private struct StoryGenerationOptionsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var options: StoryGenerationOptions
     let assets: [MediaAsset]
+    let promptTranscriptionService: PromptTranscriptionService?
+    @StateObject private var voicePromptRecorder = VoicePromptRecorder()
 
     private let styleOptions = ["Natural", "Cinematic", "Warm", "Playful"]
     private let subtitleStyleOptions = ["Bold", "Cinematic", "Minimal", "Playful"]
@@ -300,10 +325,6 @@ private struct StoryGenerationOptionsSheet: View {
 
                     Divider().overlay(FrameMioColors.divider.opacity(0.58))
 
-                    promptSection
-
-                    Divider().overlay(FrameMioColors.divider.opacity(0.58))
-
                     sceneDetailSection
 
                     Divider().overlay(FrameMioColors.divider.opacity(0.58))
@@ -313,41 +334,56 @@ private struct StoryGenerationOptionsSheet: View {
                     Divider().overlay(FrameMioColors.divider.opacity(0.58))
 
                     lengthSection
+
+                    Divider().overlay(FrameMioColors.divider.opacity(0.58))
+
+                    promptSection
                 }
                 .padding(FrameMioSpacing.lg)
             }
             .background(FrameMioColors.canvas.ignoresSafeArea())
+            .overlay {
+                if voicePromptRecorder.isListening {
+                    voicePromptListeningOverlay
+                }
+            }
             .navigationTitle("Customize Story")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
-                        dismiss()
+                        Task {
+                            await stopVoicePromptRecording()
+                            dismiss()
+                        }
                     }
                 }
             }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .onDisappear {
+            Task { await stopVoicePromptRecording() }
+        }
     }
 
     private var promptSection: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
             SectionHeader(title: "Prompt", subtitle: "Guide the story's feeling, focus, or pacing")
 
-            LazyVGrid(columns: optionGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
-                ForEach(["More emotional", "Focus on people", "Focus on places", "Keep it calm"], id: \.self) { prompt in
+            LazyVGrid(columns: promptGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
+                ForEach(["More cinematic", "More emotional", "More fun", "Focus on people", "Focus on places"], id: \.self) { prompt in
                     optionChip(title: prompt, isSelected: options.instruction == prompt) {
                         options.instruction = prompt
                     }
                 }
             }
 
-            TextField("Describe what you want to see", text: Binding(
+            TextField("Tell FrameMio what you want", text: Binding(
                 get: { options.instruction ?? "" },
                 set: { options.instruction = $0 }
             ), axis: .vertical)
-            .lineLimit(3...6)
+            .lineLimit(2...4)
             .font(FrameMioTypography.body)
             .padding(FrameMioSpacing.md)
             .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
@@ -355,21 +391,164 @@ private struct StoryGenerationOptionsSheet: View {
                 RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous)
                     .stroke(FrameMioColors.divider.opacity(0.45), lineWidth: FrameMioMetrics.borderWidth)
             }
-            .accessibilityLabel("Story prompt")
+            .accessibilityLabel("Tell FrameMio what you want")
 
-            if options.instruction?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
-                HStack {
-                    Spacer()
-                    Button {
-                        options.instruction = nil
-                    } label: {
-                        Label("Clear prompt", systemImage: "xmark.circle")
-                            .font(FrameMioTypography.footnote)
-                    }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(FrameMioColors.secondaryInk)
+            HStack {
+                Spacer()
+                Button {
+                    clearVoicePromptTranscript()
+                } label: {
+                    Label("Clear transcript", systemImage: "trash")
+                        .font(FrameMioTypography.footnote)
                 }
+                .buttonStyle(.borderless)
+                .foregroundStyle(FrameMioColors.secondaryInk)
+                .disabled(isPromptClearDisabled)
             }
+
+            voicePromptControl
+                .onChange(of: voicePromptRecorder.currentTranscript) { _, transcript in
+                    let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        options.instruction = trimmed
+                        storyCreationViewDebugLog("voice prompt live transcript applied transcript_length=\(trimmed.count)")
+                    }
+                }
+        }
+    }
+
+    private var voicePromptControl: some View {
+        VStack(alignment: .center, spacing: FrameMioSpacing.xs) {
+            HStack(spacing: FrameMioSpacing.sm) {
+                voicePromptButton
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+
+            voicePromptStatusText
+                .font(FrameMioTypography.caption)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private var voicePromptListeningOverlay: some View {
+        VStack {
+            Spacer()
+            VoicePromptListeningIndicator()
+                .padding(.horizontal, FrameMioSpacing.xl)
+                .padding(.vertical, FrameMioSpacing.lg)
+                .background(.clear)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(false)
+    }
+
+    private var voicePromptButton: some View {
+        Label(voicePromptButtonTitle, systemImage: voicePromptButtonIcon)
+            .font(FrameMioTypography.footnote)
+            .foregroundStyle(voicePromptRecorder.isListening ? .white : FrameMioColors.accent)
+            .padding(.horizontal, FrameMioSpacing.lg)
+            .frame(minHeight: FrameMioMetrics.compactButtonHeight)
+            .background(
+                voicePromptRecorder.isListening ? FrameMioColors.accent : FrameMioColors.surface.opacity(0.78),
+                in: Capsule()
+            )
+            .overlay {
+                Capsule()
+                    .stroke(FrameMioColors.accent.opacity(0.35), lineWidth: FrameMioMetrics.borderWidth)
+            }
+            .scaleEffect(voicePromptRecorder.isListening ? 1.04 : 1)
+            .opacity(voicePromptButtonDisabled ? 0.55 : 1)
+            .animation(.easeInOut(duration: 0.18), value: voicePromptRecorder.isListening)
+            .contentShape(Capsule())
+            .onTapGesture {
+                guard !voicePromptButtonDisabled else { return }
+                FrameMioHaptics.secondaryAction()
+                Task { await toggleVoicePromptRecording() }
+            }
+            .accessibilityLabel("Voice prompt")
+            .accessibilityHint("Tap to start live transcription. Tap again to stop.")
+    }
+
+    @ViewBuilder
+    private var voicePromptStatusText: some View {
+        if promptTranscriptionService == nil {
+            Text("Voice prompt is unavailable in this build.")
+                .foregroundStyle(FrameMioColors.secondaryInk)
+        } else if let error = voicePromptRecorder.errorMessage {
+            Text(error)
+                .foregroundStyle(.red)
+        } else if voicePromptRecorder.didAutoStopForSilence {
+            Text("Stopped after a few quiet seconds.")
+                .foregroundStyle(FrameMioColors.secondaryInk)
+        } else if voicePromptRecorder.isPreparing {
+            Text("Connecting… tap again to stop.")
+                .foregroundStyle(FrameMioColors.secondaryInk)
+        } else if voicePromptRecorder.isRecording {
+            Text("Listening live… auto-stops after silence.")
+                .foregroundStyle(FrameMioColors.secondaryInk)
+        } else {
+            Text("Tap Voice Prompt and speak; the text field updates live.")
+                .foregroundStyle(FrameMioColors.secondaryInk)
+        }
+    }
+
+    private var voicePromptButtonDisabled: Bool {
+        voicePromptRecorder.isTranscribing || promptTranscriptionService == nil
+    }
+
+    private var voicePromptButtonTitle: String {
+        if voicePromptRecorder.isPreparing {
+            return "Connecting"
+        }
+        if voicePromptRecorder.isRecording {
+            return "Stop Voice Prompt"
+        }
+        return "Voice Prompt"
+    }
+
+    private var voicePromptButtonIcon: String {
+        voicePromptRecorder.isListening ? "waveform" : "mic.fill"
+    }
+
+    private var isPromptClearDisabled: Bool {
+        let transcript = voicePromptRecorder.currentTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        let instruction = options.instruction?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return transcript.isEmpty && instruction.isEmpty
+    }
+
+    @MainActor
+    private func startVoicePromptRecording() async {
+        guard let promptTranscriptionService else { return }
+        await voicePromptRecorder.startRecording(using: promptTranscriptionService)
+    }
+
+    private func clearVoicePromptTranscript() {
+        voicePromptRecorder.clearTranscript()
+        if let instruction = options.instruction?.trimmingCharacters(in: .whitespacesAndNewlines), !instruction.isEmpty {
+            options.instruction = ""
+            storyCreationViewDebugLog("voice prompt transcript cleared")
+        }
+    }
+
+    @MainActor
+    private func toggleVoicePromptRecording() async {
+        if voicePromptRecorder.isListening {
+            await stopVoicePromptRecording()
+        } else {
+            await startVoicePromptRecording()
+        }
+    }
+
+    @MainActor
+    private func stopVoicePromptRecording() async {
+        await voicePromptRecorder.stopRecording()
+        let transcript = voicePromptRecorder.currentTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !transcript.isEmpty {
+            options.instruction = transcript
+            storyCreationViewDebugLog("voice prompt applied transcript_length=\(transcript.count)")
         }
     }
 
@@ -452,6 +631,10 @@ private struct StoryGenerationOptionsSheet: View {
 
     private var optionGridColumns: [GridItem] {
         [GridItem(.adaptive(minimum: 108), spacing: FrameMioSpacing.sm, alignment: .leading)]
+    }
+
+    private var promptGridColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: 140), spacing: FrameMioSpacing.sm, alignment: .leading)]
     }
 
     private func optionChip(title: String, subtitle: String? = nil, isSelected: Bool, isDisabled: Bool = false, action: @escaping () -> Void) -> some View {

@@ -3,6 +3,12 @@ import Foundation
 import UIKit
 import UniformTypeIdentifiers
 
+private func photoLibraryDebugLog(_ message: @autoclosure () -> String) {
+#if DEBUG
+    print("[FrameMio][PhotoLibrary] \(message())")
+#endif
+}
+
 final class PhotoKitPhotoLibraryService: PhotoLibraryService, MediaSelectionService, OriginalMediaSource, @unchecked Sendable {
     private let imageManager: PHCachingImageManager
 
@@ -284,9 +290,11 @@ final class PhotoKitPhotoLibraryService: PhotoLibraryService, MediaSelectionServ
 
         guard let localIdentifier = asset.localIdentifier,
               let phAsset = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil).firstObject else {
+            photoLibraryDebugLog("thumbnail request rejected asset=\(asset.id) local_identifier=\(asset.localIdentifier ?? "nil") reason=asset_not_found")
             throw AppError.unsupportedMedia
         }
 
+        photoLibraryDebugLog("thumbnail request started asset=\(asset.id) local_identifier=\(localIdentifier) target=\(Int(targetSize.width))x\(Int(targetSize.height))")
         let options = PHImageRequestOptions()
         options.deliveryMode = .highQualityFormat
         options.resizeMode = .fast
@@ -303,12 +311,20 @@ final class PhotoKitPhotoLibraryService: PhotoLibraryService, MediaSelectionServ
                     options: options
                 ) { image, info in
                     if let cancelled = info?[PHImageCancelledKey] as? Bool, cancelled {
+                        photoLibraryDebugLog("thumbnail callback cancelled asset=\(asset.id)")
                         requestIDBox.resume(.failure(CancellationError()), continuation: continuation)
                     } else if let error = info?[PHImageErrorKey] as? Error {
+                        photoLibraryDebugLog("thumbnail callback failed asset=\(asset.id) error=\(error.localizedDescription)")
                         requestIDBox.resume(.failure(error), continuation: continuation)
                     } else if let image, let data = image.jpegData(compressionQuality: 0.82) {
+                        let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                        let inCloud = (info?[PHImageResultIsInCloudKey] as? Bool) ?? false
+                        photoLibraryDebugLog("thumbnail callback image asset=\(asset.id) bytes=\(data.count) degraded=\(degraded) in_cloud=\(inCloud)")
                         requestIDBox.resume(.success(data), continuation: continuation)
                     } else {
+                        let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                        let inCloud = (info?[PHImageResultIsInCloudKey] as? Bool) ?? false
+                        photoLibraryDebugLog("thumbnail callback missing_image asset=\(asset.id) degraded=\(degraded) in_cloud=\(inCloud)")
                         requestIDBox.resume(.failure(AppError.unsupportedMedia), continuation: continuation)
                     }
                 }

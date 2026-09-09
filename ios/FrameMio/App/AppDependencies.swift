@@ -181,22 +181,30 @@ enum AppConfiguration {
 
     private static func stringConfigurationValue(infoKey: String, environmentKey: String) -> String? {
         if let environmentValue = debugEnvironmentValue(forKey: environmentKey) {
-            print("[FrameMio][Config] resolved_from_environment key=\(environmentKey) value=\(environmentValue)")
+            print("[FrameMio][Config] resolved_from_environment key=\(environmentKey) value=\(configurationLogValue(environmentValue, infoKey: infoKey, environmentKey: environmentKey))")
             return environmentValue
         }
 
         if let localEnvironmentValue = localEnvironmentValue(forKey: environmentKey) {
-            print("[FrameMio][Config] resolved_from_local_env key=\(environmentKey) value=\(localEnvironmentValue)")
+            print("[FrameMio][Config] resolved_from_local_env key=\(environmentKey) value=\(configurationLogValue(localEnvironmentValue, infoKey: infoKey, environmentKey: environmentKey))")
             return localEnvironmentValue
         }
 
         if let infoValue = debugInfoPlistValue(forKey: infoKey) {
-            print("[FrameMio][Config] resolved_from_info_plist key=\(infoKey) value=\(infoValue)")
+            print("[FrameMio][Config] resolved_from_info_plist key=\(infoKey) value=\(configurationLogValue(infoValue, infoKey: infoKey, environmentKey: environmentKey))")
             return infoValue
         }
 
         print("[FrameMio][Config] missing_value key=\(infoKey) environment_key=\(environmentKey)")
         return nil
+    }
+
+    private static func configurationLogValue(_ value: String, infoKey: String, environmentKey: String) -> String {
+        let key = "\(infoKey) \(environmentKey)".lowercased()
+        if key.contains("key") || key.contains("token") || key.contains("secret") || key.contains("password") {
+            return "<redacted>"
+        }
+        return value
     }
 
     static func debugEnvironmentValue(forKey key: String) -> String? {

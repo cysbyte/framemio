@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -146,6 +147,48 @@ func TestPlannerHonorsMainMomentsBRollPreference(t *testing.T) {
 	}
 	if len(plan.BRoll) != 0 {
 		t.Fatalf("expected no B-roll when main moments preference is selected, got %+v", plan.BRoll)
+	}
+}
+
+func TestPlannerKeepsMoreBRollWithinValidatedRatioForShortFixedStory(t *testing.T) {
+	t.Parallel()
+	photos := make([]models.PhotoAnalysis, 0, 8)
+	selected := make([]string, 0, 8)
+	for index := 0; index < 8; index++ {
+		photoID := fmt.Sprintf("photo-short-%d", index)
+		selected = append(selected, photoID)
+		photos = append(photos, models.PhotoAnalysis{
+			PhotoID: photoID, ProjectID: "project-short-more-broll", AnalysisVersion: "photo-v1",
+			TimestampMicros: int64(index) * 3_000_000, Caption: "Beach memory",
+			Labels: []string{"beach", "water"}, MemoryValue: 0.9, EmotionalValue: 0.9,
+			VisualQuality: 0.9, StoryRelevance: 0.9, Selected: true,
+		})
+	}
+	request := Request{
+		ProjectID: "project-short-more-broll", Version: 1, DesiredDuration: 15 * time.Second,
+		TargetDurationFixed: true, StoryType: models.StoryTypeTrip, VisualStyle: models.VisualStyleCinematic,
+		BRollPreference: "more", SelectedMediaIDs: selected, PhotoAnalyses: photos,
+	}
+	planner := &Planner{Now: func() time.Time {
+		return time.Date(2026, time.September, 10, 12, 0, 0, 0, time.UTC)
+	}}
+
+	plan, err := planner.Plan(context.Background(), request)
+	if err != nil {
+		t.Fatalf("short fixed story with more B-roll should plan successfully: %v", err)
+	}
+	if len(plan.BRoll) == 0 {
+		t.Fatal("expected the more B-roll preference to select supporting overlays")
+	}
+	if err := ValidateStoryPlan(plan); err != nil {
+		t.Fatalf("local plan must pass the same validation used by fallback: %v", err)
+	}
+	usedDurationMS := 0
+	for _, overlay := range plan.BRoll {
+		usedDurationMS += overlay.DurationMS
+	}
+	if usedDurationMS > maxBRollDurationMS(plan.TotalDurationMS)+1 {
+		t.Fatalf("B-roll duration exceeded shared cap: used=%d limit=%d plan=%+v", usedDurationMS, maxBRollDurationMS(plan.TotalDurationMS), plan.BRoll)
 	}
 }
 

@@ -174,6 +174,22 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 	EnforceSceneTransitions(&plan, request.VideoAnalyses, visualStyle)
 	applyCaptionColorInstruction(&plan, request.UserInstructions)
 	if err := ValidateStoryPlan(plan); err != nil {
+		if p != nil && p.Logger != nil {
+			brollDurationMS := 0
+			for _, overlay := range plan.BRoll {
+				brollDurationMS += overlay.DurationMS
+			}
+			p.Logger.Warn("story_planner_local_output_invalid",
+				slog.String("project_id", request.ProjectID),
+				slog.Int("story_plan_version", plan.Version),
+				slog.Int("moment_count", len(plan.Moments)),
+				slog.Int("broll_count", len(plan.BRoll)),
+				slog.Int("broll_duration_ms", brollDurationMS),
+				slog.Int("broll_duration_limit_ms", maxBRollDurationMS(plan.TotalDurationMS)),
+				slog.String("broll_preference", normalizedBRollPreference(request.BRollPreference)),
+				slog.Any("error", err),
+			)
+		}
 		return models.StoryPlan{}, err
 	}
 	return plan, nil
@@ -606,7 +622,7 @@ func validateBRollOverlays(plan models.StoryPlan, momentIDs map[string]struct{},
 		seen[key] = struct{}{}
 		usedDurationMS += overlay.DurationMS
 	}
-	if totalDurationMS > 0 && float64(usedDurationMS) > float64(totalDurationMS)*maxBRollRatio+1 {
+	if totalDurationMS > 0 && usedDurationMS > maxBRollDurationMS(totalDurationMS)+1 {
 		return fmt.Errorf("broll duration exceeds story ratio")
 	}
 	return nil

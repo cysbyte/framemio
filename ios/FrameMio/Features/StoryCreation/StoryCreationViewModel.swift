@@ -36,6 +36,7 @@ final class StoryCreationViewModel: ObservableObject {
     private let onCreditsUpdated: (() -> Void)?
     private var creationTask: Task<Void, Never>?
     private var thumbnailTasks: [String: Task<Void, Never>] = [:]
+    private var thumbnailRequestGeneration: [String: Int] = [:]
 
     init(
         context: MomentContext,
@@ -56,6 +57,7 @@ final class StoryCreationViewModel: ObservableObject {
         self.creditService = creditService
         self.onCreditsUpdated = onCreditsUpdated
         self.createStoryCreditCost = CreditPricing.price(for: .createStory, stats: Self.createStoryCreditStats(for: assets))
+        storyCreationDebugLog("view model initialized instance=\(ObjectIdentifier(self)) assets=\(assets.count)")
     }
 
     func image(for asset: MediaAsset) -> Image? {
@@ -63,27 +65,66 @@ final class StoryCreationViewModel: ObservableObject {
         return Image(uiImage: image)
     }
 
-    func loadThumbnail(for asset: MediaAsset, targetSize: CGSize) {
-        guard thumbnails[asset.id] == nil, thumbnailTasks[asset.id] == nil else { return }
+    func isThumbnailLoading(for asset: MediaAsset) -> Bool {
+        thumbnailTasks[asset.id] != nil
+    }
 
+    func loadMissingThumbnails(targetSize: CGSize) {
+        let missingAssets = assets.filter { thumbnails[$0.id] == nil }
+        storyCreationDebugLog("thumbnail refresh requested assets=\(assets.count) missing=\(missingAssets.count) active_tasks=\(thumbnailTasks.count)")
+        for asset in missingAssets {
+            loadThumbnail(for: asset, targetSize: targetSize)
+        }
+    }
+
+    func loadThumbnail(for asset: MediaAsset, targetSize: CGSize) {
         let assetID = asset.id
+        if thumbnails[assetID] != nil {
+            storyCreationDebugLog("thumbnail request skipped asset=\(assetID) reason=cache_hit")
+            return
+        }
+        if thumbnailTasks[assetID] != nil {
+            storyCreationDebugLog("thumbnail request skipped asset=\(assetID) reason=already_loading")
+            return
+        }
+
+        let generation = (thumbnailRequestGeneration[assetID] ?? 0) + 1
+        thumbnailRequestGeneration[assetID] = generation
+        storyCreationDebugLog("thumbnail request started asset=\(assetID) local_identifier=\(asset.localIdentifier ?? "nil") kind=\(asset.kind.rawValue) target=\(Int(targetSize.width))x\(Int(targetSize.height)) generation=\(generation)")
         thumbnailTasks[assetID] = Task { [weak self, photoLibrary] in
+            defer {
+                if let self, self.thumbnailRequestGeneration[assetID] == generation {
+                    self.thumbnailTasks[assetID] = nil
+                    storyCreationDebugLog("thumbnail task cleared asset=\(assetID) generation=\(generation)")
+                }
+            }
+
             do {
                 let data = try await photoLibrary.requestThumbnail(for: asset, targetSize: targetSize)
                 try Task.checkCancellation()
                 if let image = UIImage(data: data) {
                     self?.thumbnails[assetID] = image
+                    storyCreationDebugLog("thumbnail request succeeded asset=\(assetID) bytes=\(data.count) generation=\(generation)")
+                } else {
+                    storyCreationDebugLog("thumbnail request failed asset=\(assetID) reason=image_decode_failed bytes=\(data.count) generation=\(generation)")
                 }
             } catch is CancellationError {
+                storyCreationDebugLog("thumbnail request cancelled asset=\(assetID) generation=\(generation)")
             } catch {
+                storyCreationDebugLog("thumbnail request failed asset=\(assetID) generation=\(generation) error=\(error.localizedDescription)")
             }
-            self?.thumbnailTasks[assetID] = nil
         }
     }
 
     func cancelThumbnail(for asset: MediaAsset) {
-        thumbnailTasks[asset.id]?.cancel()
-        thumbnailTasks[asset.id] = nil
+        let assetID = asset.id
+        guard let task = thumbnailTasks[assetID] else {
+            storyCreationDebugLog("thumbnail cancel skipped asset=\(assetID) reason=no_active_task")
+            return
+        }
+        task.cancel()
+        thumbnailTasks[assetID] = nil
+        storyCreationDebugLog("thumbnail request cancelled asset=\(assetID) reason=view_disappeared")
     }
 
     func refreshCreditBalance() {
@@ -371,6 +412,7 @@ final class StoryCreationViewModel: ObservableObject {
     }
 
     deinit {
+        storyCreationDebugLog("view model deinitialized instance=\(ObjectIdentifier(self))")
         creationTask?.cancel()
         thumbnailTasks.values.forEach { $0.cancel() }
     }

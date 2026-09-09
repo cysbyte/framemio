@@ -227,6 +227,7 @@ struct AppRootView: View {
                     creditService: dependencies.creditService,
                     onCreditsUpdated: refreshCredits
                 ),
+                promptTranscriptionService: dependencies.promptTranscriptionService,
                 onCreate: { options in
                     homePath.append(.storyCreating(context: context, assets: assets, options: options, launchID: UUID()))
                 },

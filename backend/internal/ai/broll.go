@@ -82,13 +82,13 @@ func planBRoll(request Request, moments []models.StoryMoment, captions []models.
 	for index := range anchors {
 		mergeTerms(anchors[index].concepts, requestConcepts)
 	}
-	budgetRatio := maxBRollRatio
 	matchThreshold := minBRollMatchScore
 	if preference == "more" {
-		budgetRatio = 0.45
 		matchThreshold = 0.46
 	}
-	budgetMS := int(math.Round(float64(totalDurationMS) * budgetRatio))
+	// "more" broadens matching; the shared duration cap still protects the
+	// renderer and must agree with StoryPlan validation.
+	budgetMS := maxBRollDurationMS(totalDurationMS)
 	selected := make([]models.StoryBRoll, 0, minInt(len(anchors), len(brollCandidates)))
 	usedReferences := make(map[string]struct{})
 	usedAssets := make(map[string]int)
@@ -136,6 +136,13 @@ func planBRoll(request Request, moments []models.StoryMoment, captions []models.
 		usedDurationMS += durationMS
 	}
 	return selected
+}
+
+func maxBRollDurationMS(totalDurationMS int) int {
+	if totalDurationMS <= 0 {
+		return 0
+	}
+	return int(math.Floor(float64(totalDurationMS) * maxBRollRatio))
 }
 
 func buildBRollCandidates(candidates []candidate) []brollCandidate {

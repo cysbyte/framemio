@@ -1547,13 +1547,14 @@ private struct EditStorySheet: View {
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(FrameMioColors.secondaryInk)
-                .disabled(voicePromptRecorder.currentTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(isPromptClearDisabled)
             }
             voicePromptControl
                 .onChange(of: voicePromptRecorder.currentTranscript) { _, transcript in
                     let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !trimmed.isEmpty {
                         draft.instruction = trimmed
+                        storyPreviewUIDebugLog("voice prompt live transcript applied transcript_length=\(trimmed.count)")
                     }
             }
             PrimaryButton(title: "Update Story (\(draft.regenerationCreditCost) credits)", systemImage: "sparkles") {
@@ -1661,6 +1662,12 @@ private struct EditStorySheet: View {
 
     private var voicePromptButtonIcon: String {
         voicePromptRecorder.isListening ? "waveform" : "mic.fill"
+    }
+
+    private var isPromptClearDisabled: Bool {
+        let transcript = voicePromptRecorder.currentTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        let instruction = draft.instruction?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return transcript.isEmpty && instruction.isEmpty
     }
 
     @MainActor
@@ -2597,7 +2604,7 @@ private extension StoryStatus {
 }
 
 @MainActor
-private final class VoicePromptRecorder: ObservableObject {
+final class VoicePromptRecorder: ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var isPreparing = false
     @Published private(set) var isTranscribing = false
@@ -2932,7 +2939,7 @@ private struct DeepgramLiveTranscriptionMessage: Decodable {
 }
 
 
-private struct VoicePromptListeningIndicator: View {
+struct VoicePromptListeningIndicator: View {
     @State private var isAnimating = false
 
     var body: some View {
