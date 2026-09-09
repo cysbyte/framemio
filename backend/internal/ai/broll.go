@@ -454,6 +454,31 @@ func brollID(projectID string, candidate brollCandidate, startMS, durationMS int
 	return "broll_" + hex.EncodeToString(hash.Sum(nil))[:20]
 }
 
+func derivedStoryPlannerBRollID(projectID string, overlay models.StoryBRoll, index int) string {
+	mediaID := strings.TrimSpace(firstNonEmpty(overlay.MediaID, overlay.AssetID))
+	anchorMomentID := ""
+	anchorType := ""
+	if overlay.Anchor != nil {
+		anchorMomentID = strings.TrimSpace(overlay.Anchor.MomentID)
+		anchorType = strings.TrimSpace(overlay.Anchor.Type)
+	}
+	hash := sha256.New()
+	for _, value := range []string{
+		strings.TrimSpace(projectID),
+		mediaID,
+		string(overlay.MediaType),
+		strings.TrimSpace(overlay.VideoAnalysisVersion),
+		fmt.Sprintf("%d:%d:%d:%d", overlay.SourceStartMicros, overlay.SourceEndMicros, overlay.StartMS, overlay.DurationMS),
+		anchorMomentID,
+		anchorType,
+		fmt.Sprintf("%d", index),
+	} {
+		_, _ = hash.Write([]byte(value))
+		_, _ = hash.Write([]byte{0})
+	}
+	return "broll_" + hex.EncodeToString(hash.Sum(nil))[:20]
+}
+
 func roundFloat(value float64, places int) float64 {
 	multiplier := math.Pow10(places)
 	return math.Round(value*multiplier) / multiplier

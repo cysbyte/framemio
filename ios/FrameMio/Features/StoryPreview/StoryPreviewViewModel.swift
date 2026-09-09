@@ -499,7 +499,8 @@ final class StoryPreviewViewModel: ObservableObject {
 
     private func loadStoryOrLaunch() async {
         if let launchContext, let launchID, let storyLaunchCoordinator {
-            storyPreviewDebugLog("launch_bridge_start launch_id=\(launchID) assets=\(launchAssets.count) style=\(launchGenerationOptions.style ?? "automatic") scene_detail=\(launchGenerationOptions.sceneDetailStyle ?? "balanced") target_duration=\(launchGenerationOptions.targetDuration.map { String(Int($0.rounded())) } ?? "auto") story_id=\(storyID ?? "nil")")
+            let instruction = launchGenerationOptions.instruction?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            storyPreviewDebugLog("launch_bridge_start launch_id=\(launchID) assets=\(launchAssets.count) style=\(launchGenerationOptions.style ?? "automatic") scene_detail=\(launchGenerationOptions.sceneDetailStyle ?? "balanced") target_duration=\(launchGenerationOptions.targetDuration.map { String(Int($0.rounded())) } ?? "auto") prompt_present=\(!instruction.isEmpty) prompt_length=\(instruction.count) story_id=\(storyID ?? "nil")")
             storyLaunchCoordinator.start(context: launchContext, assets: launchAssets, options: launchGenerationOptions, launchID: launchID)
             await waitForLaunchedStoryID(from: storyLaunchCoordinator)
         }

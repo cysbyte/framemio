@@ -64,6 +64,7 @@ type iosCreateStoryRequest struct {
 	SubtitleStyle    string             `json:"subtitleStyle,omitempty"`
 	SceneDetailStyle string             `json:"sceneDetailStyle,omitempty"`
 	TargetDuration   float64            `json:"targetDuration,omitempty"`
+	Instruction      string             `json:"instruction,omitempty"`
 }
 
 type iosStoryEditRequest struct {
@@ -1182,7 +1183,8 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 	if !s.allowExpensiveOperation(response, user.ID, "create_ios_story") {
 		return
 	}
-	s.Logger.Info("creating iOS story", "user_id", user.ID, "context", input.Context, "asset_count", len(input.Assets), "analysis_count", len(input.Analyses), "visual_style", normalizeIOSStoryEditStyle(input.Style), "subtitles_enabled", boolPointerLogValue(input.SubtitlesEnabled), "caption_style_preset", normalizeIOSSubtitleStyle(input.SubtitleStyle), "scene_detail_style", normalizeIOSSceneDetailStyle(input.SceneDetailStyle), "target_duration_seconds", input.TargetDuration, "has_target_duration", input.TargetDuration > 0, "idempotency_key_present", strings.TrimSpace(request.Header.Get("Idempotency-Key")) != "")
+	instruction := strings.TrimSpace(sanitizeIOSStoryText(input.Instruction))
+	s.Logger.Info("creating iOS story", "user_id", user.ID, "context", input.Context, "asset_count", len(input.Assets), "analysis_count", len(input.Analyses), "visual_style", normalizeIOSStoryEditStyle(input.Style), "subtitles_enabled", boolPointerLogValue(input.SubtitlesEnabled), "caption_style_preset", normalizeIOSSubtitleStyle(input.SubtitleStyle), "scene_detail_style", normalizeIOSSceneDetailStyle(input.SceneDetailStyle), "target_duration_seconds", input.TargetDuration, "has_target_duration", input.TargetDuration > 0, "prompt_present", instruction != "", "prompt_length", len(instruction), "idempotency_key_present", strings.TrimSpace(request.Header.Get("Idempotency-Key")) != "")
 	storyConfig := map[string]string{"pipeline_version": orchestration.PipelineVersion}
 	if input.TargetDuration > 0 {
 		if input.TargetDuration < 5 || input.TargetDuration > 60 {
@@ -1202,6 +1204,9 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 	}
 	if preference := normalizeIOSSceneDetailStyle(input.SceneDetailStyle); preference != "" {
 		storyConfig["broll_preference"] = preference
+	}
+	if instruction != "" {
+		storyConfig["user_instructions"] = truncateIOSConfigValue(instruction, 480)
 	}
 	resolved, err := s.resolveIOSStoryAssets(request, user.ID, input.Assets)
 	if err != nil {

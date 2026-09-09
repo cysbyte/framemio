@@ -7,7 +7,7 @@ import {EcsTaskProtectionClient, type TaskProtectionClient} from './ecs-task-pro
 import {ShellFfmpegClient} from './ffmpeg/client.js';
 import {FfmpegCompositionRenderer, RemotionCliRenderer} from './remotion/renderer.js';
 import {AwsCliObjectStore} from './storage/object-store.js';
-import {DeterministicRenderWorker} from './pipeline/render-worker.js';
+import {brollTrace, DeterministicRenderWorker} from './pipeline/render-worker.js';
 import type {RenderInput} from './types.js';
 
 const unsupportedMessageVisibilitySeconds = 0;
@@ -208,7 +208,7 @@ export async function handleMessage(received: ReceivedJobMessage, dependencies: 
     console.info(JSON.stringify({level: 'info', msg: 'render mark running completed', job_id: message.jobId, duration_ms: Date.now() - markRunningStartedAt, elapsed_ms: Date.now() - startedAt}));
     const inputStartedAt = Date.now();
     const input = await backend.renderInput(message.jobId);
-    console.info(JSON.stringify({level: 'info', msg: 'render input received', job_id: message.jobId, project_id: input.project_id, story_plan_id: input.story_plan.id, moment_count: input.story_plan.moments.length, caption_count: input.story_plan.captions?.length ?? 0, media_asset_count: input.media_assets.length, duration_ms: Date.now() - inputStartedAt, elapsed_ms: Date.now() - startedAt}));
+    console.info(JSON.stringify({level: 'info', msg: 'render input received', job_id: message.jobId, project_id: input.project_id, story_plan_id: input.story_plan.id, moment_count: input.story_plan.moments.length, broll_count: input.story_plan.broll?.length ?? 0, broll_trace: brollTrace(input.story_plan.broll ?? []), caption_count: input.story_plan.captions?.length ?? 0, media_asset_count: input.media_assets.length, duration_ms: Date.now() - inputStartedAt, elapsed_ms: Date.now() - startedAt}));
     const renderStartedAt = Date.now();
     const result = await worker.render(input);
     console.info(JSON.stringify({level: 'info', msg: 'render pipeline completed', job_id: message.jobId, output_s3_key: result.record.s3_key, duration_ms: Date.now() - renderStartedAt, elapsed_ms: Date.now() - startedAt}));

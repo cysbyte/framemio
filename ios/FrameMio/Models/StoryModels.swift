@@ -115,13 +115,15 @@ struct StoryGenerationOptions: Codable, Hashable, Sendable {
     var subtitleStyle: String?
     var sceneDetailStyle: String?
     var targetDuration: TimeInterval?
+    var instruction: String?
 
     static let automatic = StoryGenerationOptions(
         style: "cinematic",
         subtitlesEnabled: true,
         subtitleStyle: "cinematic",
         sceneDetailStyle: nil,
-        targetDuration: nil
+        targetDuration: nil,
+        instruction: nil
     )
 }
 
@@ -240,6 +242,7 @@ struct CreateStoryRequest: Codable, Hashable, Sendable {
     let subtitleStyle: String?
     let sceneDetailStyle: String?
     let targetDuration: TimeInterval?
+    let instruction: String?
 
     init(
         context: MomentContext,
@@ -255,5 +258,7 @@ struct CreateStoryRequest: Codable, Hashable, Sendable {
         self.subtitleStyle = options.subtitleStyle
         self.sceneDetailStyle = options.sceneDetailStyle
         self.targetDuration = options.targetDuration
+        let trimmedInstruction = options.instruction?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.instruction = trimmedInstruction?.isEmpty == true ? nil : trimmedInstruction
     }
 }

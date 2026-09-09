@@ -148,6 +148,35 @@ func TestOpenAICompatibleStoryPlannerNormalizesVideoMomentReferences(t *testing.
 	}
 }
 
+func TestOpenAICompatibleStoryPlannerDerivesMissingBRollIDWithoutInventingScore(t *testing.T) {
+	t.Parallel()
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		planJSON := `{"schema_version":"story_plan_v1","id":"plan-gpt","project_id":"project-gpt","version":3,"requested_duration_ms":4000,"story_type":"trip","visual_style":"cinematic","title_text":"Beach Story","ending_text":"Until next time.","moments":[{"moment_id":"moment-1","asset_id":"photo-gpt","media_id":"photo-gpt","media_type":"photo","narrative":"A beach sunset opens the story.","duration_ms":4000,"crop_intent":"fit","transition":"fade_in"}],"broll":[{"asset_id":"photo-gpt","media_id":"photo-gpt","media_type":"photo","start_ms":1000,"duration_ms":1000,"confidence":0.76,"reason":"Supporting detail"}],"captions":[{"moment_id":"moment-1","text":"Beach sunset","start_ms":0,"end_ms":4000}],"output":{"aspect_ratio":"9:16","max_duration_seconds":4,"preset":"premium-memory"},"total_duration_ms":4000}`
+		return typographyHTTPResponse(http.StatusOK, responsesTypographyResponse(planJSON)), nil
+	})}
+	planner := OpenAICompatibleStoryPlanner{BaseURL: "https://planner.test", APIKey: "test-key", ProviderName: "openai-compatible", ModelName: "gpt-story", WireAPI: "responses", Client: client}
+	plan, err := planner.Plan(context.Background(), storyPlannerProviderRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.BRoll) != 1 {
+		t.Fatalf("expected one B-roll item, got %+v", plan.BRoll)
+	}
+	overlay := plan.BRoll[0]
+	if !strings.HasPrefix(overlay.BrollID, "broll_") {
+		t.Fatalf("expected deterministic B-roll ID, got %q", overlay.BrollID)
+	}
+	if overlay.Confidence != 0.76 {
+		t.Fatalf("expected confidence to be preserved, got %f", overlay.Confidence)
+	}
+	if overlay.Score != 0 {
+		t.Fatalf("expected missing score to remain unset instead of being fabricated, got %f", overlay.Score)
+	}
+	if err := ValidateStoryPlan(plan); err != nil {
+		t.Fatalf("expected derived B-roll metadata to pass validation: %v", err)
+	}
+}
+
 func TestOpenAICompatibleStoryPlannerSynthesizesCaptionsWhenExternalPlanOmitsThem(t *testing.T) {
 	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {

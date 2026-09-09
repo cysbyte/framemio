@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,20 @@ import (
 	"github.com/framemio/backend/internal/store"
 	"github.com/framemio/backend/internal/storyvalidation"
 )
+
+func TestBRollScoresReportsIdentityAndUnsetScoreClearly(t *testing.T) {
+	t.Parallel()
+	got := brollScores([]models.StoryBRoll{
+		{AssetID: "media-a", BrollID: "broll-a", Score: 0.72, Confidence: 0.81},
+		{MediaID: "media-b", Confidence: 0.64},
+	})
+	if !strings.Contains(got, "broll-a:media-a:start=0:duration=0:score=0.720:confidence=0.810") {
+		t.Fatalf("expected scored B-roll details, got %q", got)
+	}
+	if !strings.Contains(got, "broll_index_1:media-b:start=0:duration=0:score=unset:confidence=0.640") {
+		t.Fatalf("expected missing score to be explicit, got %q", got)
+	}
+}
 
 func TestStoryPlanHandlerUsesPersistedVideoAnalysis(t *testing.T) {
 	t.Parallel()

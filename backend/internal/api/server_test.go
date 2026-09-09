@@ -27,6 +27,20 @@ import (
 
 const testInternalToken = "internal-token-with-at-least-thirty-two-characters"
 
+func TestRenderBRollTraceReportsIdentityTimingAndMissingScore(t *testing.T) {
+	t.Parallel()
+	got := renderBRollTrace([]models.StoryBRoll{
+		{BrollID: "broll-a", AssetID: "media-a", StartMS: 1000, DurationMS: 1200, Score: 0.72, Confidence: 0.81},
+		{MediaID: "media-b", StartMS: 2000, DurationMS: 900, Confidence: 0.64},
+	})
+	if !strings.Contains(got, "broll-a:media-a:start=1000:duration=1200:score=0.720:confidence=0.810") {
+		t.Fatalf("expected scored B-roll trace, got %q", got)
+	}
+	if !strings.Contains(got, "broll_index_1:media-b:start=2000:duration=900:score=unset:confidence=0.640") {
+		t.Fatalf("expected missing score to be explicit, got %q", got)
+	}
+}
+
 func TestMediaProjectAndJobFlowIsIdempotent(t *testing.T) {
 	t.Parallel()
 
@@ -493,6 +507,7 @@ func TestIOSStoriesCompatibilityCreatesProjectAndFetchesStories(t *testing.T) {
 		"subtitleStyle":    "minimal",
 		"sceneDetailStyle": "moreDetails",
 		"targetDuration":   30,
+		"instruction":      "Focus on the people and keep the pacing gentle.",
 	}, "", true, nil)
 	if storyResponse.Code != http.StatusCreated {
 		t.Fatalf("create iOS story status = %d, body = %s", storyResponse.Code, storyResponse.Body.String())
@@ -531,7 +546,8 @@ func TestIOSStoriesCompatibilityCreatesProjectAndFetchesStories(t *testing.T) {
 		messages[0].Configuration["subtitles_enabled"] != "true" ||
 		messages[0].Configuration["caption_style_preset"] != "clean_minimal" ||
 		messages[0].Configuration["broll_preference"] != "more" ||
-		messages[0].Configuration["target_duration_seconds"] != "30" {
+		messages[0].Configuration["target_duration_seconds"] != "30" ||
+		messages[0].Configuration["user_instructions"] != "Focus on the people and keep the pacing gentle." {
 		t.Fatalf("expected create options in story plan config, got %+v", messages[0].Configuration)
 	}
 }

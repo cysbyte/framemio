@@ -107,7 +107,8 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 			return validationErr
 		}
 	}
-	h.logger().Info("story planner output ready", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.Int("candidate_count", len(photoAnalyses)+totalVideoSegments(videoAnalyses)), slog.Int("requested_duration_ms", plan.RequestedDurationMS), slog.Int("planned_duration_ms", plan.TotalDurationMS), slog.Int("output_max_duration_seconds", plan.Output.MaxDurationS), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.String("broll_scores", brollScores(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)), slog.Int("typography_count", typographyCount(plan.Moments)), slog.Int("video_moment_count", videoMomentCount(plan.Moments)), slog.String("caption_style_preset", storyPlanCaptionStylePreset(plan)))
+	brollWithScoreCount, brollWithConfidenceCount := brollMetadataCounts(plan.BRoll)
+	h.logger().Info("story planner output ready", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.Int("candidate_count", len(photoAnalyses)+totalVideoSegments(videoAnalyses)), slog.Int("requested_duration_ms", plan.RequestedDurationMS), slog.Int("planned_duration_ms", plan.TotalDurationMS), slog.Int("output_max_duration_seconds", plan.Output.MaxDurationS), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("broll_with_score_count", brollWithScoreCount), slog.Int("broll_with_confidence_count", brollWithConfidenceCount), slog.String("broll_scores", brollScores(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)), slog.Int("typography_count", typographyCount(plan.Moments)), slog.Int("video_moment_count", videoMomentCount(plan.Moments)), slog.String("caption_style_preset", storyPlanCaptionStylePreset(plan)))
 	if h.Validator != nil {
 		validationStarted := time.Now()
 		if validationErr := h.Validator.Validate(ctx, job.UserID, plan); validationErr != nil {
@@ -713,11 +714,42 @@ func brollScores(overlays []models.StoryBRoll) string {
 		return ""
 	}
 	parts := make([]string, 0, len(overlays))
-	for _, overlay := range overlays {
-		parts = append(parts, fmt.Sprintf("%s:%s:%.3f", overlay.BrollID, overlay.AssetID, overlay.Score))
+	for index, overlay := range overlays {
+		brollID := strings.TrimSpace(overlay.BrollID)
+		if brollID == "" {
+			brollID = fmt.Sprintf("broll_index_%d", index)
+		}
+		assetID := strings.TrimSpace(overlay.AssetID)
+		if assetID == "" {
+			assetID = strings.TrimSpace(overlay.MediaID)
+		}
+		if assetID == "" {
+			assetID = "unset"
+		}
+		score := "unset"
+		if overlay.Score > 0 {
+			score = fmt.Sprintf("%.3f", overlay.Score)
+		}
+		confidence := "unset"
+		if overlay.Confidence > 0 {
+			confidence = fmt.Sprintf("%.3f", overlay.Confidence)
+		}
+		parts = append(parts, fmt.Sprintf("%s:%s:start=%d:duration=%d:score=%s:confidence=%s", brollID, assetID, overlay.StartMS, overlay.DurationMS, score, confidence))
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, ",")
+}
+
+func brollMetadataCounts(overlays []models.StoryBRoll) (withScore, withConfidence int) {
+	for _, overlay := range overlays {
+		if overlay.Score > 0 {
+			withScore++
+		}
+		if overlay.Confidence > 0 {
+			withConfidence++
+		}
+	}
+	return withScore, withConfidence
 }
 
 func videoMomentCount(moments []models.StoryMoment) int {

@@ -8,7 +8,7 @@ import {FfmpegCompositionRenderer, FixtureRemotionRenderer} from '../remotion/re
 import {LocalFixtureObjectStore} from '../storage/object-store.js';
 import {canonicalJson, resolutionForAspectRatio} from '../determinism.js';
 import {RenderAssetError, RenderInputError} from './errors.js';
-import {DeterministicRenderWorker} from './render-worker.js';
+import {brollTrace, DeterministicRenderWorker} from './render-worker.js';
 import {buildComposition} from './timeline.js';
 import {fixtureMediaAssets, fixtureRenderInput, fixtureStoryPlan} from '../__fixtures__/story-plan.js';
 
@@ -30,6 +30,16 @@ async function createHarness(compositionOutputIsFinal = false) {
   });
   return {root, objectStore, ffmpeg, remotion, worker};
 }
+
+test('b-roll trace preserves IDs and distinguishes missing scores', () => {
+  assert.equal(
+    brollTrace([
+      {broll_id: 'broll-a', asset_id: 'media-a', start_ms: 1000, duration_ms: 1200, score: 0.72, confidence: 0.81},
+      {asset_id: 'media-b', start_ms: 2000, duration_ms: 900, confidence: 0.64},
+    ]),
+    'broll-a:media-a:start=1000:duration=1200:score=0.720:confidence=0.810,broll_index_1:media-b:start=2000:duration=900:score=unset:confidence=0.640',
+  );
+});
 
 test('preprocesses b-roll video without muting A-roll audio', async () => {
   const harness = await createHarness();

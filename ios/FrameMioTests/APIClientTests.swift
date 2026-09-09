@@ -183,6 +183,32 @@ final class CreditBalanceModelTests: XCTestCase {
 }
 
 final class StoryModelTests: XCTestCase {
+    func testCreateStoryRequestEncodesCustomizeOptionsAndPrompt() throws {
+        let request = CreateStoryRequest(
+            context: .family,
+            assets: [],
+            analyses: [],
+            options: StoryGenerationOptions(
+                style: "warm",
+                subtitlesEnabled: true,
+                subtitleStyle: "bold",
+                sceneDetailStyle: "moreDetails",
+                targetDuration: 30,
+                instruction: "Focus on the people and keep the pacing gentle."
+            )
+        )
+
+        let data = try FrameMioJSONCoding.apiEncoder().encode(request)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertEqual(object["style"] as? String, "warm")
+        XCTAssertEqual(object["subtitlesEnabled"] as? Bool, true)
+        XCTAssertEqual(object["subtitleStyle"] as? String, "bold")
+        XCTAssertEqual(object["sceneDetailStyle"] as? String, "moreDetails")
+        XCTAssertEqual(object["targetDuration"] as? Double, 30)
+        XCTAssertEqual(object["instruction"] as? String, "Focus on the people and keep the pacing gentle.")
+    }
+
     func testStoryDecodesWithoutOptionalDescriptionOrMoments() throws {
         let data = Data("""
         {

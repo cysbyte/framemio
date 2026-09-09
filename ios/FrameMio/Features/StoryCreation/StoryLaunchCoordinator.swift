@@ -111,7 +111,8 @@ final class StoryLaunchCoordinator: ObservableObject {
             return
         }
 
-        storyLaunchDebugLog("launch requested id=\(launchID) assets=\(assets.count) videos=\(assets.filter(\.isVideo).count) style=\(options.style ?? "automatic") scene_detail=\(options.sceneDetailStyle ?? "balanced") target_duration=\(options.targetDuration.map { String(Int($0.rounded())) } ?? "auto")")
+        let instruction = options.instruction?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        storyLaunchDebugLog("launch requested id=\(launchID) assets=\(assets.count) videos=\(assets.filter(\.isVideo).count) style=\(options.style ?? "automatic") scene_detail=\(options.sceneDetailStyle ?? "balanced") target_duration=\(options.targetDuration.map { String(Int($0.rounded())) } ?? "auto") prompt_present=\(!instruction.isEmpty) prompt_length=\(instruction.count)")
         launchTask?.cancel()
         activeLaunchID = launchID
         isPreparing = true

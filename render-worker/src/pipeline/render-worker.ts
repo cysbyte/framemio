@@ -23,7 +23,7 @@ export class DeterministicRenderWorker {
 
   async render(input: RenderInput): Promise<RenderResult> {
     const rendererVersion = input.renderer_version ?? RENDER_VERSION;
-    console.info(JSON.stringify({level: 'info', msg: 'render job started', job_id: input.job_id, project_id: input.project_id, media_count: input.media_assets.length, moment_count: input.story_plan.moments.length, broll_count: input.story_plan.broll?.length ?? 0, caption_count: input.story_plan.captions?.length ?? 0, output_s3_key: input.output_s3_key, renderer_version: rendererVersion}));
+    console.info(JSON.stringify({level: 'info', msg: 'render job started', job_id: input.job_id, project_id: input.project_id, media_count: input.media_assets.length, moment_count: input.story_plan.moments.length, broll_count: input.story_plan.broll?.length ?? 0, broll_trace: brollTrace(input.story_plan.broll ?? []), caption_count: input.story_plan.captions?.length ?? 0, output_s3_key: input.output_s3_key, renderer_version: rendererVersion}));
     validateInput(input, rendererVersion);
     const fingerprint = renderFingerprint(input, rendererVersion);
     const paths = await ensureRenderDirs(this.dependencies.workRoot, fingerprint);
@@ -35,7 +35,7 @@ export class DeterministicRenderWorker {
     console.info(JSON.stringify({level: 'info', msg: 'render clips prepared', job_id: input.job_id, project_id: input.project_id, prepared_count: preparedPaths.size}));
     const composition = buildComposition(input.story_plan, input.media_assets, assetPaths, preparedPaths, paths, {rendererVersion, fps: DEFAULT_FPS});
     await writeFile(paths.composition_file, JSON.stringify(composition, null, 2), 'utf8');
-    console.info(JSON.stringify({level: 'info', msg: 'render composition built', job_id: input.job_id, project_id: input.project_id, duration_ms: composition.duration_ms, width: composition.resolution.width, height: composition.resolution.height, clip_count: composition.clips.length, broll_count: composition.broll.length, caption_count: composition.captions.length, transition_summary: transitionSummary(composition)}));
+    console.info(JSON.stringify({level: 'info', msg: 'render composition built', job_id: input.job_id, project_id: input.project_id, duration_ms: composition.duration_ms, width: composition.resolution.width, height: composition.resolution.height, clip_count: composition.clips.length, broll_count: composition.broll.length, broll_trace: timelineBRollTrace(composition.broll), caption_count: composition.captions.length, transition_summary: transitionSummary(composition)}));
     const remotionIntermediate = path.join(paths.work_dir, 'remotion-output.mp4');
     await this.dependencies.remotion.renderComposition(composition, remotionIntermediate);
     console.info(JSON.stringify({level: 'info', msg: 'remotion render completed', job_id: input.job_id, project_id: input.project_id}));
@@ -177,6 +177,20 @@ export class DeterministicRenderWorker {
 
 function transitionSummary(composition: CompositionSpec): string {
   return composition.clips.map((clip, index) => `${index + 1}:${clip.asset_id}:${clip.transition}`).join(',');
+}
+
+export function brollTrace(overlays: NonNullable<RenderInput['story_plan']['broll']>): string {
+  return overlays.map((overlay, index) => {
+    const id = overlay.broll_id?.trim() || `broll_index_${index}`;
+    const assetID = overlay.asset_id?.trim() || overlay.media_id?.trim() || 'unset';
+    const score = typeof overlay.score === 'number' && Number.isFinite(overlay.score) ? overlay.score.toFixed(3) : 'unset';
+    const confidence = typeof overlay.confidence === 'number' && Number.isFinite(overlay.confidence) ? overlay.confidence.toFixed(3) : 'unset';
+    return `${id}:${assetID}:start=${overlay.start_ms}:duration=${overlay.duration_ms}:score=${score}:confidence=${confidence}`;
+  }).sort().join(',');
+}
+
+function timelineBRollTrace(overlays: CompositionSpec['broll']): string {
+  return overlays.map((overlay) => `${overlay.broll_id}:${overlay.asset_id}:start_frame=${overlay.start_frame}:duration_frames=${overlay.duration_frames}`).sort().join(',');
 }
 
 function validateInput(input: RenderInput, rendererVersion: string): void {

@@ -4,10 +4,12 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -623,7 +625,7 @@ func (s *Server) listCreditPacks(response http.ResponseWriter, request *http.Req
 	}
 	s.writeJSON(response, http.StatusOK, map[string]any{
 		"packs":                              s.Credits.Policy.CreditPacks,
-		"dynamic_story_pricing":             s.Credits.Policy.DynamicStoryPricing,
+		"dynamic_story_pricing":              s.Credits.Policy.DynamicStoryPricing,
 		"initial_credit_grant":               s.Credits.Policy.InitialGrant,
 		"monthly_subscription_cycle_credits": s.Credits.Policy.MonthlySubscriptionCycleCredits,
 		"yearly_subscription_cycle_credits":  s.Credits.Policy.YearlySubscriptionCycleCredits,
@@ -947,7 +949,7 @@ func (s *Server) getRenderInput(response http.ResponseWriter, request *http.Requ
 	if strings.TrimSpace(outputKey) == "" {
 		outputKey = renderOutputKey(job.UserID, job.ProjectID, plan.Version, job.Configuration["output_preset"])
 	}
-	s.Logger.Info("render input prepared", slog.String("job_id", job.ID), slog.String("project_id", job.ProjectID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)), slog.Int("media_asset_count", len(assets)))
+	s.Logger.Info("render input prepared", slog.String("job_id", job.ID), slog.String("project_id", job.ProjectID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.String("broll_trace", renderBRollTrace(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)), slog.Int("media_asset_count", len(assets)))
 	s.writeJSON(response, http.StatusOK, renderInputResponse{
 		JobID:       job.ID,
 		ProjectID:   job.ProjectID,
@@ -955,6 +957,37 @@ func (s *Server) getRenderInput(response http.ResponseWriter, request *http.Requ
 		MediaAssets: assets,
 		OutputS3Key: outputKey,
 	})
+}
+
+func renderBRollTrace(overlays []models.StoryBRoll) string {
+	if len(overlays) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(overlays))
+	for index, overlay := range overlays {
+		id := strings.TrimSpace(overlay.BrollID)
+		if id == "" {
+			id = fmt.Sprintf("broll_index_%d", index)
+		}
+		assetID := strings.TrimSpace(overlay.AssetID)
+		if assetID == "" {
+			assetID = strings.TrimSpace(overlay.MediaID)
+		}
+		if assetID == "" {
+			assetID = "unset"
+		}
+		score := "unset"
+		if overlay.Score > 0 {
+			score = strconv.FormatFloat(overlay.Score, 'f', 3, 64)
+		}
+		confidence := "unset"
+		if overlay.Confidence > 0 {
+			confidence = strconv.FormatFloat(overlay.Confidence, 'f', 3, 64)
+		}
+		parts = append(parts, fmt.Sprintf("%s:%s:start=%d:duration=%d:score=%s:confidence=%s", id, assetID, overlay.StartMS, overlay.DurationMS, score, confidence))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ",")
 }
 
 func renderInputMediaIDs(projectMediaIDs []string, plan models.StoryPlan) []string {

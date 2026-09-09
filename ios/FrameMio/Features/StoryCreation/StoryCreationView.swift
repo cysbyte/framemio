@@ -90,7 +90,8 @@ struct StoryCreationView: View {
                         title: "Create Story (\(viewModel.createStoryCreditCost) credits)",
                         systemImage: "sparkles",
                         action: {
-                            storyCreationViewDebugLog("create_tapped style=\(generationOptions.style ?? "automatic") scene_detail=\(generationOptions.sceneDetailStyle ?? "balanced") subtitles=\(generationOptions.subtitlesEnabled.map(String.init) ?? "automatic") target_duration=\(generationOptions.targetDuration.map { String(Int($0.rounded())) } ?? "auto")")
+                            let instruction = generationOptions.instruction?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                            storyCreationViewDebugLog("create_tapped style=\(generationOptions.style ?? "automatic") scene_detail=\(generationOptions.sceneDetailStyle ?? "balanced") subtitles=\(generationOptions.subtitlesEnabled.map(String.init) ?? "automatic") target_duration=\(generationOptions.targetDuration.map { String(Int($0.rounded())) } ?? "auto") prompt_present=\(!instruction.isEmpty) prompt_length=\(instruction.count)")
                             viewModel.requestCreateStory { onCreate(generationOptions) }
                         },
                         isDisabled: viewModel.isCheckingCredits,
@@ -196,7 +197,8 @@ struct StoryCreationView: View {
         }
         let subtitles = generationOptions.subtitlesEnabled == false ? "Subtitles off" : "Subtitles on"
         let length = generationOptions.targetDuration.map { "\(Int($0.rounded()))s" } ?? "Auto length"
-        return "\(style) · \(sceneDetail) · \(subtitles) · \(length)"
+        let prompt = generationOptions.instruction?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? "Prompt added" : nil
+        return [style, sceneDetail, subtitles, length, prompt].compactMap { $0 }.joined(separator: " · ")
     }
 
     private func processingStartedCard(_ story: Story) -> some View {
@@ -298,6 +300,10 @@ private struct StoryGenerationOptionsSheet: View {
 
                     Divider().overlay(FrameMioColors.divider.opacity(0.58))
 
+                    promptSection
+
+                    Divider().overlay(FrameMioColors.divider.opacity(0.58))
+
                     sceneDetailSection
 
                     Divider().overlay(FrameMioColors.divider.opacity(0.58))
@@ -323,6 +329,48 @@ private struct StoryGenerationOptionsSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+    }
+
+    private var promptSection: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            SectionHeader(title: "Prompt", subtitle: "Guide the story's feeling, focus, or pacing")
+
+            LazyVGrid(columns: optionGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
+                ForEach(["More emotional", "Focus on people", "Focus on places", "Keep it calm"], id: \.self) { prompt in
+                    optionChip(title: prompt, isSelected: options.instruction == prompt) {
+                        options.instruction = prompt
+                    }
+                }
+            }
+
+            TextField("Describe what you want to see", text: Binding(
+                get: { options.instruction ?? "" },
+                set: { options.instruction = $0 }
+            ), axis: .vertical)
+            .lineLimit(3...6)
+            .font(FrameMioTypography.body)
+            .padding(FrameMioSpacing.md)
+            .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous)
+                    .stroke(FrameMioColors.divider.opacity(0.45), lineWidth: FrameMioMetrics.borderWidth)
+            }
+            .accessibilityLabel("Story prompt")
+
+            if options.instruction?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                HStack {
+                    Spacer()
+                    Button {
+                        options.instruction = nil
+                    } label: {
+                        Label("Clear prompt", systemImage: "xmark.circle")
+                            .font(FrameMioTypography.footnote)
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+                }
+            }
+        }
     }
 
     private var sceneDetailSection: some View {
