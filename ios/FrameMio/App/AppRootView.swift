@@ -227,19 +227,20 @@ struct AppRootView: View {
                     creditService: dependencies.creditService,
                     onCreditsUpdated: refreshCredits
                 ),
-                onCreate: {
-                    homePath.append(.storyCreating(context: context, assets: assets, launchID: UUID()))
+                onCreate: { options in
+                    homePath.append(.storyCreating(context: context, assets: assets, options: options, launchID: UUID()))
                 },
                 onCreated: { story in
                     homePath.append(.storyPreview(story: story))
                 },
                 onOpenPricing: openPricing
             )
-        case let .storyCreating(context, assets, launchID):
+        case let .storyCreating(context, assets, options, launchID):
             StoryPreviewView(
                 viewModel: StoryPreviewViewModel(
                     context: context,
                     assets: assets,
+                    generationOptions: options,
                     launchID: launchID,
                     storyLaunchCoordinator: storyLaunchCoordinator,
                     storyService: dependencies.storyService,

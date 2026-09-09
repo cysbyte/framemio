@@ -96,7 +96,12 @@ final class StoryLaunchCoordinator: ObservableObject {
         self.creditService = creditService
     }
 
-    func start(context: MomentContext, assets: [MediaAsset], launchID: UUID) {
+    func start(
+        context: MomentContext,
+        assets: [MediaAsset],
+        options: StoryGenerationOptions = .automatic,
+        launchID: UUID
+    ) {
         guard activeLaunchID != launchID || (!isPreparing && storyID == nil) else {
             storyLaunchDebugLog("ignored duplicate launch id=\(launchID)")
             return
@@ -106,7 +111,7 @@ final class StoryLaunchCoordinator: ObservableObject {
             return
         }
 
-        storyLaunchDebugLog("launch requested id=\(launchID) assets=\(assets.count) videos=\(assets.filter(\.isVideo).count)")
+        storyLaunchDebugLog("launch requested id=\(launchID) assets=\(assets.count) videos=\(assets.filter(\.isVideo).count) style=\(options.style ?? "automatic") scene_detail=\(options.sceneDetailStyle ?? "balanced") target_duration=\(options.targetDuration.map { String(Int($0.rounded())) } ?? "auto")")
         launchTask?.cancel()
         activeLaunchID = launchID
         isPreparing = true
@@ -158,6 +163,7 @@ final class StoryLaunchCoordinator: ObservableObject {
                 let story = try await createStoryWithUploadRefreshRetry(
                     context: context,
                     assets: assets,
+                    options: options,
                     selection: selection,
                     analyses: analyses
                 )
@@ -213,12 +219,13 @@ final class StoryLaunchCoordinator: ObservableObject {
     private func createStoryWithUploadRefreshRetry(
         context: MomentContext,
         assets: [MediaAsset],
+        options: StoryGenerationOptions,
         selection: MediaSelection,
         analyses: [MediaAnalysis]
     ) async throws -> Story {
         do {
             return try await storyService.createStory(
-                request: CreateStoryRequest(context: context, assets: assets, analyses: analyses)
+                request: CreateStoryRequest(context: context, assets: assets, analyses: analyses, options: options)
             )
         } catch {
             guard shouldRetryAfterStaleUploadCache(error) else {
@@ -245,7 +252,7 @@ final class StoryLaunchCoordinator: ObservableObject {
             phaseDetail = "Retrying story creation with refreshed media references."
             progress = max(progress, 0.86)
             return try await storyService.createStory(
-                request: CreateStoryRequest(context: context, assets: assets, analyses: analyses)
+                request: CreateStoryRequest(context: context, assets: assets, analyses: analyses, options: options)
             )
         }
     }

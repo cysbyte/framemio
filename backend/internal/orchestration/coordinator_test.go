@@ -191,6 +191,31 @@ func TestStartIOSAnalysisAdvancesExistingCompletedVideoJob(t *testing.T) {
 	}
 }
 
+func TestStartIOSAnalysisPreservesConfigurationForPhotoOnlyProject(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	_, publisher, coordinator, project, _ := setupProject(t, models.MediaTypePhoto)
+	configuration := map[string]string{
+		"pipeline_version":        PipelineVersion,
+		"visual_style":            "playful",
+		"subtitles_enabled":       "true",
+		"caption_style_preset":    "clean_minimal",
+		"broll_preference":        "more",
+		"target_duration_seconds": "30",
+	}
+
+	if _, err := coordinator.StartIOSAnalysis(ctx, project.UserID, project.ID, "ios-photo-only-key", configuration); err != nil {
+		t.Fatal(err)
+	}
+
+	storyPlan := latestMessageOfType(t, publisher, models.JobTypeStoryPlan)
+	for key, expected := range configuration {
+		if storyPlan.Configuration[key] != expected {
+			t.Fatalf("story plan configuration[%q] = %q, want %q; configuration = %+v", key, storyPlan.Configuration[key], expected, storyPlan.Configuration)
+		}
+	}
+}
+
 func TestCoordinatorRetriesWithBackoffBeforeFailingTerminally(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

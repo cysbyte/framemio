@@ -87,6 +87,7 @@ final class StoryPreviewViewModel: ObservableObject {
     private var storyID: String?
     private let launchContext: MomentContext?
     private let launchAssets: [MediaAsset]
+    private let launchGenerationOptions: StoryGenerationOptions
     private let launchID: UUID?
     private let storyLaunchCoordinator: StoryLaunchCoordinator?
     private let storyService: StoryService
@@ -119,6 +120,7 @@ final class StoryPreviewViewModel: ObservableObject {
         storyID = story.id
         launchContext = nil
         launchAssets = []
+        launchGenerationOptions = .automatic
         launchID = nil
         storyLaunchCoordinator = nil
         self.storyService = storyService
@@ -145,6 +147,7 @@ final class StoryPreviewViewModel: ObservableObject {
         self.storyID = storyID
         launchContext = nil
         launchAssets = []
+        launchGenerationOptions = .automatic
         launchID = nil
         storyLaunchCoordinator = nil
         self.storyService = storyService
@@ -160,6 +163,7 @@ final class StoryPreviewViewModel: ObservableObject {
     init(
         context: MomentContext,
         assets: [MediaAsset],
+        generationOptions: StoryGenerationOptions = .automatic,
         launchID: UUID,
         storyLaunchCoordinator: StoryLaunchCoordinator,
         storyService: StoryService,
@@ -174,6 +178,7 @@ final class StoryPreviewViewModel: ObservableObject {
         storyID = nil
         launchContext = context
         launchAssets = assets
+        launchGenerationOptions = generationOptions
         self.launchID = launchID
         self.storyLaunchCoordinator = storyLaunchCoordinator
         self.storyService = storyService
@@ -494,8 +499,8 @@ final class StoryPreviewViewModel: ObservableObject {
 
     private func loadStoryOrLaunch() async {
         if let launchContext, let launchID, let storyLaunchCoordinator {
-            storyPreviewDebugLog("launch_bridge_start launch_id=\(launchID) assets=\(launchAssets.count) story_id=\(storyID ?? "nil")")
-            storyLaunchCoordinator.start(context: launchContext, assets: launchAssets, launchID: launchID)
+            storyPreviewDebugLog("launch_bridge_start launch_id=\(launchID) assets=\(launchAssets.count) style=\(launchGenerationOptions.style ?? "automatic") scene_detail=\(launchGenerationOptions.sceneDetailStyle ?? "balanced") target_duration=\(launchGenerationOptions.targetDuration.map { String(Int($0.rounded())) } ?? "auto") story_id=\(storyID ?? "nil")")
+            storyLaunchCoordinator.start(context: launchContext, assets: launchAssets, options: launchGenerationOptions, launchID: launchID)
             await waitForLaunchedStoryID(from: storyLaunchCoordinator)
         }
 

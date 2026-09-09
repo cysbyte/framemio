@@ -488,6 +488,11 @@ func TestIOSStoriesCompatibilityCreatesProjectAndFetchesStories(t *testing.T) {
 		"analyses": []map[string]any{
 			{"assetID": "asset-photo-1", "labels": []string{"beach", "friends"}, "peopleCount": 2, "confidence": 0.91},
 		},
+		"style":            "playful",
+		"subtitlesEnabled": true,
+		"subtitleStyle":    "minimal",
+		"sceneDetailStyle": "moreDetails",
+		"targetDuration":   30,
 	}, "", true, nil)
 	if storyResponse.Code != http.StatusCreated {
 		t.Fatalf("create iOS story status = %d, body = %s", storyResponse.Code, storyResponse.Body.String())
@@ -521,6 +526,13 @@ func TestIOSStoriesCompatibilityCreatesProjectAndFetchesStories(t *testing.T) {
 	messages := publisher.Messages()
 	if len(messages) != 1 || messages[0].JobType != models.JobTypeStoryPlan || messages[0].MediaID != "" {
 		t.Fatalf("expected immediate story plan queue message for photo-only story, got %+v", messages)
+	}
+	if messages[0].Configuration["visual_style"] != "playful" ||
+		messages[0].Configuration["subtitles_enabled"] != "true" ||
+		messages[0].Configuration["caption_style_preset"] != "clean_minimal" ||
+		messages[0].Configuration["broll_preference"] != "more" ||
+		messages[0].Configuration["target_duration_seconds"] != "30" {
+		t.Fatalf("expected create options in story plan config, got %+v", messages[0].Configuration)
 	}
 }
 

@@ -56,10 +56,14 @@ type iosStoryMoment struct {
 }
 
 type iosCreateStoryRequest struct {
-	Context        string             `json:"context"`
-	Assets         []iosStoryAsset    `json:"assets"`
-	Analyses       []iosStoryAnalysis `json:"analyses"`
-	TargetDuration float64            `json:"targetDuration,omitempty"`
+	Context          string             `json:"context"`
+	Assets           []iosStoryAsset    `json:"assets"`
+	Analyses         []iosStoryAnalysis `json:"analyses"`
+	Style            string             `json:"style,omitempty"`
+	SubtitlesEnabled *bool              `json:"subtitlesEnabled,omitempty"`
+	SubtitleStyle    string             `json:"subtitleStyle,omitempty"`
+	SceneDetailStyle string             `json:"sceneDetailStyle,omitempty"`
+	TargetDuration   float64            `json:"targetDuration,omitempty"`
 }
 
 type iosStoryEditRequest struct {
@@ -1178,7 +1182,7 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 	if !s.allowExpensiveOperation(response, user.ID, "create_ios_story") {
 		return
 	}
-	s.Logger.Info("creating iOS story", "user_id", user.ID, "context", input.Context, "asset_count", len(input.Assets), "analysis_count", len(input.Analyses), "target_duration_seconds", input.TargetDuration, "has_target_duration", input.TargetDuration > 0, "idempotency_key_present", strings.TrimSpace(request.Header.Get("Idempotency-Key")) != "")
+	s.Logger.Info("creating iOS story", "user_id", user.ID, "context", input.Context, "asset_count", len(input.Assets), "analysis_count", len(input.Analyses), "visual_style", normalizeIOSStoryEditStyle(input.Style), "subtitles_enabled", boolPointerLogValue(input.SubtitlesEnabled), "caption_style_preset", normalizeIOSSubtitleStyle(input.SubtitleStyle), "scene_detail_style", normalizeIOSSceneDetailStyle(input.SceneDetailStyle), "target_duration_seconds", input.TargetDuration, "has_target_duration", input.TargetDuration > 0, "idempotency_key_present", strings.TrimSpace(request.Header.Get("Idempotency-Key")) != "")
 	storyConfig := map[string]string{"pipeline_version": orchestration.PipelineVersion}
 	if input.TargetDuration > 0 {
 		if input.TargetDuration < 5 || input.TargetDuration > 60 {
@@ -1186,6 +1190,18 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 			return
 		}
 		storyConfig["target_duration_seconds"] = strconv.Itoa(int(input.TargetDuration + 0.5))
+	}
+	if style := normalizeIOSStoryEditStyle(input.Style); style != "" {
+		storyConfig["visual_style"] = style
+	}
+	if input.SubtitlesEnabled != nil {
+		storyConfig["subtitles_enabled"] = strconv.FormatBool(*input.SubtitlesEnabled)
+	}
+	if subtitleStyle := normalizeIOSSubtitleStyle(input.SubtitleStyle); subtitleStyle != "" {
+		storyConfig["caption_style_preset"] = subtitleStyle
+	}
+	if preference := normalizeIOSSceneDetailStyle(input.SceneDetailStyle); preference != "" {
+		storyConfig["broll_preference"] = preference
 	}
 	resolved, err := s.resolveIOSStoryAssets(request, user.ID, input.Assets)
 	if err != nil {

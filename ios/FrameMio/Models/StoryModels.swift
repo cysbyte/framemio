@@ -109,6 +109,22 @@ struct Story: Identifiable, Codable, Hashable, Sendable {
     var availableMoments: [StoryMoment]? = nil
 }
 
+struct StoryGenerationOptions: Codable, Hashable, Sendable {
+    var style: String?
+    var subtitlesEnabled: Bool?
+    var subtitleStyle: String?
+    var sceneDetailStyle: String?
+    var targetDuration: TimeInterval?
+
+    static let automatic = StoryGenerationOptions(
+        style: "cinematic",
+        subtitlesEnabled: true,
+        subtitleStyle: "cinematic",
+        sceneDetailStyle: nil,
+        targetDuration: nil
+    )
+}
+
 struct StoryMomentReplacement: Codable, Hashable, Sendable {
     let fromMomentID: String?
     let fromMediaID: String?
@@ -219,4 +235,25 @@ struct CreateStoryRequest: Codable, Hashable, Sendable {
     let context: MomentContext
     let assets: [MediaAsset]
     let analyses: [MediaAnalysis]
+    let style: String?
+    let subtitlesEnabled: Bool?
+    let subtitleStyle: String?
+    let sceneDetailStyle: String?
+    let targetDuration: TimeInterval?
+
+    init(
+        context: MomentContext,
+        assets: [MediaAsset],
+        analyses: [MediaAnalysis],
+        options: StoryGenerationOptions = .automatic
+    ) {
+        self.context = context
+        self.assets = assets
+        self.analyses = analyses
+        self.style = options.style
+        self.subtitlesEnabled = options.subtitlesEnabled
+        self.subtitleStyle = options.subtitleStyle
+        self.sceneDetailStyle = options.sceneDetailStyle
+        self.targetDuration = options.targetDuration
+    }
 }

@@ -153,7 +153,7 @@ func (c *Coordinator) StartIOSAnalysis(ctx context.Context, userID, projectID, i
 		if err := c.Store.SetProjectStatus(ctx, userID, projectID, models.ProjectStatusAnalyzing); err != nil {
 			return nil, err
 		}
-		if err := c.enqueueStoryPlanIfReady(ctx, userID, projectID); err != nil {
+		if err := c.enqueueStoryPlanIfReady(ctx, userID, projectID, baseConfig); err != nil {
 			return nil, err
 		}
 	}
