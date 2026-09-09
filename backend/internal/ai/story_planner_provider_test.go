@@ -363,7 +363,6 @@ func TestFallbackStoryPlannerKeepsPrimaryWhenCaptionsAreRepairable(t *testing.T)
 		TitleText:           "Repairable",
 		EndingText:          "Done",
 		Moments: []models.StoryMoment{{
-			MomentID:   "moment-primary",
 			MediaID:    "photo-gpt",
 			AssetID:    "photo-gpt",
 			MediaType:  models.MediaTypePhoto,
@@ -391,8 +390,11 @@ func TestFallbackStoryPlannerKeepsPrimaryWhenCaptionsAreRepairable(t *testing.T)
 	if plan.ID != primaryPlan.ID {
 		t.Fatalf("expected repairable primary plan to be kept, got %+v", plan)
 	}
-	if len(plan.Captions) != 1 || plan.Captions[0].MomentID != "moment-primary" || plan.Captions[0].Text != "Beach sunset" {
+	if len(plan.Captions) != 1 || strings.TrimSpace(plan.Captions[0].MomentID) == "" || plan.Captions[0].Text != "Beach sunset" {
 		t.Fatalf("expected malformed captions to be replaced from moment caption, got %+v", plan.Captions)
+	}
+	if plan.Moments[0].MomentID != plan.Captions[0].MomentID {
+		t.Fatalf("expected generated moment id to be used by captions, moment=%q caption=%q", plan.Moments[0].MomentID, plan.Captions[0].MomentID)
 	}
 	if err := ValidateStoryPlan(plan); err != nil {
 		t.Fatalf("expected repaired primary plan to pass lightweight validation: %v", err)

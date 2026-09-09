@@ -83,6 +83,7 @@ func (p FallbackStoryPlanner) Plan(ctx context.Context, request Request) (models
 	if err == nil {
 		captionCountBeforeSanitize := len(plan.Captions)
 		invalidCaptionCountBeforeSanitize := invalidStoryPlannerCaptionCount(plan)
+		ensureStoryPlannerMomentIDs(&plan)
 		SanitizeExternalStoryPlannerOutput(&plan)
 		captionCountAfterSanitize := len(plan.Captions)
 		synthesizeStoryPlannerCaptions(&plan, request)
@@ -934,6 +935,18 @@ func storyPlannerSubtitlesDisabled(request Request) bool {
 	return request.SubtitlesEnabled != nil && !*request.SubtitlesEnabled
 }
 
+func ensureStoryPlannerMomentIDs(plan *models.StoryPlan) {
+	if plan == nil {
+		return
+	}
+	for index := range plan.Moments {
+		moment := &plan.Moments[index]
+		if strings.TrimSpace(moment.MomentID) == "" {
+			moment.MomentID = momentKey(*moment)
+		}
+	}
+}
+
 func invalidStoryPlannerCaptionCount(plan models.StoryPlan) int {
 	if len(plan.Captions) == 0 {
 		return 0
@@ -1349,6 +1362,7 @@ func normalizeStoryPlannerOutput(plan *models.StoryPlan, request Request) error 
 	plan.ProjectID = expectedProjectID
 	plan.Version = expectedVersion
 	normalizeStoryPlannerMediaReferences(plan, request)
+	ensureStoryPlannerMomentIDs(plan)
 	SanitizeExternalStoryPlannerOutput(plan)
 	deduplicateStoryPlanMoments(plan)
 	if err := validateStoryPlannerOutputMediaReferences(*plan, request); err != nil {
