@@ -121,6 +121,7 @@ func (p FallbackStoryPlanner) Plan(ctx context.Context, request Request) (models
 	if p.Fallback == nil {
 		return models.StoryPlan{}, err
 	}
+	primaryTimedOut := errors.Is(err, context.DeadlineExceeded)
 	if p.Logger != nil {
 		p.Logger.Warn("story_planner_primary_failed_falling_back",
 			slog.String("primary_provider", storyPlannerProviderName(p.Primary)),
@@ -128,6 +129,7 @@ func (p FallbackStoryPlanner) Plan(ctx context.Context, request Request) (models
 			slog.String("fallback_provider", storyPlannerProviderName(p.Fallback)),
 			slog.Int64("primary_latency_ms", primaryLatency.Milliseconds()),
 			slog.Int64("primary_timeout_ms", p.PrimaryTimeout.Milliseconds()),
+			slog.Bool("primary_timed_out", primaryTimedOut),
 			slog.Any("error", err),
 		)
 	}
@@ -196,6 +198,14 @@ func (p OpenAICompatibleStoryPlanner) Plan(ctx context.Context, request Request)
 			p.Logger.Warn("story_planner_external_request_failed", slog.String("provider", p.Name()), slog.String("model", p.Model()), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Any("error", err))
 		}
 		return models.StoryPlan{}, fmt.Errorf("story planner provider request: %w", err)
+	}
+	if p.Logger != nil {
+		p.Logger.Info("story_planner_external_response_received",
+			slog.String("provider", p.Name()),
+			slog.String("model", p.Model()),
+			slog.Int64("latency_ms", time.Since(started).Milliseconds()),
+			slog.Int("response_bytes", len(raw)),
+		)
 	}
 	text, err := extractTypographyModelText(raw, normalizeTypographyWireAPI(p.WireAPI))
 	if err != nil {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -61,6 +62,22 @@ func TestConfiguredStoryPlannerUsesOpenAICompatibleProvider(t *testing.T) {
 	}
 }
 
+func TestConfiguredStoryPlannerRequiresFallbackTimeoutBelowHTTPTimeout(t *testing.T) {
+	t.Parallel()
+	_, err := configuredStoryPlanner(configuration{
+		TypographyEnabled:           true,
+		TypographyProvider:          "local",
+		StoryPlannerProvider:        "openai-compatible",
+		StoryPlannerAPIKey:          "test-key",
+		StoryPlannerModel:           "gpt-test",
+		StoryPlannerTimeout:         80 * time.Second,
+		StoryPlannerFallbackTimeout: 80 * time.Second,
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "must be less than") {
+		t.Fatalf("expected fallback timeout ordering error, got %v", err)
+	}
+}
+
 func TestLoadConfigurationStoryPlannerFallsBackToOpenAIEnv(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://example")
 	t.Setenv("S3_MEDIA_BUCKET", "bucket")
@@ -76,7 +93,7 @@ func TestLoadConfigurationStoryPlannerFallsBackToOpenAIEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.StoryPlannerBaseURL != "https://openai-compatible.test" || config.StoryPlannerAPIKey != "fallback-key" || config.StoryPlannerWireAPI != "responses" || config.StoryPlannerTimeout != 90*time.Second || config.StoryPlannerFallbackTimeout != 45*time.Second {
+	if config.StoryPlannerBaseURL != "https://openai-compatible.test" || config.StoryPlannerAPIKey != "fallback-key" || config.StoryPlannerWireAPI != "responses" || config.StoryPlannerTimeout != 90*time.Second || config.StoryPlannerFallbackTimeout != 80*time.Second {
 		t.Fatalf("unexpected story planner config: %+v", config)
 	}
 }

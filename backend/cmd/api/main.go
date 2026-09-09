@@ -196,7 +196,7 @@ func loadConfiguration() (configuration, error) {
 		StoryPlannerWireAPI:          environment("STORY_PLANNER_WIRE_API", "responses"),
 		StoryPlannerMaxTokens:        environmentInt("STORY_PLANNER_MAX_OUTPUT_TOKENS", 6000),
 		StoryPlannerTimeout:          environmentDuration("STORY_PLANNER_TIMEOUT", 90*time.Second),
-		StoryPlannerFallbackTimeout:  environmentDuration("STORY_PLANNER_FALLBACK_TIMEOUT", 45*time.Second),
+		StoryPlannerFallbackTimeout:  environmentDuration("STORY_PLANNER_FALLBACK_TIMEOUT", 80*time.Second),
 		StoryRevisionProvider:        environment("STORY_REVISION_PROVIDER", "local"),
 		StoryRevisionBaseURL:         environment("STORY_REVISION_BASE_URL", os.Getenv("OPENAI_BASE_URL")),
 		StoryRevisionAPIKey:          environment("STORY_REVISION_API_KEY", os.Getenv("OPENAI_API_KEY")),
@@ -321,6 +321,9 @@ func configuredStoryPlanner(configuration configuration, logger *slog.Logger) (a
 		}
 		if strings.TrimSpace(configuration.StoryPlannerModel) == "" {
 			return nil, errors.New("STORY_PLANNER_MODEL is required when STORY_PLANNER_PROVIDER uses an external AI provider")
+		}
+		if configuration.StoryPlannerFallbackTimeout >= configuration.StoryPlannerTimeout {
+			return nil, fmt.Errorf("STORY_PLANNER_FALLBACK_TIMEOUT (%s) must be less than STORY_PLANNER_TIMEOUT (%s)", configuration.StoryPlannerFallbackTimeout, configuration.StoryPlannerTimeout)
 		}
 		primary := ai.OpenAICompatibleStoryPlanner{
 			BaseURL:         configuration.StoryPlannerBaseURL,
