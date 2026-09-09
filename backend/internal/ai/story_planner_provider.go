@@ -81,6 +81,25 @@ func (p FallbackStoryPlanner) Plan(ctx context.Context, request Request) (models
 	plan, err := p.Primary.Plan(primaryCtx, request)
 	primaryLatency := time.Since(started)
 	if err == nil {
+		captionCountBeforeSanitize := len(plan.Captions)
+		invalidCaptionCountBeforeSanitize := invalidStoryPlannerCaptionCount(plan)
+		SanitizeExternalStoryPlannerOutput(&plan)
+		captionCountAfterSanitize := len(plan.Captions)
+		synthesizeStoryPlannerCaptions(&plan, request)
+		invalidCaptionCountAfterRepair := invalidStoryPlannerCaptionCount(plan)
+		if p.Logger != nil && (captionCountBeforeSanitize != len(plan.Captions) || invalidCaptionCountBeforeSanitize > 0 || invalidCaptionCountAfterRepair > 0) {
+			p.Logger.Info("story_planner_primary_output_sanitized",
+				slog.String("primary_provider", storyPlannerProviderName(p.Primary)),
+				slog.String("primary_model", storyPlannerProviderModel(p.Primary)),
+				slog.Int64("primary_latency_ms", primaryLatency.Milliseconds()),
+				slog.Int("raw_caption_count", captionCountBeforeSanitize),
+				slog.Int("raw_invalid_caption_count", invalidCaptionCountBeforeSanitize),
+				slog.Int("sanitized_caption_count", captionCountAfterSanitize),
+				slog.Int("synthesized_caption_count", max(0, len(plan.Captions)-captionCountAfterSanitize)),
+				slog.Int("final_caption_count", len(plan.Captions)),
+				slog.Int("final_invalid_caption_count", invalidCaptionCountAfterRepair),
+			)
+		}
 		if validationErr := ValidateStoryPlan(plan); validationErr == nil {
 			if p.Logger != nil {
 				p.Logger.Info("story_planner_primary_succeeded",
@@ -89,6 +108,7 @@ func (p FallbackStoryPlanner) Plan(ctx context.Context, request Request) (models
 					slog.Int64("primary_latency_ms", primaryLatency.Milliseconds()),
 					slog.Int("story_plan_version", plan.Version),
 					slog.Int("moment_count", len(plan.Moments)),
+					slog.Int("caption_count", len(plan.Captions)),
 				)
 			}
 			return plan, nil
@@ -190,6 +210,8 @@ func (p OpenAICompatibleStoryPlanner) Plan(ctx context.Context, request Request)
 	if err := json.Unmarshal(responseJSON, &plan); err != nil {
 		return models.StoryPlan{}, fmt.Errorf("decode story plan JSON: %w", err)
 	}
+	rawCaptionCount := len(plan.Captions)
+	rawInvalidCaptionCount := invalidStoryPlannerCaptionCount(plan)
 	if err := normalizeStoryPlannerOutput(&plan, request); err != nil {
 		if p.Logger != nil {
 			p.Logger.Warn("story_planner_external_output_invalid", slog.String("provider", p.Name()), slog.String("model", p.Model()), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Any("error", err))
@@ -197,7 +219,17 @@ func (p OpenAICompatibleStoryPlanner) Plan(ctx context.Context, request Request)
 		return models.StoryPlan{}, err
 	}
 	if p.Logger != nil {
-		p.Logger.Info("story_planner_external_output_valid", slog.String("provider", p.Name()), slog.String("model", p.Model()), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.String("schema_version", plan.SchemaVersion), slog.Int("moment_count", len(plan.Moments)))
+		if rawCaptionCount != len(plan.Captions) || rawInvalidCaptionCount > 0 {
+			p.Logger.Info("story_planner_external_output_sanitized",
+				slog.String("provider", p.Name()),
+				slog.String("model", p.Model()),
+				slog.Int64("latency_ms", time.Since(started).Milliseconds()),
+				slog.Int("raw_caption_count", rawCaptionCount),
+				slog.Int("raw_invalid_caption_count", rawInvalidCaptionCount),
+				slog.Int("final_caption_count", len(plan.Captions)),
+			)
+		}
+		p.Logger.Info("story_planner_external_output_valid", slog.String("provider", p.Name()), slog.String("model", p.Model()), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.String("schema_version", plan.SchemaVersion), slog.Int("moment_count", len(plan.Moments)), slog.Int("caption_count", len(plan.Captions)))
 	}
 	return plan, nil
 }
@@ -900,6 +932,30 @@ func synthesizeStoryPlannerCaptions(plan *models.StoryPlan, request Request) {
 
 func storyPlannerSubtitlesDisabled(request Request) bool {
 	return request.SubtitlesEnabled != nil && !*request.SubtitlesEnabled
+}
+
+func invalidStoryPlannerCaptionCount(plan models.StoryPlan) int {
+	if len(plan.Captions) == 0 {
+		return 0
+	}
+	momentIDs := make(map[string]struct{}, len(plan.Moments))
+	for _, moment := range plan.Moments {
+		if momentID := strings.TrimSpace(moment.MomentID); momentID != "" {
+			momentIDs[momentID] = struct{}{}
+		}
+	}
+	invalid := 0
+	for _, caption := range plan.Captions {
+		momentID := strings.TrimSpace(caption.MomentID)
+		if momentID == "" || strings.TrimSpace(caption.Text) == "" {
+			invalid++
+			continue
+		}
+		if _, exists := momentIDs[momentID]; !exists {
+			invalid++
+		}
+	}
+	return invalid
 }
 
 func validateStoryPlannerOutputMediaReferences(plan models.StoryPlan, request Request) error {

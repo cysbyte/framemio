@@ -10,7 +10,8 @@ The Story Planner combines `PhotoAnalysis`, `VideoAnalysis`, `MediaClusters`, ti
 - It assigns title text, ending text, captions when useful, caption style, clip durations, and transitions.
 - It honors story edit subtitle preferences by clearing captions when subtitles are disabled and by selecting only approved caption style presets.
 - It returns strict JSON-serializable `StoryPlan` data with valid media references.
-- External planners pass through a bounded sanitizer before validation. The sanitizer normalizes common renderer-safe aliases for transitions, crop intents, caption styles, caption timing, aspect ratio, and source-audio intent, and backfills top-level timed captions from transcript cues when the external plan omits `captions` and subtitles are not disabled. It does not repair invented media or identity fields.
+- External planners pass through a bounded sanitizer before validation. The sanitizer normalizes common renderer-safe aliases for transitions, crop intents, caption styles, caption timing, aspect ratio, and source-audio intent, drops malformed caption rows, and backfills top-level timed captions from transcript cues or moment captions when the external plan omits valid `captions` and subtitles are not disabled. It does not repair invented media or identity fields.
+- CloudWatch traces caption repair with `story_planner_external_output_sanitized` at the provider boundary and `story_planner_primary_output_sanitized` before fallback validation. A repaired external plan should then emit `story_planner_primary_succeeded`, not `story_planner_primary_failed_falling_back`.
 - Initial external planning strips `moments[].typography`; photo typography is deferred for the first release.
 
 ## Validation

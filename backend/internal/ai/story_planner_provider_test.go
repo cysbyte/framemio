@@ -349,6 +349,56 @@ func TestFallbackStoryPlannerUsesFallbackWhenPrimaryReturnsInvalidPlan(t *testin
 	}
 }
 
+func TestFallbackStoryPlannerKeepsPrimaryWhenCaptionsAreRepairable(t *testing.T) {
+	t.Parallel()
+	request := storyPlannerProviderRequest()
+	primaryPlan := models.StoryPlan{
+		SchemaVersion:       models.StoryPlanSchemaVersionV1,
+		ID:                  "plan-primary-repaired",
+		ProjectID:           request.ProjectID,
+		Version:             request.Version,
+		RequestedDurationMS: int(request.DesiredDuration.Milliseconds()),
+		StoryType:           request.StoryType,
+		VisualStyle:         request.VisualStyle,
+		TitleText:           "Repairable",
+		EndingText:          "Done",
+		Moments: []models.StoryMoment{{
+			MomentID:   "moment-primary",
+			MediaID:    "photo-gpt",
+			AssetID:    "photo-gpt",
+			MediaType:  models.MediaTypePhoto,
+			Narrative:  "A beach sunset opens the story.",
+			Caption:    "Beach sunset",
+			DurationMS: 4000,
+			CropIntent: "fit",
+			Transition: "fade_in",
+		}},
+		Captions:        []models.StoryCaption{{Text: "Caption without a moment reference", StartMS: 0, EndMS: 4000}},
+		Output:          models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 4, Preset: "premium-memory"},
+		TotalDurationMS: 4000,
+	}
+	fallbackPlan := primaryPlan
+	fallbackPlan.ID = "plan-fallback"
+	fallbackPlan.Captions = nil
+	planner := FallbackStoryPlanner{
+		Primary:  staticStoryPlanner{plan: primaryPlan},
+		Fallback: staticStoryPlanner{plan: fallbackPlan},
+	}
+	plan, err := planner.Plan(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.ID != primaryPlan.ID {
+		t.Fatalf("expected repairable primary plan to be kept, got %+v", plan)
+	}
+	if len(plan.Captions) != 1 || plan.Captions[0].MomentID != "moment-primary" || plan.Captions[0].Text != "Beach sunset" {
+		t.Fatalf("expected malformed captions to be replaced from moment caption, got %+v", plan.Captions)
+	}
+	if err := ValidateStoryPlan(plan); err != nil {
+		t.Fatalf("expected repaired primary plan to pass lightweight validation: %v", err)
+	}
+}
+
 func TestFallbackStoryPlannerUsesFallbackWhenExternalPlannerReferencesUnknownMedia(t *testing.T) {
 	t.Parallel()
 	request := storyPlannerProviderRequest()
