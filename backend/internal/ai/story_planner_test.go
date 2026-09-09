@@ -205,6 +205,35 @@ func TestPlannerTruncatesLongVideoReasonsForValidation(t *testing.T) {
 	}
 }
 
+func TestPlannerTruncatesLongVideoCaptionsForValidation(t *testing.T) {
+	t.Parallel()
+	longCaption := strings.Repeat("A detailed description of the family sharing a meaningful moment by the lake. ", 8)
+	plan, err := (&Planner{Now: func() time.Time { return time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC) }}).Plan(context.Background(), Request{
+		ProjectID:        "project-long-caption",
+		DesiredDuration:  8 * time.Second,
+		StoryType:        models.StoryTypeCustom,
+		VisualStyle:      models.VisualStyleCinematic,
+		SelectedMediaIDs: []string{"video-long-caption"},
+		VideoAnalyses: []models.VideoAnalysis{{
+			ID: "video-analysis-long-caption", VideoID: "video-long-caption", ProjectID: "project-long-caption", AnalysisVersion: "video-v1", DurationMicros: 8_000_000,
+			QualitySignals: models.VideoQualitySignals{OverallScore: 0.8},
+			Segments: []models.VideoSegment{{
+				SegmentID: "segment-long-caption", SceneID: "scene-long-caption", StartMicros: 0, EndMicros: 4_000_000,
+				Description: longCaption, Importance: 0.92, VisualQuality: 0.8, MemoryValue: 0.94, EmotionalValue: 0.93, StoryRelevance: 0.94, Recommended: true,
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateStoryPlan(plan); err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Moments) != 1 || len(plan.Moments[0].Caption) > maxStoryPlanCaptionLength {
+		t.Fatalf("expected caption to be capped at %d characters, got %+v", maxStoryPlanCaptionLength, plan.Moments)
+	}
+}
+
 func TestPlannerSuppressesTechnicalGroundingText(t *testing.T) {
 	t.Parallel()
 	plan, err := (&Planner{Now: func() time.Time { return time.Date(2026, time.August, 29, 12, 0, 0, 0, time.UTC) }}).Plan(context.Background(), Request{

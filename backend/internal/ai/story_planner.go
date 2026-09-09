@@ -43,6 +43,7 @@ type Planner struct {
 }
 
 const maxVideoMomentDuration = 5 * time.Second
+const maxStoryPlanCaptionLength = 220
 
 type candidate struct {
 	moment        models.StoryMoment
@@ -526,6 +527,9 @@ func ValidateStoryPlan(plan models.StoryPlan) error {
 				return fmt.Errorf("moment %s typography is invalid: %w", mediaID, err)
 			}
 		}
+		if len(moment.Caption) > maxStoryPlanCaptionLength {
+			return fmt.Errorf("moment %s caption must be at most %d characters", mediaID, maxStoryPlanCaptionLength)
+		}
 		if strings.TrimSpace(moment.CropIntent) == "" || strings.TrimSpace(moment.Transition) == "" {
 			return fmt.Errorf("moment %s requires crop intent and transition", mediaID)
 		}
@@ -541,6 +545,9 @@ func ValidateStoryPlan(plan models.StoryPlan) error {
 		for _, caption := range plan.Captions {
 			if strings.TrimSpace(caption.MomentID) == "" || strings.TrimSpace(caption.Text) == "" {
 				return errors.New("captions require a moment reference and text")
+			}
+			if len(caption.Text) > maxStoryPlanCaptionLength {
+				return fmt.Errorf("caption must be at most %d characters", maxStoryPlanCaptionLength)
 			}
 			if _, exists := momentIDs[caption.MomentID]; !exists {
 				return fmt.Errorf("caption references unknown moment %s", caption.MomentID)
@@ -1139,11 +1146,11 @@ func selectedVideoEndMicros(segment models.VideoSegment) int64 {
 
 func captionFromSegment(segment models.VideoSegment) string {
 	if text := humanText(segment.Description); text != "" && (segment.Recommended || segment.StoryRelevance >= 0.7) {
-		return text
+		return truncateText(text, maxStoryPlanCaptionLength)
 	}
 	for _, reason := range segment.Reasons {
 		if text := humanText(reason); text != "" {
-			return text
+			return truncateText(text, maxStoryPlanCaptionLength)
 		}
 	}
 	return ""
@@ -1236,13 +1243,13 @@ func reasonFromSegment(segment models.VideoSegment) string {
 
 func photoMomentTitle(photo models.PhotoAnalysis) string {
 	if text := humanText(photo.Caption); text != "" {
-		return text
+		return truncateText(text, maxStoryPlanCaptionLength)
 	}
 	if text := humanText(photo.Description); text != "" {
-		return text
+		return truncateText(text, maxStoryPlanCaptionLength)
 	}
 	if text := humanText(photo.Location); text != "" {
-		return text + " memory"
+		return truncateText(text+" memory", maxStoryPlanCaptionLength)
 	}
 	return ""
 }
