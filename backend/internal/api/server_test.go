@@ -744,6 +744,7 @@ func TestIOSStoryEditQueuesStoryPlanRevisionWithoutReanalysis(t *testing.T) {
 		"style":            "cinematic",
 		"subtitlesEnabled": false,
 		"subtitleStyle":    "minimal",
+		"sceneDetailStyle": "mainMoments",
 		"targetDuration":   15,
 		"instruction":      "Make it quieter.",
 	}, "edit-key", true, nil)
@@ -761,7 +762,7 @@ func TestIOSStoryEditQueuesStoryPlanRevisionWithoutReanalysis(t *testing.T) {
 	if last.JobType != models.JobTypeStoryPlan || last.MediaID != "" {
 		t.Fatalf("edit should queue only a project-level story plan job, got %+v", last)
 	}
-	if last.Configuration["story_plan_version"] != "2" || last.Configuration["visual_style"] != "cinematic" || last.Configuration["subtitles_enabled"] != "false" || last.Configuration["caption_style_preset"] != "clean_minimal" {
+	if last.Configuration["story_plan_version"] != "2" || last.Configuration["visual_style"] != "cinematic" || last.Configuration["subtitles_enabled"] != "false" || last.Configuration["caption_style_preset"] != "clean_minimal" || last.Configuration["broll_preference"] != "none" {
 		t.Fatalf("unexpected edit config: %+v", last.Configuration)
 	}
 	if strings.Contains(last.Configuration["selected_media_ids"], first.MediaID) || !strings.Contains(last.Configuration["selected_media_ids"], second.MediaID) {

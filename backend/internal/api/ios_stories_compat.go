@@ -72,6 +72,7 @@ type iosStoryEditRequest struct {
 	Style            string                  `json:"style,omitempty"`
 	SubtitlesEnabled *bool                   `json:"subtitlesEnabled,omitempty"`
 	SubtitleStyle    string                  `json:"subtitleStyle,omitempty"`
+	SceneDetailStyle string                  `json:"sceneDetailStyle,omitempty"`
 	TargetDuration   float64                 `json:"targetDuration,omitempty"`
 	Instruction      string                  `json:"instruction,omitempty"`
 	BaseVersion      int                     `json:"baseVersion,omitempty"`
@@ -246,6 +247,7 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		"has_visual_style", strings.TrimSpace(input.Style) != "",
 		"subtitles_enabled", boolPointerLogValue(input.SubtitlesEnabled),
 		"subtitle_style", normalizeIOSSubtitleStyle(input.SubtitleStyle),
+		"scene_detail_style", normalizeIOSSceneDetailStyle(input.SceneDetailStyle),
 		"has_target_duration", input.TargetDuration > 0,
 		"has_instruction", strings.TrimSpace(input.Instruction) != "",
 		"base_version", input.BaseVersion,
@@ -400,7 +402,7 @@ func (s *Server) createIOSStoryVersion(response http.ResponseWriter, request *ht
 		)
 		reservations = nil
 	}
-	s.Logger.Info("queued iOS story revision", "user_id", user.ID, "project_id", project.ID, "job_id", job.ID, "job_status", string(job.Status), "story_plan_version", job.Configuration["story_plan_version"], "subtitles_enabled", valueOrUnset(job.Configuration["subtitles_enabled"]), "caption_style_preset", valueOrUnset(job.Configuration["caption_style_preset"]))
+	s.Logger.Info("queued iOS story revision", "user_id", user.ID, "project_id", project.ID, "job_id", job.ID, "job_status", string(job.Status), "story_plan_version", job.Configuration["story_plan_version"], "subtitles_enabled", valueOrUnset(job.Configuration["subtitles_enabled"]), "caption_style_preset", valueOrUnset(job.Configuration["caption_style_preset"]), "broll_preference", valueOrUnset(job.Configuration["broll_preference"]))
 	updated, err := s.Store.GetProject(request.Context(), user.ID, project.ID)
 	if err != nil {
 		s.mapStoreError(response, err)
@@ -914,6 +916,9 @@ func (s *Server) iosStoryEditConfiguration(request *http.Request, userID string,
 	if subtitleStyle := normalizeIOSSubtitleStyle(input.SubtitleStyle); subtitleStyle != "" {
 		config["caption_style_preset"] = subtitleStyle
 	}
+	if preference := normalizeIOSSceneDetailStyle(input.SceneDetailStyle); preference != "" {
+		config["broll_preference"] = preference
+	}
 	if instruction := strings.TrimSpace(sanitizeIOSStoryText(input.Instruction)); instruction != "" {
 		config["user_instructions"] = truncateIOSConfigValue(instruction, 480)
 		config["revision_mode"] = "ai_story_plan_revision"
@@ -1092,6 +1097,17 @@ func normalizeIOSSubtitleStyle(value string) string {
 		return "clean_minimal"
 	case "playful", "playful_pop":
 		return "playful_pop"
+	default:
+		return ""
+	}
+}
+
+func normalizeIOSSceneDetailStyle(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "more", "more_details", "moredetails", "more-details", "extra", "rich":
+		return "more"
+	case "main", "main_moments", "mainmoments", "main-moments", "none", "off":
+		return "none"
 	default:
 		return ""
 	}

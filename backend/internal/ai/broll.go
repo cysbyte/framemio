@@ -66,6 +66,10 @@ type brollScoredCandidate struct {
 }
 
 func planBRoll(request Request, moments []models.StoryMoment, captions []models.StoryCaption, candidates []candidate, totalDurationMS int) []models.StoryBRoll {
+	preference := normalizedBRollPreference(request.BRollPreference)
+	if preference == "none" {
+		return nil
+	}
 	if totalDurationMS <= 0 || len(moments) == 0 || len(candidates) < 2 {
 		return nil
 	}
@@ -78,7 +82,13 @@ func planBRoll(request Request, moments []models.StoryMoment, captions []models.
 	for index := range anchors {
 		mergeTerms(anchors[index].concepts, requestConcepts)
 	}
-	budgetMS := int(math.Round(float64(totalDurationMS) * maxBRollRatio))
+	budgetRatio := maxBRollRatio
+	matchThreshold := minBRollMatchScore
+	if preference == "more" {
+		budgetRatio = 0.45
+		matchThreshold = 0.46
+	}
+	budgetMS := int(math.Round(float64(totalDurationMS) * budgetRatio))
 	selected := make([]models.StoryBRoll, 0, minInt(len(anchors), len(brollCandidates)))
 	usedReferences := make(map[string]struct{})
 	usedAssets := make(map[string]int)
@@ -88,7 +98,7 @@ func planBRoll(request Request, moments []models.StoryMoment, captions []models.
 			continue
 		}
 		match, ok := bestBRollForAnchor(anchor, brollCandidates, usedReferences, usedAssets)
-		if !ok || match.score < minBRollMatchScore {
+		if !ok || match.score < matchThreshold {
 			continue
 		}
 		durationMS := brollDuration(match.candidate, anchor, budgetMS-usedDurationMS)

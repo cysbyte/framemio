@@ -657,7 +657,7 @@ GET  /v1/stories/:id
 POST /v1/stories/:id/versions
 ```
 
-`POST /v1/stories/:id/versions` accepts edit preferences such as selected/removed media, style changes, `subtitlesEnabled`, and `subtitleStyle`. Subtitle preferences are stored as story-plan revision configuration (`subtitles_enabled` and `caption_style_preset`) and affect only generated `StoryPlan` captions plus renderer-safe `caption_style`; iOS never sends raw renderer commands, font paths, STT provider information, or transcript text.
+`POST /v1/stories/:id/versions` accepts edit preferences such as selected/removed media, style changes, scene detail level (`sceneDetailStyle`), target duration, `subtitlesEnabled`, `subtitleStyle`, and natural-language instructions. When an instruction is present, the job uses `revision_mode=ai_story_plan_revision`; the instruction is stored as `user_instructions`, while style, scene-detail, subtitle, and length controls stay as structured planner inputs (`requested_visual_style`, `broll_preference`, `subtitles_enabled`, `caption_style_preset`, and fixed duration constraints). The backend enforces those structured controls after planner output, so external planners cannot silently drop selected style, B-roll, or subtitle settings. Subtitle preferences affect only generated `StoryPlan` captions plus renderer-safe `caption_style`; iOS never sends raw renderer commands, font paths, STT provider information, or transcript text.
 
 ## 8.3 Edit Story contract
 
@@ -667,7 +667,7 @@ Edit Story is an intent-based story revision flow. It must preserve this separat
 Project Media ≠ Story Moments ≠ StoryPlan
 ```
 
-The iOS client may request high-level changes such as add media, remove moments, replace moments, style, target duration, subtitle settings, and natural-language revision instructions. The client must not choose final story ordering, raw video trim ranges, renderer commands, internal job stages, provider IDs, or raw `StoryPlan` JSON.
+The iOS client may request high-level changes such as add media, remove moments, replace moments, style, scene detail level, target duration, subtitle settings, and natural-language revision instructions. The client must not choose final story ordering, raw video trim ranges, renderer commands, internal job stages, provider IDs, or raw `StoryPlan` JSON.
 
 Add media supports both existing Project Media and brand-new Photos selections:
 

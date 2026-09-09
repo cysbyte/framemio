@@ -131,6 +131,7 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
     let style: String?
     let subtitlesEnabled: Bool?
     let subtitleStyle: String?
+    let sceneDetailStyle: String?
     let targetDuration: TimeInterval?
     let instruction: String?
     let baseVersion: Int?
@@ -145,6 +146,7 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
         style: String? = nil,
         subtitlesEnabled: Bool? = nil,
         subtitleStyle: String? = nil,
+        sceneDetailStyle: String? = nil,
         targetDuration: TimeInterval? = nil,
         instruction: String? = nil,
         baseVersion: Int? = nil
@@ -158,6 +160,7 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
         self.style = style
         self.subtitlesEnabled = subtitlesEnabled
         self.subtitleStyle = subtitleStyle
+        self.sceneDetailStyle = sceneDetailStyle
         self.targetDuration = targetDuration
         self.instruction = instruction
         self.baseVersion = baseVersion
@@ -173,6 +176,7 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
         case style
         case subtitlesEnabled
         case subtitleStyle
+        case sceneDetailStyle
         case targetDuration
         case instruction
         case baseVersion
@@ -187,6 +191,7 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
             || style != nil
             || subtitlesEnabled != nil
             || subtitleStyle != nil
+            || sceneDetailStyle != nil
             || targetDuration != nil
             || instruction?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
@@ -202,6 +207,7 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
             style: style,
             subtitlesEnabled: subtitlesEnabled,
             subtitleStyle: subtitleStyle,
+            sceneDetailStyle: sceneDetailStyle,
             targetDuration: targetDuration,
             instruction: instruction,
             baseVersion: version ?? baseVersion

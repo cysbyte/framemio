@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -213,6 +214,62 @@ func TestOpenAIStoryRevisionNormalizesProviderOutput(t *testing.T) {
 	}
 	if result.RevisedStoryPlan.TotalDurationMS != 5000 {
 		t.Fatalf("expected total duration to be recalculated, got %d", result.RevisedStoryPlan.TotalDurationMS)
+	}
+}
+
+func TestOpenAIStoryRevisionAppliesStructuredEditPreferences(t *testing.T) {
+	t.Parallel()
+	input := revisionFixtureInput("Make it more focused on the beach.")
+	subtitlesEnabled := true
+	input.Constraints.RequestedVisualStyle = models.VisualStylePlayful
+	input.Constraints.SubtitlesEnabled = &subtitlesEnabled
+	input.Constraints.CaptionStylePreset = "clean_minimal"
+	input.Constraints.BRollPreference = "none"
+	revisedPlan := input.CurrentStoryPlan
+	revisedPlan.ProjectID = input.Story.ID
+	revisedPlan.Version = input.Story.NextVersion
+	revisedPlan.VisualStyle = models.VisualStyleNatural
+	revisedPlan.Captions = nil
+	revisedPlan.CaptionStyle = nil
+	revisedPlan.BRoll = []models.StoryBRoll{{BrollID: "broll-provider", AssetID: "media-sunset", MediaID: "media-sunset", MediaType: models.MediaTypePhoto, StartMS: 2000, DurationMS: 1000}}
+	output := StoryRevisionResult{
+		RevisionSummary:  "Focused the story while preserving selected controls.",
+		RevisedStoryPlan: revisedPlan,
+	}
+	content, err := json.Marshal(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var requestBody string
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		requestBody = string(body)
+		return typographyHTTPResponse(http.StatusOK, chatTypographyResponse(string(content))), nil
+	})}
+	planner := OpenAICompatibleStoryRevisionPlanner{BaseURL: "https://revision.test", APIKey: "test-key", ModelName: "revision-model", WireAPI: "chat_completions", Client: client}
+	result, err := planner.Revise(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`\"requested_visual_style\":\"playful\"`, `\"subtitles_enabled\":true`, `\"caption_style_preset\":\"clean_minimal\"`, `\"broll_preference\":\"none\"`} {
+		if !strings.Contains(requestBody, expected) {
+			t.Fatalf("expected request body to include %s, got %s", expected, requestBody)
+		}
+	}
+	if result.RevisedStoryPlan.VisualStyle != models.VisualStylePlayful {
+		t.Fatalf("visual style = %q, want %q", result.RevisedStoryPlan.VisualStyle, models.VisualStylePlayful)
+	}
+	if result.RevisedStoryPlan.CaptionStyle == nil || result.RevisedStoryPlan.CaptionStyle.Preset != "clean_minimal" {
+		t.Fatalf("caption style = %+v, want clean_minimal", result.RevisedStoryPlan.CaptionStyle)
+	}
+	if len(result.RevisedStoryPlan.Captions) == 0 {
+		t.Fatal("expected enabled subtitles to generate captions when provider omitted them")
+	}
+	if len(result.RevisedStoryPlan.BRoll) != 0 {
+		t.Fatalf("expected main-moments preference to remove B-roll, got %+v", result.RevisedStoryPlan.BRoll)
 	}
 }
 

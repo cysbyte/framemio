@@ -29,6 +29,7 @@ type Request struct {
 	ExcludedMomentIDs   []string
 	SubtitlesEnabled    *bool
 	CaptionStylePreset  string
+	BRollPreference     string
 	Timestamps          []time.Time
 	Locations           []string
 	PhotoAnalyses       []models.PhotoAnalysis
@@ -135,6 +136,9 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 	broll := planBRoll(request, moments, captions, candidates, totalDuration)
 	if request.SubtitlesEnabled != nil && !*request.SubtitlesEnabled {
 		captions = nil
+	}
+	if normalizedBRollPreference(request.BRollPreference) == "none" {
+		broll = nil
 	}
 	storyType := normalizeStoryType(request.StoryType)
 	visualStyle := normalizeVisualStyle(request.VisualStyle)
@@ -392,6 +396,17 @@ func applyCaptionColorInstruction(plan *models.StoryPlan, instructions string) b
 		plan.CaptionStyle.Position = "bottom"
 	}
 	return true
+}
+
+func normalizedBRollPreference(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "none", "main_moments", "main-moments", "main moments", "off", "disabled":
+		return "none"
+	case "more", "more_details", "more-details", "more details", "extra", "rich":
+		return "more"
+	default:
+		return ""
+	}
 }
 
 func captionTextColorFromInstruction(instructions string) (string, bool) {

@@ -421,6 +421,67 @@ func TestStoryPlanRevisionKeepsExplicitTargetDurationFixed(t *testing.T) {
 	}
 }
 
+func TestStoryPlanRevisionAppliesStructuredEditPreferencesWithPrompt(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore, project := storyRevisionHandlerFixture(t)
+	job := models.ProcessingJob{
+		ID:        "job-revision-preferences",
+		UserID:    project.UserID,
+		ProjectID: project.ID,
+		Type:      models.JobTypeStoryPlan,
+		Status:    models.JobStatusRunning,
+		Configuration: map[string]string{
+			"revision_mode":           "ai_story_plan_revision",
+			"base_story_plan_version": "1",
+			"story_plan_version":      "2",
+			"user_instructions":       "Make it more focused on the beach.",
+			"visual_style":            string(models.VisualStylePlayful),
+			"subtitles_enabled":       "true",
+			"caption_style_preset":    "clean_minimal",
+			"broll_preference":        "none",
+		},
+		CreatedAt: project.CreatedAt,
+		UpdatedAt: project.CreatedAt,
+	}
+	planner := &capturingRevisionPlanner{}
+	handler := StoryPlanHandler{Store: memoryStore, RevisionPlanner: planner, Now: func() time.Time { return project.CreatedAt }}
+	if err := handler.HandleJob(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	if planner.input.Constraints.RequestedVisualStyle != models.VisualStylePlayful {
+		t.Fatalf("requested visual style = %q, want %q", planner.input.Constraints.RequestedVisualStyle, models.VisualStylePlayful)
+	}
+	if planner.input.Story.VisualStyle != models.VisualStylePlayful {
+		t.Fatalf("story visual style = %q, want %q", planner.input.Story.VisualStyle, models.VisualStylePlayful)
+	}
+	if planner.input.Constraints.SubtitlesEnabled == nil || !*planner.input.Constraints.SubtitlesEnabled {
+		t.Fatalf("subtitles enabled = %v, want true", planner.input.Constraints.SubtitlesEnabled)
+	}
+	if planner.input.Constraints.CaptionStylePreset != "clean_minimal" {
+		t.Fatalf("caption style preset = %q, want clean_minimal", planner.input.Constraints.CaptionStylePreset)
+	}
+	if planner.input.Constraints.BRollPreference != "none" {
+		t.Fatalf("b-roll preference = %q, want none", planner.input.Constraints.BRollPreference)
+	}
+	plan, err := memoryStore.GetStoryPlan(ctx, project.UserID, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.VisualStyle != models.VisualStylePlayful {
+		t.Fatalf("persisted visual style = %q, want %q", plan.VisualStyle, models.VisualStylePlayful)
+	}
+	if plan.CaptionStyle == nil || plan.CaptionStyle.Preset != "clean_minimal" {
+		t.Fatalf("persisted caption style = %+v, want clean_minimal", plan.CaptionStyle)
+	}
+	if len(plan.Captions) == 0 {
+		t.Fatal("expected subtitles-enabled revision to have generated captions")
+	}
+	if len(plan.BRoll) != 0 {
+		t.Fatalf("expected main-moments revision to remove B-roll, got %+v", plan.BRoll)
+	}
+}
+
 func storyRevisionHandlerFixture(t *testing.T) (*store.MemoryStore, models.StoryProject) {
 	t.Helper()
 	ctx := context.Background()

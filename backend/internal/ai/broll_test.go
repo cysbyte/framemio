@@ -115,6 +115,40 @@ func TestPlannerInsertsTranscriptAwareBRollAndPreservesARollAudio(t *testing.T) 
 	}
 }
 
+func TestPlannerHonorsMainMomentsBRollPreference(t *testing.T) {
+	t.Parallel()
+	planner := &Planner{Now: func() time.Time { return time.Date(2026, time.August, 21, 12, 0, 0, 0, time.UTC) }}
+	request := Request{
+		ProjectID:        "project-broll-off",
+		Version:          1,
+		DesiredDuration:  9 * time.Second,
+		StoryType:        models.StoryTypeTrip,
+		VisualStyle:      models.VisualStyleCinematic,
+		BRollPreference:  "none",
+		SelectedMediaIDs: []string{"video-1", "photo-beach", "photo-dinner"},
+		PhotoAnalyses: []models.PhotoAnalysis{
+			{PhotoID: "photo-beach", ProjectID: "project-broll-off", AnalysisVersion: "photo-v1", TimestampMicros: 2_000_000, Caption: "Beach photo", Labels: []string{"beach", "ocean"}, MemoryValue: 0.8, EmotionalValue: 0.75, VisualQuality: 0.92, StoryRelevance: 0.85, Selected: true},
+			{PhotoID: "photo-dinner", ProjectID: "project-broll-off", AnalysisVersion: "photo-v1", TimestampMicros: 8_000_000, Caption: "Dinner table", Labels: []string{"dinner", "food"}, MemoryValue: 0.8, EmotionalValue: 0.75, VisualQuality: 0.9, StoryRelevance: 0.82, Selected: true},
+		},
+		VideoAnalyses: []models.VideoAnalysis{{
+			VideoID: "video-1", ProjectID: "project-broll-off", AnalysisVersion: "video-v1", DurationMicros: 9_000_000, QualitySignals: models.VideoQualitySignals{OverallScore: 0.82},
+			Transcript: models.VideoTranscript{HasSpeech: true, Segments: []models.VideoTranscriptSegment{{StartMicros: 0, EndMicros: 3_000_000, Text: "We arrived at the beautiful beach", Confidence: 0.95}}},
+			Segments: []models.VideoSegment{
+				{SegmentID: "talking", SceneID: "scene-1", StartMicros: 0, EndMicros: 4_000_000, Description: "Talking to camera at the beach", Importance: 0.95, VisualQuality: 0.72, MemoryValue: 0.93, EmotionalValue: 0.86, StoryRelevance: 0.94, Recommended: true, RecommendedUsage: "hero", Speech: []string{"speech"}},
+				{SegmentID: "scenery", SceneID: "scene-2", StartMicros: 4_000_000, EndMicros: 6_500_000, Description: "Beach ocean scenery", Importance: 0.5, VisualQuality: 0.95, MemoryValue: 0.55, EmotionalValue: 0.52, StoryRelevance: 0.72, Recommended: true, RecommendedUsage: "context", Scenery: []string{"beach", "ocean"}},
+			},
+		}},
+	}
+
+	plan, err := planner.Plan(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.BRoll) != 0 {
+		t.Fatalf("expected no B-roll when main moments preference is selected, got %+v", plan.BRoll)
+	}
+}
+
 func TestPlannerSkipsBRollWhenNoSuitableCandidateExists(t *testing.T) {
 	t.Parallel()
 	planner := &Planner{Now: func() time.Time { return time.Date(2026, time.August, 21, 12, 0, 0, 0, time.UTC) }}

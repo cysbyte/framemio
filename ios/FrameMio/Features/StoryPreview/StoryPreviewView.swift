@@ -1052,6 +1052,11 @@ private struct EditStorySheet: View {
 
     private let styleOptions = ["Natural", "Cinematic", "Warm", "Playful"]
     private let subtitleStyleOptions = ["Bold", "Cinematic", "Minimal", "Playful"]
+    private let sceneDetailOptions: [(title: String, value: String?, subtitle: String?)] = [
+        ("Balanced", nil, "Default"),
+        ("More details", "moreDetails", "Extra cutaways"),
+        ("Main moments", "mainMoments", "No cutaways")
+    ]
 
     private var lengthOptions: [Int] {
         Array(Set([15, 30, 45, 60, max(8, min(60, Int(story.duration.rounded())))])).sorted()
@@ -1204,9 +1209,7 @@ private struct EditStorySheet: View {
                     }
                     momentsSection
                     addMomentButton
-                    styleSection
-                    subtitleSection
-                    lengthSection
+                    storyControlsSection
                     anotherVersionSection
                 }
                 .padding(FrameMioSpacing.lg)
@@ -1407,6 +1410,46 @@ private struct EditStorySheet: View {
         }
     }
 
+    private var storyControlsSection: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
+            styleSection
+            editControlDivider
+            sceneDetailSection
+            editControlDivider
+            subtitleSection
+            editControlDivider
+            lengthSection
+        }
+        .padding(FrameMioSpacing.lg)
+        .background(FrameMioColors.surface.opacity(0.54), in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                .stroke(FrameMioColors.divider.opacity(0.34), lineWidth: FrameMioMetrics.borderWidth)
+        }
+    }
+
+    private var editControlDivider: some View {
+        Divider()
+            .overlay(FrameMioColors.divider.opacity(0.58))
+    }
+
+    private var sceneDetailSection: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            SectionHeader(title: "Scene Details", subtitle: "Choose how much supporting footage to include")
+            LazyVGrid(columns: optionGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
+                ForEach(sceneDetailOptions, id: \.title) { option in
+                    optionChip(
+                        title: option.title,
+                        subtitle: option.subtitle,
+                        isSelected: draft.sceneDetailStyle == option.value
+                    ) {
+                        draft.sceneDetailStyle = option.value
+                    }
+                }
+            }
+        }
+    }
+
     private var subtitleSection: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
             SectionHeader(title: "Subtitles", subtitle: "Show spoken dialogue as captions")
@@ -1512,9 +1555,9 @@ private struct EditStorySheet: View {
                     if !trimmed.isEmpty {
                         draft.instruction = trimmed
                     }
-                }
+            }
             PrimaryButton(title: "Update Story (\(draft.regenerationCreditCost) credits)", systemImage: "sparkles") {
-                storyPreviewUIDebugLog("edit sheet regenerate tapped has_changes=\(draft.request.hasChanges) added=\(draft.addedMediaIDs.sorted().joined(separator: ",")) ordered=\(draft.orderedMediaIDs.joined(separator: ",")) visible=\(displayedMoments.map(\.assetID).joined(separator: ",")) required_credits=\(draft.regenerationCreditCost)")
+                storyPreviewUIDebugLog("edit sheet regenerate tapped has_changes=\(draft.request.hasChanges) added=\(draft.addedMediaIDs.sorted().joined(separator: ",")) ordered=\(draft.orderedMediaIDs.joined(separator: ",")) visible=\(displayedMoments.map(\.assetID).joined(separator: ",")) scene_detail=\(draft.sceneDetailStyle ?? "balanced") required_credits=\(draft.regenerationCreditCost)")
                 Task {
                     await stopVoicePromptRecording()
                     onRegenerate(draft.request)
@@ -1706,6 +1749,7 @@ private struct EditStoryDraft {
     var style: String?
     var subtitlesEnabled: Bool?
     var subtitleStyle: String?
+    var sceneDetailStyle: String?
     var targetDuration: TimeInterval?
     var instruction: String?
 
@@ -1726,6 +1770,7 @@ private struct EditStoryDraft {
             style: style,
             subtitlesEnabled: subtitlesEnabled,
             subtitleStyle: subtitleStyle,
+            sceneDetailStyle: sceneDetailStyle,
             targetDuration: targetDuration,
             instruction: instruction?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true ? nil : instruction
         )
