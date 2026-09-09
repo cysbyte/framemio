@@ -210,6 +210,37 @@ func TestOpenAICompatibleStoryPlannerSynthesizesCaptionsWhenExternalPlanOmitsThe
 	}
 }
 
+func TestOpenAICompatibleStoryPlannerRemovesOverlappingExternalCaptions(t *testing.T) {
+	t.Parallel()
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		planJSON := `{"schema_version":"story_plan_v1","id":"plan-gpt","project_id":"project-gpt","version":3,"requested_duration_ms":4000,"story_type":"trip","visual_style":"cinematic","title_text":"Beach Story","ending_text":"Until next time.","moments":[{"moment_id":"moment-1","asset_id":"photo-gpt","media_id":"photo-gpt","media_type":"photo","narrative":"A beach sunset opens the story.","caption":"Beach sunset","duration_ms":4000,"crop_intent":"fit","transition":"fade_in","reason":"Strong opening image","score":0.9}],"captions":[{"moment_id":"moment-1","text":"Broad full-moment caption","start_ms":0,"end_ms":4000},{"moment_id":"moment-1","text":"First spoken line","start_ms":0,"end_ms":1600},{"moment_id":"moment-1","text":"Second spoken line","start_ms":1200,"end_ms":3000},{"moment_id":"moment-1","text":"Too short after clipping","start_ms":2900,"end_ms":3050},{"moment_id":"moment-1","text":"Final beat","start_ms":3200,"end_ms":4000}],"caption_style":{"preset":"cinematic_subtitle","font_family":"inter-bold","font_size":48,"text_color":"#FFFFFF","stroke_color":"#000000","stroke_width":4,"background_enabled":true,"background_color":"#000000","background_opacity":0.32,"position":"bottom","bottom_offset":150,"max_lines":2,"max_characters_per_line":32},"output":{"aspect_ratio":"9:16","max_duration_seconds":4,"preset":"premium-memory"},"total_duration_ms":4000}`
+		return typographyHTTPResponse(http.StatusOK, responsesTypographyResponse(planJSON)), nil
+	})}
+	planner := OpenAICompatibleStoryPlanner{BaseURL: "https://planner.test", APIKey: "test-key", ProviderName: "openai-compatible", ModelName: "gpt-story", WireAPI: "responses", Client: client}
+	plan, err := planner.Plan(context.Background(), storyPlannerProviderRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if overlappingStoryPlannerCaptionCount(plan) != 0 {
+		t.Fatalf("expected overlapping captions to be removed, got %+v", plan.Captions)
+	}
+	if len(plan.Captions) != 3 {
+		t.Fatalf("expected broad and too-short overlap captions to be removed, got %+v", plan.Captions)
+	}
+	if plan.Captions[0].Text != "First spoken line" || plan.Captions[0].StartMS != 0 || plan.Captions[0].EndMS != 1600 {
+		t.Fatalf("unexpected first caption: %+v", plan.Captions[0])
+	}
+	if plan.Captions[1].Text != "Second spoken line" || plan.Captions[1].StartMS != 1600 || plan.Captions[1].EndMS != 3000 {
+		t.Fatalf("expected second caption to be clipped after first, got %+v", plan.Captions[1])
+	}
+	if plan.Captions[2].Text != "Final beat" || plan.Captions[2].StartMS != 3200 || plan.Captions[2].EndMS != 4000 {
+		t.Fatalf("unexpected final caption: %+v", plan.Captions[2])
+	}
+	if err := ValidateStoryPlan(plan); err != nil {
+		t.Fatalf("expected sanitized captions to pass lightweight validation: %v", err)
+	}
+}
+
 func TestOpenAICompatibleStoryPlannerCoercesStringOriginalAudio(t *testing.T) {
 	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {

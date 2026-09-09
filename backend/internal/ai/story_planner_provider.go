@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 )
 
 const StoryPlannerPromptVersion = "story-planner-v1"
+const minStoryPlannerCaptionDurationMS = 250
 
 type StoryPlanner interface {
 	Plan(ctx context.Context, request Request) (models.StoryPlan, error)
@@ -84,22 +86,26 @@ func (p FallbackStoryPlanner) Plan(ctx context.Context, request Request) (models
 	if err == nil {
 		captionCountBeforeSanitize := len(plan.Captions)
 		invalidCaptionCountBeforeSanitize := invalidStoryPlannerCaptionCount(plan)
+		overlappingCaptionCountBeforeSanitize := overlappingStoryPlannerCaptionCount(plan)
 		ensureStoryPlannerMomentIDs(&plan)
 		SanitizeExternalStoryPlannerOutput(&plan)
 		captionCountAfterSanitize := len(plan.Captions)
 		synthesizeStoryPlannerCaptions(&plan, request)
 		invalidCaptionCountAfterRepair := invalidStoryPlannerCaptionCount(plan)
-		if p.Logger != nil && (captionCountBeforeSanitize != len(plan.Captions) || invalidCaptionCountBeforeSanitize > 0 || invalidCaptionCountAfterRepair > 0) {
+		overlappingCaptionCountAfterRepair := overlappingStoryPlannerCaptionCount(plan)
+		if p.Logger != nil && (captionCountBeforeSanitize != len(plan.Captions) || invalidCaptionCountBeforeSanitize > 0 || invalidCaptionCountAfterRepair > 0 || overlappingCaptionCountBeforeSanitize > 0 || overlappingCaptionCountAfterRepair > 0) {
 			p.Logger.Info("story_planner_primary_output_sanitized",
 				slog.String("primary_provider", storyPlannerProviderName(p.Primary)),
 				slog.String("primary_model", storyPlannerProviderModel(p.Primary)),
 				slog.Int64("primary_latency_ms", primaryLatency.Milliseconds()),
 				slog.Int("raw_caption_count", captionCountBeforeSanitize),
 				slog.Int("raw_invalid_caption_count", invalidCaptionCountBeforeSanitize),
+				slog.Int("raw_overlapping_caption_count", overlappingCaptionCountBeforeSanitize),
 				slog.Int("sanitized_caption_count", captionCountAfterSanitize),
 				slog.Int("synthesized_caption_count", max(0, len(plan.Captions)-captionCountAfterSanitize)),
 				slog.Int("final_caption_count", len(plan.Captions)),
 				slog.Int("final_invalid_caption_count", invalidCaptionCountAfterRepair),
+				slog.Int("final_overlapping_caption_count", overlappingCaptionCountAfterRepair),
 			)
 		}
 		if validationErr := ValidateStoryPlan(plan); validationErr == nil {
@@ -237,6 +243,7 @@ func (p OpenAICompatibleStoryPlanner) Plan(ctx context.Context, request Request)
 	}
 	rawCaptionCount := len(plan.Captions)
 	rawInvalidCaptionCount := invalidStoryPlannerCaptionCount(plan)
+	rawOverlappingCaptionCount := overlappingStoryPlannerCaptionCount(plan)
 	rawInvalidVideoAnalysisVersionCount := invalidStoryPlannerVideoAnalysisVersionCount(plan, request)
 	rawBRollMissingIDCount, rawBRollMissingScoreCount := storyPlannerBRollMetadataGaps(plan)
 	if err := normalizeStoryPlannerOutput(&plan, request); err != nil {
@@ -247,17 +254,20 @@ func (p OpenAICompatibleStoryPlanner) Plan(ctx context.Context, request Request)
 	}
 	if p.Logger != nil {
 		finalBRollWithIDCount, finalBRollWithScoreCount := storyPlannerBRollMetadataCounts(plan)
-		if rawCaptionCount != len(plan.Captions) || rawInvalidCaptionCount > 0 || rawInvalidVideoAnalysisVersionCount > 0 || rawBRollMissingIDCount > 0 || rawBRollMissingScoreCount > 0 {
+		finalOverlappingCaptionCount := overlappingStoryPlannerCaptionCount(plan)
+		if rawCaptionCount != len(plan.Captions) || rawInvalidCaptionCount > 0 || rawOverlappingCaptionCount > 0 || finalOverlappingCaptionCount > 0 || rawInvalidVideoAnalysisVersionCount > 0 || rawBRollMissingIDCount > 0 || rawBRollMissingScoreCount > 0 {
 			p.Logger.Info("story_planner_external_output_sanitized",
 				slog.String("provider", p.Name()),
 				slog.String("model", p.Model()),
 				slog.Int64("latency_ms", time.Since(started).Milliseconds()),
 				slog.Int("raw_caption_count", rawCaptionCount),
 				slog.Int("raw_invalid_caption_count", rawInvalidCaptionCount),
+				slog.Int("raw_overlapping_caption_count", rawOverlappingCaptionCount),
 				slog.Int("raw_invalid_video_analysis_version_count", rawInvalidVideoAnalysisVersionCount),
 				slog.Int("raw_broll_missing_id_count", rawBRollMissingIDCount),
 				slog.Int("raw_broll_missing_score_count", rawBRollMissingScoreCount),
 				slog.Int("final_caption_count", len(plan.Captions)),
+				slog.Int("final_overlapping_caption_count", finalOverlappingCaptionCount),
 				slog.Int("final_broll_count", len(plan.BRoll)),
 				slog.Int("final_broll_with_id_count", finalBRollWithIDCount),
 				slog.Int("final_broll_with_score_count", finalBRollWithScoreCount),
@@ -771,9 +781,15 @@ func sanitizeStoryPlannerCaptions(plan *models.StoryPlan) {
 		}
 		cursor += duration
 	}
-	sanitized := make([]models.StoryCaption, 0, len(plan.Captions))
+	type captionCandidate struct {
+		caption    models.StoryCaption
+		order      int
+		fullMoment bool
+	}
+	candidates := make([]captionCandidate, 0, len(plan.Captions))
 	seen := make(map[string]struct{}, len(plan.Captions))
-	for _, caption := range plan.Captions {
+	hasGranularCaption := make(map[string]bool, len(plan.Captions))
+	for order, caption := range plan.Captions {
 		caption.MomentID = strings.TrimSpace(caption.MomentID)
 		caption.Text = truncateText(strings.TrimSpace(caption.Text), maxStoryPlanCaptionLength)
 		if caption.MomentID == "" || caption.Text == "" {
@@ -797,7 +813,49 @@ func sanitizeStoryPlannerCaptions(plan *models.StoryPlan) {
 			continue
 		}
 		seen[key] = struct{}{}
+		fullMoment := caption.StartMS == momentRange.start && caption.EndMS == momentRange.end
+		if !fullMoment {
+			hasGranularCaption[caption.MomentID] = true
+		}
+		candidates = append(candidates, captionCandidate{caption: caption, order: order, fullMoment: fullMoment})
+	}
+	filtered := make([]captionCandidate, 0, len(candidates))
+	fullMomentSeen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.fullMoment {
+			if hasGranularCaption[candidate.caption.MomentID] {
+				continue
+			}
+			if _, exists := fullMomentSeen[candidate.caption.MomentID]; exists {
+				continue
+			}
+			fullMomentSeen[candidate.caption.MomentID] = struct{}{}
+		}
+		filtered = append(filtered, candidate)
+	}
+	sort.SliceStable(filtered, func(i, j int) bool {
+		left := filtered[i].caption
+		right := filtered[j].caption
+		if left.StartMS != right.StartMS {
+			return left.StartMS < right.StartMS
+		}
+		if left.EndMS != right.EndMS {
+			return left.EndMS < right.EndMS
+		}
+		return filtered[i].order < filtered[j].order
+	})
+	sanitized := make([]models.StoryCaption, 0, len(filtered))
+	lastEndMS := 0
+	for _, candidate := range filtered {
+		caption := candidate.caption
+		if caption.StartMS < lastEndMS {
+			caption.StartMS = lastEndMS
+		}
+		if caption.EndMS-caption.StartMS < minStoryPlannerCaptionDurationMS {
+			continue
+		}
 		sanitized = append(sanitized, caption)
+		lastEndMS = caption.EndMS
 	}
 	plan.Captions = sanitized
 }
@@ -1085,6 +1143,39 @@ func invalidStoryPlannerCaptionCount(plan models.StoryPlan) int {
 		}
 	}
 	return invalid
+}
+
+func overlappingStoryPlannerCaptionCount(plan models.StoryPlan) int {
+	if len(plan.Captions) < 2 {
+		return 0
+	}
+	captions := make([]models.StoryCaption, 0, len(plan.Captions))
+	for _, caption := range plan.Captions {
+		if strings.TrimSpace(caption.Text) == "" || caption.EndMS <= caption.StartMS {
+			continue
+		}
+		captions = append(captions, caption)
+	}
+	if len(captions) < 2 {
+		return 0
+	}
+	sort.SliceStable(captions, func(i, j int) bool {
+		if captions[i].StartMS != captions[j].StartMS {
+			return captions[i].StartMS < captions[j].StartMS
+		}
+		return captions[i].EndMS < captions[j].EndMS
+	})
+	overlaps := 0
+	lastEndMS := captions[0].EndMS
+	for _, caption := range captions[1:] {
+		if caption.StartMS < lastEndMS {
+			overlaps++
+		}
+		if caption.EndMS > lastEndMS {
+			lastEndMS = caption.EndMS
+		}
+	}
+	return overlaps
 }
 
 func invalidStoryPlannerVideoAnalysisVersionCount(plan models.StoryPlan, request Request) int {
