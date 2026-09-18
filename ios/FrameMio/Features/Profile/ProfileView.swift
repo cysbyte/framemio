@@ -230,7 +230,8 @@ final class ProfileViewModel: ObservableObject {
             for await result in Transaction.currentEntitlements {
                 guard case let .verified(transaction) = result,
                       FrameMioProCatalog.productIDs.contains(transaction.productID),
-                      transaction.revocationDate == nil else {
+                      transaction.revocationDate == nil,
+                      Self.subscriptionTransactionIsActive(transaction) else {
                     continue
                 }
                 hasSubscription = true
@@ -242,6 +243,11 @@ final class ProfileViewModel: ObservableObject {
             self?.isSubscribed = hasSubscription
             self?.renewalDate = latestRenewalDate
         }
+    }
+
+    private static func subscriptionTransactionIsActive(_ transaction: StoreKit.Transaction, now: Date = Date()) -> Bool {
+        guard let expirationDate = transaction.expirationDate else { return true }
+        return expirationDate > now
     }
 }
 

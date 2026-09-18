@@ -2079,6 +2079,60 @@ func TestGrantSubscriptionCycleCreditsIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestGrantSubscriptionCycleCreditsRejectsExpiredCycle(t *testing.T) {
+	t.Parallel()
+	memoryStore := store.NewMemoryStore()
+	server := newTestServer(memoryStore, queue.NewMemoryPublisher())
+	handler := server.Handler()
+
+	expiredAt := time.Date(2026, time.August, 19, 9, 59, 0, 0, time.UTC)
+	response := performJSON(t, handler, http.MethodPost, "/v1/me/credits/subscription-cycle", map[string]any{
+		"plan":        "yearly",
+		"purchase_id": "expired-cycle",
+		"expires_at":  expiredAt.Format(time.RFC3339),
+	}, "", true, nil)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expired grant status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	balanceResponse := performJSON(t, handler, http.MethodGet, "/v1/me/credits", nil, "", true, nil)
+	if balanceResponse.Code != http.StatusOK {
+		t.Fatalf("balance status = %d, body = %s", balanceResponse.Code, balanceResponse.Body.String())
+	}
+	var balance models.CreditBalance
+	decodeResponse(t, balanceResponse, &balance)
+	if balance.SubscriptionCredits != 0 {
+		t.Fatalf("expired cycle granted subscription credits: %+v", balance)
+	}
+}
+
+func TestGrantSubscriptionCycleCreditsAcceptsActiveCycle(t *testing.T) {
+	t.Parallel()
+	memoryStore := store.NewMemoryStore()
+	server := newTestServer(memoryStore, queue.NewMemoryPublisher())
+	handler := server.Handler()
+
+	expiresAt := time.Date(2026, time.August, 19, 10, 1, 0, 0, time.UTC)
+	response := performJSON(t, handler, http.MethodPost, "/v1/me/credits/subscription-cycle", map[string]any{
+		"plan":        "yearly",
+		"purchase_id": "active-cycle",
+		"expires_at":  expiresAt.Format(time.RFC3339),
+	}, "", true, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("active grant status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	balanceResponse := performJSON(t, handler, http.MethodGet, "/v1/me/credits", nil, "", true, nil)
+	if balanceResponse.Code != http.StatusOK {
+		t.Fatalf("balance status = %d, body = %s", balanceResponse.Code, balanceResponse.Body.String())
+	}
+	var balance models.CreditBalance
+	decodeResponse(t, balanceResponse, &balance)
+	if balance.SubscriptionCredits != server.Credits.Policy.YearlySubscriptionCycleCredits {
+		t.Fatalf("subscription credits = %d, want %d", balance.SubscriptionCredits, server.Credits.Policy.YearlySubscriptionCycleCredits)
+	}
+}
+
 func latestJobOfType(t *testing.T, jobs []models.ProcessingJob, jobType models.JobType) models.ProcessingJob {
 	t.Helper()
 	for index := len(jobs) - 1; index >= 0; index-- {

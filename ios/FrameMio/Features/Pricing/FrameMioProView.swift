@@ -593,6 +593,11 @@ final class FrameMioProViewModel: ObservableObject {
         }
     }
 
+    private static func subscriptionTransactionIsActive(_ transaction: StoreKit.Transaction, now: Date = Date()) -> Bool {
+        guard let expirationDate = transaction.expirationDate else { return true }
+        return expirationDate > now
+    }
+
     private func refreshEntitlements() async {
         var activeSubscriptionDate: Date?
         var subscriptionActive = false
@@ -600,7 +605,9 @@ final class FrameMioProViewModel: ObservableObject {
         pricingDebugLog("refresh_entitlements_start")
         for await result in StoreKit.Transaction.currentEntitlements {
             guard let transaction = try? verifiedTransaction(from: result) else { continue }
-            guard FrameMioProCatalog.productIDs.contains(transaction.productID), transaction.revocationDate == nil else {
+            guard FrameMioProCatalog.productIDs.contains(transaction.productID),
+                  transaction.revocationDate == nil,
+                  Self.subscriptionTransactionIsActive(transaction) else {
                 continue
             }
             subscriptionActive = true
@@ -655,6 +662,10 @@ final class FrameMioProViewModel: ObservableObject {
             pricingDebugLog("subscription_credit_sync_ignored source=\(source) reason=non_pro_product product=\(transaction.productID) transaction=\(transaction.id)")
             return false
         }
+        guard Self.subscriptionTransactionIsActive(transaction) else {
+            pricingDebugLog("subscription_credit_sync_ignored source=\(source) reason=expired product=\(transaction.productID) transaction=\(transaction.id) expires=\(transaction.expirationDate?.description ?? "nil")")
+            return false
+        }
         let purchaseID = String(transaction.id)
         pricingDebugLog("subscription_credit_sync_start source=\(source) plan=\(plan.rawValue) product=\(transaction.productID) transaction=\(purchaseID) expires=\(transaction.expirationDate?.description ?? "nil")")
         let creditBalance = try await creditService.grantSubscriptionCycleCredits(
@@ -674,7 +685,9 @@ final class FrameMioProViewModel: ObservableObject {
                 pricingDebugLog("subscription_credit_sync_current_unverified source=\(source)")
                 continue
             }
-            guard FrameMioProPlanKind(productID: transaction.productID) != nil, transaction.revocationDate == nil else {
+            guard FrameMioProPlanKind(productID: transaction.productID) != nil,
+                  transaction.revocationDate == nil,
+                  Self.subscriptionTransactionIsActive(transaction) else {
                 pricingDebugLog("subscription_credit_sync_current_ignored source=\(source) product=\(transaction.productID) revoked=\(transaction.revocationDate != nil)")
                 continue
             }
@@ -716,7 +729,9 @@ final class FrameMioProViewModel: ObservableObject {
                     pricingDebugLog("transaction_update_unverified")
                     continue
                 }
-                guard FrameMioProPlanKind(productID: transaction.productID) != nil, transaction.revocationDate == nil else {
+                guard FrameMioProPlanKind(productID: transaction.productID) != nil,
+                      transaction.revocationDate == nil,
+                      Self.subscriptionTransactionIsActive(transaction) else {
                     pricingDebugLog("transaction_update_ignored product=\(transaction.productID) revoked=\(transaction.revocationDate != nil)")
                     continue
                 }

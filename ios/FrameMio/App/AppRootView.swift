@@ -186,7 +186,8 @@ struct AppRootView: View {
         for await result in Transaction.currentEntitlements {
             guard case let .verified(transaction) = result,
                   FrameMioProCatalog.productIDs.contains(transaction.productID),
-                  transaction.revocationDate == nil else {
+                  transaction.revocationDate == nil,
+                  Self.subscriptionTransactionIsActive(transaction) else {
                 continue
             }
             guard let status = await transaction.subscriptionStatus else {
@@ -213,6 +214,11 @@ struct AppRootView: View {
         case let .unverified(_, error):
             throw error
         }
+    }
+
+    private static func subscriptionTransactionIsActive(_ transaction: StoreKit.Transaction, now: Date = Date()) -> Bool {
+        guard let expirationDate = transaction.expirationDate else { return true }
+        return expirationDate > now
     }
 
     private func refreshCredits() {

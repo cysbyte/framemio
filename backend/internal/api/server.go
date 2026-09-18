@@ -852,12 +852,22 @@ func (s *Server) grantSubscriptionCycleCredits(response http.ResponseWriter, req
 		s.writeError(response, http.StatusBadRequest, "invalid_plan", "plan must be monthly or yearly")
 		return
 	}
+	if input.ExpiresAt != nil && !input.ExpiresAt.After(s.Now().UTC()) {
+		s.Logger.Warn("rejected expired subscription credit grant",
+			slog.String("user_id", user.ID),
+			slog.String("purchase_id", purchaseID),
+			slog.String("plan", plan),
+			slog.Time("expires_at", input.ExpiresAt.UTC()),
+		)
+		s.writeError(response, http.StatusBadRequest, "expired_subscription_cycle", "subscription cycle has expired")
+		return
+	}
 	beforeBalance, err := s.Credits.GetBalance(request.Context(), user.ID)
 	if err != nil {
 		s.internalError(response, err, "get credit balance before subscription grant")
 		return
 	}
-	grant, created, err := s.Credits.GrantSubscriptionCycle(request.Context(), user.ID, purchaseID, amount, input.ExpiresAt, map[string]any{"plan": plan})
+	grant, reused, err := s.Credits.GrantSubscriptionCycle(request.Context(), user.ID, purchaseID, amount, input.ExpiresAt, map[string]any{"plan": plan})
 	if err != nil {
 		s.internalError(response, err, "grant subscription cycle credits")
 		return
@@ -867,8 +877,8 @@ func (s *Server) grantSubscriptionCycleCredits(response http.ResponseWriter, req
 		s.internalError(response, err, "get credit balance after subscription grant")
 		return
 	}
-	if created {
-		s.Logger.Info("subscription credits granted",
+	if reused {
+		s.Logger.Info("subscription credits grant reused",
 			slog.String("user_id", user.ID),
 			slog.String("purchase_id", purchaseID),
 			slog.String("plan", plan),
@@ -882,7 +892,7 @@ func (s *Server) grantSubscriptionCycleCredits(response http.ResponseWriter, req
 			slog.Int("balance_after_purchased", afterBalance.PurchasedCredits),
 		)
 	} else {
-		s.Logger.Info("subscription credits grant reused",
+		s.Logger.Info("subscription credits granted",
 			slog.String("user_id", user.ID),
 			slog.String("purchase_id", purchaseID),
 			slog.String("plan", plan),
