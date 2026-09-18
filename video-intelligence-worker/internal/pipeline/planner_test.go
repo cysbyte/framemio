@@ -86,3 +86,57 @@ func TestBuildSegmentsCreatesStorySizedCandidates(t *testing.T) {
 		t.Fatalf("fourth segment = %+v, want 15s-18s", segments[3])
 	}
 }
+
+func TestDurationBasedFrameBudgets(t *testing.T) {
+	t.Parallel()
+	configuration := PlannerConfig{
+		MaxFramesShort: 12, MaxFramesLong: 24, MaxCandidateFrames: 450,
+		MaxModelFramesShort: 120, MaxModelFramesMedium: 120, MaxModelFramesLong: 150, MaxModelFramesVeryLong: 180,
+	}
+	tests := []struct {
+		name               string
+		duration           time.Duration
+		expectedCandidates int
+		expectedSelected   int
+	}{
+		{name: "short uses three fps candidate budget", duration: 45 * time.Second, expectedCandidates: 135, expectedSelected: 120},
+		{name: "one to two minutes uses two fps candidate budget", duration: 90 * time.Second, expectedCandidates: 180, expectedSelected: 120},
+		{name: "two to five minutes uses one fps candidate budget", duration: 3 * time.Minute, expectedCandidates: 180, expectedSelected: 150},
+		{name: "five to ten minutes uses half fps candidate budget", duration: 8 * time.Minute, expectedCandidates: 240, expectedSelected: 150},
+		{name: "very long uses capped quarter fps candidate budget", duration: 30 * time.Minute, expectedCandidates: 450, expectedSelected: 180},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			metadata := domain.VideoMetadata{DurationMicros: test.duration.Microseconds(), FPS: 30}
+			if got := MaxCandidateFrames(metadata, configuration); got != test.expectedCandidates {
+				t.Fatalf("MaxCandidateFrames = %d, want %d", got, test.expectedCandidates)
+			}
+			if got := MaxSelectedFrames(metadata, configuration); got != test.expectedSelected {
+				t.Fatalf("MaxSelectedFrames = %d, want %d", got, test.expectedSelected)
+			}
+		})
+	}
+}
+
+func TestPlanFrameCandidatesAddsDurationSamples(t *testing.T) {
+	t.Parallel()
+	configuration := PlannerConfig{
+		MaxFramesShort: 12, MaxFramesLong: 24, MaxCandidateFrames: 450,
+		MaxModelFramesShort: 120, MaxModelFramesMedium: 120, MaxModelFramesLong: 150, MaxModelFramesVeryLong: 180,
+	}
+	metadata := domain.VideoMetadata{DurationMicros: (10 * time.Second).Microseconds(), FPS: 30}
+	scenes := []domain.VideoScene{{ID: "scene-0001", StartMicros: 0, EndMicros: metadata.DurationMicros, ChangeScore: 1}}
+	segments := BuildSegments(scenes, 5*time.Second)
+	candidates := PlanFrameCandidates(metadata, scenes, segments, configuration)
+	var durationSamples int
+	for _, candidate := range candidates {
+		if candidate.Role == "duration-sample" {
+			durationSamples++
+		}
+	}
+	if durationSamples == 0 {
+		t.Fatalf("expected duration-sample candidates, got %+v", candidates)
+	}
+}

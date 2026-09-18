@@ -10,15 +10,21 @@ import (
 )
 
 type PlannerConfig struct {
-	MinSceneDuration   time.Duration
-	MaxSegmentDuration time.Duration
-	LongVideoThreshold time.Duration
-	MaxFramesShort     int
-	MaxFramesLong      int
+	MinSceneDuration       time.Duration
+	MaxSegmentDuration     time.Duration
+	LongVideoThreshold     time.Duration
+	MaxFramesShort         int
+	MaxFramesLong          int
+	MaxCandidateFrames     int
+	MaxModelFramesShort    int
+	MaxModelFramesMedium   int
+	MaxModelFramesLong     int
+	MaxModelFramesVeryLong int
 }
 
 const (
 	defaultStorySegmentDuration = 5 * time.Second
+	microsPerSecond             = int64(time.Second / time.Microsecond)
 )
 
 func BuildScenes(metadata domain.VideoMetadata, boundaries []domain.SceneBoundary, minimumDuration time.Duration) []domain.VideoScene {
@@ -82,20 +88,14 @@ func BuildSegments(scenes []domain.VideoScene, maximumDuration time.Duration) []
 }
 
 func PlanFrameCandidates(metadata domain.VideoMetadata, scenes []domain.VideoScene, segments []domain.CandidateSegment, configuration PlannerConfig) []domain.FrameCandidate {
-	maximumFrames := configuration.MaxFramesShort
-	if time.Duration(metadata.DurationMicros)*time.Microsecond >= configuration.LongVideoThreshold {
-		maximumFrames = configuration.MaxFramesLong
-	}
-	if maximumFrames <= 0 {
-		maximumFrames = 24
-	}
+	maximumCandidates := MaxCandidateFrames(metadata, configuration)
 	sceneScores := make(map[string]float64, len(scenes))
 	for _, scene := range scenes {
 		sceneScores[scene.ID] = scene.ChangeScore
 	}
 	sceneChangesPerMinute := float64(max(0, len(scenes)-1)) / maxFloat(float64(metadata.DurationMicros)/60_000_000, 1.0/60)
 	denseMotion := sceneChangesPerMinute >= 20 || metadata.FPS >= 60
-	candidates := make([]domain.FrameCandidate, 0, len(segments)*5)
+	candidates := make([]domain.FrameCandidate, 0, min(maximumCandidates*2, len(segments)*8))
 	seenTimestamp := make(map[int64]struct{})
 	add := func(segment domain.CandidateSegment, timestamp int64, role string, priority float64) {
 		timestamp = max(segment.StartMicros, min(segment.EndMicros-1, timestamp))
@@ -125,8 +125,8 @@ func PlanFrameCandidates(metadata domain.VideoMetadata, scenes []domain.VideoSce
 			add(segment, segment.StartMicros+3*length/4, "motion-three-quarter", 0.9)
 		}
 	}
-	limit := maximumFrames * 4
-	if len(candidates) <= limit {
+	addDurationSampleCandidates(segments, durationSamplingInterval(metadata), add)
+	if len(candidates) <= maximumCandidates {
 		return candidates
 	}
 	ranked := append([]domain.FrameCandidate(nil), candidates...)
@@ -136,16 +136,101 @@ func PlanFrameCandidates(metadata domain.VideoMetadata, scenes []domain.VideoSce
 		}
 		return ranked[left].Priority > ranked[right].Priority
 	})
-	ranked = ranked[:limit]
+	ranked = ranked[:maximumCandidates]
 	sort.Slice(ranked, func(left, right int) bool { return ranked[left].TimestampMicros < ranked[right].TimestampMicros })
 	return ranked
 }
 
-func MaxSelectedFrames(metadata domain.VideoMetadata, configuration PlannerConfig) int {
-	if time.Duration(metadata.DurationMicros)*time.Microsecond >= configuration.LongVideoThreshold {
-		return configuration.MaxFramesLong
+func addDurationSampleCandidates(segments []domain.CandidateSegment, intervalMicros int64, add func(domain.CandidateSegment, int64, string, float64)) {
+	if intervalMicros <= 0 {
+		return
 	}
-	return configuration.MaxFramesShort
+	for _, segment := range segments {
+		if segment.EndMicros <= segment.StartMicros {
+			continue
+		}
+		first := ((segment.StartMicros + intervalMicros - 1) / intervalMicros) * intervalMicros
+		if first <= segment.StartMicros {
+			first = segment.StartMicros + intervalMicros
+		}
+		for timestamp := first; timestamp < segment.EndMicros; timestamp += intervalMicros {
+			add(segment, timestamp, "duration-sample", 0.65)
+		}
+	}
+}
+
+func durationSamplingInterval(metadata domain.VideoMetadata) int64 {
+	duration := videoDuration(metadata)
+	switch {
+	case duration < time.Minute:
+		return microsPerSecond / 3
+	case duration < 2*time.Minute:
+		return microsPerSecond / 2
+	case duration < 5*time.Minute:
+		return microsPerSecond
+	case duration < 10*time.Minute:
+		return 2 * microsPerSecond
+	default:
+		return 4 * microsPerSecond
+	}
+}
+
+func MaxCandidateFrames(metadata domain.VideoMetadata, configuration PlannerConfig) int {
+	duration := videoDuration(metadata)
+	seconds := maxFloat(float64(metadata.DurationMicros)/1_000_000, 1)
+	var frames float64
+	switch {
+	case duration < time.Minute:
+		frames = seconds * 3
+	case duration < 2*time.Minute:
+		frames = seconds * 2
+	case duration < 5*time.Minute:
+		frames = seconds
+	case duration < 10*time.Minute:
+		frames = seconds * 0.5
+	default:
+		frames = seconds * 0.25
+	}
+	budget := int(math.Ceil(frames))
+	if budget < 1 {
+		budget = 1
+	}
+	maximum := configuration.MaxCandidateFrames
+	if maximum <= 0 {
+		maximum = 450
+	}
+	return min(budget, maximum)
+}
+
+func MaxSelectedFrames(metadata domain.VideoMetadata, configuration PlannerConfig) int {
+	duration := videoDuration(metadata)
+	switch {
+	case duration < time.Minute:
+		return modelFrameBudget(configuration.MaxModelFramesShort, configuration.MaxFramesShort, 120)
+	case duration < 2*time.Minute:
+		return modelFrameBudget(configuration.MaxModelFramesMedium, configuration.MaxFramesShort, 120)
+	case duration < 10*time.Minute:
+		return modelFrameBudget(configuration.MaxModelFramesLong, configuration.MaxFramesLong, 150)
+	default:
+		return modelFrameBudget(configuration.MaxModelFramesVeryLong, configuration.MaxFramesLong, 180)
+	}
+}
+
+func modelFrameBudget(configured, legacy, fallback int) int {
+	if configured > 0 {
+		return configured
+	}
+	if legacy > 0 {
+		return legacy
+	}
+	return fallback
+}
+
+func videoDuration(metadata domain.VideoMetadata) time.Duration {
+	if metadata.DurationMicros <= 0 {
+		return 0
+	}
+	return time.Duration(metadata.DurationMicros) * time.Microsecond
 }
 
 func ComputeQuality(metadata domain.VideoMetadata, scenes []domain.VideoScene, frames []domain.SelectedFrame) domain.QualitySignals {

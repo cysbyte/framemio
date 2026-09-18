@@ -186,10 +186,14 @@ Optional tuning:
 - `TRANSCRIPTION_RETRIES`, `TRANSCRIPTION_PROVIDER_TIMEOUT`
 - `TRANSCRIPTION_RAW_ARTIFACT_THRESHOLD_BYTES`
 - `SCENE_CHANGE_THRESHOLD`, `MIN_SCENE_DURATION`, `MAX_SEGMENT_DURATION` (default `5s`)
-- `LONG_VIDEO_THRESHOLD`, `MAX_FRAMES_SHORT` (default `12`), `MAX_FRAMES_LONG` (default `24`)
+- `LONG_VIDEO_THRESHOLD`, `MAX_FRAMES_SHORT` (default `12`), `MAX_FRAMES_LONG` (default `24`) for compatibility fallback budgets
+- `MAX_CANDIDATE_FRAMES` (default `450`)
+- `MAX_MODEL_FRAMES_SHORT` (default `120`), `MAX_MODEL_FRAMES_MEDIUM` (default `120`), `MAX_MODEL_FRAMES_LONG` (default `150`), `MAX_MODEL_FRAMES_VERY_LONG` (default `180`)
 - `MAX_SCENE_BOUNDARIES`, `DUPLICATE_HASH_DISTANCE`, `ANALYSIS_FRAME_WIDTH`
 - `STAGE_RETRIES`, `MAX_JOB_ATTEMPTS`, `SQS_VISIBILITY_TIMEOUT`
 - `EVIDENCE_URL_EXPIRY`
+
+Frame candidates are planned with duration-based sampling before quality filtering and perceptual-deduplication: 3 fps for videos shorter than 1 minute, 2 fps for 1-2 minutes, 1 fps for 2-5 minutes, 0.5 fps for 5-10 minutes, and 0.25 fps beyond 10 minutes. `MAX_CANDIDATE_FRAMES` caps extraction work, while the `MAX_MODEL_FRAMES_*` settings cap the representative frames sent to the video-understanding model.
 
 Duration values use Go duration syntax such as `750ms`, `90s`, or `2h`. Keep `SQS_VISIBILITY_TIMEOUT` close to the expected provider timeout so transient video-understanding cancellations retry quickly; the GitHub Actions deployment default is `240s`, overridable with `VIDEO_WORKER_SQS_VISIBILITY_TIMEOUT`.
 

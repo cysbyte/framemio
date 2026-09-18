@@ -122,7 +122,10 @@ func main() {
 			Planner: pipeline.PlannerConfig{
 				MinSceneDuration: configuration.MinSceneDuration, MaxSegmentDuration: configuration.MaxSegmentDuration,
 				LongVideoThreshold: configuration.LongVideoThreshold, MaxFramesShort: configuration.MaxFramesShort,
-				MaxFramesLong: configuration.MaxFramesLong,
+				MaxFramesLong:      configuration.MaxFramesLong,
+				MaxCandidateFrames: configuration.MaxCandidateFrames, MaxModelFramesShort: configuration.MaxModelFramesShort,
+				MaxModelFramesMedium: configuration.MaxModelFramesMedium, MaxModelFramesLong: configuration.MaxModelFramesLong,
+				MaxModelFramesVeryLong: configuration.MaxModelFramesVeryLong,
 			},
 			DuplicateHashDistance: configuration.DuplicateHashDistance, StageRetries: configuration.StageRetries,
 			EnableTranscription: configuration.EnableTranscription, TranscriptionVersion: configuration.TranscriptionVersion,

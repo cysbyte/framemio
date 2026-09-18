@@ -47,6 +47,11 @@ type Config struct {
 	LongVideoThreshold                time.Duration
 	MaxFramesShort                    int
 	MaxFramesLong                     int
+	MaxCandidateFrames                int
+	MaxModelFramesShort               int
+	MaxModelFramesMedium              int
+	MaxModelFramesLong                int
+	MaxModelFramesVeryLong            int
 	MaxSceneBoundaries                int
 	DuplicateHashDistance             int
 	FrameWidth                        int
@@ -101,6 +106,11 @@ func Load() (Config, error) {
 		LongVideoThreshold:                environmentDuration("LONG_VIDEO_THRESHOLD", 5*time.Minute),
 		MaxFramesShort:                    environmentInt("MAX_FRAMES_SHORT", 12),
 		MaxFramesLong:                     environmentInt("MAX_FRAMES_LONG", 24),
+		MaxCandidateFrames:                environmentInt("MAX_CANDIDATE_FRAMES", 450),
+		MaxModelFramesShort:               environmentIntFirst([]string{"MAX_MODEL_FRAMES_SHORT", "MAX_FRAMES_SHORT"}, 120),
+		MaxModelFramesMedium:              environmentInt("MAX_MODEL_FRAMES_MEDIUM", 120),
+		MaxModelFramesLong:                environmentInt("MAX_MODEL_FRAMES_LONG", 150),
+		MaxModelFramesVeryLong:            environmentIntFirst([]string{"MAX_MODEL_FRAMES_VERY_LONG", "MAX_FRAMES_LONG"}, 180),
 		MaxSceneBoundaries:                environmentInt("MAX_SCENE_BOUNDARIES", 240),
 		DuplicateHashDistance:             environmentInt("DUPLICATE_HASH_DISTANCE", 6),
 		FrameWidth:                        environmentInt("ANALYSIS_FRAME_WIDTH", 1280),
@@ -153,6 +163,13 @@ func Load() (Config, error) {
 	}
 	if configuration.MaxFramesShort <= 0 || configuration.MaxFramesLong < configuration.MaxFramesShort || configuration.FrameWidth <= 0 {
 		return Config{}, errors.New("frame limits and ANALYSIS_FRAME_WIDTH are invalid")
+	}
+	if configuration.MaxCandidateFrames <= 0 ||
+		configuration.MaxModelFramesShort <= 0 ||
+		configuration.MaxModelFramesMedium <= 0 ||
+		configuration.MaxModelFramesLong <= 0 ||
+		configuration.MaxModelFramesVeryLong <= 0 {
+		return Config{}, errors.New("duration-based frame limits are invalid")
 	}
 	return configuration, nil
 }
@@ -224,6 +241,15 @@ func environmentInt(name string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func environmentIntFirst(names []string, fallback int) int {
+	for _, name := range names {
+		if os.Getenv(name) != "" {
+			return environmentInt(name, fallback)
+		}
+	}
+	return fallback
 }
 
 func environmentFloat(name string, fallback float64) float64 {

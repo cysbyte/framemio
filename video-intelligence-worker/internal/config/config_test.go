@@ -123,8 +123,15 @@ func TestLoadUsesOptimizedEvidenceDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if configuration.MaxSegmentDuration != 5_000_000_000 || configuration.MaxFramesShort != 12 || configuration.MaxFramesLong != 24 {
-		t.Fatalf("evidence defaults = segment:%s short:%d long:%d, want segment:5s short:12 long:24", configuration.MaxSegmentDuration, configuration.MaxFramesShort, configuration.MaxFramesLong)
+	if configuration.MaxSegmentDuration != 5_000_000_000 ||
+		configuration.MaxFramesShort != 12 ||
+		configuration.MaxFramesLong != 24 ||
+		configuration.MaxCandidateFrames != 450 ||
+		configuration.MaxModelFramesShort != 120 ||
+		configuration.MaxModelFramesMedium != 120 ||
+		configuration.MaxModelFramesLong != 150 ||
+		configuration.MaxModelFramesVeryLong != 180 {
+		t.Fatalf("evidence defaults were not loaded: %+v", configuration)
 	}
 }
 
