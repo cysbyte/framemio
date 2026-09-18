@@ -441,17 +441,30 @@ func (c *Coordinator) settleProjectCredits(ctx context.Context, job models.Proce
 		slog.Int("action_count", len(actions)),
 	)
 	for _, action := range actions {
+		diagnostics := c.creditSettlementDiagnostics(ctx, job.UserID, action, "project", referenceID)
+		c.Logger.Info("project credit reservation settlement state",
+			slogArgs(append([]slog.Attr{
+				slog.String("user_id", job.UserID),
+				slog.String("project_id", job.ProjectID),
+				slog.String("job_id", job.ID),
+				slog.String("status", string(status)),
+				slog.String("reference_id", referenceID),
+				slog.String("action", string(action)),
+			}, diagnostics...))...,
+		)
 		switch status {
 		case models.ProjectStatusReady:
 			reservation, err := c.Credits.CommitByReference(ctx, job.UserID, action, "project", referenceID)
 			if err != nil {
 				c.Logger.Warn("failed to commit project credit reservation",
-					slog.String("user_id", job.UserID),
-					slog.String("project_id", job.ProjectID),
-					slog.String("job_id", job.ID),
-					slog.String("reference_id", referenceID),
-					slog.String("action", string(action)),
-					slog.Any("error", err),
+					slogArgs(append([]slog.Attr{
+						slog.String("user_id", job.UserID),
+						slog.String("project_id", job.ProjectID),
+						slog.String("job_id", job.ID),
+						slog.String("reference_id", referenceID),
+						slog.String("action", string(action)),
+						slog.Any("error", err),
+					}, diagnostics...))...,
 				)
 				continue
 			}
@@ -470,12 +483,14 @@ func (c *Coordinator) settleProjectCredits(ctx context.Context, job models.Proce
 			reservation, err := c.Credits.ReleaseByReference(ctx, job.UserID, action, "project", referenceID)
 			if err != nil {
 				c.Logger.Warn("failed to release project credit reservation",
-					slog.String("user_id", job.UserID),
-					slog.String("project_id", job.ProjectID),
-					slog.String("job_id", job.ID),
-					slog.String("reference_id", referenceID),
-					slog.String("action", string(action)),
-					slog.Any("error", err),
+					slogArgs(append([]slog.Attr{
+						slog.String("user_id", job.UserID),
+						slog.String("project_id", job.ProjectID),
+						slog.String("job_id", job.ID),
+						slog.String("reference_id", referenceID),
+						slog.String("action", string(action)),
+						slog.Any("error", err),
+					}, diagnostics...))...,
 				)
 				continue
 			}
@@ -516,6 +531,80 @@ func (c *Coordinator) settleProjectCredits(ctx context.Context, job models.Proce
 		}
 	}
 	return nil
+}
+
+func slogArgs(attributes []slog.Attr) []any {
+	args := make([]any, len(attributes))
+	for index, attribute := range attributes {
+		args[index] = attribute
+	}
+	return args
+}
+
+func (c *Coordinator) creditSettlementDiagnostics(ctx context.Context, userID string, action models.CreditAction, referenceType, referenceID string) []slog.Attr {
+	attributes := make([]slog.Attr, 0, 20)
+	if c == nil || c.Store == nil {
+		return append(attributes, slog.Bool("credit_store_configured", false))
+	}
+	attributes = append(attributes, slog.Bool("credit_store_configured", true))
+	balance, balanceErr := c.Store.GetCreditBalance(ctx, userID)
+	if balanceErr != nil {
+		attributes = append(attributes, slog.String("credit_balance_error", balanceErr.Error()))
+	} else {
+		attributes = append(attributes,
+			slog.Int("credit_available", balance.Available),
+			slog.Int("credit_reserved", balance.Reserved),
+			slog.Int("credit_total", balance.TotalCredits),
+			slog.Int("credit_subscription_available", balance.SubscriptionCredits),
+			slog.Int("credit_subscription_reserved", balance.SubscriptionReserved),
+			slog.Int("credit_purchased_available", balance.PurchasedCredits),
+			slog.Int("credit_purchased_reserved", balance.PurchasedReserved),
+		)
+	}
+	reservation, reservationErr := c.Store.GetCreditReservationByReference(ctx, userID, action, referenceType, referenceID)
+	if reservationErr != nil {
+		attributes = append(attributes,
+			slog.Bool("credit_reservation_found", false),
+			slog.String("credit_reservation_error", reservationErr.Error()),
+		)
+		return attributes
+	}
+	attributes = append(attributes,
+		slog.Bool("credit_reservation_found", true),
+		slog.String("credit_reservation_id", reservation.ID),
+		slog.String("credit_reservation_state", string(reservation.State)),
+		slog.Int("credit_reservation_amount", reservation.Amount),
+		slog.String("credit_reservation_reference_type", reservation.ReferenceType),
+		slog.String("credit_reservation_reference_id", reservation.ReferenceID),
+		slog.Int("credit_reservation_allocation_count", len(reservation.Allocations)),
+		slog.String("credit_reservation_allocations", creditReservationAllocationsLog(reservation.Allocations)),
+	)
+	if reservation.ConsumedAt != nil {
+		attributes = append(attributes, slog.Time("credit_reservation_consumed_at", *reservation.ConsumedAt))
+	}
+	if reservation.ReleasedAt != nil {
+		attributes = append(attributes, slog.Time("credit_reservation_released_at", *reservation.ReleasedAt))
+	}
+	return attributes
+}
+
+func creditReservationAllocationsLog(allocations []models.CreditReservationAllocation) string {
+	if len(allocations) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(allocations))
+	for _, allocation := range allocations {
+		source := string(allocation.Source)
+		if source == "" {
+			source = "unset"
+		}
+		if allocation.GrantID != "" {
+			parts = append(parts, source+":"+strconv.Itoa(allocation.Amount)+":grant="+allocation.GrantID)
+			continue
+		}
+		parts = append(parts, source+":"+strconv.Itoa(allocation.Amount))
+	}
+	return strings.Join(parts, ",")
 }
 
 func creditActionSettlementPriority(action models.CreditAction) int {

@@ -96,6 +96,21 @@ func TestMemoryStoreReleaseRestoresReservedCredits(t *testing.T) {
 	}
 }
 
+func TestCommitCreditReservationAllocationsConsumesAvailableFallback(t *testing.T) {
+	t.Parallel()
+
+	balance, err := commitCreditReservationAllocations(
+		models.CreditBalance{PurchasedCredits: 40},
+		[]models.CreditReservationAllocation{{Source: models.CreditGrantSourceCreditPurchase, Amount: 40}},
+	)
+	if err != nil {
+		t.Fatalf("commit allocations: %v", err)
+	}
+	if balance.Available != 0 || balance.Reserved != 0 || balance.PurchasedCredits != 0 || balance.TotalCredits != 0 {
+		t.Fatalf("balance = %+v, want zero", balance)
+	}
+}
+
 func TestMemoryStoreGrantSeparatesSubscriptionAndPurchasedCredits(t *testing.T) {
 	t.Parallel()
 
