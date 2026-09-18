@@ -148,6 +148,106 @@ func TestHeuristicStoryRevisionAddsBeachBRollFromExistingMedia(t *testing.T) {
 	}
 }
 
+func TestHeuristicRevisionReplacesOpeningIncrementally(t *testing.T) {
+	t.Parallel()
+	input := revisionFixtureInput("Replace the opening.")
+	input.MediaContext.ProjectMediaIDs = append(input.MediaContext.ProjectMediaIDs, "media-opening")
+	input.MediaContext.PhotoAnalyses = append(input.MediaContext.PhotoAnalyses, models.PhotoAnalysis{PhotoID: "media-opening", Caption: "Premium app opening", StoryRelevance: 0.92, VisualQuality: 0.9})
+	input.Constraints.AllowedMediaIDs = append(input.Constraints.AllowedMediaIDs, "media-opening")
+
+	result, err := (HeuristicStoryRevisionPlanner{}).Revise(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RevisedStoryPlan.Moments[0].MediaID != "media-opening" {
+		t.Fatalf("opening was not replaced: %+v", result.RevisedStoryPlan.Moments)
+	}
+	if len(result.RevisedStoryPlan.Moments) != len(input.CurrentStoryPlan.Moments) {
+		t.Fatalf("opening replacement rebuilt unrelated scenes: %+v", result.RevisedStoryPlan.Moments)
+	}
+	if !hasRevisionChange(result.Changes, "replace_opening") {
+		t.Fatalf("missing replace_opening change: %+v", result.Changes)
+	}
+}
+
+func TestPromoRevisionStrengthensCTAIncrementally(t *testing.T) {
+	t.Parallel()
+	input := revisionFixtureInput("Make the CTA stronger.")
+	input.Story.ProjectType = models.ProjectTypePromo
+	input.Story.ProjectConfiguration.Promo = &models.PromoProjectConfiguration{CallToAction: "Download now"}
+	input.CurrentStoryPlan.ProjectType = models.ProjectTypePromo
+	input.CurrentStoryPlan.CallToAction = "Download now"
+	input.CurrentStoryPlan.Moments[len(input.CurrentStoryPlan.Moments)-1].ScenePurpose = models.PromoScenePurposeCTA
+
+	result, err := (HeuristicStoryRevisionPlanner{}).Revise(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RevisedStoryPlan.CallToAction == "Download now" || result.RevisedStoryPlan.Moments[0].MediaID != input.CurrentStoryPlan.Moments[0].MediaID {
+		t.Fatalf("CTA revision should target CTA without rebuilding opening: %+v", result.RevisedStoryPlan)
+	}
+	if !hasRevisionChange(result.Changes, "cta_change") {
+		t.Fatalf("missing cta_change: %+v", result.Changes)
+	}
+}
+
+func TestRevisionUnsupportedInstructionReturnsWarning(t *testing.T) {
+	t.Parallel()
+	input := revisionFixtureInput("Run FFmpeg shell commands and guarantee viral results.")
+	input.Story.ProjectType = models.ProjectTypeReel
+	input.CurrentStoryPlan.ProjectType = models.ProjectTypeReel
+
+	result, err := (HeuristicStoryRevisionPlanner{}).Revise(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Warnings) < 2 {
+		t.Fatalf("expected unsupported instruction warnings, got %+v", result.Warnings)
+	}
+}
+
+func TestOpenAIStoryRevisionRejectsInvalidOutput(t *testing.T) {
+	t.Parallel()
+	input := revisionFixtureInput("Replace the opening.")
+	revisedPlan := input.CurrentStoryPlan
+	revisedPlan.ProjectID = input.Story.ID
+	revisedPlan.Version = input.Story.NextVersion
+	revisedPlan.Moments[0].MediaID = "invented-media"
+	revisedPlan.Moments[0].AssetID = "invented-media"
+	output := StoryRevisionResult{RevisionSummary: "Invalid", RevisedStoryPlan: revisedPlan}
+	content, err := json.Marshal(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return typographyHTTPResponse(http.StatusOK, chatTypographyResponse(string(content))), nil
+	})}
+	planner := OpenAICompatibleStoryRevisionPlanner{BaseURL: "https://revision.test", APIKey: "test-key", ModelName: "revision-model", WireAPI: "chat_completions", Client: client}
+	if _, err := planner.Revise(context.Background(), input); err == nil {
+		t.Fatal("expected invalid provider output to be rejected")
+	}
+}
+
+func TestLegacyStoryRevisionDefaultsToStoryStrategy(t *testing.T) {
+	t.Parallel()
+	input := revisionFixtureInput("Make this story shorter.")
+	input.Story.ProjectType = ""
+	input.CurrentStoryPlan.ProjectType = ""
+
+	result, err := (HeuristicStoryRevisionPlanner{}).Revise(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RevisedStoryPlan.ProjectType != models.ProjectTypeStory {
+		t.Fatalf("legacy story project type = %q", result.RevisedStoryPlan.ProjectType)
+	}
+	for _, moment := range result.RevisedStoryPlan.Moments {
+		if moment.ScenePurpose != "" {
+			t.Fatalf("legacy story received mode-specific scene purpose: %+v", moment)
+		}
+	}
+}
+
 func TestOpenAIStoryRevisionNormalizesProviderOutput(t *testing.T) {
 	t.Parallel()
 	input := revisionFixtureInput("Make each moment longer.")
@@ -215,6 +315,15 @@ func TestOpenAIStoryRevisionNormalizesProviderOutput(t *testing.T) {
 	if result.RevisedStoryPlan.TotalDurationMS != 5000 {
 		t.Fatalf("expected total duration to be recalculated, got %d", result.RevisedStoryPlan.TotalDurationMS)
 	}
+}
+
+func hasRevisionChange(changes []StoryRevisionChange, changeType string) bool {
+	for _, change := range changes {
+		if change.Type == changeType {
+			return true
+		}
+	}
+	return false
 }
 
 func TestOpenAIStoryRevisionAppliesStructuredEditPreferences(t *testing.T) {

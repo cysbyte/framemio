@@ -25,21 +25,22 @@ const iosStoryVideoURLExpiry = 2 * time.Hour
 const iosStoryDescriptionMaxLength = 240
 
 type iosStory struct {
-	ID               string           `json:"id"`
-	Title            string           `json:"title"`
-	Context          string           `json:"context"`
-	CreatedAt        string           `json:"createdAt"`
-	Duration         float64          `json:"duration"`
-	AssetIDs         []string         `json:"assetIDs"`
-	Status           string           `json:"status"`
-	VideoURL         *string          `json:"videoURL,omitempty"`
-	Description      string           `json:"description,omitempty"`
-	ProgressTitle    string           `json:"progressTitle,omitempty"`
-	ProgressDetail   string           `json:"progressDetail,omitempty"`
-	ProgressValue    *float64         `json:"progressValue,omitempty"`
-	StoryPlanVersion int              `json:"storyPlanVersion,omitempty"`
-	Moments          []iosStoryMoment `json:"moments,omitempty"`
-	AvailableMoments []iosStoryMoment `json:"availableMoments,omitempty"`
+	ID               string             `json:"id"`
+	Type             models.ProjectType `json:"type,omitempty"`
+	Title            string             `json:"title"`
+	Context          string             `json:"context"`
+	CreatedAt        string             `json:"createdAt"`
+	Duration         float64            `json:"duration"`
+	AssetIDs         []string           `json:"assetIDs"`
+	Status           string             `json:"status"`
+	VideoURL         *string            `json:"videoURL,omitempty"`
+	Description      string             `json:"description,omitempty"`
+	ProgressTitle    string             `json:"progressTitle,omitempty"`
+	ProgressDetail   string             `json:"progressDetail,omitempty"`
+	ProgressValue    *float64           `json:"progressValue,omitempty"`
+	StoryPlanVersion int                `json:"storyPlanVersion,omitempty"`
+	Moments          []iosStoryMoment   `json:"moments,omitempty"`
+	AvailableMoments []iosStoryMoment   `json:"availableMoments,omitempty"`
 }
 
 type iosStoryMoment struct {
@@ -1257,6 +1258,7 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 	project := models.StoryProject{
 		ID:                 projectID,
 		UserID:             user.ID,
+		Type:               models.ProjectTypeStory,
 		Title:              iosStoryTitle(input.Context, resolved),
 		Context:            input.Context,
 		MediaIDs:           mediaIDs,
@@ -1459,6 +1461,7 @@ func (s *Server) makeIOSStory(request *http.Request, userID string, project mode
 	progress := s.iosStoryProgress(request, userID, project)
 	story := iosStory{
 		ID:             project.ID,
+		Type:           project.Type,
 		Title:          project.Title,
 		Context:        project.Context,
 		CreatedAt:      iosTimeString(project.CreatedAt),

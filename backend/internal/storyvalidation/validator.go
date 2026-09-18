@@ -49,6 +49,15 @@ func New(store store.Store, objectStorage storage.ObjectStorage, config Config) 
 	if config.AllowedTextOverlayTypes == nil {
 		config.AllowedTextOverlayTypes = DefaultConfig().AllowedTextOverlayTypes
 	}
+	if config.AllowedPromoScenePurposes == nil {
+		config.AllowedPromoScenePurposes = DefaultConfig().AllowedPromoScenePurposes
+	}
+	if config.AllowedCTAStyles == nil {
+		config.AllowedCTAStyles = DefaultConfig().AllowedCTAStyles
+	}
+	if config.AllowedCTAPlacements == nil {
+		config.AllowedCTAPlacements = DefaultConfig().AllowedCTAPlacements
+	}
 	if config.AllowedTypographyStyles == nil {
 		config.AllowedTypographyStyles = DefaultConfig().AllowedTypographyStyles
 	}
@@ -84,6 +93,18 @@ func New(store store.Store, objectStorage storage.ObjectStorage, config Config) 
 	}
 	if config.MaxTypographyLines == 0 {
 		config.MaxTypographyLines = DefaultConfig().MaxTypographyLines
+	}
+	if config.MaxPromoSceneTextLength == 0 {
+		config.MaxPromoSceneTextLength = DefaultConfig().MaxPromoSceneTextLength
+	}
+	if config.MaxVoiceoverTextLength == 0 {
+		config.MaxVoiceoverTextLength = DefaultConfig().MaxVoiceoverTextLength
+	}
+	if config.MaxBrandTextLength == 0 {
+		config.MaxBrandTextLength = DefaultConfig().MaxBrandTextLength
+	}
+	if config.MaxCTAURLLength == 0 {
+		config.MaxCTAURLLength = DefaultConfig().MaxCTAURLLength
 	}
 	if config.MaxNarrativeLength == 0 {
 		config.MaxNarrativeLength = DefaultConfig().MaxNarrativeLength
@@ -245,6 +266,7 @@ func (v *Validator) Validate(ctx context.Context, userID string, plan models.Sto
 		if len(moment.Reason) > config.MaxReasonLength {
 			problems.Add(field+".reason", "too_long", fmt.Sprintf("reason must be at most %d characters", config.MaxReasonLength))
 		}
+		validateSceneMetadata(field, moment, plan.ProjectType, config, problems)
 		if moment.Typography != nil {
 			validateTypography(field+".typography", *moment.Typography, moment.DurationMS, config, problems)
 		}
@@ -380,6 +402,15 @@ func (v *Validator) Validate(ctx context.Context, userID string, plan models.Sto
 	return nil
 }
 
+func ValidatePromoConfiguration(configuration models.PromoProjectConfiguration) error {
+	problems := &ValidationError{}
+	validatePromoConfiguration("configuration.promo", configuration, DefaultConfig(), problems)
+	if problems.HasErrors() {
+		return problems
+	}
+	return nil
+}
+
 func (v *Validator) config() Config {
 	if v == nil {
 		return DefaultConfig()
@@ -409,6 +440,15 @@ func (v *Validator) config() Config {
 	}
 	if config.AllowedTextOverlayTypes == nil {
 		config.AllowedTextOverlayTypes = defaults.AllowedTextOverlayTypes
+	}
+	if config.AllowedPromoScenePurposes == nil {
+		config.AllowedPromoScenePurposes = defaults.AllowedPromoScenePurposes
+	}
+	if config.AllowedCTAStyles == nil {
+		config.AllowedCTAStyles = defaults.AllowedCTAStyles
+	}
+	if config.AllowedCTAPlacements == nil {
+		config.AllowedCTAPlacements = defaults.AllowedCTAPlacements
 	}
 	if config.AllowedTypographyStyles == nil {
 		config.AllowedTypographyStyles = defaults.AllowedTypographyStyles
@@ -445,6 +485,18 @@ func (v *Validator) config() Config {
 	}
 	if config.MaxTypographyLines == 0 {
 		config.MaxTypographyLines = defaults.MaxTypographyLines
+	}
+	if config.MaxPromoSceneTextLength == 0 {
+		config.MaxPromoSceneTextLength = defaults.MaxPromoSceneTextLength
+	}
+	if config.MaxVoiceoverTextLength == 0 {
+		config.MaxVoiceoverTextLength = defaults.MaxVoiceoverTextLength
+	}
+	if config.MaxBrandTextLength == 0 {
+		config.MaxBrandTextLength = defaults.MaxBrandTextLength
+	}
+	if config.MaxCTAURLLength == 0 {
+		config.MaxCTAURLLength = defaults.MaxCTAURLLength
 	}
 	if config.MaxNarrativeLength == 0 {
 		config.MaxNarrativeLength = defaults.MaxNarrativeLength
@@ -486,6 +538,79 @@ func (v *Validator) config() Config {
 		config.MaxCaptionLineCharacters = defaults.MaxCaptionLineCharacters
 	}
 	return config
+}
+
+func validateSceneMetadata(field string, moment models.StoryMoment, projectType models.ProjectType, config Config, problems *ValidationError) {
+	if projectType != models.ProjectTypePromo {
+		return
+	}
+	if moment.Order < 0 {
+		problems.Add(field+".order", "out_of_range", "scene order must not be negative")
+	}
+	if moment.ScenePurpose != "" {
+		if _, ok := config.AllowedPromoScenePurposes[moment.ScenePurpose]; !ok {
+			problems.Add(field+".scene_purpose", "unsupported_scene_purpose", "promo scene purpose is unsupported")
+		}
+	}
+	if moment.SceneText != nil {
+		if utf8.RuneCountInString(moment.SceneText.Headline) > config.MaxPromoSceneTextLength {
+			problems.Add(field+".scene_text.headline", "too_long", fmt.Sprintf("scene headline must be at most %d characters", config.MaxPromoSceneTextLength))
+		}
+		if utf8.RuneCountInString(moment.SceneText.Supporting) > config.MaxPromoSceneTextLength {
+			problems.Add(field+".scene_text.supporting", "too_long", fmt.Sprintf("scene supporting text must be at most %d characters", config.MaxPromoSceneTextLength))
+		}
+		if utf8.RuneCountInString(moment.SceneText.CTA) > config.MaxPromoSceneTextLength {
+			problems.Add(field+".scene_text.cta", "too_long", fmt.Sprintf("scene CTA text must be at most %d characters", config.MaxPromoSceneTextLength))
+		}
+	}
+	if moment.Voiceover != nil {
+		if utf8.RuneCountInString(moment.Voiceover.Text) > config.MaxVoiceoverTextLength {
+			problems.Add(field+".voiceover.text", "too_long", fmt.Sprintf("scene voiceover text must be at most %d characters", config.MaxVoiceoverTextLength))
+		}
+		if moment.Voiceover.StartMS < 0 || moment.Voiceover.DurationMS < 0 || moment.Voiceover.StartMS+moment.Voiceover.DurationMS > moment.DurationMS {
+			problems.Add(field+".voiceover.timing", "invalid_timing", "scene voiceover timing must fit within the owning scene")
+		}
+	}
+}
+
+func validatePromoConfiguration(field string, configuration models.PromoProjectConfiguration, config Config, problems *ValidationError) {
+	validateBrandConfiguration(field+".brand", configuration.Brand, config, problems)
+	if configuration.CTA != nil {
+		validateCTAConfiguration(field+".cta", *configuration.CTA, config, problems)
+	}
+	if utf8.RuneCountInString(configuration.CallToAction) > config.MaxPromoSceneTextLength {
+		problems.Add(field+".call_to_action", "too_long", fmt.Sprintf("CTA text must be at most %d characters", config.MaxPromoSceneTextLength))
+	}
+}
+
+func validateBrandConfiguration(field string, brand models.BrandConfiguration, config Config, problems *ValidationError) {
+	if utf8.RuneCountInString(brand.Name) > config.MaxBrandTextLength {
+		problems.Add(field+".name", "too_long", fmt.Sprintf("brand name must be at most %d characters", config.MaxBrandTextLength))
+	}
+	if strings.TrimSpace(brand.PrimaryColor) != "" && !isHexColor(brand.PrimaryColor) {
+		problems.Add(field+".primary_color", "invalid_color", "brand primary color must be a #RRGGBB color")
+	}
+	if strings.TrimSpace(brand.SecondaryColor) != "" && !isHexColor(brand.SecondaryColor) {
+		problems.Add(field+".secondary_color", "invalid_color", "brand secondary color must be a #RRGGBB color")
+	}
+	if utf8.RuneCountInString(brand.FontPreference) > config.MaxBrandTextLength {
+		problems.Add(field+".font_preference", "too_long", fmt.Sprintf("brand font preference must be at most %d characters", config.MaxBrandTextLength))
+	}
+}
+
+func validateCTAConfiguration(field string, cta models.CTAConfiguration, config Config, problems *ValidationError) {
+	if utf8.RuneCountInString(cta.Text) > config.MaxPromoSceneTextLength {
+		problems.Add(field+".text", "too_long", fmt.Sprintf("CTA text must be at most %d characters", config.MaxPromoSceneTextLength))
+	}
+	if strings.TrimSpace(cta.Style) != "" && !allowedString(config.AllowedCTAStyles, cta.Style) {
+		problems.Add(field+".style", "unsupported_cta_style", "CTA style is unsupported")
+	}
+	if strings.TrimSpace(cta.Placement) != "" && !allowedString(config.AllowedCTAPlacements, cta.Placement) {
+		problems.Add(field+".placement", "unsupported_cta_placement", "CTA placement is unsupported")
+	}
+	if utf8.RuneCountInString(cta.URL) > config.MaxCTAURLLength {
+		problems.Add(field+".url", "too_long", fmt.Sprintf("CTA URL must be at most %d characters", config.MaxCTAURLLength))
+	}
 }
 
 func allowedString(values map[string]struct{}, value string) bool {

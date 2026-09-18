@@ -94,18 +94,6 @@ const (
 	ProjectStatusFailed     ProjectStatus = "failed"
 )
 
-type StoryProject struct {
-	ID                 string        `json:"id"`
-	UserID             string        `json:"user_id"`
-	Title              string        `json:"title"`
-	Context            string        `json:"context"`
-	MediaIDs           []string      `json:"media_ids"`
-	CreditOperationKey string        `json:"credit_operation_key,omitempty"`
-	Status             ProjectStatus `json:"status"`
-	CreatedAt          time.Time     `json:"created_at"`
-	UpdatedAt          time.Time     `json:"updated_at"`
-}
-
 type JobType string
 
 const (
@@ -193,6 +181,7 @@ type ProcessingJob struct {
 	ID              string            `json:"id"`
 	UserID          string            `json:"user_id"`
 	ProjectID       string            `json:"project_id"`
+	ProjectType     ProjectType       `json:"project_type,omitempty"`
 	MediaID         string            `json:"media_id,omitempty"`
 	Type            JobType           `json:"type"`
 	Status          JobStatus         `json:"status"`
@@ -229,12 +218,14 @@ type StoryPlan struct {
 	SchemaVersion       string         `json:"schema_version,omitempty"`
 	ID                  string         `json:"id"`
 	ProjectID           string         `json:"project_id"`
+	ProjectType         ProjectType    `json:"project_type,omitempty"`
 	Version             int            `json:"version"`
 	RequestedDurationMS int            `json:"requested_duration_ms,omitempty"`
 	StoryType           StoryType      `json:"story_type,omitempty"`
 	VisualStyle         VisualStyle    `json:"visual_style,omitempty"`
 	TitleText           string         `json:"title_text,omitempty"`
 	EndingText          string         `json:"ending_text,omitempty"`
+	CallToAction        string         `json:"call_to_action,omitempty"`
 	UserInstructions    string         `json:"user_instructions,omitempty"`
 	Moments             []StoryMoment  `json:"moments"`
 	BRoll               []StoryBRoll   `json:"broll,omitempty"`
@@ -256,6 +247,9 @@ const (
 	TextOverlayChapterTitle  TextOverlayType = "chapter_title"
 	TextOverlayStoryIntro    TextOverlayType = "story_intro"
 	TextOverlayStoryOutro    TextOverlayType = "story_outro"
+	TextOverlayPromoHeadline TextOverlayType = "promo_headline"
+	TextOverlayPromoSupport  TextOverlayType = "promo_support"
+	TextOverlayPromoCTA      TextOverlayType = "promo_cta"
 )
 
 type TypographyStyle string
@@ -324,22 +318,52 @@ type TextOverlay struct {
 	Confidence float64         `json:"confidence,omitempty"`
 }
 
+type PromoScenePurpose string
+
+const (
+	PromoScenePurposeHook        PromoScenePurpose = "hook"
+	PromoScenePurposeProblem     PromoScenePurpose = "problem"
+	PromoScenePurposeProduct     PromoScenePurpose = "product"
+	PromoScenePurposeFeature     PromoScenePurpose = "feature"
+	PromoScenePurposeBenefit     PromoScenePurpose = "benefit"
+	PromoScenePurposeProof       PromoScenePurpose = "proof"
+	PromoScenePurposeTestimonial PromoScenePurpose = "testimonial"
+	PromoScenePurposeCTA         PromoScenePurpose = "cta"
+	PromoScenePurposeOutro       PromoScenePurpose = "outro"
+)
+
+type PromoSceneText struct {
+	Headline   string `json:"headline,omitempty"`
+	Supporting string `json:"supporting,omitempty"`
+	CTA        string `json:"cta,omitempty"`
+}
+
+type SceneVoiceover struct {
+	Text       string `json:"text,omitempty"`
+	StartMS    int    `json:"start_ms,omitempty"`
+	DurationMS int    `json:"duration_ms,omitempty"`
+}
+
 type StoryMoment struct {
-	MomentID             string       `json:"moment_id,omitempty"`
-	AssetID              string       `json:"asset_id"`
-	MediaID              string       `json:"media_id,omitempty"`
-	MediaType            MediaType    `json:"media_type,omitempty"`
-	VideoAnalysisVersion string       `json:"video_analysis_version,omitempty"`
-	StartMicros          int64        `json:"start_micros,omitempty"`
-	EndMicros            int64        `json:"end_micros,omitempty"`
-	Narrative            string       `json:"narrative,omitempty"`
-	Caption              string       `json:"caption,omitempty"`
-	DurationMS           int          `json:"duration_ms"`
-	CropIntent           string       `json:"crop_intent,omitempty"`
-	Transition           string       `json:"transition,omitempty"`
-	Reason               string       `json:"reason,omitempty"`
-	Score                float64      `json:"score,omitempty"`
-	Typography           *TextOverlay `json:"typography,omitempty"`
+	MomentID             string            `json:"moment_id,omitempty"`
+	AssetID              string            `json:"asset_id"`
+	MediaID              string            `json:"media_id,omitempty"`
+	MediaType            MediaType         `json:"media_type,omitempty"`
+	VideoAnalysisVersion string            `json:"video_analysis_version,omitempty"`
+	StartMicros          int64             `json:"start_micros,omitempty"`
+	EndMicros            int64             `json:"end_micros,omitempty"`
+	Narrative            string            `json:"narrative,omitempty"`
+	Caption              string            `json:"caption,omitempty"`
+	DurationMS           int               `json:"duration_ms"`
+	CropIntent           string            `json:"crop_intent,omitempty"`
+	Transition           string            `json:"transition,omitempty"`
+	Reason               string            `json:"reason,omitempty"`
+	Score                float64           `json:"score,omitempty"`
+	Typography           *TextOverlay      `json:"typography,omitempty"`
+	Order                int               `json:"order,omitempty"`
+	ScenePurpose         PromoScenePurpose `json:"scene_purpose,omitempty"`
+	SceneText            *PromoSceneText   `json:"scene_text,omitempty"`
+	Voiceover            *SceneVoiceover   `json:"voiceover,omitempty"`
 }
 
 type StoryBRoll struct {

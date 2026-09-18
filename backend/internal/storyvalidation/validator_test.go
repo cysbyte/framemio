@@ -130,6 +130,92 @@ func TestValidateStoryPlanAcceptsTypography(t *testing.T) {
 	}
 }
 
+func TestValidatePromoEditPlanAcceptsSceneMetadata(t *testing.T) {
+	t.Parallel()
+	validator, plan := validStoryPlanFixture(t)
+	plan.ProjectType = models.ProjectTypePromo
+	plan.CallToAction = "Try it free"
+	plan.Moments[0].Order = 1
+	plan.Moments[0].ScenePurpose = models.PromoScenePurposeHook
+	plan.Moments[0].SceneText = &models.PromoSceneText{Headline: "Launch faster", Supporting: "AI-assisted product videos", CTA: "Try it free"}
+	plan.Moments[0].Voiceover = &models.SceneVoiceover{Text: "Create a polished promo in minutes.", StartMS: 0, DurationMS: 1800}
+	plan.Moments[0].Typography = &models.TextOverlay{
+		Enabled: true, Type: models.TextOverlayPromoHeadline, Title: "Launch faster", Subtitle: "AI-assisted videos",
+		Style: models.TypographyStyleEditorial, Placement: models.TextPlacementBottomLeft, StartMS: 250, DurationMS: 1800, MaxWidth: 0.78,
+		SafeArea: models.SafeArea{Top: 0.08, Right: 0.08, Bottom: 0.08, Left: 0.08}, Animation: models.TextAnimationFadeUp, Source: models.TextSourceAI, Confidence: 0.9,
+	}
+
+	if err := validator.Validate(context.Background(), "user-1", plan); err != nil {
+		t.Fatalf("validate promo plan: %v", err)
+	}
+}
+
+func TestValidatePromoEditPlanRejectsInvalidSceneMetadata(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		mutate func(*models.StoryMoment)
+		field  string
+		code   string
+	}{
+		{name: "invalid purpose", mutate: func(moment *models.StoryMoment) { moment.ScenePurpose = "random" }, field: "moments[0].scene_purpose", code: "unsupported_scene_purpose"},
+		{name: "headline too long", mutate: func(moment *models.StoryMoment) {
+			moment.SceneText = &models.PromoSceneText{Headline: makeString("A", 81)}
+		}, field: "moments[0].scene_text.headline", code: "too_long"},
+		{name: "voiceover outside scene", mutate: func(moment *models.StoryMoment) {
+			moment.Voiceover = &models.SceneVoiceover{Text: "Read this", StartMS: 2500, DurationMS: 800}
+		}, field: "moments[0].voiceover.timing", code: "invalid_timing"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			validator, plan := validStoryPlanFixture(t)
+			plan.ProjectType = models.ProjectTypePromo
+			tc.mutate(&plan.Moments[0])
+			err := validator.Validate(context.Background(), "user-1", plan)
+			if err == nil {
+				t.Fatalf("expected validation error")
+			}
+			validationErr, ok := AsValidationError(err)
+			if !ok {
+				t.Fatalf("unexpected error type: %T %v", err, err)
+			}
+			assertFieldError(t, validationErr, tc.field, tc.code)
+		})
+	}
+}
+
+func TestValidatePromoConfigurationChecksBrandAndCTA(t *testing.T) {
+	t.Parallel()
+	valid := models.PromoProjectConfiguration{
+		PromotionCategory:  "app",
+		PromotionGoal:      "downloads",
+		ProductInformation: "FrameMio",
+		CallToAction:       "Try it free",
+		Brand:              models.BrandConfiguration{Name: "FrameMio", PrimaryColor: "#2244FF", SecondaryColor: "#11AA88", FontPreference: "Inter"},
+		CTA:                &models.CTAConfiguration{Text: "Try it free", Style: "button", Placement: "bottom"},
+	}
+	if err := ValidatePromoConfiguration(valid); err != nil {
+		t.Fatalf("valid promo configuration rejected: %v", err)
+	}
+
+	invalid := valid
+	invalid.Brand.PrimaryColor = "blue"
+	invalid.CTA = &models.CTAConfiguration{Text: "Try it free", Style: "flashy", URL: makeString("u", 241)}
+	err := ValidatePromoConfiguration(invalid)
+	if err == nil {
+		t.Fatalf("expected validation error")
+	}
+	validationErr, ok := AsValidationError(err)
+	if !ok {
+		t.Fatalf("unexpected error type: %T %v", err, err)
+	}
+	assertFieldError(t, validationErr, "configuration.promo.brand.primary_color", "invalid_color")
+	assertFieldError(t, validationErr, "configuration.promo.cta.style", "unsupported_cta_style")
+	assertFieldError(t, validationErr, "configuration.promo.cta.url", "too_long")
+}
+
 func TestValidateStoryPlanRejectsInvalidTypography(t *testing.T) {
 	t.Parallel()
 	valid := models.TextOverlay{

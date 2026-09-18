@@ -1,9 +1,10 @@
 import Foundation
 
 enum AppRoute: Hashable {
-    case allStories
-    case mediaPicker(context: MomentContext)
-    case storyCreation(context: MomentContext, assets: [MediaAsset])
+    case allProjects
+    case mediaPicker(draft: VideoProjectDraft)
+    case projectConfiguration(draft: VideoProjectDraft, assets: [MediaAsset])
+    case storyCreation(draft: VideoProjectDraft, assets: [MediaAsset])
     case storyPreview(story: Story)
-    case storyCreating(context: MomentContext, assets: [MediaAsset], options: StoryGenerationOptions, launchID: UUID)
+    case storyCreating(draft: VideoProjectDraft, assets: [MediaAsset], launchID: UUID)
 }

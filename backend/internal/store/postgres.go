@@ -38,6 +38,9 @@ func (s *PostgresStore) Migrate(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("migrate postgres: %w", err)
 	}
+	if _, err := s.pool.Exec(ctx, videoProjectCompatibilityMigration); err != nil {
+		return fmt.Errorf("migrate video projects: %w", err)
+	}
 	return nil
 }
 
@@ -325,9 +328,10 @@ func (s *PostgresStore) MarkMediaReady(ctx context.Context, userID, mediaID, upl
 	return media, nil
 }
 
-func (s *PostgresStore) CreateProject(ctx context.Context, project models.StoryProject, idempotencyKey string) (models.StoryProject, bool, error) {
+func (s *PostgresStore) CreateProject(ctx context.Context, project models.VideoProject, idempotencyKey string) (models.VideoProject, bool, error) {
+	project = project.Normalized()
 	if idempotencyKey != "" {
-		var existing models.StoryProject
+		var existing models.VideoProject
 		if err := s.getByLogical(ctx, "project", project.UserID, idempotencyKey, &existing); err == nil {
 			return existing, true, nil
 		}
@@ -335,27 +339,55 @@ func (s *PostgresStore) CreateProject(ctx context.Context, project models.StoryP
 	for _, mediaID := range project.MediaIDs {
 		media, err := s.GetMedia(ctx, project.UserID, mediaID)
 		if err != nil || media.Status != models.MediaStatusReady {
-			return models.StoryProject{}, false, ErrConflict
+			return models.VideoProject{}, false, ErrConflict
 		}
 	}
 	inserted, err := s.put(ctx, "project", project.ID, project.UserID, project.ID, "", idempotencyKey, project)
 	if err != nil {
-		return models.StoryProject{}, false, err
+		return models.VideoProject{}, false, err
 	}
 	if !inserted {
-		var existing models.StoryProject
+		var existing models.VideoProject
 		if lookupErr := s.getByLogical(ctx, "project", project.UserID, idempotencyKey, &existing); lookupErr == nil {
 			return existing, true, nil
 		}
-		return models.StoryProject{}, false, ErrConflict
+		return models.VideoProject{}, false, ErrConflict
 	}
 	return project, false, nil
 }
 
-func (s *PostgresStore) AddProjectMedia(ctx context.Context, userID, projectID string, mediaIDs []string) (models.StoryProject, error) {
+func (s *PostgresStore) UpdateProject(ctx context.Context, project models.VideoProject) (models.VideoProject, error) {
+	existing, err := s.GetProject(ctx, project.UserID, project.ID)
+	if err != nil {
+		return models.VideoProject{}, err
+	}
+	project = project.Normalized()
+	for _, mediaID := range project.MediaIDs {
+		media, err := s.GetMedia(ctx, project.UserID, mediaID)
+		if err != nil || media.Status != models.MediaStatusReady {
+			return models.VideoProject{}, ErrConflict
+		}
+	}
+	project.CreatedAt = existing.CreatedAt
+	project.UpdatedAt = time.Now().UTC()
+	data, err := json.Marshal(project)
+	if err != nil {
+		return models.VideoProject{}, err
+	}
+	result, err := s.pool.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='project' AND id=$3 AND user_id=$4`, jsonbParam(data), project.UpdatedAt, project.ID, project.UserID)
+	if err != nil {
+		return models.VideoProject{}, fmt.Errorf("update project: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return models.VideoProject{}, ErrNotFound
+	}
+	return project, nil
+}
+
+func (s *PostgresStore) AddProjectMedia(ctx context.Context, userID, projectID string, mediaIDs []string) (models.VideoProject, error) {
 	project, err := s.GetProject(ctx, userID, projectID)
 	if err != nil {
-		return models.StoryProject{}, err
+		return models.VideoProject{}, err
 	}
 	existing := make(map[string]struct{}, len(project.MediaIDs))
 	existingSourceAssets := make(map[string]struct{}, len(project.MediaIDs))
@@ -375,10 +407,10 @@ func (s *PostgresStore) AddProjectMedia(ctx context.Context, userID, projectID s
 		}
 		media, err := s.GetMedia(ctx, userID, mediaID)
 		if err != nil {
-			return models.StoryProject{}, err
+			return models.VideoProject{}, err
 		}
 		if media.Status != models.MediaStatusReady {
-			return models.StoryProject{}, ErrConflict
+			return models.VideoProject{}, ErrConflict
 		}
 		if _, ok := existing[mediaID]; ok {
 			continue
@@ -399,43 +431,43 @@ func (s *PostgresStore) AddProjectMedia(ctx context.Context, userID, projectID s
 	project.UpdatedAt = time.Now().UTC()
 	data, err := json.Marshal(project)
 	if err != nil {
-		return models.StoryProject{}, err
+		return models.VideoProject{}, err
 	}
 	result, err := s.pool.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='project' AND id=$3 AND user_id=$4`, jsonbParam(data), project.UpdatedAt, projectID, userID)
 	if err != nil {
-		return models.StoryProject{}, fmt.Errorf("add project media: %w", err)
+		return models.VideoProject{}, fmt.Errorf("add project media: %w", err)
 	}
 	if result.RowsAffected() == 0 {
-		return models.StoryProject{}, ErrNotFound
+		return models.VideoProject{}, ErrNotFound
 	}
 	return project, nil
 }
 
-func (s *PostgresStore) GetProject(ctx context.Context, userID, projectID string) (models.StoryProject, error) {
-	var project models.StoryProject
+func (s *PostgresStore) GetProject(ctx context.Context, userID, projectID string) (models.VideoProject, error) {
+	var project models.VideoProject
 	if err := s.get(ctx, "project", userID, projectID, &project); err != nil {
-		return models.StoryProject{}, err
+		return models.VideoProject{}, err
 	}
-	return project, nil
+	return project.Normalized(), nil
 }
 
-func (s *PostgresStore) ListProjects(ctx context.Context, userID string) ([]models.StoryProject, error) {
+func (s *PostgresStore) ListProjects(ctx context.Context, userID string) ([]models.VideoProject, error) {
 	rows, err := s.pool.Query(ctx, `SELECT data FROM framemio_domain_records WHERE kind='project' AND user_id=$1 ORDER BY created_at DESC`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)
 	}
 	defer rows.Close()
-	projects := make([]models.StoryProject, 0)
+	projects := make([]models.VideoProject, 0)
 	for rows.Next() {
 		var data []byte
 		if err := rows.Scan(&data); err != nil {
 			return nil, err
 		}
-		var project models.StoryProject
+		var project models.VideoProject
 		if err := json.Unmarshal(data, &project); err != nil {
 			return nil, fmt.Errorf("decode project: %w", err)
 		}
-		projects = append(projects, project)
+		projects = append(projects, project.Normalized())
 	}
 	return projects, rows.Err()
 }
@@ -696,6 +728,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS framemio_domain_records_logical_key
     WHERE logical_key <> '';
 CREATE INDEX IF NOT EXISTS framemio_domain_records_project
     ON framemio_domain_records (kind, user_id, project_id, created_at);`
+
+const videoProjectCompatibilityMigration = `
+-- Legacy project records predate project.type. Default only missing values.
+UPDATE framemio_domain_records
+SET data = jsonb_set(data, '{type}', '"story"'::jsonb, true),
+    updated_at = NOW()
+WHERE kind = 'project'
+  AND (data->>'type' IS NULL OR BTRIM(data->>'type') = '');`
 
 func (s *PostgresStore) SaveAnalysis(ctx context.Context, userID string, analysis models.MediaAnalysis) error {
 	if _, err := s.GetProject(ctx, userID, analysis.ProjectID); err != nil {

@@ -73,7 +73,14 @@ async function prepareRemotionStaticAssets(composition: CompositionSpec, publicD
 
   return {
     ...composition,
-    clips: await Promise.all(composition.clips.map(async (clip) => ({...clip, typography: undefined, prepared_path: await toStaticAsset(clip.prepared_path)}))),
+    clips: await Promise.all(composition.clips.map(async (clip) => ({...clip, prepared_path: await toStaticAsset(clip.prepared_path)}))),
+    scenes: composition.scenes ? await Promise.all(composition.scenes.map(async (scene) => ({
+      ...scene,
+      prepared_path: await toStaticAsset(scene.prepared_path),
+      media: {...scene.media, source_path: await toStaticAsset(scene.media.source_path), prepared_path: scene.media.prepared_path ? await toStaticAsset(scene.media.prepared_path) : undefined},
+    }))) : undefined,
+    media: composition.media ? await Promise.all(composition.media.map(async (asset) => ({...asset, source_path: await toStaticAsset(asset.source_path), prepared_path: asset.prepared_path ? await toStaticAsset(asset.prepared_path) : undefined}))) : undefined,
+    branding: composition.branding?.logo_path ? {...composition.branding, logo_path: await toStaticAsset(composition.branding.logo_path)} : composition.branding,
     broll: await Promise.all(composition.broll.map(async (overlay) => ({...overlay, prepared_path: await toStaticAsset(overlay.prepared_path)}))),
   };
 }
@@ -742,8 +749,8 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
       args.push('-i', inputPath);
     }
     const captions = await this.prepareCaptionOverlays(composition, outputPath);
-    const typography: TypographyOverlay[] = [];
-    console.info(JSON.stringify({level: 'info', msg: 'ffmpeg overlays prepared', project_id: composition.project_id, story_plan_id: composition.story_plan_id, input_caption_count: composition.captions.length, caption_overlay_count: captions.length, typography_overlay_count: typography.length, typography_disabled: true}));
+    const typography = await this.prepareTypographyOverlays(composition, outputPath);
+    console.info(JSON.stringify({level: 'info', msg: 'ffmpeg overlays prepared', project_id: composition.project_id, story_plan_id: composition.story_plan_id, input_caption_count: composition.captions.length, caption_overlay_count: captions.length, typography_overlay_count: typography.length}));
     const filter = concatFilter(composition, captions, typography);
     args.push(
       '-filter_complex',
@@ -797,11 +804,12 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
   private async prepareTypographyOverlays(composition: CompositionSpec, outputPath: string): Promise<TypographyOverlay[]> {
     const overlays: TypographyOverlay[] = [];
     const outputDir = path.dirname(outputPath);
-    for (const [clipIndex, clip] of composition.clips.entries()) {
-      const typography = clip.typography;
-      if (!typography?.enabled) {
-        continue;
-      }
+    for (const [clipIndex, clip] of (composition.scenes ?? composition.clips).entries()) {
+      const textOverlays = clip.overlays?.length ? clip.overlays : clip.typography ? [clip.typography] : [];
+      for (const [overlayIndex, typography] of textOverlays.entries()) {
+        if (!typography?.enabled) {
+          continue;
+        }
       const timing = typographyTiming(clip, typography, composition);
       if (!timing) {
         console.info(JSON.stringify({level: 'info', msg: 'skipping typography overlay with invalid timing', project_id: composition.project_id, story_plan_id: composition.story_plan_id, clip_id: clip.clip_id}));
@@ -821,14 +829,15 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
       const gap = titleLines > 0 && subtitleLines > 0 ? Math.round(style.subtitleFontSize * 0.42) : 0;
       const groupHeight = titleHeight + gap + subtitleHeight;
       if (title) {
-        const textFilePath = path.join(outputDir, `typography-${clipIndex}-title-${stableHash({title, timing}).slice(0, 12)}.txt`);
+        const textFilePath = path.join(outputDir, `typography-${clipIndex}-${overlayIndex}-title-${stableHash({title, timing}).slice(0, 12)}.txt`);
         await writeFile(textFilePath, title, 'utf8');
         overlays.push({textFilePath, startSeconds: timing.startSeconds, endSeconds: timing.endSeconds, placement, style: String(typography.style ?? 'cinematic'), kind: 'title', safeArea, maxWidth, lineCount: titleLines, groupHeight, offsetY: 0, animation});
       }
       if (subtitle) {
-        const textFilePath = path.join(outputDir, `typography-${clipIndex}-subtitle-${stableHash({subtitle, timing}).slice(0, 12)}.txt`);
+        const textFilePath = path.join(outputDir, `typography-${clipIndex}-${overlayIndex}-subtitle-${stableHash({subtitle, timing}).slice(0, 12)}.txt`);
         await writeFile(textFilePath, subtitle, 'utf8');
         overlays.push({textFilePath, startSeconds: timing.startSeconds, endSeconds: timing.endSeconds, placement, style: String(typography.style ?? 'cinematic'), kind: 'subtitle', safeArea, maxWidth, lineCount: subtitleLines, groupHeight, offsetY: titleHeight + gap, animation});
+      }
       }
     }
     return overlays;

@@ -36,6 +36,9 @@ var (
 		models.TextOverlayChapterTitle:  {},
 		models.TextOverlayStoryIntro:    {},
 		models.TextOverlayStoryOutro:    {},
+		models.TextOverlayPromoHeadline: {},
+		models.TextOverlayPromoSupport:  {},
+		models.TextOverlayPromoCTA:      {},
 	}
 	allowedTypographyStyles = map[models.TypographyStyle]struct{}{
 		models.TypographyStyleCinematic: {},

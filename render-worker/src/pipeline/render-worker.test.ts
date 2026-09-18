@@ -198,16 +198,23 @@ test('applies deterministic cinematic motion to photo clips', () => {
   assert.equal(composition.clips[0].media_type, 'photo');
 });
 
-test('defers typography on timeline clips for first release', () => {
+test('carries promo scene metadata and typography into timeline clips', () => {
   const basePlan = fixtureStoryPlan();
   const plan = fixtureStoryPlan({
+    project_type: 'promo',
+    call_to_action: 'Try it free',
     moments: [{
       ...basePlan.moments[0],
+      order: 1,
+      scene_purpose: 'hook',
+      scene_text: {headline: 'Launch faster', supporting: 'AI-assisted promos', cta: 'Try it free'},
+      voiceover: {text: 'Create a polished promo in minutes.', start_ms: 0, duration_ms: 1800},
       typography: {
         enabled: true,
-        type: 'moment_title',
-        title: 'Golden Hour',
-        style: 'cinematic',
+        type: 'promo_headline',
+        title: 'Launch faster',
+        subtitle: 'AI-assisted promos',
+        style: 'editorial',
         placement: 'bottom_left',
       },
     }],
@@ -224,7 +231,82 @@ test('defers typography on timeline clips for first release', () => {
     composition_file: '/work/composition.json',
   });
 
-  assert.equal(composition.clips[0].typography, undefined);
+  assert.equal(composition.project_type, 'promo');
+  assert.equal(composition.scenes?.[0].id, composition.clips[0].scene_id);
+  assert.equal(composition.scenes?.[0].overlays?.[0]?.title, 'Launch faster');
+  assert.equal(composition.text?.[0]?.title, 'Launch faster');
+  assert.equal(composition.cta?.text, 'Try it free');
+  assert.equal(composition.call_to_action, 'Try it free');
+  assert.equal(composition.clips[0].order, 1);
+  assert.equal(composition.clips[0].scene_purpose, 'hook');
+  assert.deepEqual(composition.clips[0].scene_text, {headline: 'Launch faster', supporting: 'AI-assisted promos', cta: 'Try it free'});
+  assert.deepEqual(composition.clips[0].voiceover, {text: 'Create a polished promo in minutes.', start_ms: 0, duration_ms: 1800});
+  assert.equal(composition.clips[0].typography?.type, 'promo_headline');
+  assert.equal(composition.clips[0].typography?.title, 'Launch faster');
+});
+
+test('builds normalized Story, Promo, and Reel compositions from shared fixtures', async () => {
+  const cases = [
+    {
+      projectType: 'story' as const,
+      plan: fixtureStoryPlan({project_type: 'story'}),
+      assert: (composition: Awaited<ReturnType<DeterministicRenderWorker['render']>>['composition']) => {
+        assert.equal(composition.canvas?.aspect_ratio, '9:16');
+        assert.equal(composition.scenes?.length, composition.clips.length);
+        assert.equal(composition.text?.length, 0);
+      },
+    },
+    {
+      projectType: 'promo' as const,
+      plan: fixtureStoryPlan({
+        project_type: 'promo',
+        call_to_action: 'Try it today',
+        moments: [{
+          ...fixtureStoryPlan().moments[0],
+          scene_text: {headline: 'Create faster', supporting: 'AI-assisted video editing', cta: 'Try it today'},
+          typography: {enabled: true, title: 'Create faster', subtitle: 'AI-assisted video editing', style: 'editorial', placement: 'bottom_left'},
+        }],
+        captions: [],
+        audio: {source: 'none'},
+        output: {aspect_ratio: '16:9', max_duration_seconds: 15, preset: 'social'},
+        total_duration_ms: 3000,
+      }),
+      assert: (composition: Awaited<ReturnType<DeterministicRenderWorker['render']>>['composition']) => {
+        assert.deepEqual(composition.resolution, {width: 1920, height: 1080});
+        assert.equal(composition.cta?.text, 'Try it today');
+        assert.equal(composition.scenes?.[0].overlays?.[0]?.title, 'Create faster');
+      },
+    },
+    {
+      projectType: 'reel' as const,
+      plan: fixtureStoryPlan({
+        project_type: 'reel',
+        moments: fixtureStoryPlan().moments.map((moment) => ({...moment, crop_intent: 'fill', typography: {enabled: true, title: 'Watch this', style: 'minimal', placement: 'top_center', safe_area: {top: 0.08, right: 0.08, bottom: 0.16, left: 0.08}}})),
+        caption_style: {preset: 'bold_social', font_size: 52, bottom_offset: 160, position: 'bottom'},
+        output: {aspect_ratio: '9:16', max_duration_seconds: 15, preset: 'social'},
+      }),
+      assert: (composition: Awaited<ReturnType<DeterministicRenderWorker['render']>>['composition']) => {
+        assert.deepEqual(composition.resolution, {width: 1080, height: 1920});
+        assert.equal(composition.scenes?.every((scene) => scene.crop_intent === 'fill'), true);
+        assert.equal(composition.canvas?.safe_area?.bottom, 0.16);
+      },
+    },
+  ];
+
+  for (const testCase of cases) {
+    const harness = await createHarness();
+    const result = await harness.worker.render(fixtureRenderInput({
+      project_type: testCase.projectType,
+      story_plan: testCase.plan,
+    }));
+    assert.equal(result.composition.project_type, testCase.projectType);
+    assert.ok(result.composition.canvas);
+    assert.ok(result.composition.scenes);
+    assert.ok(result.composition.media);
+    assert.ok(result.composition.transitions);
+    assert.ok(result.composition.effects);
+    testCase.assert(result.composition);
+  }
 });
 
 test('normalizes transitions and resolves audio deterministically', () => {
@@ -381,7 +463,7 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
   }
 });
 
-test('ffmpeg fallback renderer ignores typography for first release', async () => {
+test('ffmpeg fallback renderer includes typography overlays', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'framemio-typography-render-test-'));
   const fakeFfmpeg = path.join(root, 'fake-ffmpeg.cjs');
   const argsPath = path.join(root, 'ffmpeg-args.json');
@@ -431,8 +513,8 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
 
     const args = JSON.parse(await readFile(argsPath, 'utf8')) as string[];
     const filterComplex = args[args.indexOf('-filter_complex') + 1];
-    assert.doesNotMatch(filterComplex, /typography-0-title-/);
-    assert.doesNotMatch(filterComplex, /typography-0-subtitle-/);
+    assert.match(filterComplex, /typography-0-.*title-/);
+    assert.match(filterComplex, /typography-0-.*subtitle-/);
     assert.match(filterComplex, /caption-0-/);
   } finally {
     if (previousArgsPath === undefined) {
@@ -597,11 +679,60 @@ test('supports the required output aspect ratios', () => {
   assert.deepEqual(resolutionForAspectRatio('16:9'), {width: 1920, height: 1080});
 });
 
+test('renders Story, Promo, and Reel through the same normalized composition', async () => {
+  const cases = [
+    {projectType: 'story' as const, aspectRatio: '9:16' as const},
+    {projectType: 'promo' as const, aspectRatio: '16:9' as const},
+    {projectType: 'reel' as const, aspectRatio: '9:16' as const},
+  ];
+
+  for (const testCase of cases) {
+    const harness = await createHarness();
+    const result = await harness.worker.render(fixtureRenderInput({
+      project_type: testCase.projectType,
+      project_configuration: {mode: testCase.projectType, brand: testCase.projectType === 'promo' ? {name: 'FrameMio'} : undefined},
+      story_plan: fixtureStoryPlan({
+        project_type: testCase.projectType,
+        call_to_action: testCase.projectType === 'promo' ? 'Try it today' : undefined,
+        output: {aspect_ratio: testCase.aspectRatio, max_duration_seconds: 15, preset: 'social'},
+      }),
+    }));
+    assert.equal(result.composition.project_type, testCase.projectType);
+    assert.equal(result.composition.project_configuration?.mode, testCase.projectType);
+    assert.deepEqual(result.composition.resolution, resolutionForAspectRatio(testCase.aspectRatio));
+    assert.equal(result.composition.clips.length, 2);
+    if (testCase.projectType === 'promo') {
+      assert.equal(result.composition.call_to_action, 'Try it today');
+      assert.equal(result.composition.branding?.name, 'FrameMio');
+      assert.deepEqual(result.composition.project_configuration?.brand, {name: 'FrameMio'});
+    }
+  }
+});
+
+test('rejects reel render input that is not vertical', async () => {
+  const harness = await createHarness();
+  await assert.rejects(
+    () => harness.worker.render(fixtureRenderInput({
+      project_type: 'reel',
+      story_plan: fixtureStoryPlan({
+        project_type: 'reel',
+        output: {aspect_ratio: '1:1', max_duration_seconds: 15, preset: 'social'},
+      }),
+    })),
+    RenderInputError,
+  );
+});
+
 test('fails before rendering when source media is missing', async () => {
   const harness = await createHarness();
+  const moment = fixtureStoryPlan().moments[0];
   const input = fixtureRenderInput({
     media_assets: [{...fixtureMediaAssets()[0], s3_key: 'source/missing.jpg'}],
-    story_plan: fixtureStoryPlan({moments: [fixtureStoryPlan().moments[0]]}),
+    story_plan: fixtureStoryPlan({
+      moments: [moment],
+      requested_duration_ms: moment.duration_ms,
+      total_duration_ms: moment.duration_ms,
+    }),
   });
 
   await assert.rejects(() => harness.worker.render(input), RenderAssetError);
@@ -617,5 +748,31 @@ test('rejects unsupported aspect ratios and duplicate assets', async () => {
   await assert.rejects(
     () => harness.worker.render(fixtureRenderInput({media_assets: [fixtureMediaAssets()[0], fixtureMediaAssets()[0]]})),
     RenderInputError,
+  );
+});
+
+test('rejects invalid composition inputs before rendering', async () => {
+  const harness = await createHarness();
+  await assert.rejects(
+    () => harness.worker.render(fixtureRenderInput({story_plan: fixtureStoryPlan({total_duration_ms: 999_999})})),
+    /duration mismatch/,
+  );
+  await assert.rejects(
+    () => harness.worker.render(fixtureRenderInput({story_plan: fixtureStoryPlan({captions: [{moment_id: 'moment-photo-1', text: 'x'.repeat(221), start_ms: 0, end_ms: 1000}]})})),
+    /captions\[0\]\.text exceeds 220/,
+  );
+  await assert.rejects(
+    () => harness.worker.render(fixtureRenderInput({story_plan: fixtureStoryPlan({audio: {source: 'remote-music'}})})),
+    /unsupported audio source/,
+  );
+  await assert.rejects(
+    () => harness.worker.render(fixtureRenderInput({
+      story_plan: fixtureStoryPlan({
+        moments: [{...fixtureStoryPlan().moments[1], start_micros: 2_000_000, end_micros: 1_000_000, media_type: undefined}],
+        captions: [],
+        total_duration_ms: fixtureStoryPlan().moments[1].duration_ms,
+      }),
+    })),
+    /invalid video source range/,
   );
 });

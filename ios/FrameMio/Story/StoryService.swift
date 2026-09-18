@@ -78,6 +78,61 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
         }
     }
 
+    func createProject(request: CreateVideoProjectRequest) async throws -> Story {
+        guard request.draft.type != .story else {
+            return try await createStory(
+                request: CreateStoryRequest(
+                    context: request.draft.context,
+                    assets: request.assets,
+                    analyses: request.analyses,
+                    options: request.draft.storyOptions
+                )
+            )
+        }
+
+        let mediaIDs = request.assets.compactMap { request.mediaIDsByAssetID[$0.id] }
+        guard mediaIDs.count == request.assets.count, !mediaIDs.isEmpty else {
+            throw AppError.invalidResponse
+        }
+
+        let createBody: Data
+        do {
+            createBody = try encoder.encode(GenericProjectCreateRequest(from: request, mediaIDs: mediaIDs))
+        } catch {
+            throw AppError.invalidResponse
+        }
+
+        let idempotencyKey = "ios-\(request.draft.type.rawValue)-\(UUID().uuidString)"
+        let projectData = try await apiClient.data(
+            for: APIRequest(
+                method: .post,
+                path: "/projects",
+                body: createBody,
+                headers: ["Idempotency-Key": idempotencyKey]
+            )
+        )
+
+        let project: GenericProjectResponse
+        do {
+            project = try decoder.decode(GenericProjectResponse.self, from: projectData)
+        } catch {
+            throw AppError.invalidResponse
+        }
+
+        _ = try await apiClient.data(
+            for: APIRequest(
+                method: .post,
+                path: "/projects/\(project.id)/analyze",
+                headers: ["Idempotency-Key": "\(idempotencyKey)-analysis"]
+            )
+        )
+
+        let story = project.storyFallback
+        let existing = try await persistence.loadStories()
+        try await persistence.saveStories([story] + existing.filter { $0.id != story.id })
+        return story
+    }
+
     func retryProcessing(id: String) async throws -> Story {
         try await requestRender(id: id)
     }
@@ -247,6 +302,237 @@ final class RemotePromptTranscriptionService: PromptTranscriptionService, @unche
     }
 }
 
+private struct GenericProjectCreateRequest: Encodable {
+    let type: VideoProjectType
+    let title: String
+    let context: String
+    let mediaIDs: [String]
+    let configuration: GenericProjectConfiguration
+    let analyses: [GenericProjectAnalysis]
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case title
+        case context
+        case mediaIDs = "media_ids"
+        case configuration
+        case analyses
+    }
+
+    init(from request: CreateVideoProjectRequest, mediaIDs: [String]) {
+        type = request.draft.type
+        title = Self.title(for: request.draft)
+        context = Self.context(for: request.draft)
+        self.mediaIDs = mediaIDs
+        configuration = GenericProjectConfiguration(draft: request.draft)
+        analyses = request.analyses.compactMap { analysis in
+            guard let mediaID = request.mediaIDsByAssetID[analysis.assetID] else { return nil }
+            return GenericProjectAnalysis(mediaID: mediaID, analysis: analysis)
+        }
+    }
+
+    private static func title(for draft: VideoProjectDraft) -> String {
+        switch draft.type {
+        case .story:
+            draft.context.rawValue
+        case .promo:
+            draft.promo?.prompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? "Promo Draft" : "\(draft.promo?.subject.title ?? "Product") Promo"
+        case .reel:
+            "\(draft.reel?.platform.title ?? "Social") Reel"
+        }
+    }
+
+    private static func context(for draft: VideoProjectDraft) -> String {
+        switch draft.type {
+        case .story:
+            draft.context.rawValue
+        case .promo:
+            [
+                "Promo",
+                draft.promo?.subject.title,
+                draft.promo?.goal.title,
+                draft.promo?.prompt
+            ]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+        case .reel:
+            [
+                "Reel",
+                draft.reel?.platform.title,
+                draft.reel?.style.title,
+                draft.reel?.prompt
+            ]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+        }
+    }
+}
+
+private struct GenericProjectConfiguration: Encodable {
+    let aiInstructions: String?
+    let promo: PromoConfigurationPayload?
+    let reel: ReelConfigurationPayload?
+    let composition: CompositionConfigurationPayload
+
+    enum CodingKeys: String, CodingKey {
+        case aiInstructions = "ai_instructions"
+        case promo
+        case reel
+        case composition
+    }
+
+    init(draft: VideoProjectDraft) {
+        aiInstructions = draft.prompt?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        promo = draft.type == .promo ? PromoConfigurationPayload(configuration: draft.promo ?? .automatic) : nil
+        reel = draft.type == .reel ? ReelConfigurationPayload(configuration: draft.reel ?? .automatic) : nil
+        composition = CompositionConfigurationPayload(aspectRatio: draft.type == .promo ? "16:9" : "9:16")
+    }
+}
+
+private struct PromoConfigurationPayload: Encodable {
+    let promotionGoal: String
+    let productInformation: String
+    let callToAction: String
+    let targetAudience: String
+    let desiredDurationSeconds: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case promotionGoal = "promotion_goal"
+        case productInformation = "product_information"
+        case callToAction = "call_to_action"
+        case targetAudience = "target_audience"
+        case desiredDurationSeconds = "desired_duration_seconds"
+    }
+
+    init(configuration: PromoCreationConfiguration) {
+        promotionGoal = configuration.goal.title
+        productInformation = configuration.subject.title
+        callToAction = switch configuration.goal {
+        case .driveDownloads: "Download now"
+        case .announce: "Learn more"
+        case .explain: "See how it works"
+        case .getAttention: "Watch now"
+        case .sell: "Shop now"
+        }
+        targetAudience = "general audience"
+        desiredDurationSeconds = configuration.duration.seconds.map(Int.init)
+    }
+}
+
+private struct ReelConfigurationPayload: Encodable {
+    let socialPlatform: String
+    let targetDurationSeconds: Int?
+    let style: String
+    let hookPreference: String
+    let captionStyle: String
+    let aspectRatio: String
+
+    enum CodingKeys: String, CodingKey {
+        case socialPlatform = "social_platform"
+        case targetDurationSeconds = "target_duration_seconds"
+        case style
+        case hookPreference = "hook_preference"
+        case captionStyle = "caption_style"
+        case aspectRatio = "aspect_ratio"
+    }
+
+    init(configuration: ReelCreationConfiguration) {
+        socialPlatform = configuration.platform.apiValue
+        targetDurationSeconds = configuration.duration.seconds.map(Int.init)
+        style = configuration.style.apiValue
+        hookPreference = configuration.style.hookPreference
+        captionStyle = configuration.style.captionStylePreset
+        aspectRatio = "9:16"
+    }
+}
+
+private struct CompositionConfigurationPayload: Encodable {
+    let aspectRatio: String
+
+    enum CodingKeys: String, CodingKey {
+        case aspectRatio = "aspect_ratio"
+    }
+}
+
+private struct GenericProjectAnalysis: Encodable {
+    let mediaID: String
+    let labels: [String]
+    let peopleCount: Int
+    let qualityScore: Double
+
+    enum CodingKeys: String, CodingKey {
+        case mediaID = "media_id"
+        case labels
+        case peopleCount = "people_count"
+        case qualityScore = "quality_score"
+    }
+
+    init(mediaID: String, analysis: MediaAnalysis) {
+        self.mediaID = mediaID
+        labels = analysis.labels
+        peopleCount = analysis.peopleCount
+        qualityScore = analysis.confidence
+    }
+}
+
+private struct GenericProjectResponse: Decodable {
+    let id: String
+    let type: VideoProjectType?
+    let title: String
+    let context: String
+    let mediaIDs: [String]
+    let status: String
+    let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case type
+        case title
+        case context
+        case mediaIDs = "media_ids"
+        case status
+        case createdAt = "created_at"
+    }
+
+    var storyFallback: Story {
+        Story(
+            id: id,
+            type: type ?? .story,
+            title: title,
+            context: MomentContext(rawValue: context) ?? .specialMoments,
+            createdAt: createdAt,
+            duration: max(8, Double(max(mediaIDs.count, 1)) * 4),
+            assetIDs: mediaIDs,
+            status: storyStatus,
+            videoURL: nil
+        )
+    }
+
+    private var storyStatus: StoryStatus {
+        switch status {
+        case "draft", "analyzing", "story_ready":
+            .analyzing
+        case "rendering":
+            .rendering
+        case "ready":
+            .ready
+        case "failed":
+            .failed
+        default:
+            .queued
+        }
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
 private struct PromptTranscriptionResponse: Decodable {
     let transcript: String
 }
@@ -295,12 +581,43 @@ final class MockStoryService: StoryService, @unchecked Sendable {
         try await Task.sleep(for: .milliseconds(240))
         let story = Story(
             id: UUID().uuidString,
+            type: .story,
             title: request.context.rawValue,
             context: request.context,
             createdAt: Date(),
             duration: max(12, Double(request.assets.count) * 4),
             assetIDs: request.assets.map(\.id),
             status: .ready,
+            videoURL: nil
+        )
+        let existing = try await persistence.loadStories()
+        try await persistence.saveStories([story] + existing)
+        return story
+    }
+
+    func createProject(request: CreateVideoProjectRequest) async throws -> Story {
+        if request.draft.type == .story {
+            return try await createStory(
+                request: CreateStoryRequest(
+                    context: request.draft.context,
+                    assets: request.assets,
+                    analyses: request.analyses,
+                    options: request.draft.storyOptions
+                )
+            )
+        }
+        try await Task.sleep(for: .milliseconds(240))
+        let story = Story(
+            id: UUID().uuidString,
+            type: request.draft.type,
+            title: request.draft.type == .promo ? "Promo Draft" : "Social Reel",
+            context: request.draft.context,
+            createdAt: Date(),
+            duration: request.draft.type == .promo
+                ? request.draft.promo?.duration.seconds ?? 20
+                : request.draft.reel?.duration.seconds ?? 15,
+            assetIDs: request.mediaIDsByAssetID.isEmpty ? request.assets.map(\.id) : request.assets.compactMap { request.mediaIDsByAssetID[$0.id] },
+            status: .analyzing,
             videoURL: nil
         )
         let existing = try await persistence.loadStories()

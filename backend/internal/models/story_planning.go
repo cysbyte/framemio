@@ -4,6 +4,13 @@ import "time"
 
 const StoryPlanSchemaVersionV1 = "story_plan_v1"
 
+// EditPlan is the mode-neutral editorial plan consumed by rendering. It aliases
+// the existing StoryPlan schema to preserve wire compatibility and existing
+// stored plans while allowing Story, Promo, and Reel to share one renderer
+// contract.
+type EditPlan = StoryPlan
+type EditScene = StoryMoment
+
 type StoryType string
 
 const (

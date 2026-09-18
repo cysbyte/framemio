@@ -25,10 +25,11 @@ type Store interface {
 	GetReadyMediaByUploadIdempotencyPrefix(ctx context.Context, userID, prefix string) (models.MediaAsset, error)
 	GetUploadSession(ctx context.Context, userID, uploadID string) (models.UploadSession, error)
 	MarkMediaReady(ctx context.Context, userID, mediaID, uploadID, s3Key, etag string) (models.MediaAsset, error)
-	CreateProject(ctx context.Context, project models.StoryProject, idempotencyKey string) (models.StoryProject, bool, error)
-	AddProjectMedia(ctx context.Context, userID, projectID string, mediaIDs []string) (models.StoryProject, error)
-	GetProject(ctx context.Context, userID, projectID string) (models.StoryProject, error)
-	ListProjects(ctx context.Context, userID string) ([]models.StoryProject, error)
+	CreateProject(ctx context.Context, project models.VideoProject, idempotencyKey string) (models.VideoProject, bool, error)
+	UpdateProject(ctx context.Context, project models.VideoProject) (models.VideoProject, error)
+	AddProjectMedia(ctx context.Context, userID, projectID string, mediaIDs []string) (models.VideoProject, error)
+	GetProject(ctx context.Context, userID, projectID string) (models.VideoProject, error)
+	ListProjects(ctx context.Context, userID string) ([]models.VideoProject, error)
 	DeleteProject(ctx context.Context, userID, projectID string) error
 	SetProjectStatus(ctx context.Context, userID, projectID string, status models.ProjectStatus) error
 	SetProjectCreditOperationKey(ctx context.Context, userID, projectID, creditOperationKey string) error

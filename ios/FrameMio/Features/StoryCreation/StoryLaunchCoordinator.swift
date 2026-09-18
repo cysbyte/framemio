@@ -102,6 +102,14 @@ final class StoryLaunchCoordinator: ObservableObject {
         options: StoryGenerationOptions = .automatic,
         launchID: UUID
     ) {
+        start(draft: .story(context: context, options: options), assets: assets, launchID: launchID)
+    }
+
+    func start(
+        draft: VideoProjectDraft,
+        assets: [MediaAsset],
+        launchID: UUID
+    ) {
         guard activeLaunchID != launchID || (!isPreparing && storyID == nil) else {
             storyLaunchDebugLog("ignored duplicate launch id=\(launchID)")
             return
@@ -111,8 +119,8 @@ final class StoryLaunchCoordinator: ObservableObject {
             return
         }
 
-        let instruction = options.instruction?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        storyLaunchDebugLog("launch requested id=\(launchID) assets=\(assets.count) videos=\(assets.filter(\.isVideo).count) style=\(options.style ?? "automatic") scene_detail=\(options.sceneDetailStyle ?? "balanced") target_duration=\(options.targetDuration.map { String(Int($0.rounded())) } ?? "auto") prompt_present=\(!instruction.isEmpty) prompt_length=\(instruction.count)")
+        let instruction = draft.prompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        storyLaunchDebugLog("launch requested id=\(launchID) type=\(draft.type.rawValue) assets=\(assets.count) videos=\(assets.filter(\.isVideo).count) prompt_present=\(!instruction.isEmpty) prompt_length=\(instruction.count)")
         launchTask?.cancel()
         activeLaunchID = launchID
         isPreparing = true
@@ -120,7 +128,7 @@ final class StoryLaunchCoordinator: ObservableObject {
         storyID = nil
         insufficientCredits = nil
         errorMessage = nil
-        phaseTitle = "Preparing your memories..."
+        phaseTitle = preparingTitle(for: draft.type)
         phaseDetail = "Preparing selected media before upload starts."
         launchTask = Task { [weak self] in
             guard let self else { return }
@@ -132,7 +140,7 @@ final class StoryLaunchCoordinator: ObservableObject {
                 phaseTitle = "Uploading your photos and videos..."
                 phaseDetail = "Uploading originals to FrameMio. Large videos and iCloud downloads can take longer."
                 storyLaunchDebugLog("phase=upload_start progress=\(progress)")
-                _ = try await mediaUploadService.upload(
+                let uploads = try await mediaUploadService.upload(
                     selection: selection,
                     assets: assets,
                     options: MediaUploadOptions(),
@@ -151,32 +159,32 @@ final class StoryLaunchCoordinator: ObservableObject {
                 )
                 try Task.checkCancellation()
 
-                phaseTitle = "Finding meaningful moments..."
-                phaseDetail = "Scanning media locally so the server can build the story."
+                phaseTitle = analysisTitle(for: draft.type)
+                phaseDetail = "Scanning media locally so the server can build the first AI draft."
                 storyLaunchDebugLog("phase=analysis_start assets=\(assets.count)")
                 let analyses = try await analyzeAssets(assets)
                 try Task.checkCancellation()
 
-                phaseTitle = "Building your story..."
-                phaseDetail = "Sending analyzed moments to FrameMio before server-side planning starts."
+                phaseTitle = buildingTitle(for: draft.type)
+                phaseDetail = "Sending analyzed media to FrameMio before server-side planning starts."
                 progress = max(progress, 0.86)
                 storyLaunchDebugLog("phase=story_create_start app_percent=\(Int(progress * 100)) analyses=\(analyses.count)")
                 let story = try await createStoryWithUploadRefreshRetry(
-                    context: context,
+                    draft: draft,
                     assets: assets,
-                    options: options,
                     selection: selection,
-                    analyses: analyses
+                    analyses: analyses,
+                    uploads: uploads
                 )
                 storyID = story.id
                 progress = 1
-                phaseTitle = "Story is processing."
+                phaseTitle = processingTitle(for: draft.type)
                 phaseDetail = "Server-side planning and rendering will continue next."
                 storyLaunchDebugLog("phase=story_create_complete story=\(story.id) status=\(story.status.rawValue)")
                 FrameMioHaptics.success()
             } catch is CancellationError {
                 storyLaunchDebugLog("phase=cancelled progress=\(progress)")
-                phaseTitle = "Preparing your memories..."
+                phaseTitle = preparingTitle(for: draft.type)
                 phaseDetail = "Preparing selected media before upload starts."
             } catch {
                 let appError = AppError.from(error)
@@ -218,15 +226,20 @@ final class StoryLaunchCoordinator: ObservableObject {
     }
 
     private func createStoryWithUploadRefreshRetry(
-        context: MomentContext,
+        draft: VideoProjectDraft,
         assets: [MediaAsset],
-        options: StoryGenerationOptions,
         selection: MediaSelection,
-        analyses: [MediaAnalysis]
+        analyses: [MediaAnalysis],
+        uploads: [MediaUpload]
     ) async throws -> Story {
         do {
-            return try await storyService.createStory(
-                request: CreateStoryRequest(context: context, assets: assets, analyses: analyses, options: options)
+            return try await storyService.createProject(
+                request: CreateVideoProjectRequest(
+                    draft: draft,
+                    assets: assets,
+                    analyses: analyses,
+                    mediaIDsByAssetID: mediaIDsByAssetID(from: uploads)
+                )
             )
         } catch {
             guard shouldRetryAfterStaleUploadCache(error) else {
@@ -236,7 +249,7 @@ final class StoryLaunchCoordinator: ObservableObject {
             phaseTitle = "Refreshing uploaded media..."
             phaseDetail = "Previous server media references expired, so FrameMio is refreshing them before creating the story."
             try await mediaUploadService.invalidateCompletedUploads(for: assets, optimization: .original)
-            _ = try await mediaUploadService.upload(
+            let refreshedUploads = try await mediaUploadService.upload(
                 selection: selection,
                 assets: assets,
                 options: MediaUploadOptions(),
@@ -249,12 +262,58 @@ final class StoryLaunchCoordinator: ObservableObject {
                 }
             )
             try Task.checkCancellation()
-            phaseTitle = "Building your story..."
-            phaseDetail = "Retrying story creation with refreshed media references."
+            phaseTitle = buildingTitle(for: draft.type)
+            phaseDetail = "Retrying project creation with refreshed media references."
             progress = max(progress, 0.86)
-            return try await storyService.createStory(
-                request: CreateStoryRequest(context: context, assets: assets, analyses: analyses, options: options)
+            return try await storyService.createProject(
+                request: CreateVideoProjectRequest(
+                    draft: draft,
+                    assets: assets,
+                    analyses: analyses,
+                    mediaIDsByAssetID: mediaIDsByAssetID(from: refreshedUploads)
+                )
             )
+        }
+    }
+
+    private func mediaIDsByAssetID(from uploads: [MediaUpload]) -> [String: String] {
+        var result: [String: String] = [:]
+        for upload in uploads where upload.status == .completed {
+            guard let mediaID = upload.mediaID, !mediaID.isEmpty else { continue }
+            result[upload.assetID] = mediaID
+        }
+        return result
+    }
+
+    private func preparingTitle(for type: VideoProjectType) -> String {
+        switch type {
+        case .story: "Preparing your memories..."
+        case .promo: "Preparing your promo..."
+        case .reel: "Preparing your reel..."
+        }
+    }
+
+    private func analysisTitle(for type: VideoProjectType) -> String {
+        switch type {
+        case .story: "Finding meaningful moments..."
+        case .promo: "Finding useful product shots..."
+        case .reel: "Finding short-form highlights..."
+        }
+    }
+
+    private func buildingTitle(for type: VideoProjectType) -> String {
+        switch type {
+        case .story: "Building your story..."
+        case .promo: "Building your promo..."
+        case .reel: "Building your reel..."
+        }
+    }
+
+    private func processingTitle(for type: VideoProjectType) -> String {
+        switch type {
+        case .story: "Story is processing."
+        case .promo: "Promo is processing."
+        case .reel: "Reel is processing."
         }
     }
 

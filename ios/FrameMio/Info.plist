@@ -35,13 +35,13 @@
 	<key>MinimumOSVersion</key>
 	<string>17.0</string>
 	<key>NSCameraUsageDescription</key>
-	<string>FrameMio uses the camera to capture new moments for memory stories.</string>
+	<string>FrameMio uses the camera to capture photos and footage for your videos.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>FrameMio uses the microphone for voice prompts and video audio to understand memory stories.</string>
+	<string>FrameMio uses the microphone for voice prompts and video audio to help create videos.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>FrameMio saves new photos and videos so they can be selected for memory stories.</string>
+	<string>FrameMio saves new photos and videos so they can be selected for your projects.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>FrameMio needs access to your photos and videos to create personal memory stories.</string>
+	<string>FrameMio needs access to your photos and videos to create stories, promos, and reels.</string>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
 		<string>arm64</string>

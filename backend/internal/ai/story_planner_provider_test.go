@@ -371,6 +371,57 @@ func TestOpenAICompatibleStoryPlannerKeepsExplicitTargetDurationFixed(t *testing
 	}
 }
 
+func TestOpenAICompatibleStoryPlannerPreservesPromoScenePlan(t *testing.T) {
+	t.Parallel()
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		var request struct {
+			Input []struct {
+				Content []struct {
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		prompt := request.Input[1].Content[0].Text
+		if !strings.Contains(prompt, `"projectType":"promo"`) || !strings.Contains(prompt, `"primary_color":"#2244FF"`) || !strings.Contains(prompt, `"text":"Try it free"`) {
+			t.Fatalf("promo prompt missing mode configuration: %s", prompt)
+		}
+		planJSON := `{"schema_version":"story_plan_v1","id":"plan-promo","project_id":"project-gpt","project_type":"promo","version":3,"requested_duration_ms":4000,"story_type":"custom","visual_style":"cinematic","title_text":"Create ads from your phone","ending_text":"Try it free","call_to_action":"Try it free","moments":[{"moment_id":"moment-1","asset_id":"photo-gpt","media_id":"photo-gpt","media_type":"photo","narrative":"A product shot opens the promo.","caption":"Launch faster","duration_ms":4000,"crop_intent":"fit","transition":"fade_in","order":1,"scene_purpose":"hook","scene_text":{"headline":"Launch faster","supporting":"AI-assisted promo videos","cta":"Try it free"},"voiceover":{"text":"Create a polished promo in minutes.","start_ms":0,"duration_ms":1800},"typography":{"enabled":true,"type":"promo_headline","title":"Launch faster","subtitle":"AI-assisted promo videos","style":"editorial","placement":"bottom_left","start_ms":250,"duration_ms":1800,"max_width":0.78,"safe_area":{"top":0.08,"right":0.08,"bottom":0.08,"left":0.08},"animation":"fade_up","source":"ai","confidence":0.9}}],"output":{"aspect_ratio":"16:9","max_duration_seconds":4,"preset":"premium-memory"},"total_duration_ms":4000}`
+		return typographyHTTPResponse(http.StatusOK, responsesTypographyResponse(planJSON)), nil
+	})}
+	request := storyPlannerProviderRequest()
+	request.ProjectType = models.ProjectTypePromo
+	request.ProjectConfiguration = models.VideoProjectConfiguration{
+		Promo: &models.PromoProjectConfiguration{
+			PromotionCategory:  "app",
+			PromotionGoal:      "downloads",
+			ProductInformation: "FrameMio",
+			CTA:                &models.CTAConfiguration{Text: "Try it free", Style: "button", Placement: "bottom"},
+			Brand:              models.BrandConfiguration{Name: "FrameMio", PrimaryColor: "#2244FF", SecondaryColor: "#11AA88", FontPreference: "Inter"},
+		},
+	}
+	planner := OpenAICompatibleStoryPlanner{BaseURL: "https://planner.test", APIKey: "test-key", ModelName: "gpt-story", WireAPI: "responses", Client: client}
+	plan, err := planner.Plan(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.ProjectType != models.ProjectTypePromo || plan.CallToAction != "Try it free" {
+		t.Fatalf("promo plan identity not preserved: %+v", plan)
+	}
+	scene := plan.Moments[0]
+	if scene.ScenePurpose != models.PromoScenePurposeHook || scene.Order != 1 || scene.SceneText == nil || scene.SceneText.Headline != "Launch faster" {
+		t.Fatalf("promo scene metadata not preserved: %+v", scene)
+	}
+	if scene.Typography == nil || scene.Typography.Type != models.TextOverlayPromoHeadline {
+		t.Fatalf("promo typography not preserved: %+v", scene.Typography)
+	}
+	if err := ValidateStoryPlan(plan); err != nil {
+		t.Fatalf("expected promo plan to pass lightweight validation: %v", err)
+	}
+}
+
 func TestFallbackStoryPlannerUsesFallbackWhenPrimaryFails(t *testing.T) {
 	t.Parallel()
 	request := storyPlannerProviderRequest()

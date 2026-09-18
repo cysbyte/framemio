@@ -120,7 +120,7 @@ final class HomeViewModel: ObservableObject {
     }
 
     private func sortedStories(_ stories: [Story]) -> [Story] {
-        stories.sorted { $0.createdAt > $1.createdAt }
+        stories.sorted { $0.lastModifiedAt > $1.lastModifiedAt }
     }
 
     private func latestHomeStories(_ stories: [Story]) -> [Story] {
@@ -270,9 +270,11 @@ final class HomeViewModel: ObservableObject {
     private static let mockStories: [Story] = [
         Story(
             id: "mock-coastline",
-            title: "An afternoon by the sea",
+            type: .story,
+            title: "Kyoto Trip",
             context: .trip,
             createdAt: Calendar.current.date(byAdding: .day, value: -2, to: Date()) ?? Date(),
+            updatedAt: Calendar.current.date(byAdding: .hour, value: -8, to: Date()) ?? Date(),
             duration: 42,
             assetIDs: Array(0..<9).map { "coastline-\($0)" },
             status: .ready,
@@ -280,19 +282,23 @@ final class HomeViewModel: ObservableObject {
         ),
         Story(
             id: "mock-together",
-            title: "Summer, together",
-            context: .friends,
+            type: .promo,
+            title: "FrameMio Launch",
+            context: .specialMoments,
             createdAt: Calendar.current.date(byAdding: .day, value: -6, to: Date()) ?? Date(),
+            updatedAt: Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date(),
             duration: 36,
             assetIDs: Array(0..<7).map { "together-\($0)" },
-            status: .ready,
+            status: .rendering,
             videoURL: nil
         ),
         Story(
             id: "mock-little-things",
-            title: "The little things",
-            context: .family,
+            type: .reel,
+            title: "Weekend Walk",
+            context: .weekend,
             createdAt: Calendar.current.date(byAdding: .day, value: -11, to: Date()) ?? Date(),
+            updatedAt: Calendar.current.date(byAdding: .day, value: -3, to: Date()) ?? Date(),
             duration: 29,
             assetIDs: Array(0..<6).map { "little-things-\($0)" },
             status: .ready,

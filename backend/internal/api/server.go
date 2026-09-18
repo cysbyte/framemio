@@ -274,6 +274,14 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 	}
 	if strings.HasPrefix(request.URL.Path, "/projects/") {
 		parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
+		if len(parts) == 2 && request.Method == http.MethodGet {
+			s.getProject(response, request, parts[1])
+			return
+		}
+		if len(parts) == 2 && request.Method == http.MethodPatch {
+			s.updateProject(response, request, parts[1])
+			return
+		}
 		if len(parts) == 3 && request.Method == http.MethodPost {
 			switch parts[2] {
 			case "analyze":
@@ -281,6 +289,9 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 				return
 			case "render":
 				s.renderProject(response, request, parts[1])
+				return
+			case "regenerate":
+				s.regenerateProject(response, request, parts[1])
 				return
 			}
 		}
@@ -452,9 +463,20 @@ func (s *Server) getMedia(response http.ResponseWriter, request *http.Request, m
 }
 
 type createProjectRequest struct {
-	Title    string   `json:"title"`
-	Context  string   `json:"context"`
-	MediaIDs []string `json:"media_ids"`
+	Type          models.ProjectType               `json:"type,omitempty"`
+	Title         string                           `json:"title"`
+	Context       string                           `json:"context"`
+	MediaIDs      []string                         `json:"media_ids"`
+	Configuration models.VideoProjectConfiguration `json:"configuration,omitempty"`
+	Analyses      []createProjectAnalysisRequest   `json:"analyses,omitempty"`
+}
+
+type createProjectAnalysisRequest struct {
+	MediaID      string                 `json:"media_id"`
+	Labels       []string               `json:"labels,omitempty"`
+	PeopleCount  int                    `json:"people_count"`
+	QualityScore float64                `json:"quality_score,omitempty"`
+	Signals      map[string]interface{} `json:"signals,omitempty"`
 }
 
 func (s *Server) createProject(response http.ResponseWriter, request *http.Request) {
@@ -475,10 +497,23 @@ func (s *Server) createProject(response http.ResponseWriter, request *http.Reque
 		s.writeError(response, http.StatusBadRequest, "invalid_project", "at least one media id is required")
 		return
 	}
+	projectType, valid := models.NormalizeProjectType(input.Type)
+	if !valid {
+		s.writeError(response, http.StatusBadRequest, "invalid_project_type", "project type must be story, promo, or reel")
+		return
+	}
 	now := s.Now().UTC()
-	project := models.StoryProject{ID: models.NewID("project"), UserID: user.ID, Title: input.Title, Context: input.Context, MediaIDs: append([]string(nil), input.MediaIDs...), Status: models.ProjectStatusDraft, CreatedAt: now, UpdatedAt: now}
+	project := models.VideoProject{
+		ID: models.NewID("project"), UserID: user.ID, Type: projectType, Title: input.Title, Context: input.Context,
+		MediaIDs: append([]string(nil), input.MediaIDs...), Configuration: input.Configuration,
+		Status: models.ProjectStatusDraft, CreatedAt: now, UpdatedAt: now,
+	}
 	created, existing, err := s.Store.CreateProject(request.Context(), project, idempotencyKey)
 	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	if err := s.saveProjectCreateAnalyses(request, user.ID, created.ID, input.Analyses); err != nil {
 		s.mapStoreError(response, err)
 		return
 	}
@@ -487,6 +522,162 @@ func (s *Server) createProject(response http.ResponseWriter, request *http.Reque
 		status = http.StatusOK
 	}
 	s.writeJSON(response, status, created)
+}
+
+func (s *Server) saveProjectCreateAnalyses(request *http.Request, userID, projectID string, inputs []createProjectAnalysisRequest) error {
+	if len(inputs) == 0 {
+		return nil
+	}
+	now := s.Now().UTC()
+	seen := make(map[string]struct{}, len(inputs))
+	for _, input := range inputs {
+		mediaID := strings.TrimSpace(input.MediaID)
+		if mediaID == "" {
+			return store.ErrConflict
+		}
+		if _, duplicate := seen[mediaID]; duplicate {
+			continue
+		}
+		seen[mediaID] = struct{}{}
+		if input.PeopleCount < 0 || input.QualityScore < 0 || input.QualityScore > 1 {
+			return store.ErrConflict
+		}
+		if _, err := s.Store.GetMedia(request.Context(), userID, mediaID); err != nil {
+			return err
+		}
+		analysis := models.MediaAnalysis{
+			ID:           models.NewID("analysis"),
+			ProjectID:    projectID,
+			MediaID:      mediaID,
+			Labels:       input.Labels,
+			PeopleCount:  input.PeopleCount,
+			QualityScore: input.QualityScore,
+			Signals:      input.Signals,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		}
+		if err := s.Store.SaveAnalysis(request.Context(), userID, analysis); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type updateProjectRequest struct {
+	Type          *models.ProjectType               `json:"type,omitempty"`
+	Title         *string                           `json:"title,omitempty"`
+	Context       *string                           `json:"context,omitempty"`
+	MediaIDs      *[]string                         `json:"media_ids,omitempty"`
+	Configuration *models.VideoProjectConfiguration `json:"configuration,omitempty"`
+}
+
+func (s *Server) getProject(response http.ResponseWriter, request *http.Request, projectID string) {
+	user, ok := s.authenticate(response, request)
+	if !ok {
+		return
+	}
+	project, err := s.Store.GetProject(request.Context(), user.ID, strings.TrimSpace(projectID))
+	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	s.writeJSON(response, http.StatusOK, project)
+}
+
+func (s *Server) updateProject(response http.ResponseWriter, request *http.Request, projectID string) {
+	user, ok := s.authenticate(response, request)
+	if !ok {
+		return
+	}
+	project, err := s.Store.GetProject(request.Context(), user.ID, strings.TrimSpace(projectID))
+	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	var input updateProjectRequest
+	if !s.decodeJSON(response, request, &input) {
+		return
+	}
+	if input.Type != nil {
+		projectType, valid := models.NormalizeProjectType(*input.Type)
+		if !valid {
+			s.writeError(response, http.StatusBadRequest, "invalid_project_type", "project type must be story, promo, or reel")
+			return
+		}
+		if projectType != project.Type {
+			s.writeError(response, http.StatusConflict, "project_type_immutable", "project type cannot be changed after creation")
+			return
+		}
+	}
+	if input.Title != nil {
+		project.Title = strings.TrimSpace(*input.Title)
+	}
+	if input.Context != nil {
+		project.Context = strings.TrimSpace(*input.Context)
+	}
+	if input.MediaIDs != nil {
+		project.MediaIDs = uniqueNonEmpty(*input.MediaIDs)
+		if len(project.MediaIDs) == 0 {
+			s.writeError(response, http.StatusBadRequest, "invalid_project", "at least one media id is required")
+			return
+		}
+	}
+	if input.Configuration != nil {
+		project.Configuration = *input.Configuration
+	}
+	updated, err := s.Store.UpdateProject(request.Context(), project)
+	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	s.writeJSON(response, http.StatusOK, updated)
+}
+
+type regenerateProjectRequest struct {
+	Instruction string `json:"instruction,omitempty"`
+}
+
+func (s *Server) regenerateProject(response http.ResponseWriter, request *http.Request, projectID string) {
+	user, ok := s.authenticate(response, request)
+	if !ok {
+		return
+	}
+	idempotencyKey, ok := requiredIdempotencyKey(response, request)
+	if !ok {
+		return
+	}
+	project, err := s.Store.GetProject(request.Context(), user.ID, strings.TrimSpace(projectID))
+	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	var input regenerateProjectRequest
+	if request.ContentLength != 0 && !s.decodeJSON(response, request, &input) {
+		return
+	}
+	instruction := strings.TrimSpace(input.Instruction)
+	if instruction != "" {
+		project.Configuration.AIInstructions = instruction
+		if _, err := s.Store.UpdateProject(request.Context(), project); err != nil {
+			s.mapStoreError(response, err)
+			return
+		}
+	}
+	if s.Orchestrator == nil {
+		s.internalError(response, errors.New("job orchestrator not configured"), "job orchestrator not configured")
+		return
+	}
+	configuration := map[string]string{
+		"project_type":      string(project.Type),
+		"revision_mode":     "ai_edit_plan_revision",
+		"user_instructions": project.Configuration.AIInstructions,
+	}
+	job, err := s.Orchestrator.RequestStoryPlanRevision(request.Context(), user.ID, project.ID, idempotencyKey, configuration)
+	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	s.writeJSON(response, http.StatusAccepted, jobsResponse{JobID: job.ID, JobIDs: []string{job.ID}, Jobs: []models.ProcessingJob{job}})
 }
 
 type jobsResponse struct {
@@ -886,12 +1077,14 @@ type renderInputMediaAsset struct {
 }
 
 type renderInputResponse struct {
-	JobID           string                  `json:"job_id"`
-	ProjectID       string                  `json:"project_id"`
-	StoryPlan       models.StoryPlan        `json:"story_plan"`
-	MediaAssets     []renderInputMediaAsset `json:"media_assets"`
-	OutputS3Key     string                  `json:"output_s3_key"`
-	RendererVersion string                  `json:"renderer_version,omitempty"`
+	JobID                string                           `json:"job_id"`
+	ProjectID            string                           `json:"project_id"`
+	ProjectType          models.ProjectType               `json:"project_type"`
+	ProjectConfiguration models.VideoProjectConfiguration `json:"project_configuration,omitempty"`
+	StoryPlan            models.StoryPlan                 `json:"story_plan"`
+	MediaAssets          []renderInputMediaAsset          `json:"media_assets"`
+	OutputS3Key          string                           `json:"output_s3_key"`
+	RendererVersion      string                           `json:"renderer_version,omitempty"`
 }
 
 func (s *Server) getRenderInput(response http.ResponseWriter, request *http.Request, jobID string) {
@@ -925,6 +1118,11 @@ func (s *Server) getRenderInput(response http.ResponseWriter, request *http.Requ
 		s.writeError(response, http.StatusConflict, "story_plan_version_mismatch", "render job targets a different story plan version")
 		return
 	}
+	if plan.ProjectType != "" && plan.ProjectType != project.Type {
+		s.writeError(response, http.StatusConflict, "project_type_mismatch", "edit plan project type does not match the project")
+		return
+	}
+	plan.ProjectType = project.Type
 	mediaIDs := renderInputMediaIDs(project.MediaIDs, plan)
 	assets := make([]renderInputMediaAsset, 0, len(mediaIDs))
 	for _, mediaID := range mediaIDs {
@@ -951,11 +1149,13 @@ func (s *Server) getRenderInput(response http.ResponseWriter, request *http.Requ
 	}
 	s.Logger.Info("render input prepared", slog.String("job_id", job.ID), slog.String("project_id", job.ProjectID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.String("broll_trace", renderBRollTrace(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)), slog.Int("media_asset_count", len(assets)))
 	s.writeJSON(response, http.StatusOK, renderInputResponse{
-		JobID:       job.ID,
-		ProjectID:   job.ProjectID,
-		StoryPlan:   plan,
-		MediaAssets: assets,
-		OutputS3Key: outputKey,
+		JobID:                job.ID,
+		ProjectID:            job.ProjectID,
+		ProjectType:          project.Type,
+		ProjectConfiguration: project.Configuration,
+		StoryPlan:            plan,
+		MediaAssets:          assets,
+		OutputS3Key:          outputKey,
 	})
 }
 
@@ -1198,6 +1398,11 @@ func (s *Server) saveJobStoryPlan(response http.ResponseWriter, request *http.Re
 		return
 	}
 	plan.ProjectID = project.ID
+	if plan.ProjectType != "" && plan.ProjectType != project.Type {
+		s.writeError(response, http.StatusBadRequest, "project_type_mismatch", "story plan project type does not match the project")
+		return
+	}
+	plan.ProjectType = project.Type
 	if plan.ID == "" {
 		plan.ID = models.NewID("plan")
 	}

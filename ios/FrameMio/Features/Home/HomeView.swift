@@ -7,6 +7,7 @@ struct HomeView: View {
     @ObservedObject private var viewModel: HomeViewModel
     @ObservedObject private var creditStore: CreditBalanceStore
     let onCreateStory: (MomentContext) -> Void
+    let onOpenCreate: () -> Void
     let onOpenStory: (Story) -> Void
     let onOpenAllStories: () -> Void
     let onOpenPricing: (PricingEntryPoint) -> Void
@@ -15,6 +16,7 @@ struct HomeView: View {
         viewModel: HomeViewModel,
         creditStore: CreditBalanceStore,
         onCreateStory: @escaping (MomentContext) -> Void,
+        onOpenCreate: @escaping () -> Void,
         onOpenStory: @escaping (Story) -> Void,
         onOpenAllStories: @escaping () -> Void,
         onOpenPricing: @escaping (PricingEntryPoint) -> Void
@@ -22,6 +24,7 @@ struct HomeView: View {
         _viewModel = ObservedObject(wrappedValue: viewModel)
         _creditStore = ObservedObject(wrappedValue: creditStore)
         self.onCreateStory = onCreateStory
+        self.onOpenCreate = onOpenCreate
         self.onOpenStory = onOpenStory
         self.onOpenAllStories = onOpenAllStories
         self.onOpenPricing = onOpenPricing
@@ -31,27 +34,16 @@ struct HomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: FrameMioSpacing.xxl) {
                 hero
-                if !viewModel.stories.isEmpty {
-                    createAction
-                        .transition(FrameMioAnimation.transition(reduceMotion: reduceMotion))
-                }
-                shortcuts
 
                 if viewModel.isLoading && viewModel.stories.isEmpty {
                     LoadingState(
-                        title: "Finding your moments",
-                        message: "Looking for the memories that belong together."
+                        title: "Loading your projects",
+                        message: "Finding your latest videos."
                     )
                     .frame(maxWidth: .infinity)
                     .transition(FrameMioAnimation.transition(reduceMotion: reduceMotion))
                 } else if viewModel.stories.isEmpty {
-                    EmptyState(
-                        systemImage: "photo.stack",
-                        title: "Your first story is waiting",
-                        message: "Choose a few moments and let FrameMio turn them into something worth revisiting.",
-                        actionTitle: "Create Story",
-                        action: { onCreateStory(.specialMoments) }
-                    )
+                    FirstVideoEmptyState(action: onOpenCreate)
                     .frame(maxWidth: .infinity)
                     .transition(FrameMioAnimation.transition(reduceMotion: reduceMotion))
                 } else {
@@ -139,16 +131,21 @@ struct HomeView: View {
     private var hero: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.xl) {
             VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
-                Text("Turn your moments into cinematic memory stories.")
+                Text("Create videos from your photos and footage.")
                     .font(FrameMioTypography.display)
                     .foregroundStyle(FrameMioColors.ink)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("Select meaningful photos and videos from real life, then let FrameMio shape them into a warm story-style film.")
+                Text("FrameMio helps turn raw media into finished stories, promos, and reels.")
                     .font(FrameMioTypography.body)
                     .foregroundStyle(FrameMioColors.secondaryInk)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            PrimaryButton(title: "Create", systemImage: "plus") {
+                onOpenCreate()
+            }
+            .accessibilityHint("Choose Story, Promo, or Reel")
 
             heroPreview
         }
@@ -193,7 +190,7 @@ struct HomeView: View {
                 HStack(spacing: FrameMioSpacing.xs) {
                     Image(systemName: "sparkles")
                         .accessibilityHidden(true)
-                    Text("Made from your day")
+                    Text("AI-assisted video")
                 }
                 .font(FrameMioTypography.caption)
                 .foregroundStyle(FrameMioColors.inverseInk)
@@ -201,7 +198,7 @@ struct HomeView: View {
                 .frame(minHeight: FrameMioMetrics.tagHeight)
                 .background(FrameMioColors.mediaScrim, in: Capsule())
 
-                Text("Golden hour, small laughs, one perfect wave.")
+                Text("Your photos and footage, shaped into a finished video.")
                     .font(FrameMioTypography.headline)
                     .foregroundStyle(FrameMioColors.inverseInk)
                     .fixedSize(horizontal: false, vertical: true)
@@ -213,45 +210,11 @@ struct HomeView: View {
         .accessibilityHidden(true)
     }
 
-    private var createAction: some View {
-        PrimaryButton(title: "Create Story", systemImage: "sparkles") {
-            onCreateStory(.specialMoments)
-        }
-        .accessibilityHint("Choose photos and videos to create a memory story")
-    }
-
-    private var shortcuts: some View {
-        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            SectionHeader(title: "Start with a moment")
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: FrameMioSpacing.sm) {
-                    shortcut(title: "Today", icon: MomentContext.today.icon, context: .today)
-                    shortcut(title: "Weekend", icon: MomentContext.weekend.icon, context: .weekend)
-                    shortcut(title: "Trip", icon: MomentContext.trip.icon, context: .trip)
-                    shortcut(title: "Select Medias", icon: "checkmark.circle", context: .specialMoments)
-                }
-            }
-        }
-    }
-
-    private func shortcut(title: String, icon: String, context: MomentContext) -> some View {
-        Button {
-            FrameMioHaptics.secondaryAction()
-            onCreateStory(context)
-        } label: {
-            ContextTile(title: title, systemImage: icon)
-        }
-        .frame(width: FrameMioMetrics.homeShortcutWidth)
-        .buttonStyle(FrameMioPressButtonStyle())
-        .accessibilityLabel(title)
-    }
-
     private var recentStories: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
             SectionHeader(
-                title: "Recent stories",
-                subtitle: "Made from your moments",
+                title: "Recent projects",
+                subtitle: "Stories, promos, and reels",
                 actionTitle: "See all",
                 action: onOpenAllStories
             )
@@ -265,6 +228,9 @@ struct HomeView: View {
                             image: viewModel.coverImage(for: story),
                             isImageLoading: viewModel.isCoverLoading(for: story),
                             duration: story.duration,
+                            projectType: story.projectType,
+                            lastModified: story.lastModifiedAt,
+                            status: story.status,
                             action: { onOpenStory(story) }
                         )
                         .frame(width: FrameMioMetrics.homeStoryCardWidth)
@@ -276,9 +242,19 @@ struct HomeView: View {
     }
 
     private func storySubtitle(for story: Story) -> String {
-        let date = story.createdAt.formatted(.dateTime.month(.abbreviated).day())
-        let moments = story.assetIDs.count == 1 ? "1 moment" : "\(story.assetIDs.count) moments"
-        return "\(date) · \(moments)"
+        let items = story.assetIDs.count == 1 ? itemName(for: story.projectType) : "\(story.assetIDs.count) \(itemName(for: story.projectType).lowercased())s"
+        return items
+    }
+
+    private func itemName(for type: VideoProjectType) -> String {
+        switch type {
+        case .story:
+            "Moment"
+        case .promo:
+            "Scene"
+        case .reel:
+            "Clip"
+        }
     }
 
     private var errorBinding: Binding<Bool> {
@@ -293,12 +269,15 @@ struct HomeView: View {
 struct AllStoriesView: View {
     @ObservedObject private var viewModel: HomeViewModel
     @State private var pageIndex = 0
+    @State private var filter: ProjectFilter = .all
+    let onCreate: (() -> Void)?
     let onOpenStory: (Story) -> Void
 
     private let pageSize = 10
 
-    init(viewModel: HomeViewModel, onOpenStory: @escaping (Story) -> Void) {
+    init(viewModel: HomeViewModel, onCreate: (() -> Void)? = nil, onOpenStory: @escaping (Story) -> Void) {
         _viewModel = ObservedObject(wrappedValue: viewModel)
+        self.onCreate = onCreate
         self.onOpenStory = onOpenStory
     }
 
@@ -306,20 +285,38 @@ struct AllStoriesView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
                 SectionHeader(
-                    title: "All stories",
+                    title: "Projects",
                     subtitle: pageSubtitle
                 )
 
-                LazyVStack(spacing: FrameMioSpacing.md) {
-                    ForEach(pageStories) { story in
-                        StoryCard(
-                            title: story.title,
-                            subtitle: storySubtitle(for: story),
-                            image: viewModel.coverImage(for: story),
-                            isImageLoading: viewModel.isCoverLoading(for: story),
-                            duration: story.duration,
-                            action: { onOpenStory(story) }
-                        )
+                if shouldShowFilters {
+                    projectFilterPicker
+                }
+
+                if filteredStories.isEmpty {
+                    EmptyState(
+                        systemImage: "rectangle.stack.badge.play",
+                        title: "No \(filter.title.lowercased()) projects yet",
+                        message: "Create a Story, Promo, or Reel from your photos and footage.",
+                        actionTitle: onCreate == nil ? nil : "Create",
+                        action: onCreate
+                    )
+                    .frame(maxWidth: .infinity)
+                } else {
+                    LazyVStack(spacing: FrameMioSpacing.md) {
+                        ForEach(pageStories) { story in
+                            StoryCard(
+                                title: story.title,
+                                subtitle: storySubtitle(for: story),
+                                image: viewModel.coverImage(for: story),
+                                isImageLoading: viewModel.isCoverLoading(for: story),
+                                duration: story.duration,
+                                projectType: story.projectType,
+                                lastModified: story.lastModifiedAt,
+                                status: story.status,
+                                action: { onOpenStory(story) }
+                            )
+                        }
                     }
                 }
 
@@ -332,7 +329,7 @@ struct AllStoriesView: View {
             .padding(.bottom, FrameMioSpacing.xxxl)
         }
         .background(FrameMioColors.canvas.ignoresSafeArea())
-        .navigationTitle("All stories")
+        .navigationTitle("Projects")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: pageIndex) {
             viewModel.loadCovers(for: pageStories)
@@ -341,24 +338,52 @@ struct AllStoriesView: View {
         .onChange(of: viewModel.allStories.count) { _, _ in
             pageIndex = min(pageIndex, max(pageCount - 1, 0))
         }
+        .onChange(of: filter) { _, _ in
+            pageIndex = 0
+        }
+    }
+
+    private var filteredStories: [Story] {
+        switch filter {
+        case .all:
+            viewModel.allStories
+        case let .type(projectType):
+            viewModel.allStories.filter { $0.projectType == projectType }
+        }
     }
 
     private var pageStories: [Story] {
         let startIndex = pageIndex * pageSize
-        guard startIndex < viewModel.allStories.count else { return [] }
-        let endIndex = min(startIndex + pageSize, viewModel.allStories.count)
-        return Array(viewModel.allStories[startIndex..<endIndex])
+        guard startIndex < filteredStories.count else { return [] }
+        let endIndex = min(startIndex + pageSize, filteredStories.count)
+        return Array(filteredStories[startIndex..<endIndex])
     }
 
     private var pageCount: Int {
-        max(1, Int(ceil(Double(viewModel.allStories.count) / Double(pageSize))))
+        max(1, Int(ceil(Double(filteredStories.count) / Double(pageSize))))
     }
 
     private var pageSubtitle: String {
-        guard !viewModel.allStories.isEmpty else { return "No stories yet" }
+        guard !viewModel.allStories.isEmpty else { return "No projects yet" }
+        guard !filteredStories.isEmpty else { return "No \(filter.title.lowercased()) projects" }
         let firstStory = pageIndex * pageSize + 1
-        let lastStory = min(firstStory + pageStories.count - 1, viewModel.allStories.count)
-        return "Showing \(firstStory)–\(lastStory) of \(viewModel.allStories.count)"
+        let lastStory = min(firstStory + pageStories.count - 1, filteredStories.count)
+        return "Showing \(firstStory)-\(lastStory) of \(filteredStories.count)"
+    }
+
+    private var shouldShowFilters: Bool {
+        Set(viewModel.allStories.map(\.projectType)).count > 1
+    }
+
+    private var projectFilterPicker: some View {
+        Picker("Project type", selection: $filter) {
+            ForEach(ProjectFilter.allCases, id: \.self) { filter in
+                Text(filter.title).tag(filter)
+            }
+        }
+        .pickerStyle(.segmented)
+        .tint(FrameMioColors.accent)
+        .accessibilityLabel("Filter projects by type")
     }
 
     private var paginationControls: some View {
@@ -396,9 +421,108 @@ struct AllStoriesView: View {
     }
 
     private func storySubtitle(for story: Story) -> String {
-        let date = story.createdAt.formatted(.dateTime.month(.abbreviated).day())
-        let moments = story.assetIDs.count == 1 ? "1 moment" : "\(story.assetIDs.count) moments"
-        return "\(date) · \(moments)"
+        let count = story.assetIDs.count
+        let noun = itemName(for: story.projectType).lowercased()
+        return count == 1 ? "1 \(noun)" : "\(count) \(noun)s"
+    }
+
+    private func itemName(for type: VideoProjectType) -> String {
+        switch type {
+        case .story:
+            "Moment"
+        case .promo:
+            "Scene"
+        case .reel:
+            "Clip"
+        }
+    }
+}
+
+private enum ProjectFilter: Hashable, CaseIterable {
+    case all
+    case type(VideoProjectType)
+
+    static var allCases: [ProjectFilter] {
+        [.all, .type(.story), .type(.promo), .type(.reel)]
+    }
+
+    var title: String {
+        switch self {
+        case .all:
+            "All"
+        case let .type(type):
+            type.title
+        }
+    }
+}
+
+private struct FirstVideoEmptyState: View {
+    let action: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
+            VStack(alignment: .leading, spacing: FrameMioSpacing.xs) {
+                Image(systemName: "plus.rectangle.on.rectangle")
+                    .font(.title2.weight(.medium))
+                    .foregroundStyle(FrameMioColors.accent)
+                    .frame(width: 56, height: 56)
+                    .background(FrameMioColors.accentMuted.opacity(0.7), in: Circle())
+                    .accessibilityHidden(true)
+
+                Text("Create your first video")
+                    .font(FrameMioTypography.title)
+                    .foregroundStyle(FrameMioColors.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+                EmptyProjectKindRow(type: .story, text: "Turn everyday moments into a story")
+                EmptyProjectKindRow(type: .promo, text: "Turn your footage into a product or business video")
+                EmptyProjectKindRow(type: .reel, text: "Create a short social video")
+            }
+
+            PrimaryButton(title: "Create", systemImage: "plus", action: action)
+                .frame(maxWidth: FrameMioMetrics.compactActionMaxWidth)
+        }
+        .frame(maxWidth: FrameMioMetrics.emptyStateMaxWidth, alignment: .leading)
+        .padding(FrameMioSpacing.xl)
+        .background(
+            FrameMioColors.surface.opacity(0.78),
+            in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+        }
+        .frameMioElevation(.subtle)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Create your first video. Story, turn everyday moments into a story. Promo, turn your footage into a product or business video. Reel, create a short social video.")
+    }
+}
+
+private struct EmptyProjectKindRow: View {
+    let type: VideoProjectType
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: FrameMioSpacing.sm) {
+            Image(systemName: type.icon)
+                .font(FrameMioTypography.headline)
+                .foregroundStyle(FrameMioColors.accent)
+                .frame(width: 28, height: 28)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(type.title)
+                    .font(FrameMioTypography.headline)
+                    .foregroundStyle(FrameMioColors.ink)
+                Text(text)
+                    .font(FrameMioTypography.footnote)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

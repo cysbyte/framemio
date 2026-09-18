@@ -11,6 +11,9 @@ type Config struct {
 	AllowedCropIntents          map[string]struct{}
 	AllowedCaptionPositions     map[string]struct{}
 	AllowedTextOverlayTypes     map[models.TextOverlayType]struct{}
+	AllowedPromoScenePurposes   map[models.PromoScenePurpose]struct{}
+	AllowedCTAStyles            map[string]struct{}
+	AllowedCTAPlacements        map[string]struct{}
 	AllowedTypographyStyles     map[models.TypographyStyle]struct{}
 	AllowedTextPlacements       map[models.TextPlacement]struct{}
 	AllowedTextAnimations       map[models.TextAnimation]struct{}
@@ -23,6 +26,10 @@ type Config struct {
 	MaxTypographySubtitleLength int
 	MaxTypographyReasonLength   int
 	MaxTypographyLines          int
+	MaxPromoSceneTextLength     int
+	MaxVoiceoverTextLength      int
+	MaxBrandTextLength          int
+	MaxCTAURLLength             int
 	MaxNarrativeLength          int
 	MaxReasonLength             int
 	MaxCropIntentLength         int
@@ -84,6 +91,31 @@ func DefaultConfig() Config {
 			models.TextOverlayChapterTitle:  {},
 			models.TextOverlayStoryIntro:    {},
 			models.TextOverlayStoryOutro:    {},
+			models.TextOverlayPromoHeadline: {},
+			models.TextOverlayPromoSupport:  {},
+			models.TextOverlayPromoCTA:      {},
+		},
+		AllowedPromoScenePurposes: map[models.PromoScenePurpose]struct{}{
+			models.PromoScenePurposeHook:        {},
+			models.PromoScenePurposeProblem:     {},
+			models.PromoScenePurposeProduct:     {},
+			models.PromoScenePurposeFeature:     {},
+			models.PromoScenePurposeBenefit:     {},
+			models.PromoScenePurposeProof:       {},
+			models.PromoScenePurposeTestimonial: {},
+			models.PromoScenePurposeCTA:         {},
+			models.PromoScenePurposeOutro:       {},
+		},
+		AllowedCTAStyles: map[string]struct{}{
+			"button":   {},
+			"banner":   {},
+			"minimal":  {},
+			"end_card": {},
+		},
+		AllowedCTAPlacements: map[string]struct{}{
+			"bottom":   {},
+			"center":   {},
+			"end_card": {},
 		},
 		AllowedTypographyStyles: map[models.TypographyStyle]struct{}{
 			models.TypographyStyleCinematic: {},
@@ -123,6 +155,10 @@ func DefaultConfig() Config {
 		MaxTypographySubtitleLength: 100,
 		MaxTypographyReasonLength:   240,
 		MaxTypographyLines:          3,
+		MaxPromoSceneTextLength:     80,
+		MaxVoiceoverTextLength:      220,
+		MaxBrandTextLength:          80,
+		MaxCTAURLLength:             240,
 		MaxNarrativeLength:          240,
 		MaxReasonLength:             240,
 		MaxCropIntentLength:         32,

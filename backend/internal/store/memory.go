@@ -17,7 +17,7 @@ type MemoryStore struct {
 	media                        map[string]models.MediaAsset
 	uploads                      map[string]models.UploadSession
 	uploadByIdem                 map[string]string
-	projects                     map[string]models.StoryProject
+	projects                     map[string]models.VideoProject
 	projectByIdem                map[string]string
 	jobs                         map[string]models.ProcessingJob
 	jobByIdem                    map[string]string
@@ -38,7 +38,7 @@ func NewMemoryStore() *MemoryStore {
 		media:         make(map[string]models.MediaAsset),
 		uploads:       make(map[string]models.UploadSession),
 		uploadByIdem:  make(map[string]string),
-		projects:      make(map[string]models.StoryProject),
+		projects:      make(map[string]models.VideoProject),
 		projectByIdem: make(map[string]string),
 		jobs:          make(map[string]models.ProcessingJob),
 		jobByIdem:     make(map[string]string),
@@ -190,9 +190,10 @@ func (s *MemoryStore) MarkMediaReady(_ context.Context, userID, mediaID, uploadI
 	return media, nil
 }
 
-func (s *MemoryStore) CreateProject(_ context.Context, project models.StoryProject, idempotencyKey string) (models.StoryProject, bool, error) {
+func (s *MemoryStore) CreateProject(_ context.Context, project models.VideoProject, idempotencyKey string) (models.VideoProject, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	project = project.Normalized()
 	key := project.UserID + "\x00" + idempotencyKey
 	if idempotencyKey != "" {
 		if existingID, ok := s.projectByIdem[key]; ok {
@@ -202,7 +203,7 @@ func (s *MemoryStore) CreateProject(_ context.Context, project models.StoryProje
 	for _, mediaID := range project.MediaIDs {
 		media, ok := s.media[mediaID]
 		if !ok || media.UserID != project.UserID || media.Status != models.MediaStatusReady {
-			return models.StoryProject{}, false, ErrConflict
+			return models.VideoProject{}, false, ErrConflict
 		}
 	}
 	s.projects[project.ID] = project
@@ -212,15 +213,38 @@ func (s *MemoryStore) CreateProject(_ context.Context, project models.StoryProje
 	return project, false, nil
 }
 
-func (s *MemoryStore) AddProjectMedia(_ context.Context, userID, projectID string, mediaIDs []string) (models.StoryProject, error) {
+func (s *MemoryStore) UpdateProject(_ context.Context, project models.VideoProject) (models.VideoProject, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	existing, ok := s.projects[project.ID]
+	if !ok {
+		return models.VideoProject{}, ErrNotFound
+	}
+	if existing.UserID != project.UserID {
+		return models.VideoProject{}, ErrInvalidOwner
+	}
+	project = project.Normalized()
+	for _, mediaID := range project.MediaIDs {
+		media, ok := s.media[mediaID]
+		if !ok || media.UserID != project.UserID || media.Status != models.MediaStatusReady {
+			return models.VideoProject{}, ErrConflict
+		}
+	}
+	project.CreatedAt = existing.CreatedAt
+	project.UpdatedAt = time.Now().UTC()
+	s.projects[project.ID] = project
+	return project, nil
+}
+
+func (s *MemoryStore) AddProjectMedia(_ context.Context, userID, projectID string, mediaIDs []string) (models.VideoProject, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	project, ok := s.projects[projectID]
 	if !ok {
-		return models.StoryProject{}, ErrNotFound
+		return models.VideoProject{}, ErrNotFound
 	}
 	if project.UserID != userID {
-		return models.StoryProject{}, ErrInvalidOwner
+		return models.VideoProject{}, ErrInvalidOwner
 	}
 	existing := make(map[string]struct{}, len(project.MediaIDs))
 	existingSourceAssets := make(map[string]struct{}, len(project.MediaIDs))
@@ -240,13 +264,13 @@ func (s *MemoryStore) AddProjectMedia(_ context.Context, userID, projectID strin
 		}
 		media, ok := s.media[mediaID]
 		if !ok {
-			return models.StoryProject{}, ErrNotFound
+			return models.VideoProject{}, ErrNotFound
 		}
 		if media.UserID != userID {
-			return models.StoryProject{}, ErrInvalidOwner
+			return models.VideoProject{}, ErrInvalidOwner
 		}
 		if media.Status != models.MediaStatusReady {
-			return models.StoryProject{}, ErrConflict
+			return models.VideoProject{}, ErrConflict
 		}
 		if _, ok := existing[mediaID]; ok {
 			continue
@@ -268,29 +292,29 @@ func (s *MemoryStore) AddProjectMedia(_ context.Context, userID, projectID strin
 	return project, nil
 }
 
-func (s *MemoryStore) GetProject(_ context.Context, userID, projectID string) (models.StoryProject, error) {
+func (s *MemoryStore) GetProject(_ context.Context, userID, projectID string) (models.VideoProject, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	project, ok := s.projects[projectID]
 	if !ok {
-		return models.StoryProject{}, ErrNotFound
+		return models.VideoProject{}, ErrNotFound
 	}
 	if project.UserID != userID {
-		return models.StoryProject{}, ErrInvalidOwner
+		return models.VideoProject{}, ErrInvalidOwner
 	}
-	return project, nil
+	return project.Normalized(), nil
 }
 
-func (s *MemoryStore) ListProjects(_ context.Context, userID string) ([]models.StoryProject, error) {
+func (s *MemoryStore) ListProjects(_ context.Context, userID string) ([]models.VideoProject, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	projects := make([]models.StoryProject, 0)
+	projects := make([]models.VideoProject, 0)
 	for _, project := range s.projects {
 		if project.UserID == userID {
-			projects = append(projects, project)
+			projects = append(projects, project.Normalized())
 		}
 	}
-	slices.SortFunc(projects, func(a, b models.StoryProject) int {
+	slices.SortFunc(projects, func(a, b models.VideoProject) int {
 		return b.CreatedAt.Compare(a.CreatedAt)
 	})
 	return projects, nil

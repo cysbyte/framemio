@@ -23,7 +23,13 @@ export function stableHash(value: unknown): string {
 }
 
 export function renderFingerprint(input: RenderInput, rendererVersion: string): string {
-  return stableHash({rendererVersion, storyPlan: input.story_plan, mediaAssets: input.media_assets});
+  return stableHash({
+    rendererVersion,
+    projectType: input.project_type ?? input.story_plan.project_type ?? 'story',
+    projectConfiguration: input.project_configuration ?? {},
+    storyPlan: input.story_plan,
+    mediaAssets: input.media_assets,
+  });
 }
 
 export function resolutionForAspectRatio(aspectRatio: AspectRatio | string): Resolution {

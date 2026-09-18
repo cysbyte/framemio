@@ -8,6 +8,7 @@ interface StoryProps extends Record<string, unknown> {
 
 const emptyComposition: CompositionSpec = {
   renderer_version: 'framemio-renderer-v1',
+  project_type: 'story',
   story_plan_id: 'empty',
   story_plan_version: 1,
   project_id: 'empty',
@@ -45,7 +46,7 @@ export const FrameMioStory: React.FC<StoryProps> = ({composition}) => {
     <AbsoluteFill style={{backgroundColor: '#0f0f12', overflow: 'hidden'}}>
       {composition.clips.map((clip, index) => (
         <Sequence key={clip.clip_id} from={clip.start_frame} durationInFrames={clip.duration_frames}>
-          <MomentLayer clip={clip} index={index} clips={composition.clips} fps={fps} />
+          <MomentLayer clip={composition.scenes?.[index] ?? clip} index={index} clips={composition.scenes ?? composition.clips} fps={fps} />
         </Sequence>
       ))}
       {composition.broll.map((overlay) => (
@@ -53,6 +54,8 @@ export const FrameMioStory: React.FC<StoryProps> = ({composition}) => {
           <BRollLayer overlay={overlay} />
         </Sequence>
       ))}
+      <BrandLayer composition={composition} />
+      <CTALayer composition={composition} fps={fps} />
       {composition.captions.map((caption, index) => <CaptionLayer key={`${caption.moment_id}-${index}`} caption={caption} styleSpec={composition.caption_style} fps={fps} />)}
       <AudioLayer audio={composition.audio} clips={composition.clips} />
     </AbsoluteFill>
@@ -67,6 +70,9 @@ const MomentLayer: React.FC<{clip: TimelineClip; index: number; clips: TimelineC
       {clip.media_type === 'video'
         ? <OffthreadVideo src={sourceURL(clip.prepared_path)} muted={clip.volume <= 0} volume={clip.volume} style={mediaStyle(clip.crop_intent)} />
         : <PhotoLayer clip={clip} />}
+      {(clip.overlays?.length ? clip.overlays : clip.typography ? [clip.typography] : []).map((overlay, overlayIndex) => (
+        <TypographyLayer key={`${clip.clip_id}-overlay-${overlayIndex}`} typography={overlay} durationFrames={clip.duration_frames} fps={fps} />
+      ))}
     </AbsoluteFill>
   );
 };
@@ -172,6 +178,48 @@ const CaptionLayer: React.FC<{caption: StoryCaption; styleSpec?: CaptionStyle; f
     <AbsoluteFill style={{justifyContent: 'flex-end', alignItems: 'center', paddingBottom: bottom, pointerEvents: 'none'}}>
       <div style={{maxWidth: `${captionDefaults.maxWidth * 100}%`, padding: '12px 22px', borderRadius: 16, background: styleSpec?.background_enabled === false ? 'transparent' : captionDefaults.backgroundColor, color: styleSpec?.text_color ?? captionDefaults.textColor, fontFamily: 'Liberation Sans, Arial, sans-serif', fontSize, fontWeight: 700, lineHeight: 1.12, textAlign: 'center', WebkitTextStroke: `${clamp(styleSpec?.stroke_width ?? captionDefaults.strokeWidth, 0, 8)}px ${styleSpec?.stroke_color ?? captionDefaults.strokeColor}`, textShadow: '0 3px 12px rgba(0,0,0,0.55)'}}>{text}</div>
     </AbsoluteFill>
+  );
+};
+
+const BrandLayer: React.FC<{composition: CompositionSpec}> = ({composition}) => {
+  const maybeBrand = composition.branding;
+  if (!maybeBrand || (!maybeBrand.logo_path && !cleanText(maybeBrand.name))) {
+    return null;
+  }
+  const safe = composition.canvas?.safe_area ?? {top: 0.06, right: 0.06, bottom: 0.08, left: 0.06};
+  return (
+    <AbsoluteFill style={{pointerEvents: 'none'}}>
+      <div style={{position: 'absolute', top: percent(safe.top ?? 0.06), left: percent(safe.left ?? 0.06), display: 'flex', alignItems: 'center', gap: 12, maxWidth: '72%'}}>
+        {maybeBrand.logo_path ? <Img src={sourceURL(maybeBrand.logo_path)} style={{width: 56, height: 56, objectFit: 'contain', borderRadius: 8}} /> : null}
+        {cleanText(maybeBrand.name) ? <div style={{fontFamily: 'Liberation Sans, Arial, sans-serif', fontSize: 28, fontWeight: 700, color: maybeBrand.primary_color ?? '#FFFFFF', textShadow: '0 3px 12px rgba(0,0,0,0.48)'}}>{cleanText(maybeBrand.name)}</div> : null}
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+const CTALayer: React.FC<{composition: CompositionSpec; fps: number}> = ({composition, fps}) => {
+  const text = cleanText(composition.cta?.text ?? composition.call_to_action);
+  if (!text || composition.clips.length === 0) {
+    return null;
+  }
+  const last = composition.clips[composition.clips.length - 1];
+  const durationFrames = Math.max(1, Math.min(last.duration_frames, Math.round(2.4 * fps)));
+  const from = Math.max(0, last.start_frame + last.duration_frames - durationFrames);
+  const typography: TextOverlay = {
+    enabled: true,
+    title: text,
+    style: String(composition.cta?.style ?? 'editorial'),
+    placement: String(composition.cta?.placement ?? 'bottom_center'),
+    start_ms: 0,
+    duration_ms: Math.round((durationFrames / fps) * 1000),
+    max_width: 0.78,
+    safe_area: composition.canvas?.safe_area,
+    animation: 'fade_up',
+  };
+  return (
+    <Sequence from={from} durationInFrames={durationFrames}>
+      <TypographyLayer typography={typography} durationFrames={durationFrames} fps={fps} />
+    </Sequence>
   );
 };
 

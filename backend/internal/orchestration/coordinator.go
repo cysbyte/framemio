@@ -76,7 +76,7 @@ func (c *Coordinator) StartAnalysis(ctx context.Context, userID, projectID, idem
 		if media.Type != models.MediaTypeVideo {
 			continue
 		}
-		job, err := c.createStageJob(ctx, userID, projectID, mediaID, models.JobTypeMediaPreprocess, map[string]string{"pipeline_version": PipelineVersion}, stableStageKey(projectID, mediaID, models.JobTypeMediaPreprocess), true)
+		job, err := c.createStageJob(ctx, userID, projectID, mediaID, models.JobTypeMediaPreprocess, map[string]string{"pipeline_version": PipelineVersion, "project_type": string(project.Type)}, stableStageKey(projectID, mediaID, models.JobTypeMediaPreprocess), true)
 		if err != nil {
 			return nil, err
 		}
@@ -106,6 +106,7 @@ func (c *Coordinator) StartIOSAnalysis(ctx context.Context, userID, projectID, i
 		return nil, err
 	}
 	baseConfig := inheritConfiguration(nil)
+	baseConfig["project_type"] = string(project.Type)
 	if len(configuration) > 0 {
 		baseConfig = inheritConfiguration(configuration[0])
 	}
@@ -169,8 +170,12 @@ func (c *Coordinator) StartIOSAnalysis(ctx context.Context, userID, projectID, i
 // and an explicit /render request for the same plan converge on one job instead
 // of rendering the same film twice.
 func (c *Coordinator) RecordValidationAndQueueRender(ctx context.Context, userID, projectID, idempotencyKey string, storyPlanVersion int, outputPreset string) (models.ProcessingJob, error) {
+	project, err := c.Store.GetProject(ctx, userID, projectID)
+	if err != nil {
+		return models.ProcessingJob{}, err
+	}
 	preset := valueOrDefault(strings.TrimSpace(outputPreset), defaultOutputPreset)
-	configuration := map[string]string{"pipeline_version": PipelineVersion, "story_plan_version": strconv.Itoa(storyPlanVersion), "output_preset": preset, "output_s3_key": renderOutputKey(userID, projectID, storyPlanVersion, preset)}
+	configuration := map[string]string{"pipeline_version": PipelineVersion, "project_type": string(project.Type), "story_plan_version": strconv.Itoa(storyPlanVersion), "output_preset": preset, "output_s3_key": renderOutputKey(userID, projectID, storyPlanVersion, preset)}
 	validationJob, err := c.createStageJob(ctx, userID, projectID, "", models.JobTypeStoryValidate, configuration, stableValidateKey(projectID, storyPlanVersion, preset), false)
 	if err != nil {
 		return models.ProcessingJob{}, err
@@ -207,6 +212,7 @@ func (c *Coordinator) RequestStoryPlanRevision(ctx context.Context, userID, proj
 	}
 	config := inheritConfiguration(configuration)
 	config["pipeline_version"] = PipelineVersion
+	config["project_type"] = string(project.Type)
 	version, _ := strconv.Atoi(strings.TrimSpace(config["story_plan_version"]))
 	if version <= 0 {
 		latest, err := c.Store.GetStoryPlan(ctx, userID, projectID)
@@ -611,6 +617,7 @@ func (c *Coordinator) enqueueStoryPlanIfReady(ctx context.Context, userID, proje
 		return nil
 	}
 	storyConfig := inheritConfiguration(nil)
+	storyConfig["project_type"] = string(project.Type)
 	if len(configuration) > 0 {
 		storyConfig = inheritConfiguration(configuration[0])
 	}
@@ -663,7 +670,11 @@ func (c *Coordinator) createStageJob(ctx context.Context, userID, projectID, med
 	config := inheritConfiguration(configuration)
 	config["job_type"] = string(jobType)
 	config["pipeline_version"] = valueOrDefault(config["pipeline_version"], PipelineVersion)
-	job := models.ProcessingJob{ID: models.NewID("job"), UserID: userID, ProjectID: projectID, MediaID: mediaID, Type: jobType, Status: models.JobStatusQueued, Progress: 0, MaxAttempts: c.MaxAttempts, Configuration: config, CreatedAt: now, UpdatedAt: now}
+	projectType, valid := models.NormalizeProjectType(models.ProjectType(config["project_type"]))
+	if !valid {
+		projectType = models.ProjectTypeStory
+	}
+	job := models.ProcessingJob{ID: models.NewID("job"), UserID: userID, ProjectID: projectID, ProjectType: projectType, MediaID: mediaID, Type: jobType, Status: models.JobStatusQueued, Progress: 0, MaxAttempts: c.MaxAttempts, Configuration: config, CreatedAt: now, UpdatedAt: now}
 	stored, existing, err := c.Store.CreateJob(ctx, job, idempotencyKey)
 	if err != nil {
 		return models.ProcessingJob{}, err
@@ -682,7 +693,7 @@ func (c *Coordinator) publishJob(ctx context.Context, job models.ProcessingJob) 
 	if c.Publisher == nil {
 		return fmt.Errorf("job publisher is not configured")
 	}
-	message := queue.JobMessage{JobID: job.ID, ProjectID: job.ProjectID, MediaID: job.MediaID, JobType: job.Type, Configuration: smallConfiguration(job.Configuration)}
+	message := queue.JobMessage{JobID: job.ID, ProjectID: job.ProjectID, ProjectType: job.ProjectType, MediaID: job.MediaID, JobType: job.Type, Configuration: smallConfiguration(job.Configuration)}
 	c.Logger.Info("publishing job message", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID))
 	if err := c.Publisher.Publish(ctx, message); err != nil {
 		c.Logger.Error("publish job message failed", slog.String("job_id", job.ID), slog.String("job_type", string(job.Type)), slog.String("project_id", job.ProjectID), slog.String("media_id", job.MediaID), slog.Any("error", err))
@@ -761,7 +772,7 @@ func (c *Coordinator) ensureRevisionMediaStages(ctx context.Context, userID stri
 			if _, ok := videoReady[mediaID]; ok || hasCompletedStage(jobs, mediaID, models.JobTypeVideoUnderstand) || hasActiveStage(jobs, mediaID, models.JobTypeMediaPreprocess) || hasActiveStage(jobs, mediaID, models.JobTypeTranscribe) || hasActiveStage(jobs, mediaID, models.JobTypeVideoUnderstand) {
 				continue
 			}
-			if _, err := c.createStageJob(ctx, userID, project.ID, mediaID, models.JobTypeMediaPreprocess, map[string]string{"pipeline_version": PipelineVersion}, stableStageKey(project.ID, mediaID, models.JobTypeMediaPreprocess), true); err != nil {
+			if _, err := c.createStageJob(ctx, userID, project.ID, mediaID, models.JobTypeMediaPreprocess, map[string]string{"pipeline_version": PipelineVersion, "project_type": string(project.Type)}, stableStageKey(project.ID, mediaID, models.JobTypeMediaPreprocess), true); err != nil {
 				return err
 			}
 			continue

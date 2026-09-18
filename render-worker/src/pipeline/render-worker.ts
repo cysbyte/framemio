@@ -33,7 +33,7 @@ export class DeterministicRenderWorker {
     console.info(JSON.stringify({level: 'info', msg: 'render source assets downloaded', job_id: input.job_id, project_id: input.project_id, downloaded_count: assetPaths.size}));
     const preparedPaths = await this.prepareClips(input, assetsByID, assetPaths, paths.clips_dir);
     console.info(JSON.stringify({level: 'info', msg: 'render clips prepared', job_id: input.job_id, project_id: input.project_id, prepared_count: preparedPaths.size}));
-    const composition = buildComposition(input.story_plan, input.media_assets, assetPaths, preparedPaths, paths, {rendererVersion, fps: DEFAULT_FPS});
+    const composition = buildComposition(input.story_plan, input.media_assets, assetPaths, preparedPaths, paths, {rendererVersion, fps: DEFAULT_FPS, projectType: input.project_type, projectConfiguration: input.project_configuration});
     await writeFile(paths.composition_file, JSON.stringify(composition, null, 2), 'utf8');
     console.info(JSON.stringify({level: 'info', msg: 'render composition built', job_id: input.job_id, project_id: input.project_id, duration_ms: composition.duration_ms, width: composition.resolution.width, height: composition.resolution.height, clip_count: composition.clips.length, broll_count: composition.broll.length, broll_trace: timelineBRollTrace(composition.broll), caption_count: composition.captions.length, transition_summary: transitionSummary(composition)}));
     const remotionIntermediate = path.join(paths.work_dir, 'remotion-output.mp4');
@@ -203,23 +203,106 @@ function validateInput(input: RenderInput, rendererVersion: string): void {
   if (!input.story_plan || input.story_plan.project_id !== input.project_id) {
     throw new RenderInputError('validated story plan must belong to the render project');
   }
+  if (input.project_type && !['story', 'promo', 'reel'].includes(input.project_type)) {
+    throw new RenderInputError(`unsupported project type: ${input.project_type}`);
+  }
+  if (input.story_plan.project_type && input.project_type && input.story_plan.project_type !== input.project_type) {
+    throw new RenderInputError('render project type does not match the edit plan');
+  }
   if (!['9:16', '1:1', '16:9'].includes(input.story_plan.output.aspect_ratio)) {
     throw new RenderInputError(`unsupported render aspect ratio: ${input.story_plan.output.aspect_ratio}`);
+  }
+  const resolution = resolutionForValidatedAspectRatio(input.story_plan.output.aspect_ratio);
+  if (resolution.width <= 0 || resolution.height <= 0 || resolution.width > 3840 || resolution.height > 3840) {
+    throw new RenderInputError(`unsupported output dimensions: ${resolution.width}x${resolution.height}`);
+  }
+  if ((input.project_type === 'reel' || input.story_plan.project_type === 'reel') && input.story_plan.output.aspect_ratio !== '9:16') {
+    throw new RenderInputError('reel renders must use 9:16 aspect ratio');
   }
   if (input.story_plan.moments.length === 0) {
     throw new RenderInputError('story plan must include at least one moment');
   }
+  const assetsByID = new Map(input.media_assets.map((asset) => [asset.id, asset]));
+  let totalDurationMs = 0;
+  for (const [index, moment] of input.story_plan.moments.entries()) {
+    const asset = moment.asset_id ? assetsByID.get(moment.asset_id) : undefined;
+    if (!moment.asset_id || !asset) {
+      throw new RenderInputError(`missing media asset for scene at index ${index}: ${moment.asset_id || 'unset'}`);
+    }
+    if (!Number.isFinite(moment.duration_ms) || moment.duration_ms <= 0) {
+      throw new RenderInputError(`invalid scene duration at index ${index}`);
+    }
+    totalDurationMs += moment.duration_ms;
+    if (asset.media_type === 'video') {
+      const startMicros = moment.start_micros ?? 0;
+      if (startMicros < 0 || (moment.end_micros ?? 0) <= startMicros) {
+        throw new RenderInputError(`invalid video source range at scene index ${index}`);
+      }
+    }
+    validateTextOverlay(moment.typography, `moments[${index}].typography`);
+    if (moment.scene_text) {
+      validateTextLength(moment.scene_text.headline, 80, `moments[${index}].scene_text.headline`);
+      validateTextLength(moment.scene_text.supporting, 100, `moments[${index}].scene_text.supporting`);
+      validateTextLength(moment.scene_text.cta, 80, `moments[${index}].scene_text.cta`);
+    }
+    if (moment.voiceover?.text) {
+      validateTextLength(moment.voiceover.text, 220, `moments[${index}].voiceover.text`);
+    }
+  }
+  if (input.story_plan.total_duration_ms !== undefined && Math.abs(input.story_plan.total_duration_ms - totalDurationMs) > 34) {
+    throw new RenderInputError(`story plan duration mismatch: moments=${totalDurationMs} total=${input.story_plan.total_duration_ms}`);
+  }
   for (const [index, overlay] of (input.story_plan.broll ?? []).entries()) {
-    if (!overlay.asset_id || overlay.start_ms < 0 || overlay.duration_ms <= 0) {
+    const asset = overlay.asset_id ? assetsByID.get(overlay.asset_id) : undefined;
+    if (!overlay.asset_id || !asset || overlay.start_ms < 0 || overlay.duration_ms <= 0) {
       throw new RenderInputError(`invalid b-roll overlay at index ${index}`);
     }
     if (overlay.start_ms + overlay.duration_ms > (input.story_plan.total_duration_ms ?? Number.MAX_SAFE_INTEGER)) {
       throw new RenderInputError(`b-roll overlay exceeds story duration at index ${index}`);
     }
     const sourceStartMicros = overlay.source_start_micros ?? 0;
-    if (overlay.media_type === 'video' && (sourceStartMicros < 0 || (overlay.source_end_micros ?? 0) <= sourceStartMicros)) {
+    if (asset.media_type === 'video' && (sourceStartMicros < 0 || (overlay.source_end_micros ?? 0) <= sourceStartMicros)) {
       throw new RenderInputError(`invalid b-roll source segment at index ${index}`);
     }
+  }
+  for (const [index, caption] of (input.story_plan.captions ?? []).entries()) {
+    validateTextLength(caption.text, 220, `captions[${index}].text`);
+    if ((caption.start_ms ?? 0) < 0 || (caption.end_ms ?? totalDurationMs) < (caption.start_ms ?? 0)) {
+      throw new RenderInputError(`invalid caption timing at index ${index}`);
+    }
+  }
+  if (input.story_plan.audio?.source && !['none', 'original'].includes(input.story_plan.audio.source)) {
+    throw new RenderInputError(`unsupported audio source: ${input.story_plan.audio.source}`);
+  }
+}
+
+function resolutionForValidatedAspectRatio(aspectRatio: string): {width: number; height: number} {
+  switch (aspectRatio) {
+    case '9:16':
+      return {width: 1080, height: 1920};
+    case '1:1':
+      return {width: 1080, height: 1080};
+    case '16:9':
+      return {width: 1920, height: 1080};
+    default:
+      return {width: 0, height: 0};
+  }
+}
+
+function validateTextOverlay(overlay: RenderInput['story_plan']['moments'][number]['typography'], field: string): void {
+  if (!overlay) {
+    return;
+  }
+  validateTextLength(overlay.title, 80, `${field}.title`);
+  validateTextLength(overlay.subtitle, 140, `${field}.subtitle`);
+  if (overlay.max_width !== undefined && (overlay.max_width < 0.2 || overlay.max_width > 0.95)) {
+    throw new RenderInputError(`invalid text overlay width at ${field}`);
+  }
+}
+
+function validateTextLength(value: string | undefined, maxLength: number, field: string): void {
+  if (typeof value === 'string' && value.replace(/\s+/g, ' ').trim().length > maxLength) {
+    throw new RenderInputError(`${field} exceeds ${maxLength} characters`);
   }
 }
 

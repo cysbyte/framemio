@@ -302,8 +302,11 @@ func TestStoryPlanHandlerSanitizesExternalPlannerRendererValuesBeforeValidation(
 	if latest.Moments[0].CropIntent != "fit" || latest.Moments[1].CropIntent != "fill" {
 		t.Fatalf("unsupported crop intents were not sanitized: %+v", latest.Moments)
 	}
-	if latest.Moments[0].Typography != nil {
-		t.Fatalf("external story planner typography should be stripped before first-release validation: %+v", latest.Moments[0].Typography)
+	if latest.Moments[0].Typography == nil {
+		t.Fatal("external story planner typography should be sanitized and preserved")
+	}
+	if latest.Moments[0].Typography.Type != models.TextOverlayMomentTitle || latest.Moments[0].Typography.Title != "Opening" || latest.Moments[0].Typography.Placement != models.TextPlacementBottomCenter {
+		t.Fatalf("external story planner typography was not sanitized and preserved: %+v", latest.Moments[0].Typography)
 	}
 	if len(latest.Captions) != 1 || latest.Captions[0].StartMS != 0 || latest.Captions[0].EndMS != 2000 {
 		t.Fatalf("invalid captions were not repaired/dropped: %+v", latest.Captions)

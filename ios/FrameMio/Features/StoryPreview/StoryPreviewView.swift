@@ -21,6 +21,10 @@ struct StoryPreviewView: View {
     private let generatedVideoAspectRatio: CGFloat = 9.0 / 16.0
     private let onOpenPricing: (PricingEntryPoint) -> Void
 
+    private var editorConfiguration: VideoProjectEditorConfiguration {
+        viewModel.editorConfiguration
+    }
+
     init(viewModel: StoryPreviewViewModel, onOpenPricing: @escaping (PricingEntryPoint) -> Void) {
         _viewModel = StateObject(wrappedValue: viewModel)
         self.onOpenPricing = onOpenPricing
@@ -37,8 +41,8 @@ struct StoryPreviewView: View {
                 } else {
                     EmptyState(
                         systemImage: "film",
-                        title: "Story unavailable",
-                        message: viewModel.errorMessage ?? "This story could not be opened.",
+                        title: "\(editorConfiguration.terminology.projectName) unavailable",
+                        message: viewModel.errorMessage ?? "This project could not be opened.",
                         actionTitle: "Try Again",
                         action: { viewModel.load() }
                     )
@@ -50,7 +54,7 @@ struct StoryPreviewView: View {
             .padding(.bottom, FrameMioSpacing.xxxl)
         }
         .background(FrameMioColors.canvas.ignoresSafeArea())
-        .navigationTitle("My Story")
+        .navigationTitle("My \(editorConfiguration.terminology.projectName)")
         .navigationBarTitleDisplayMode(.inline)
         .task {
             viewModel.load()
@@ -72,6 +76,7 @@ struct StoryPreviewView: View {
         .sheet(item: $selectedMoment) { moment in
             MomentDetailSheet(
                 moment: moment,
+                terminology: editorConfiguration.terminology,
                 image: viewModel.image(forStoryAssetID: moment.assetID),
                 videoURLProvider: { assetID in
                     await viewModel.playableMomentVideoURL(forStoryAssetID: assetID)
@@ -97,6 +102,7 @@ struct StoryPreviewView: View {
                     isPerformingAction: viewModel.isPerformingAction,
                     creditBalance: viewModel.creditBalance,
                     promptTranscriptionService: viewModel.promptTranscriptionService,
+                    configuration: editorConfiguration,
                     imageProvider: { viewModel.image(forStoryAssetID: $0) },
                     videoURLProvider: { assetID in
                         await viewModel.playableMomentVideoURL(forStoryAssetID: assetID)
@@ -150,7 +156,7 @@ struct StoryPreviewView: View {
             StoryWaitingAnimation()
 
             VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
-                Text("Creating your story...")
+                Text("Creating your \(editorConfiguration.terminology.projectName.lowercased())...")
                     .font(FrameMioTypography.title)
                     .foregroundStyle(FrameMioColors.ink)
 
@@ -185,7 +191,7 @@ struct StoryPreviewView: View {
 
     private func storyHeader(_ story: Story) -> some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
-            Text("YOUR STORY")
+            Text(editorConfiguration.eyebrow)
                 .font(FrameMioTypography.eyebrow)
                 .foregroundStyle(FrameMioColors.accent)
                 .textCase(.uppercase)
@@ -314,7 +320,7 @@ struct StoryPreviewView: View {
                     StoryPillActionLabel(title: "Share", systemImage: "square.and.arrow.up")
                 }
                 .disabled(viewModel.isPerformingAction)
-                .accessibilityLabel("Share story")
+                .accessibilityLabel("Share \(editorConfiguration.terminology.projectName.lowercased())")
 
                 PrimaryButton(
                     title: actionTitle(.saveVideo, fallback: "Save"),
@@ -323,7 +329,7 @@ struct StoryPreviewView: View {
                     isLoading: viewModel.activeAction == .saveVideo
                 )
                 .disabled(viewModel.isPerformingAction)
-                .accessibilityLabel("Save story to Photos")
+                .accessibilityLabel("Save \(editorConfiguration.terminology.projectName.lowercased()) to Photos")
             }
         } else if story.status.shouldPoll {
             VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
@@ -338,7 +344,7 @@ struct StoryPreviewView: View {
     private func storyDescription(_ story: Story) -> some View {
         if let description = nonEmpty(story.description) {
             VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
-                Text("About this story")
+                Text("About this \(editorConfiguration.terminology.projectName.lowercased())")
                     .font(FrameMioTypography.title)
                     .foregroundStyle(FrameMioColors.ink)
 
@@ -355,10 +361,10 @@ struct StoryPreviewView: View {
         let moments = momentPresentations(for: story)
 
         return VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            SectionHeader(title: "Moments", subtitle: momentSummary(for: story, moments: moments))
+            SectionHeader(title: editorConfiguration.terminology.plural, subtitle: momentSummary(for: story, moments: moments))
 
             if moments.isEmpty {
-                Text("FrameMio will show the moments that shaped this story when they are available.")
+                Text("FrameMio will show the \(editorConfiguration.terminology.plural.lowercased()) that shaped this \(editorConfiguration.terminology.projectName.lowercased()) when they are available.")
                     .font(FrameMioTypography.body)
                     .foregroundStyle(FrameMioColors.secondaryInk)
             } else {
@@ -392,13 +398,13 @@ struct StoryPreviewView: View {
     }
 
     private func editStoryButton(_ story: Story) -> some View {
-        PrimaryButton(title: "Edit Story", systemImage: "square.and.pencil") {
+        PrimaryButton(title: editorConfiguration.editButtonTitle, systemImage: "square.and.pencil") {
             guard !story.status.shouldPoll else { return }
             isShowingEditStory = true
         }
         .disabled(viewModel.isPerformingAction || story.status.shouldPoll)
-        .accessibilityLabel("Edit story")
-        .accessibilityHint(story.status.shouldPoll ? "Editing is unavailable while FrameMio is creating this story." : "Opens story editing options.")
+        .accessibilityLabel(editorConfiguration.editButtonTitle)
+        .accessibilityHint(story.status.shouldPoll ? "Editing is unavailable while FrameMio is creating this project." : "Opens project editing options.")
     }
 
     private func removeStoryButton(_ story: Story) -> some View {
@@ -417,7 +423,7 @@ struct StoryPreviewView: View {
                         .font(FrameMioTypography.headline)
                         .accessibilityHidden(true)
                 }
-                Text(actionTitle(.deleteStory, fallback: "Remove Story"))
+                Text(actionTitle(.deleteStory, fallback: editorConfiguration.deleteButtonTitle))
                     .font(FrameMioTypography.headline)
             }
             .foregroundStyle(Color.red)
@@ -425,8 +431,8 @@ struct StoryPreviewView: View {
         }
         .buttonStyle(FrameMioPressButtonStyle())
         .disabled(viewModel.activeAction == .deleteStory)
-        .accessibilityLabel("Remove story")
-        .accessibilityHint("Removes this story from FrameMio.")
+        .accessibilityLabel(editorConfiguration.deleteButtonTitle)
+        .accessibilityHint("Removes this project from FrameMio.")
     }
 
     private var progressDetail: some View {
@@ -444,8 +450,8 @@ struct StoryPreviewView: View {
     private var processingSteps: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.xs) {
             processingStep("Media prepared", isActive: viewModel.progressValue >= 0.28)
-            processingStep("Highlights found", isActive: viewModel.progressValue >= 0.55)
-            processingStep("Story written", isActive: viewModel.progressValue >= 0.72)
+            processingStep(editorConfiguration.type == .story ? "Highlights found" : "\(editorConfiguration.terminology.plural) planned", isActive: viewModel.progressValue >= 0.55)
+            processingStep(editorConfiguration.type == .story ? "Story written" : "Edit planned", isActive: viewModel.progressValue >= 0.72)
             processingStep("Film rendered", isActive: viewModel.progressValue >= 0.88)
         }
     }
@@ -548,7 +554,7 @@ struct StoryPreviewView: View {
         case 2:
             return "A favorite part"
         default:
-            return "Moment \(index + 1)"
+            return "\(editorConfiguration.terminology.singular) \(index + 1)"
         }
     }
 
@@ -570,7 +576,7 @@ struct StoryPreviewView: View {
         guard !moments.isEmpty else { return nil }
         let photoCount = moments.filter { $0.kind == .photo || $0.kind == .livePhoto }.count
         let videoCount = moments.filter { $0.kind == .video }.count
-        var parts = [moments.count == 1 ? "1 moment" : "\(moments.count) moments"]
+        var parts = [moments.count == 1 ? "1 \(editorConfiguration.terminology.singular.lowercased())" : "\(moments.count) \(editorConfiguration.terminology.plural.lowercased())"]
         if photoCount > 0 {
             parts.append(photoCount == 1 ? "1 photo" : "\(photoCount) photos")
         }
@@ -604,11 +610,11 @@ struct StoryPreviewView: View {
     private func placeholderTitle(for story: Story) -> String {
         switch story.status {
         case .failed:
-            "Something went wrong creating your story."
+            "Something went wrong creating your \(editorConfiguration.terminology.projectName.lowercased())."
         case .ready:
             "Preparing your film..."
         case .queued, .analyzing, .rendering:
-            "Creating your story..."
+            "Creating your \(editorConfiguration.terminology.projectName.lowercased())..."
         }
     }
 
@@ -619,7 +625,7 @@ struct StoryPreviewView: View {
         case .ready:
             "The video link is almost ready."
         case .queued, .analyzing, .rendering:
-            "FrameMio is finding the moments that belong together."
+            "FrameMio is finding the \(editorConfiguration.terminology.plural.lowercased()) that belong together."
         }
     }
 
@@ -703,7 +709,7 @@ struct StoryPreviewView: View {
     }
 }
 
-private struct StoryMomentPresentation: Identifiable, Hashable {
+struct StoryMomentPresentation: Identifiable, Hashable {
     enum Kind: Hashable {
         case photo
         case video
@@ -889,6 +895,7 @@ private struct StoryMomentCard: View {
 
 private struct MomentDetailSheet: View {
     let moment: StoryMomentPresentation
+    let terminology: VideoProjectTerminology
     let image: Image?
     let videoURLProvider: (String) async -> URL?
     let isPerformingAction: Bool
@@ -918,7 +925,7 @@ private struct MomentDetailSheet: View {
                     Text(moment.title)
                         .font(FrameMioTypography.title)
                         .foregroundStyle(FrameMioColors.ink)
-                    Text(moment.description ?? "This is one of the moments FrameMio used in your story.")
+                    Text(moment.description ?? "This is one of the \(terminology.plural.lowercased()) FrameMio used in your \(terminology.projectName.lowercased()).")
                         .font(FrameMioTypography.body)
                         .foregroundStyle(FrameMioColors.secondaryInk)
                         .fixedSize(horizontal: false, vertical: true)
@@ -928,12 +935,12 @@ private struct MomentDetailSheet: View {
 
                 VStack(spacing: FrameMioSpacing.sm) {
                     Button(role: .destructive, action: onRemove) {
-                        Label("Remove from Story", systemImage: "minus.circle")
+                        Label("Remove from \(terminology.projectName)", systemImage: "minus.circle")
                             .font(FrameMioTypography.headline)
                             .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.compactButtonHeight)
                     }
                     .disabled(isPerformingAction)
-                    .accessibilityLabel("Remove \(moment.title) from story")
+                    .accessibilityLabel("Remove \(moment.title) from \(terminology.projectName.lowercased())")
 
                     SecondaryButton(title: "Keep", systemImage: "checkmark", action: onKeep)
                 }
@@ -1035,6 +1042,7 @@ private struct EditStorySheet: View {
     let isPerformingAction: Bool
     let creditBalance: Int?
     let promptTranscriptionService: PromptTranscriptionService?
+    let configuration: VideoProjectEditorConfiguration
     let imageProvider: (String) -> Image?
     let videoURLProvider: (String) async -> URL?
     let onAppearMoment: (String) -> Void
@@ -1050,8 +1058,6 @@ private struct EditStorySheet: View {
     @State private var draggedMomentAssetID: String?
     @StateObject private var voicePromptRecorder = VoicePromptRecorder()
 
-    private let styleOptions = ["Natural", "Cinematic", "Warm", "Playful"]
-    private let subtitleStyleOptions = ["Bold", "Cinematic", "Minimal", "Playful"]
     private let sceneDetailOptions: [(title: String, value: String?, subtitle: String?)] = [
         ("Balanced", nil, "Default"),
         ("More details", "moreDetails", "Extra cutaways"),
@@ -1086,14 +1092,14 @@ private struct EditStorySheet: View {
 
     private var lengthSectionSubtitle: String {
         if hasPhotoLikeLengthSource {
-            return "Photos can extend the story up to 60s"
+            return "Photos can extend the \(configuration.terminology.projectName.lowercased()) up to 60s"
         }
         if hasUnknownVideoLengthSource {
-            return "FrameMio will fit the story to available footage"
+            return "FrameMio will fit the \(configuration.terminology.projectName.lowercased()) to available footage"
         }
         let seconds = maxSelectableLengthSeconds
         if seconds < 60 {
-            return "Video-only story: up to \(seconds)s of source footage available"
+            return "Video-only \(configuration.terminology.projectName.lowercased()): up to \(seconds)s of source footage available"
         }
         return "FrameMio decides what to keep"
     }
@@ -1207,10 +1213,13 @@ private struct EditStorySheet: View {
                     } else if isPerformingAction && activeAction == .editStory {
                         updatingState
                     }
-                    momentsSection
+                    if configuration.type == .promo, !displayedMoments.isEmpty {
+                        promoSceneTimelineSection
+                    }
+                    timelineSection
                     addMomentButton
-                    storyControlsSection
-                    anotherVersionSection
+                    editorControlsSection
+                    aiActionSection
                 }
                 .padding(FrameMioSpacing.lg)
             }
@@ -1220,7 +1229,7 @@ private struct EditStorySheet: View {
                     voicePromptListeningOverlay
                 }
             }
-            .navigationTitle("Edit Story")
+            .navigationTitle(configuration.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -1236,6 +1245,12 @@ private struct EditStorySheet: View {
                 EditMomentSheet(
                     moment: moment,
                     image: imageProvider(moment.assetID),
+                    terminology: configuration.terminology,
+                    configuration: configuration,
+                    sceneDraft: Binding(
+                        get: { draft.sceneEdit(for: moment.assetID) },
+                        set: { draft.setSceneEdit($0, for: moment.assetID) }
+                    ),
                     videoURLProvider: videoURLProvider,
                     isPerformingAction: isPerformingAction,
                     onRemove: {
@@ -1253,6 +1268,8 @@ private struct EditStorySheet: View {
             }
             .sheet(isPresented: $isShowingAddMoment) {
                 AddMomentSelectionSheet(
+                    title: configuration.addSheetTitle,
+                    terminology: configuration.terminology,
                     moments: selectableMoments,
                     excludedSourceIDs: visibleSourceKeys,
                     thumbnailRevision: thumbnailRevision,
@@ -1282,7 +1299,8 @@ private struct EditStorySheet: View {
             }
             .sheet(item: $replacingMoment) { source in
                 AddMomentSelectionSheet(
-                    title: "Replace Moment",
+                    title: configuration.replaceSheetTitle,
+                    terminology: configuration.terminology,
                     moments: selectableMoments,
                     allowsMultipleSelection: false,
                     excludedSourceIDs: visibleSourceKeys,
@@ -1319,7 +1337,7 @@ private struct EditStorySheet: View {
             Text("Couldn't create this version.")
                 .font(FrameMioTypography.headline)
                 .foregroundStyle(FrameMioColors.ink)
-            Text("Your previous story stays available. Try again when you're ready.")
+            Text("Your previous \(configuration.terminology.projectName.lowercased()) stays available. Try again when you're ready.")
                 .font(FrameMioTypography.footnote)
                 .foregroundStyle(FrameMioColors.secondaryInk)
             SecondaryButton(title: "Try Again", systemImage: "arrow.clockwise", action: onRetry)
@@ -1330,7 +1348,7 @@ private struct EditStorySheet: View {
         HStack(spacing: FrameMioSpacing.sm) {
             ProgressView()
             VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
-                Text("Creating your new story")
+                Text("Creating your new \(configuration.terminology.projectName.lowercased())")
                     .font(FrameMioTypography.headline)
                 Text("Finding the right rhythm and rendering your video.")
                     .font(FrameMioTypography.caption)
@@ -1341,17 +1359,17 @@ private struct EditStorySheet: View {
         .background(FrameMioColors.surface.opacity(0.72), in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
     }
 
-    private var momentsSection: some View {
+    private var timelineSection: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            SectionHeader(title: "Moments", subtitle: draft.hasChanges ? "Unsaved changes" : "Drag to reorder")
+            SectionHeader(title: configuration.terminology.plural, subtitle: draft.hasChanges(for: configuration) ? "Unsaved changes" : configuration.timelineSubtitle)
             if displayedMoments.isEmpty {
-                Text("Choose a few moments and FrameMio will shape them into a new version.")
+                Text("Choose a few \(configuration.terminology.plural.lowercased()) and FrameMio will shape them into a new version.")
                     .font(FrameMioTypography.body)
                     .foregroundStyle(FrameMioColors.secondaryInk)
             } else {
                 LazyVStack(spacing: FrameMioSpacing.sm) {
                     ForEach(displayedMoments) { moment in
-                        StoryMomentRow(moment: moment, image: imageProvider(moment.assetID), showsReorderHandle: displayedMoments.count > 1) {
+                        StoryMomentRow(moment: moment, image: imageProvider(moment.assetID), terminology: configuration.terminology, showsReorderHandle: displayedMoments.count > 1) {
                             selectedMoment = moment
                         }
                         .onAppear { onAppearMoment(moment.assetID) }
@@ -1371,11 +1389,44 @@ private struct EditStorySheet: View {
                         )
                     }
                 }
-                Text("Drag moments to suggest the story order. FrameMio still handles pacing and transitions.")
+                Text(configuration.timelineGuidance)
                     .font(FrameMioTypography.caption)
                     .foregroundStyle(FrameMioColors.secondaryInk)
             }
         }
+    }
+
+    private var promoSceneTimelineSection: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            SectionHeader(title: "Scene timeline", subtitle: "Select, reorder, and shape the promo arc")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: FrameMioSpacing.sm) {
+                    ForEach(Array(displayedMoments.enumerated()), id: \.element.id) { index, moment in
+                        PromoSceneTimelineCard(
+                            moment: moment,
+                            index: index,
+                            count: displayedMoments.count,
+                            purpose: draft.sceneEdit(for: moment.assetID).purpose,
+                            image: imageProvider(moment.assetID),
+                            canMoveLeft: index > 0,
+                            canMoveRight: index < displayedMoments.count - 1,
+                            isPerformingAction: isPerformingAction,
+                            onSelect: { selectedMoment = moment },
+                            onMoveLeft: { moveScene(at: index, by: -1) },
+                            onMoveRight: { moveScene(at: index, by: 1) }
+                        )
+                        .onAppear { onAppearMoment(moment.assetID) }
+                    }
+                }
+                .padding(.vertical, FrameMioSpacing.xs)
+            }
+        }
+    }
+
+    private func moveScene(at index: Int, by offset: Int) {
+        let targetIndex = index + offset
+        guard displayedMoments.indices.contains(index), displayedMoments.indices.contains(targetIndex) else { return }
+        draft.moveMoment(from: index, to: targetIndex, currentMoments: displayedMoments)
     }
 
     private var addMomentButton: some View {
@@ -1385,7 +1436,7 @@ private struct EditStorySheet: View {
                 FrameMioHaptics.secondaryAction()
                 isShowingAddMoment = true
             } label: {
-                Label("Add Moment (\(CreditPricing.addMoment) credits)", systemImage: "plus.circle.fill")
+                Label("\(configuration.addItemTitle) (\(CreditPricing.addMoment) credits)", systemImage: "plus.circle.fill")
                     .font(FrameMioTypography.headline)
                     .foregroundStyle(FrameMioColors.accent)
                     .padding(.horizontal, FrameMioSpacing.lg)
@@ -1398,25 +1449,44 @@ private struct EditStorySheet: View {
             }
             .buttonStyle(FrameMioPressButtonStyle())
             .disabled(isPerformingAction)
-            .accessibilityLabel("Add moment")
+            .accessibilityLabel(configuration.addItemTitle)
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity)
     }
 
     private var styleSection: some View {
-        optionSection(title: "Style", options: styleOptions, selected: draft.style ?? "Natural") { option in
+        optionSection(title: "Style", options: configuration.styleOptions, selected: draft.style ?? configuration.styleOptions.first ?? "Natural") { option in
             draft.style = option.lowercased()
         }
     }
 
-    private var storyControlsSection: some View {
+    private var editorControlsSection: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
+            SectionHeader(title: "Project settings", subtitle: settingsSubtitle)
             styleSection
-            editControlDivider
-            sceneDetailSection
+            if configuration.showsSceneDetailControl {
+                editControlDivider
+                sceneDetailSection
+            }
+            if configuration.showsSceneDurationControls {
+                editControlDivider
+                sceneTimingSection
+            }
             editControlDivider
             subtitleSection
+            if configuration.showsAudioControls {
+                editControlDivider
+                audioSection
+            }
+            if configuration.showsBrandControls {
+                editControlDivider
+                brandSection
+            }
+            if configuration.showsCTAControls {
+                editControlDivider
+                ctaSection
+            }
             editControlDivider
             lengthSection
         }
@@ -1435,7 +1505,7 @@ private struct EditStorySheet: View {
 
     private var sceneDetailSection: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            SectionHeader(title: "Scene Details", subtitle: "Choose how much supporting footage to include")
+            SectionHeader(title: "\(configuration.terminology.singular) details", subtitle: "Choose how much supporting footage to include")
             LazyVGrid(columns: optionGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
                 ForEach(sceneDetailOptions, id: \.title) { option in
                     optionChip(
@@ -1452,7 +1522,7 @@ private struct EditStorySheet: View {
 
     private var subtitleSection: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            SectionHeader(title: "Subtitles", subtitle: "Show spoken dialogue as captions")
+            SectionHeader(title: configuration.textSectionTitle, subtitle: configuration.textSectionSubtitle)
             Toggle(isOn: Binding(
                 get: { draft.subtitlesEnabled ?? true },
                 set: { draft.subtitlesEnabled = $0 }
@@ -1466,13 +1536,102 @@ private struct EditStorySheet: View {
 
             if draft.subtitlesEnabled ?? true {
                 LazyVGrid(columns: optionGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
-                    ForEach(subtitleStyleOptions, id: \.self) { option in
+                    ForEach(configuration.subtitleStyleOptions, id: \.self) { option in
                         optionChip(title: option, isSelected: option.caseInsensitiveCompare(draft.subtitleStyle ?? "Cinematic") == .orderedSame) {
                             draft.subtitleStyle = option.lowercased()
                         }
                     }
                 }
             }
+        }
+    }
+
+    private var settingsSubtitle: String {
+        switch configuration.type {
+        case .story:
+            "Style, text, audio, and length"
+        case .promo:
+            "Text, brand, CTA, scenes, audio, and length"
+        case .reel:
+            "Hook, captions, clips, audio, social layout, and length"
+        }
+    }
+
+    private var sceneTimingSection: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            SectionHeader(title: "\(configuration.terminology.singular) editing", subtitle: "Describe trims or timing changes")
+            TextField(sceneTimingPlaceholder, text: $draft.sceneTimingInstruction, axis: .vertical)
+                .lineLimit(2...4)
+                .font(FrameMioTypography.body)
+                .padding(FrameMioSpacing.md)
+                .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
+                .accessibilityLabel("\(configuration.terminology.singular) editing")
+        }
+    }
+
+    private var sceneTimingPlaceholder: String {
+        switch configuration.type {
+        case .story:
+            "Keep the pacing natural."
+        case .promo:
+            "Trim the opening tighter and hold product shots longer."
+        case .reel:
+            "Remove slow sections and keep quick, energetic cuts."
+        }
+    }
+
+    private var audioSection: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            SectionHeader(title: configuration.audioTitle, subtitle: configuration.audioSubtitle)
+            TextField(audioPlaceholder, text: $draft.audioDirection, axis: .vertical)
+                .lineLimit(2...4)
+                .font(FrameMioTypography.body)
+                .padding(FrameMioSpacing.md)
+                .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
+                .accessibilityLabel(configuration.audioTitle)
+        }
+    }
+
+    private var audioPlaceholder: String {
+        switch configuration.type {
+        case .story:
+            "Use warm music and natural audio."
+        case .promo:
+            "Add a confident voiceover and premium background music."
+        case .reel:
+            "Use upbeat audio and sync cuts to the strongest beats."
+        }
+    }
+
+    private var brandSection: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            SectionHeader(title: "Brand", subtitle: "Logo, brand name, colors, and style")
+            labeledTextField("Brand name", text: $draft.brandName)
+            labeledTextField("Logo", placeholder: "Use the imported logo or describe where it should appear", text: $draft.logoInstruction)
+            labeledTextField("Brand colors", placeholder: "Black, white, and electric blue", text: $draft.brandColors)
+            labeledTextField("Font/style", placeholder: "Premium, clean, modern", text: $draft.brandStyle)
+        }
+    }
+
+    private var ctaSection: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            SectionHeader(title: "CTA", subtitle: "Call to action text and placement")
+            labeledTextField("CTA text", placeholder: "Download now", text: $draft.ctaText)
+            labeledTextField("Optional URL", placeholder: "https://example.com", text: $draft.ctaURL)
+            labeledTextField("CTA position/style", placeholder: "Prominent end card, bottom safe area", text: $draft.ctaStyle)
+        }
+    }
+
+    private func labeledTextField(_ title: String, placeholder: String? = nil, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.xs) {
+            Text(title)
+                .font(FrameMioTypography.footnote)
+                .foregroundStyle(FrameMioColors.secondaryInk)
+            TextField(placeholder ?? title, text: text, axis: .vertical)
+                .lineLimit(1...3)
+                .font(FrameMioTypography.body)
+                .padding(FrameMioSpacing.md)
+                .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
         }
     }
 
@@ -1510,10 +1669,10 @@ private struct EditStorySheet: View {
         }
     }
 
-    private var anotherVersionSection: some View {
+    private var aiActionSection: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            SectionHeader(title: "Make Another Version", subtitle: "Tell FrameMio what to change")
-            Text("This will use \(draft.regenerationCreditCost) credits.")
+            SectionHeader(title: configuration.aiSectionTitle, subtitle: configuration.aiSectionSubtitle)
+            Text("This will use \(draft.regenerationCreditCost(for: configuration)) credits.")
                 .font(FrameMioTypography.footnote)
                 .foregroundStyle(FrameMioColors.secondaryInk)
             if let creditBalance {
@@ -1522,13 +1681,13 @@ private struct EditStorySheet: View {
                     .foregroundStyle(FrameMioColors.secondaryInk)
             }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: FrameMioSpacing.sm)], spacing: FrameMioSpacing.sm) {
-                ForEach(["More cinematic", "More emotional", "More fun", "Focus on people", "Focus on places"], id: \.self) { prompt in
+                ForEach(configuration.aiSuggestions, id: \.self) { prompt in
                     optionChip(title: prompt, isSelected: draft.instruction == prompt) {
                         draft.instruction = prompt
                     }
                 }
             }
-            TextField("Tell FrameMio what you want", text: Binding(
+            TextField(configuration.aiPromptPlaceholder, text: Binding(
                 get: { draft.instruction ?? "" },
                 set: { draft.instruction = $0 }
             ), axis: .vertical)
@@ -1536,7 +1695,7 @@ private struct EditStorySheet: View {
             .font(FrameMioTypography.body)
             .padding(FrameMioSpacing.md)
             .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
-            .accessibilityLabel("Tell FrameMio what you want")
+            .accessibilityLabel("AI edit instruction")
             HStack {
                 Spacer()
                 Button {
@@ -1557,14 +1716,15 @@ private struct EditStorySheet: View {
                         storyPreviewUIDebugLog("voice prompt live transcript applied transcript_length=\(trimmed.count)")
                     }
             }
-            PrimaryButton(title: "Update Story (\(draft.regenerationCreditCost) credits)", systemImage: "sparkles") {
-                storyPreviewUIDebugLog("edit sheet regenerate tapped has_changes=\(draft.request.hasChanges) added=\(draft.addedMediaIDs.sorted().joined(separator: ",")) ordered=\(draft.orderedMediaIDs.joined(separator: ",")) visible=\(displayedMoments.map(\.assetID).joined(separator: ",")) scene_detail=\(draft.sceneDetailStyle ?? "balanced") required_credits=\(draft.regenerationCreditCost)")
+            PrimaryButton(title: "\(configuration.primaryAIButtonTitle) (\(draft.regenerationCreditCost(for: configuration)) credits)", systemImage: "sparkles") {
+                let request = draft.request(for: configuration)
+                storyPreviewUIDebugLog("edit sheet regenerate tapped type=\(configuration.type.rawValue) has_changes=\(request.hasChanges) added=\(draft.addedMediaIDs.sorted().joined(separator: ",")) ordered=\(draft.orderedMediaIDs.joined(separator: ",")) visible=\(displayedMoments.map(\.assetID).joined(separator: ",")) scene_detail=\(draft.sceneDetailStyle ?? "balanced") required_credits=\(draft.regenerationCreditCost(for: configuration))")
                 Task {
                     await stopVoicePromptRecording()
-                    onRegenerate(draft.request)
+                    onRegenerate(draft.request(for: configuration))
                 }
             }
-            .disabled(isPerformingAction || !draft.hasChanges)
+            .disabled(isPerformingAction || !draft.hasChanges(for: configuration))
         }
     }
 
@@ -1641,7 +1801,7 @@ private struct EditStorySheet: View {
             Text("Listening live… auto-stops after silence.")
                 .foregroundStyle(FrameMioColors.secondaryInk)
         } else {
-            Text("Tap Voice Prompt and speak; the text field updates live.")
+            Text("Tap Voice Prompt and speak; the AI instruction updates live.")
                 .foregroundStyle(FrameMioColors.secondaryInk)
         }
     }
@@ -1746,7 +1906,7 @@ private struct EditStorySheet: View {
     }
 }
 
-private struct EditStoryDraft {
+struct VideoProjectEditorDraft: Hashable {
     var removedMomentIDs = Set<String>()
     var removedMediaIDs = Set<String>()
     var addedMediaIDs = Set<String>()
@@ -1759,14 +1919,26 @@ private struct EditStoryDraft {
     var sceneDetailStyle: String?
     var targetDuration: TimeInterval?
     var instruction: String?
+    var sceneTimingInstruction = ""
+    var audioDirection = ""
+    var brandName = ""
+    var logoInstruction = ""
+    var brandColors = ""
+    var brandStyle = ""
+    var ctaText = ""
+    var ctaURL = ""
+    var ctaStyle = ""
+    var sceneEditsByAssetID: [String: PromoSceneEditDraft] = [:]
 
-    var hasChanges: Bool { request.hasChanges }
-
-    var regenerationCreditCost: Int {
-        request.regenerationCreditCost
+    func hasChanges(for configuration: VideoProjectEditorConfiguration) -> Bool {
+        request(for: configuration).hasChanges
     }
 
-    var request: StoryEditRequest {
+    func regenerationCreditCost(for configuration: VideoProjectEditorConfiguration) -> Int {
+        request(for: configuration).regenerationCreditCost
+    }
+
+    func request(for configuration: VideoProjectEditorConfiguration) -> StoryEditRequest {
         StoryEditRequest(
             removeMomentIDs: Array(removedMomentIDs).sorted(),
             removeMediaIDs: Array(removedMediaIDs).sorted(),
@@ -1779,14 +1951,53 @@ private struct EditStoryDraft {
             subtitleStyle: subtitleStyle,
             sceneDetailStyle: sceneDetailStyle,
             targetDuration: targetDuration,
-            instruction: instruction?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true ? nil : instruction
+            instruction: composedInstruction(for: configuration)
         )
+    }
+
+    private func composedInstruction(for configuration: VideoProjectEditorConfiguration) -> String? {
+        var parts: [String] = []
+        append("AI instruction", instruction, to: &parts)
+        append("\(configuration.terminology.singular) editing", sceneTimingInstruction, to: &parts)
+        append(configuration.audioTitle, audioDirection, to: &parts)
+        if configuration.showsBrandControls {
+            append("Brand name", brandName, to: &parts)
+            append("Logo", logoInstruction, to: &parts)
+            append("Brand colors", brandColors, to: &parts)
+            append("Brand font/style", brandStyle, to: &parts)
+        }
+        if configuration.showsCTAControls {
+            append("CTA text", ctaText, to: &parts)
+            append("CTA URL", ctaURL, to: &parts)
+            append("CTA position/style", ctaStyle, to: &parts)
+        }
+        if configuration.type == .promo {
+            let sceneLines = sceneEditsByAssetID
+                .sorted { $0.key < $1.key }
+                .compactMap { assetID, edit -> String? in
+                    edit.composedInstruction(assetID: assetID)
+                }
+            if !sceneLines.isEmpty {
+                parts.append("Promo scene edits:\n" + sceneLines.joined(separator: "\n"))
+            }
+        }
+        guard !parts.isEmpty else { return nil }
+        parts.insert("Project type: \(configuration.type.title).", at: 0)
+        let text = parts.joined(separator: "\n")
+        return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text
+    }
+
+    private func append(_ label: String, _ value: String?, to parts: inout [String]) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return }
+        parts.append("\(label): \(trimmed)")
     }
 
     mutating func remove(_ moment: StoryMomentPresentation) {
         removedMomentIDs.insert(moment.id)
         addedMediaIDs.remove(moment.assetID)
         orderedMediaIDs.removeAll { $0 == moment.assetID }
+        sceneEditsByAssetID.removeValue(forKey: moment.assetID)
     }
 
     mutating func add(_ moments: [StoryMomentPresentation], currentMoments: [StoryMomentPresentation]) {
@@ -1842,6 +2053,19 @@ private struct EditStoryDraft {
         analysesByMediaID.removeValue(forKey: moment.assetID)
         replacements.removeAll { $0.toMediaID == moment.assetID }
         orderedMediaIDs.removeAll { $0 == moment.assetID }
+        sceneEditsByAssetID.removeValue(forKey: moment.assetID)
+    }
+
+    func sceneEdit(for assetID: String) -> PromoSceneEditDraft {
+        sceneEditsByAssetID[assetID] ?? PromoSceneEditDraft()
+    }
+
+    mutating func setSceneEdit(_ edit: PromoSceneEditDraft, for assetID: String) {
+        if edit.isEmpty {
+            sceneEditsByAssetID.removeValue(forKey: assetID)
+        } else {
+            sceneEditsByAssetID[assetID] = edit
+        }
     }
 
     func ordered(_ moments: [StoryMomentPresentation]) -> [StoryMomentPresentation] {
@@ -1872,6 +2096,14 @@ private struct EditStoryDraft {
         orderedMediaIDs = assetIDs
     }
 
+    mutating func moveMoment(from sourceIndex: Int, to targetIndex: Int, currentMoments: [StoryMomentPresentation]) {
+        var assetIDs = currentMoments.map(\.assetID)
+        guard assetIDs.indices.contains(sourceIndex), assetIDs.indices.contains(targetIndex), sourceIndex != targetIndex else { return }
+        let moved = assetIDs.remove(at: sourceIndex)
+        assetIDs.insert(moved, at: targetIndex)
+        orderedMediaIDs = assetIDs
+    }
+
     private mutating func appendToCustomOrderIfNeeded(_ mediaID: String) {
         guard !orderedMediaIDs.isEmpty, !orderedMediaIDs.contains(mediaID) else { return }
         orderedMediaIDs.append(mediaID)
@@ -1887,6 +2119,76 @@ private struct EditStoryDraft {
             return existingDate > captureDate
         } ?? moments.count
         moments.insert(moment, at: insertionIndex)
+    }
+}
+
+private typealias EditStoryDraft = VideoProjectEditorDraft
+
+struct PromoSceneEditDraft: Hashable {
+    var purpose: PromoScenePurpose = .auto
+    var durationSeconds: Int?
+    var headline = ""
+    var supportingText = ""
+    var ctaText = ""
+    var aiAction = ""
+
+    var isEmpty: Bool {
+        purpose == .auto
+            && durationSeconds == nil
+            && headline.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && supportingText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && ctaText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && aiAction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    func composedInstruction(assetID: String) -> String? {
+        var parts: [String] = ["asset \(assetID)"]
+        if purpose != .auto {
+            parts.append("purpose \(purpose.rawValue)")
+        }
+        if let durationSeconds {
+            parts.append("duration \(durationSeconds)s")
+        }
+        append("headline", headline, to: &parts)
+        append("supporting text", supportingText, to: &parts)
+        append("CTA", ctaText, to: &parts)
+        append("AI action", aiAction, to: &parts)
+        guard parts.count > 1 else { return nil }
+        return "- " + parts.joined(separator: "; ")
+    }
+
+    private func append(_ label: String, _ value: String, to parts: inout [String]) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        parts.append("\(label) \(trimmed)")
+    }
+}
+
+enum PromoScenePurpose: String, CaseIterable, Hashable {
+    case auto
+    case hook
+    case problem
+    case product
+    case feature
+    case benefit
+    case proof
+    case testimonial
+    case cta
+    case outro
+
+    var title: String {
+        switch self {
+        case .auto: "Auto"
+        case .hook: "Hook"
+        case .problem: "Problem"
+        case .product: "Product"
+        case .feature: "Feature"
+        case .benefit: "Benefit"
+        case .proof: "Proof"
+        case .testimonial: "Testimonial"
+        case .cta: "CTA"
+        case .outro: "Outro"
+        }
     }
 }
 
@@ -1918,6 +2220,7 @@ private struct StoryMomentDropDelegate: DropDelegate {
 private struct StoryMomentRow: View {
     let moment: StoryMomentPresentation
     let image: Image?
+    let terminology: VideoProjectTerminology
     var showsReorderHandle = false
     let action: () -> Void
 
@@ -1981,13 +2284,99 @@ private struct StoryMomentRow: View {
         }
         .buttonStyle(FrameMioPressButtonStyle())
         .accessibilityLabel(moment.title)
-        .accessibilityHint(showsReorderHandle ? "Double tap to edit. Drag to suggest where this moment belongs." : "Double tap to edit this moment.")
+        .accessibilityHint(showsReorderHandle ? "Double tap to edit. Drag to suggest where this \(terminology.singular.lowercased()) belongs." : "Double tap to edit this \(terminology.singular.lowercased()).")
+    }
+}
+
+private struct PromoSceneTimelineCard: View {
+    let moment: StoryMomentPresentation
+    let index: Int
+    let count: Int
+    let purpose: PromoScenePurpose
+    let image: Image?
+    let canMoveLeft: Bool
+    let canMoveRight: Bool
+    let isPerformingAction: Bool
+    let onSelect: () -> Void
+    let onMoveLeft: () -> Void
+    let onMoveRight: () -> Void
+
+    private var durationText: String {
+        guard let duration = moment.duration, duration > 0 else { return "--" }
+        return "\(Int(duration.rounded()))s"
+    }
+
+    private var purposeTitle: String {
+        purpose == .auto ? suggestedPurpose.title : purpose.title
+    }
+
+    private var suggestedPurpose: PromoScenePurpose {
+        if count <= 1 { return .cta }
+        if index == 0 { return .hook }
+        if index == count - 1 { return .cta }
+        let sequence: [PromoScenePurpose] = [.product, .feature, .benefit, .proof]
+        return sequence[(index - 1) % sequence.count]
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.xs) {
+            Button(action: onSelect) {
+                VStack(alignment: .leading, spacing: FrameMioSpacing.xs) {
+                    MediaThumbnail(
+                        image: image,
+                        duration: moment.duration,
+                        isLivePhoto: moment.kind == .livePhoto,
+                        aspectRatio: 1,
+                        placeholderSystemImage: moment.kind.placeholderName,
+                        accessibilityTitle: moment.title
+                    )
+                    .frame(width: 104, height: 104)
+                    .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
+                    Text(String(format: "%02d %@", index + 1, purposeTitle))
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(FrameMioColors.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                    Text(durationText)
+                        .font(FrameMioTypography.caption)
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                }
+                .frame(width: 116, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Scene \(index + 1), \(purposeTitle), \(durationText)")
+
+            HStack(spacing: FrameMioSpacing.xs) {
+                Button(action: onMoveLeft) {
+                    Image(systemName: "chevron.left")
+                        .frame(width: 34, height: 32)
+                }
+                .buttonStyle(.borderless)
+                .disabled(isPerformingAction || !canMoveLeft)
+                Button(action: onMoveRight) {
+                    Image(systemName: "chevron.right")
+                        .frame(width: 34, height: 32)
+                }
+                .buttonStyle(.borderless)
+                .disabled(isPerformingAction || !canMoveRight)
+            }
+            .foregroundStyle(FrameMioColors.accent)
+        }
+        .padding(FrameMioSpacing.sm)
+        .background(FrameMioColors.surface.opacity(0.72), in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                .stroke(FrameMioColors.divider.opacity(0.42), lineWidth: FrameMioMetrics.borderWidth)
+        }
     }
 }
 
 private struct EditMomentSheet: View {
     let moment: StoryMomentPresentation
     let image: Image?
+    let terminology: VideoProjectTerminology
+    let configuration: VideoProjectEditorConfiguration
+    @Binding var sceneDraft: PromoSceneEditDraft
     let videoURLProvider: (String) async -> URL?
     let isPerformingAction: Bool
     let onRemove: () -> Void
@@ -2017,17 +2406,21 @@ private struct EditMomentSheet: View {
                     Text(moment.title)
                         .font(FrameMioTypography.title)
                         .foregroundStyle(FrameMioColors.ink)
-                    Text(moment.description ?? "FrameMio used this moment in your story.")
+                    Text(moment.description ?? "FrameMio used this \(terminology.singular.lowercased()) in your \(terminology.projectName.lowercased()).")
                         .font(FrameMioTypography.body)
                         .foregroundStyle(FrameMioColors.secondaryInk)
+                }
+
+                if configuration.type == .promo {
+                    promoSceneControls
                 }
 
                 Spacer(minLength: FrameMioSpacing.md)
 
                 VStack(spacing: FrameMioSpacing.sm) {
-                    SecondaryButton(title: "Replace Moment", systemImage: "arrow.triangle.2.circlepath", action: onReplace, isDisabled: isPerformingAction)
+                    SecondaryButton(title: "Replace \(terminology.singular)", systemImage: "arrow.triangle.2.circlepath", action: onReplace, isDisabled: isPerformingAction)
                     Button(role: .destructive, action: onRemove) {
-                        Label("Remove from Story", systemImage: "minus.circle")
+                        Label("Remove from \(terminology.projectName)", systemImage: "minus.circle")
                             .font(FrameMioTypography.headline)
                             .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.compactButtonHeight)
                     }
@@ -2043,6 +2436,84 @@ private struct EditMomentSheet: View {
                 FullScreenStoryVideoPlayer(url: video.url)
             }
         }
+    }
+
+    private var promoSceneControls: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+                SectionHeader(title: "Scene purpose", subtitle: "Helps AI shape the promo arc")
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), spacing: FrameMioSpacing.sm)], alignment: .leading, spacing: FrameMioSpacing.sm) {
+                    ForEach(PromoScenePurpose.allCases, id: \.self) { purpose in
+                        Button {
+                            sceneDraft.purpose = purpose
+                        } label: {
+                            Text(purpose.title)
+                                .font(FrameMioTypography.caption)
+                                .foregroundStyle(sceneDraft.purpose == purpose ? FrameMioColors.inverseInk : FrameMioColors.ink)
+                                .frame(minHeight: 34)
+                                .padding(.horizontal, FrameMioSpacing.sm)
+                                .background(sceneDraft.purpose == purpose ? FrameMioColors.accent : FrameMioColors.surface.opacity(0.78), in: Capsule())
+                        }
+                        .buttonStyle(FrameMioPressButtonStyle())
+                        .disabled(isPerformingAction)
+                    }
+                }
+
+                SectionHeader(title: "Duration", subtitle: "Keep creation simple; AI handles exact trims")
+                HStack(spacing: FrameMioSpacing.sm) {
+                    ForEach([3, 5, 8, 10], id: \.self) { seconds in
+                        Button {
+                            sceneDraft.durationSeconds = sceneDraft.durationSeconds == seconds ? nil : seconds
+                        } label: {
+                            Text("\(seconds)s")
+                                .font(FrameMioTypography.footnote)
+                                .foregroundStyle(sceneDraft.durationSeconds == seconds ? FrameMioColors.inverseInk : FrameMioColors.ink)
+                                .frame(minHeight: 36)
+                                .padding(.horizontal, FrameMioSpacing.md)
+                                .background(sceneDraft.durationSeconds == seconds ? FrameMioColors.accent : FrameMioColors.surface.opacity(0.78), in: Capsule())
+                        }
+                        .buttonStyle(FrameMioPressButtonStyle())
+                        .disabled(isPerformingAction)
+                    }
+                }
+
+                SectionHeader(title: "Text overlays", subtitle: "Headline, supporting text, and optional CTA")
+                promoTextField("Headline", text: $sceneDraft.headline)
+                promoTextField("Supporting text", text: $sceneDraft.supportingText)
+                promoTextField("CTA", text: $sceneDraft.ctaText)
+
+                SectionHeader(title: "Scene AI", subtitle: "Modify the edit plan for this scene")
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: FrameMioSpacing.sm)], alignment: .leading, spacing: FrameMioSpacing.sm) {
+                    ForEach(["Improve this scene.", "Find a better caption.", "Shorten this scene.", "Make this scene more persuasive."], id: \.self) { action in
+                        Button {
+                            sceneDraft.aiAction = action
+                        } label: {
+                            Text(action)
+                                .font(FrameMioTypography.caption)
+                                .foregroundStyle(sceneDraft.aiAction == action ? FrameMioColors.inverseInk : FrameMioColors.ink)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
+                                .padding(.horizontal, FrameMioSpacing.sm)
+                                .background(sceneDraft.aiAction == action ? FrameMioColors.accent : FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
+                        }
+                        .buttonStyle(FrameMioPressButtonStyle())
+                        .disabled(isPerformingAction)
+                    }
+                }
+            }
+            .padding(.vertical, FrameMioSpacing.sm)
+        }
+        .frame(maxHeight: 360)
+    }
+
+    private func promoTextField(_ title: String, text: Binding<String>) -> some View {
+        TextField(title, text: text, axis: .vertical)
+            .lineLimit(1...2)
+            .font(FrameMioTypography.body)
+            .padding(FrameMioSpacing.md)
+            .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
+            .accessibilityLabel(title)
+            .disabled(isPerformingAction)
     }
 
     private var momentPreview: some View {
@@ -2089,7 +2560,7 @@ private struct EditMomentSheet: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isLoadingVideo)
-                .accessibilityLabel("Play moment video")
+                .accessibilityLabel("Play \(terminology.singular.lowercased()) video")
             }
         }
         .frame(width: previewWidth, height: previewHeight)
@@ -2169,6 +2640,7 @@ private struct AspectFillVideoPreview: UIViewRepresentable {
 
 private struct AddMomentSelectionSheet: View {
     let title: String
+    let terminology: VideoProjectTerminology
     let moments: [StoryMomentPresentation]
     let allowsMultipleSelection: Bool
     let excludedSourceIDs: Set<String>
@@ -2182,6 +2654,7 @@ private struct AddMomentSelectionSheet: View {
 
     init(
         title: String = "Add to Story",
+        terminology: VideoProjectTerminology = .forType(.story),
         moments: [StoryMomentPresentation],
         allowsMultipleSelection: Bool = true,
         excludedSourceIDs: Set<String>,
@@ -2194,6 +2667,7 @@ private struct AddMomentSelectionSheet: View {
         onCancel: @escaping () -> Void
     ) {
         self.title = title
+        self.terminology = terminology
         self.moments = moments
         self.allowsMultipleSelection = allowsMultipleSelection
         self.excludedSourceIDs = excludedSourceIDs
@@ -2287,7 +2761,7 @@ private struct AddMomentSelectionSheet: View {
             EmptyState(
                 systemImage: "photo.on.rectangle.angled",
                 title: "No unused project media yet",
-                message: "Choose Add from Photos to import new photos or videos into this story."
+                message: "Choose Add from Photos to import new photos or videos into this \(terminology.projectName.lowercased())."
             )
             .frame(maxWidth: .infinity)
         } else if displayedMoments.isEmpty {
@@ -2308,7 +2782,7 @@ private struct AddMomentSelectionSheet: View {
 
     private var intro: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
-            Text(title == "Replace Moment" ? "Choose a replacement" : "Choose more source media")
+            Text(title == "Replace \(terminology.singular)" ? "Choose a replacement" : "Choose more source media")
                 .font(FrameMioTypography.title)
                 .foregroundStyle(FrameMioColors.ink)
             Text("Select unused project media or import new photos and videos. FrameMio will decide the best placement and pacing.")
@@ -2452,17 +2926,17 @@ private struct AddMomentSelectionSheet: View {
     private var selectionSummary: String {
         switch selectedCount {
         case 0: allowsMultipleSelection ? "Select project media or import from Photos" : "Select a replacement"
-        case 1: allowsMultipleSelection ? "1 moment selected" : "Replacement selected"
-        default: "\(selectedCount) moments selected"
+        case 1: allowsMultipleSelection ? "1 \(terminology.singular.lowercased()) selected" : "Replacement selected"
+        default: "\(selectedCount) \(terminology.plural.lowercased()) selected"
         }
     }
 
     private var addButtonTitle: String {
-        if !allowsMultipleSelection { return "Replace Moment" }
+        if !allowsMultipleSelection { return "Replace \(terminology.singular)" }
         switch selectedCount {
-        case 0: return "Add Moment (+\(CreditPricing.addMoment) credits)"
-        case 1: return "Add Moment (+\(CreditPricing.addMoment) credits)"
-        default: return "Add \(selectedCount) Moments (+\(CreditPricing.addMoment) credits)"
+        case 0: return "Add \(terminology.singular) (+\(CreditPricing.addMoment) credits)"
+        case 1: return "Add \(terminology.singular) (+\(CreditPricing.addMoment) credits)"
+        default: return "Add \(selectedCount) \(terminology.plural) (+\(CreditPricing.addMoment) credits)"
         }
     }
 
@@ -2512,7 +2986,7 @@ private struct AddMomentSelectionSheet: View {
                 }, excludedSourceIDs)
                 storyPreviewUIDebugLog("add sheet import returned count=\(imported.count) ids=\(imported.map(\.assetID).joined(separator: ","))")
                 guard !imported.isEmpty else {
-                    importErrorMessage = "Those items are already in this story."
+                    importErrorMessage = "Those items are already in this \(terminology.projectName.lowercased())."
                     selectedPhotoItems = []
                     importProgress = nil
                     importStatusMessage = "Preparing media…"

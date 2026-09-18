@@ -1,6 +1,7 @@
 export const RENDER_VERSION = 'framemio-renderer-v1';
 
 export type MediaType = 'photo' | 'video' | 'live_photo';
+export type ProjectType = 'story' | 'promo' | 'reel';
 export type AspectRatio = '9:16' | '1:1' | '16:9';
 export type TransitionType = 'cut' | 'fade' | 'dissolve' | 'crossfade';
 export type CropIntent = 'fill' | 'fit' | 'pan' | 'zoom' | string;
@@ -9,10 +10,12 @@ export interface StoryPlan {
   schema_version: string;
   id: string;
   project_id: string;
+  project_type?: ProjectType;
   version: number;
   requested_duration_ms?: number;
   title_text?: string;
   ending_text?: string;
+  call_to_action?: string;
   moments: StoryMoment[];
   broll?: StoryBRoll[];
   captions?: StoryCaption[];
@@ -22,6 +25,8 @@ export interface StoryPlan {
   total_duration_ms?: number;
   created_at?: string;
 }
+
+export type EditPlan = StoryPlan;
 
 export interface StoryMoment {
   moment_id?: string;
@@ -41,6 +46,24 @@ export interface StoryMoment {
   speed?: number;
   volume?: number;
   typography?: TextOverlay;
+  order?: number;
+  scene_purpose?: PromoScenePurpose;
+  scene_text?: PromoSceneText;
+  voiceover?: SceneVoiceover;
+}
+
+export type PromoScenePurpose = 'hook' | 'problem' | 'product' | 'feature' | 'benefit' | 'proof' | 'testimonial' | 'cta' | 'outro' | string;
+
+export interface PromoSceneText {
+  headline?: string;
+  supporting?: string;
+  cta?: string;
+}
+
+export interface SceneVoiceover {
+  text?: string;
+  start_ms?: number;
+  duration_ms?: number;
 }
 
 export type TextOverlayType = 'moment_title' | 'moment_caption' | 'location' | 'date' | 'chapter_title' | 'story_intro' | 'story_outro' | string;
@@ -147,6 +170,8 @@ export interface SourceMediaAsset {
 export interface RenderInput {
   job_id: string;
   project_id: string;
+  project_type?: ProjectType;
+  project_configuration?: Record<string, unknown>;
   story_plan: StoryPlan;
   media_assets: SourceMediaAsset[];
   output_s3_key: string;
@@ -187,6 +212,7 @@ export interface RenderPaths {
 
 export interface TimelineClip {
   clip_id: string;
+  scene_id?: string;
   asset_id: string;
   media_type: MediaType;
   source_path: string;
@@ -201,7 +227,12 @@ export interface TimelineClip {
   transition: TransitionType;
   volume: number;
   speed: number;
+  overlays?: TextOverlay[];
   typography?: TextOverlay;
+  order?: number;
+  scene_purpose?: PromoScenePurpose;
+  scene_text?: PromoSceneText;
+  voiceover?: SceneVoiceover;
 }
 
 export interface TimelineBRoll {
@@ -237,20 +268,83 @@ export interface VideoTransform {
 
 export interface CompositionSpec {
   renderer_version: string;
+  project_type?: ProjectType;
+  project_configuration?: Record<string, unknown>;
   story_plan_id: string;
   story_plan_version: number;
   project_id: string;
+  canvas?: CanvasSpec;
   fps: number;
   resolution: Resolution;
   duration_frames: number;
   duration_ms: number;
+  duration?: {frames: number; ms: number};
   title_text?: string;
   ending_text?: string;
+  call_to_action?: string;
+  cta?: CTASpec;
+  branding?: BrandingSpec;
+  media?: CompositionMediaAsset[];
+  scenes?: TimelineScene[];
+  text?: TextOverlay[];
+  transitions?: CompositionTransition[];
+  effects?: CompositionEffect[];
   clips: TimelineClip[];
   broll: TimelineBRoll[];
   captions: StoryCaption[];
   caption_style?: CaptionStyle;
   audio: ResolvedAudio;
+}
+
+export interface CanvasSpec {
+  width: number;
+  height: number;
+  aspect_ratio: string;
+  fps: number;
+  background_color?: string;
+  safe_area?: SafeArea;
+}
+
+export interface CTASpec {
+  text?: string;
+  placement?: TextPlacement;
+  style?: TypographyStyle | string;
+}
+
+export interface BrandingSpec {
+  name?: string;
+  primary_color?: string;
+  secondary_color?: string;
+  logo_asset_id?: string;
+  logo_path?: string;
+  font_preference?: string;
+}
+
+export interface CompositionMediaAsset {
+  asset_id: string;
+  media_type: MediaType;
+  source_path: string;
+  prepared_path?: string;
+  width?: number;
+  height?: number;
+  duration_seconds?: number;
+}
+
+export interface TimelineScene extends TimelineClip {
+  id: string;
+  media: CompositionMediaAsset;
+}
+
+export interface CompositionTransition {
+  scene_id: string;
+  type: TransitionType;
+  duration_frames: number;
+}
+
+export interface CompositionEffect {
+  scene_id: string;
+  type: string;
+  parameters?: Record<string, unknown>;
 }
 
 export interface ResolvedAudio {

@@ -86,6 +86,7 @@ final class StoryPreviewViewModel: ObservableObject {
 
     private var storyID: String?
     private let launchContext: MomentContext?
+    private let launchDraft: VideoProjectDraft?
     private let launchAssets: [MediaAsset]
     private let launchGenerationOptions: StoryGenerationOptions
     private let launchID: UUID?
@@ -119,6 +120,7 @@ final class StoryPreviewViewModel: ObservableObject {
         self.story = story
         storyID = story.id
         launchContext = nil
+        launchDraft = nil
         launchAssets = []
         launchGenerationOptions = .automatic
         launchID = nil
@@ -146,6 +148,7 @@ final class StoryPreviewViewModel: ObservableObject {
     ) {
         self.storyID = storyID
         launchContext = nil
+        launchDraft = nil
         launchAssets = []
         launchGenerationOptions = .automatic
         launchID = nil
@@ -177,6 +180,7 @@ final class StoryPreviewViewModel: ObservableObject {
     ) {
         storyID = nil
         launchContext = context
+        launchDraft = .story(context: context, options: generationOptions)
         launchAssets = assets
         launchGenerationOptions = generationOptions
         self.launchID = launchID
@@ -196,8 +200,52 @@ final class StoryPreviewViewModel: ObservableObject {
         }
     }
 
+    init(
+        draft: VideoProjectDraft,
+        assets: [MediaAsset],
+        launchID: UUID,
+        storyLaunchCoordinator: StoryLaunchCoordinator,
+        storyService: StoryService,
+        photoLibrary: PhotoLibraryService,
+        mediaUploadStore: MediaUploadStore,
+        mediaUploadService: MediaUploadService,
+        analysisService: MediaAnalysisService,
+        creditService: CreditService? = nil,
+        promptTranscriptionService: PromptTranscriptionService? = nil,
+        onCreditsUpdated: (() -> Void)? = nil
+    ) {
+        storyID = nil
+        launchContext = draft.context
+        launchDraft = draft
+        launchAssets = assets
+        launchGenerationOptions = draft.storyOptions
+        self.launchID = launchID
+        self.storyLaunchCoordinator = storyLaunchCoordinator
+        self.storyService = storyService
+        self.creditService = creditService
+        self.onCreditsUpdated = onCreditsUpdated
+        self.photoLibrary = photoLibrary
+        self.mediaUploadStore = mediaUploadStore
+        self.mediaUploadService = mediaUploadService
+        self.analysisService = analysisService
+        self.promptTranscriptionService = promptTranscriptionService
+        launchCancellable = storyLaunchCoordinator.objectWillChange.sink { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.objectWillChange.send()
+            }
+        }
+    }
+
     var isPerformingAction: Bool {
         activeAction != nil
+    }
+
+    var projectType: VideoProjectType {
+        story?.projectType ?? launchDraft?.type ?? .story
+    }
+
+    var editorConfiguration: VideoProjectEditorConfiguration {
+        .forType(projectType)
     }
 
     var shouldShowInitialProgress: Bool {
@@ -436,19 +484,52 @@ final class StoryPreviewViewModel: ObservableObject {
             return title
         }
 
-        return switch story?.status {
-        case .queued:
-            "Preparing your memories..."
-        case .analyzing:
-            "Finding meaningful moments..."
-        case .rendering:
-            "Creating your film..."
-        case .ready:
-            "Ready to watch."
-        case .failed:
-            "This story needs another try."
-        case nil:
-            "Preparing your memories..."
+        switch projectType {
+        case .story:
+            return switch story?.status {
+            case .queued:
+                "Preparing your memories..."
+            case .analyzing:
+                "Finding meaningful moments..."
+            case .rendering:
+                "Creating your film..."
+            case .ready:
+                "Ready to watch."
+            case .failed:
+                "This story needs another try."
+            case nil:
+                "Preparing your memories..."
+            }
+        case .promo:
+            return switch story?.status {
+            case .queued:
+                "Preparing your promo..."
+            case .analyzing:
+                "Building promo scenes..."
+            case .rendering:
+                "Rendering your promo..."
+            case .ready:
+                "Promo ready."
+            case .failed:
+                "This promo needs another try."
+            case nil:
+                "Preparing your promo..."
+            }
+        case .reel:
+            return switch story?.status {
+            case .queued:
+                "Preparing your reel..."
+            case .analyzing:
+                "Finding short-form clips..."
+            case .rendering:
+                "Rendering your reel..."
+            case .ready:
+                "Reel ready."
+            case .failed:
+                "This reel needs another try."
+            case nil:
+                "Preparing your reel..."
+            }
         }
     }
 
@@ -498,10 +579,10 @@ final class StoryPreviewViewModel: ObservableObject {
     }
 
     private func loadStoryOrLaunch() async {
-        if let launchContext, let launchID, let storyLaunchCoordinator {
+        if let launchDraft, let launchID, let storyLaunchCoordinator {
             let instruction = launchGenerationOptions.instruction?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            storyPreviewDebugLog("launch_bridge_start launch_id=\(launchID) assets=\(launchAssets.count) style=\(launchGenerationOptions.style ?? "automatic") scene_detail=\(launchGenerationOptions.sceneDetailStyle ?? "balanced") target_duration=\(launchGenerationOptions.targetDuration.map { String(Int($0.rounded())) } ?? "auto") prompt_present=\(!instruction.isEmpty) prompt_length=\(instruction.count) story_id=\(storyID ?? "nil")")
-            storyLaunchCoordinator.start(context: launchContext, assets: launchAssets, options: launchGenerationOptions, launchID: launchID)
+            storyPreviewDebugLog("launch_bridge_start launch_id=\(launchID) type=\(launchDraft.type.rawValue) assets=\(launchAssets.count) style=\(launchGenerationOptions.style ?? "automatic") scene_detail=\(launchGenerationOptions.sceneDetailStyle ?? "balanced") target_duration=\(launchGenerationOptions.targetDuration.map { String(Int($0.rounded())) } ?? "auto") prompt_present=\(!instruction.isEmpty) prompt_length=\(instruction.count) story_id=\(storyID ?? "nil")")
+            storyLaunchCoordinator.start(draft: launchDraft, assets: launchAssets, launchID: launchID)
             await waitForLaunchedStoryID(from: storyLaunchCoordinator)
         }
 

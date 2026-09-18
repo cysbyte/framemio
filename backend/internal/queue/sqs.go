@@ -18,11 +18,12 @@ import (
 )
 
 type JobMessage struct {
-	JobID         string            `json:"jobId"`
-	ProjectID     string            `json:"projectId"`
-	MediaID       string            `json:"mediaId,omitempty"`
-	JobType       models.JobType    `json:"jobType"`
-	Configuration map[string]string `json:"configuration,omitempty"`
+	JobID         string             `json:"jobId"`
+	ProjectID     string             `json:"projectId"`
+	ProjectType   models.ProjectType `json:"projectType,omitempty"`
+	MediaID       string             `json:"mediaId,omitempty"`
+	JobType       models.JobType     `json:"jobType"`
+	Configuration map[string]string  `json:"configuration,omitempty"`
 }
 
 type Publisher interface {

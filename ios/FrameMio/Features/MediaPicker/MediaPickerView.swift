@@ -8,10 +8,16 @@ struct MediaPickerView: View {
     @StateObject private var viewModel: MediaPickerViewModel
     @State private var captureMode: MomentCaptureMode?
     @State private var captureErrorMessage: String?
+    private let projectType: VideoProjectType
     let onContinue: ([MediaAsset]) -> Void
 
-    init(viewModel: MediaPickerViewModel, onContinue: @escaping ([MediaAsset]) -> Void) {
+    init(
+        viewModel: MediaPickerViewModel,
+        projectType: VideoProjectType = .story,
+        onContinue: @escaping ([MediaAsset]) -> Void
+    ) {
         _viewModel = StateObject(wrappedValue: viewModel)
+        self.projectType = projectType
         self.onContinue = onContinue
     }
 
@@ -21,8 +27,8 @@ struct MediaPickerView: View {
                 accessState
             } else if !viewModel.hasCompletedInitialLoad || (viewModel.isLoading && viewModel.totalAssetCount == 0) {
                 LoadingState(
-                    title: "Finding your moments",
-                    message: "Looking through the time and place around \(viewModel.context.rawValue.lowercased())."
+                    title: loadingTitle,
+                    message: loadingMessage
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if viewModel.totalAssetCount == 0 {
@@ -122,12 +128,12 @@ struct MediaPickerView: View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
             Tag(viewModel.context.rawValue, systemImage: viewModel.context.icon)
 
-            Text("Choose the moments that belong together.")
+            Text(pickerTitle)
                 .font(FrameMioTypography.screenTitle)
                 .foregroundStyle(FrameMioColors.ink)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("Mix photos and videos from your camera roll. FrameMio will use your selection as the emotional starting point for the story.")
+            Text(pickerMessage)
                 .font(FrameMioTypography.body)
                 .foregroundStyle(FrameMioColors.secondaryInk)
                 .fixedSize(horizontal: false, vertical: true)
@@ -297,10 +303,47 @@ struct MediaPickerView: View {
     }
 
     private var selectionSummary: String {
-        switch viewModel.selectedCount {
-        case 0: "Select the moments that belong together"
-        case 1: "1 moment selected"
-        default: "\(viewModel.selectedCount) moments selected"
+        let noun = switch projectType {
+        case .story: "moment"
+        case .promo: "asset"
+        case .reel: "clip"
+        }
+        return switch viewModel.selectedCount {
+        case 0: "Select media to continue"
+        case 1: "1 \(noun) selected"
+        default: "\(viewModel.selectedCount) \(noun)s selected"
+        }
+    }
+
+    private var loadingTitle: String {
+        switch projectType {
+        case .story: "Finding your moments"
+        case .promo: "Finding usable media"
+        case .reel: "Finding short-form clips"
+        }
+    }
+
+    private var loadingMessage: String {
+        switch projectType {
+        case .story: "Looking through the time and place around \(viewModel.context.rawValue.lowercased())."
+        case .promo: "Looking for photos and videos you can use in a promotional draft."
+        case .reel: "Looking for media that can become a short social edit."
+        }
+    }
+
+    private var pickerTitle: String {
+        switch projectType {
+        case .story: "Choose the moments that belong together."
+        case .promo: "Choose media for the promotion."
+        case .reel: "Choose clips for the reel."
+        }
+    }
+
+    private var pickerMessage: String {
+        switch projectType {
+        case .story: "Mix photos and videos from your camera roll. FrameMio will use your selection as the emotional starting point for the story."
+        case .promo: "Select product shots, app footage, business visuals, or event clips. FrameMio will shape them into a first promotional draft."
+        case .reel: "Select photos and videos with clear highlights. FrameMio will turn them into a short-form social draft."
         }
     }
 

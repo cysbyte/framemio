@@ -16,25 +16,27 @@ import (
 )
 
 type Request struct {
-	ProjectID           string
-	Version             int
-	DesiredDuration     time.Duration
-	TargetDurationFixed bool
-	StoryType           models.StoryType
-	VisualStyle         models.VisualStyle
-	UserInstructions    string
-	SelectedMediaIDs    []string
-	PreferredMediaOrder []string
-	ExcludedMediaIDs    []string
-	ExcludedMomentIDs   []string
-	SubtitlesEnabled    *bool
-	CaptionStylePreset  string
-	BRollPreference     string
-	Timestamps          []time.Time
-	Locations           []string
-	PhotoAnalyses       []models.PhotoAnalysis
-	VideoAnalyses       []models.VideoAnalysis
-	MediaClusters       []models.MediaCluster
+	ProjectID            string
+	Version              int
+	ProjectType          models.ProjectType
+	ProjectConfiguration models.VideoProjectConfiguration
+	DesiredDuration      time.Duration
+	TargetDurationFixed  bool
+	StoryType            models.StoryType
+	VisualStyle          models.VisualStyle
+	UserInstructions     string
+	SelectedMediaIDs     []string
+	PreferredMediaOrder  []string
+	ExcludedMediaIDs     []string
+	ExcludedMomentIDs    []string
+	SubtitlesEnabled     *bool
+	CaptionStylePreset   string
+	BRollPreference      string
+	Timestamps           []time.Time
+	Locations            []string
+	PhotoAnalyses        []models.PhotoAnalysis
+	VideoAnalyses        []models.VideoAnalysis
+	MediaClusters        []models.MediaCluster
 }
 
 type Planner struct {
@@ -68,6 +70,7 @@ type captionCue struct {
 }
 
 func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, error) {
+	request = normalizeRequest(request)
 	if err := ctx.Err(); err != nil {
 		return models.StoryPlan{}, err
 	}
@@ -97,11 +100,12 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 	if len(candidates) == 0 {
 		return models.StoryPlan{}, errors.New("story planner requires at least one usable analysis")
 	}
-	chosen := selectCandidates(candidates, request.DesiredDuration)
+	strategy := EditStrategyForRequest(request)
+	chosen := strategy.SelectCandidates(candidates, request.DesiredDuration)
 	if len(chosen) == 0 {
 		return models.StoryPlan{}, errors.New("story planner could not assemble a coherent story")
 	}
-	sortCandidatesForStory(chosen, request.PreferredMediaOrder)
+	strategy.SortCandidates(chosen, request)
 	moments := make([]models.StoryMoment, 0, len(chosen))
 	captions := make([]models.StoryCaption, 0, len(chosen))
 	totalDuration := 0
@@ -133,6 +137,8 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 			})
 		}
 	}
+	strategy.ApplyMomentDefaults(request, moments)
+	totalDuration = storyMomentsDuration(moments)
 	broll := planBRoll(request, moments, captions, candidates, totalDuration)
 	if request.SubtitlesEnabled != nil && !*request.SubtitlesEnabled {
 		captions = nil
@@ -140,37 +146,41 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 	if normalizedBRollPreference(request.BRollPreference) == "none" {
 		broll = nil
 	}
+	projectType := request.ProjectType
 	storyType := normalizeStoryType(request.StoryType)
 	visualStyle := normalizeVisualStyle(request.VisualStyle)
-	titleText := titleFor(storyType, request, moments)
-	endingText := endingFor(storyType, request, moments)
-	captionStyle := captionStyleFor(storyType, visualStyle)
+	titleText := titleForProject(projectType, storyType, request, moments)
+	endingText := endingForProject(projectType, storyType, request, moments)
+	captionStyle := captionStyleForProject(projectType, storyType, visualStyle)
 	if preset := strings.TrimSpace(request.CaptionStylePreset); preset != "" {
-		captionStyle = captionStylePreset(preset, storyType, visualStyle)
+		captionStyle = captionStylePresetForProject(preset, projectType, storyType, visualStyle)
 	}
 	plan := models.StoryPlan{
 		SchemaVersion:       models.StoryPlanSchemaVersionV1,
 		ID:                  planID(request, moments),
 		ProjectID:           request.ProjectID,
+		ProjectType:         projectType,
 		Version:             versionFor(request.Version),
 		RequestedDurationMS: max(1, int(request.DesiredDuration.Milliseconds())),
 		StoryType:           storyType,
 		VisualStyle:         visualStyle,
 		TitleText:           titleText,
 		EndingText:          endingText,
+		CallToAction:        projectCallToAction(request),
 		UserInstructions:    strings.TrimSpace(request.UserInstructions),
 		Moments:             moments,
 		BRoll:               broll,
 		Captions:            captions,
 		CaptionStyle:        captionStyle,
 		Output: models.StoryOutput{
-			AspectRatio:  "9:16",
+			AspectRatio:  projectAspectRatio(request),
 			MaxDurationS: max(1, int(math.Ceil(request.DesiredDuration.Seconds()))),
 			Preset:       "premium-memory",
 		},
 		TotalDurationMS: totalDuration,
 		CreatedAt:       now,
 	}
+	strategy.ApplyPlanDefaults(&plan, request)
 	EnforceSceneTransitions(&plan, request.VideoAnalyses, visualStyle)
 	applyCaptionColorInstruction(&plan, request.UserInstructions)
 	if err := ValidateStoryPlan(plan); err != nil {
@@ -193,6 +203,147 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 		return models.StoryPlan{}, err
 	}
 	return plan, nil
+}
+
+func storyMomentsDuration(moments []models.StoryMoment) int {
+	total := 0
+	for _, moment := range moments {
+		total += max(0, moment.DurationMS)
+	}
+	return total
+}
+
+func applyProjectSceneDefaults(request Request, moments []models.StoryMoment) {
+	if request.ProjectType != models.ProjectTypePromo {
+		return
+	}
+	for index := range moments {
+		moments[index].Order = index + 1
+		if moments[index].ScenePurpose == "" {
+			moments[index].ScenePurpose = promoScenePurposeForIndex(index, len(moments))
+		}
+		if moments[index].Typography == nil {
+			if overlay := promoTypographyForScene(request, moments[index]); overlay != nil {
+				moments[index].Typography = overlay
+			}
+		}
+	}
+}
+
+func applyReelSceneDefaults(request Request, moments []models.StoryMoment) {
+	if request.ProjectType != models.ProjectTypeReel {
+		return
+	}
+	for index := range moments {
+		moments[index].Order = index + 1
+		moments[index].CropIntent = "fill"
+		if moments[index].DurationMS > 4200 {
+			moments[index].DurationMS = 4200
+		}
+		if index == 0 && moments[index].Typography == nil {
+			if overlay := reelHookTypography(request, moments[index]); overlay != nil {
+				moments[index].Typography = overlay
+			}
+		}
+	}
+}
+
+func reelHookTypography(request Request, moment models.StoryMoment) *models.TextOverlay {
+	title := ""
+	if reel := request.ProjectConfiguration.Reel; reel != nil {
+		title = humanText(reel.HookPreference)
+	}
+	if title == "" {
+		title = truncateText(humanText(moment.Caption), 42)
+	}
+	if title == "" {
+		title = truncateText(humanText(moment.Narrative), 42)
+	}
+	if title == "" {
+		return nil
+	}
+	durationMS := moment.DurationMS
+	if durationMS <= 0 {
+		durationMS = 2000
+	}
+	return &models.TextOverlay{
+		Enabled: true, Type: models.TextOverlayMomentTitle, Title: title,
+		Style: models.TypographyStyleMinimal, Placement: models.TextPlacementTopCenter,
+		StartMS: 150, DurationMS: max(250, minInt(durationMS-150, 1800)), MaxWidth: 0.84,
+		SafeArea:  models.SafeArea{Top: 0.08, Right: 0.08, Bottom: 0.16, Left: 0.08},
+		Animation: models.TextAnimationFadeUp, Source: models.TextSourceAI,
+		Reason: "reel hook", Confidence: 0.75,
+	}
+}
+
+func promoScenePurposeForIndex(index int, total int) models.PromoScenePurpose {
+	if total <= 1 {
+		return models.PromoScenePurposeCTA
+	}
+	if index == 0 {
+		return models.PromoScenePurposeHook
+	}
+	if index == total-1 {
+		return models.PromoScenePurposeCTA
+	}
+	sequence := []models.PromoScenePurpose{
+		models.PromoScenePurposeProduct,
+		models.PromoScenePurposeFeature,
+		models.PromoScenePurposeBenefit,
+		models.PromoScenePurposeProof,
+	}
+	return sequence[(index-1)%len(sequence)]
+}
+
+func promoTypographyForScene(request Request, moment models.StoryMoment) *models.TextOverlay {
+	title := ""
+	subtitle := ""
+	switch moment.ScenePurpose {
+	case models.PromoScenePurposeHook:
+		if promo := request.ProjectConfiguration.Promo; promo != nil {
+			title = humanText(promo.Hook)
+		}
+		if title == "" {
+			title = truncateText(humanText(moment.Caption), 40)
+		}
+	case models.PromoScenePurposeCTA:
+		title = projectCallToAction(request)
+	default:
+		title = truncateText(humanText(moment.Caption), 40)
+		subtitle = truncateText(humanText(moment.Narrative), 100)
+	}
+	if title == "" && subtitle == "" {
+		return nil
+	}
+	durationMS := moment.DurationMS
+	if durationMS <= 0 {
+		durationMS = 2000
+	}
+	return &models.TextOverlay{
+		Enabled: true, Type: promoTextOverlayType(moment.ScenePurpose), Title: title, Subtitle: subtitle,
+		Style: models.TypographyStyleEditorial, Placement: promoTextPlacement(moment.ScenePurpose),
+		StartMS: 250, DurationMS: max(250, minInt(durationMS-250, 2200)), MaxWidth: 0.78,
+		SafeArea:  models.SafeArea{Top: 0.08, Right: 0.08, Bottom: 0.1, Left: 0.08},
+		Animation: models.TextAnimationFadeUp, Source: models.TextSourceAI,
+		Reason: "promo scene text", Confidence: 0.75,
+	}
+}
+
+func promoTextOverlayType(purpose models.PromoScenePurpose) models.TextOverlayType {
+	if purpose == models.PromoScenePurposeCTA {
+		return models.TextOverlayPromoCTA
+	}
+	if purpose == models.PromoScenePurposeHook {
+		return models.TextOverlayPromoHeadline
+	}
+	return models.TextOverlayPromoSupport
+}
+
+func promoTextPlacement(purpose models.PromoScenePurpose) models.TextPlacement {
+	if purpose == models.PromoScenePurposeCTA {
+		return models.TextPlacementBottomCenter
+	}
+	return models.TextPlacementBottomLeft
 }
 
 func (p *Planner) applyTypography(ctx context.Context, request Request, moments []models.StoryMoment, titleText string) []models.StoryMoment {
@@ -360,7 +511,30 @@ func captionStyleFor(storyType models.StoryType, visualStyle models.VisualStyle)
 	}
 }
 
+func captionStyleForProject(projectType models.ProjectType, storyType models.StoryType, visualStyle models.VisualStyle) *models.CaptionStyle {
+	switch projectType {
+	case models.ProjectTypePromo:
+		return &models.CaptionStyle{
+			Preset: "clean_minimal", FontFamily: "inter-bold", FontSize: 46, TextColor: "#FFFFFF",
+			StrokeColor: "#000000", StrokeWidth: 3, BackgroundEnabled: true, BackgroundColor: "#000000",
+			BackgroundOpacity: 0.28, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 36,
+		}
+	case models.ProjectTypeReel:
+		return &models.CaptionStyle{
+			Preset: "bold_social", FontFamily: "inter-bold", FontSize: 52, TextColor: "#FFFFFF",
+			StrokeColor: "#000000", StrokeWidth: 4, BackgroundEnabled: true, BackgroundColor: "#000000",
+			BackgroundOpacity: 0.32, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 32,
+		}
+	default:
+		return captionStyleFor(storyType, visualStyle)
+	}
+}
+
 func captionStylePreset(preset string, storyType models.StoryType, visualStyle models.VisualStyle) *models.CaptionStyle {
+	return captionStylePresetForProject(preset, models.ProjectTypeStory, storyType, visualStyle)
+}
+
+func captionStylePresetForProject(preset string, projectType models.ProjectType, storyType models.StoryType, visualStyle models.VisualStyle) *models.CaptionStyle {
 	switch strings.ToLower(strings.TrimSpace(preset)) {
 	case "clean_minimal":
 		return &models.CaptionStyle{
@@ -383,7 +557,7 @@ func captionStylePreset(preset string, storyType models.StoryType, visualStyle m
 			BackgroundEnabled: true, BackgroundColor: "#000000", BackgroundOpacity: 0.32, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 32,
 		}
 	default:
-		return captionStyleFor(storyType, visualStyle)
+		return captionStyleForProject(projectType, storyType, visualStyle)
 	}
 }
 
@@ -969,6 +1143,9 @@ func validateRequest(request Request) error {
 	if strings.TrimSpace(request.ProjectID) == "" || request.DesiredDuration <= 0 {
 		return errors.New("story planner requires a project and duration")
 	}
+	if _, valid := models.NormalizeProjectType(request.ProjectType); !valid {
+		return fmt.Errorf("unsupported project type %q", request.ProjectType)
+	}
 	if !validStoryType(request.StoryType) {
 		return fmt.Errorf("unsupported story type %q", request.StoryType)
 	}
@@ -979,6 +1156,111 @@ func validateRequest(request Request) error {
 		return errors.New("story planner requires photo or video analyses")
 	}
 	return nil
+}
+
+func normalizeRequest(request Request) Request {
+	projectType, valid := models.NormalizeProjectType(request.ProjectType)
+	if !valid {
+		projectType = models.ProjectTypeStory
+	}
+	request.ProjectType = projectType
+	request.ProjectConfiguration = models.NormalizeVideoProjectConfiguration(projectType, request.ProjectConfiguration)
+	if request.StoryType == "" {
+		request.StoryType = models.StoryTypeCustom
+	}
+	if request.ProjectType == models.ProjectTypeReel && request.VisualStyle == "" {
+		if request.ProjectConfiguration.Reel != nil {
+			switch request.ProjectConfiguration.Reel.Style {
+			case "cinematic":
+				request.VisualStyle = models.VisualStyleCinematic
+			case "clean":
+				request.VisualStyle = models.VisualStyleMinimal
+			case "dynamic":
+				request.VisualStyle = models.VisualStylePlayful
+			}
+		}
+	}
+	if request.UserInstructions == "" {
+		request.UserInstructions = request.ProjectConfiguration.AIInstructions
+	}
+	if request.UserInstructions == "" {
+		request.UserInstructions = ""
+	}
+	return request
+}
+
+func projectAspectRatio(request Request) string {
+	if request.ProjectType == models.ProjectTypeReel {
+		return "9:16"
+	}
+	if ratio := supportedProjectAspectRatio(request.ProjectConfiguration.Composition.AspectRatio); ratio != "" {
+		return ratio
+	}
+	if request.ProjectType == models.ProjectTypePromo {
+		return "16:9"
+	}
+	return "9:16"
+}
+
+func supportedProjectAspectRatio(value string) string {
+	switch strings.TrimSpace(value) {
+	case "9:16", "1:1", "16:9":
+		return strings.TrimSpace(value)
+	default:
+		return ""
+	}
+}
+
+func projectCallToAction(request Request) string {
+	if request.ProjectType == models.ProjectTypePromo && request.ProjectConfiguration.Promo != nil {
+		if request.ProjectConfiguration.Promo.CTA != nil {
+			if text := strings.TrimSpace(request.ProjectConfiguration.Promo.CTA.Text); text != "" {
+				return text
+			}
+		}
+		return strings.TrimSpace(request.ProjectConfiguration.Promo.CallToAction)
+	}
+	return ""
+}
+
+func titleForProject(projectType models.ProjectType, storyType models.StoryType, request Request, moments []models.StoryMoment) string {
+	switch projectType {
+	case models.ProjectTypePromo:
+		if promo := request.ProjectConfiguration.Promo; promo != nil {
+			if hook := humanText(promo.Hook); hook != "" {
+				return truncateText(toDisplayTitle(hook), 42)
+			}
+			if product := humanText(promo.ProductInformation); product != "" {
+				return truncateText(toDisplayTitle(product), 42)
+			}
+		}
+		return "Product in Motion"
+	case models.ProjectTypeReel:
+		if reel := request.ProjectConfiguration.Reel; reel != nil {
+			if hook := humanText(reel.HookPreference); hook != "" {
+				return truncateText(toDisplayTitle(hook), 42)
+			}
+			if style := humanText(reel.Style); style != "" && !strings.EqualFold(style, "Auto") {
+				return truncateText(toDisplayTitle(style+" reel"), 42)
+			}
+		}
+		return titleFor(models.StoryTypeCustom, request, moments)
+	default:
+		return titleFor(storyType, request, moments)
+	}
+}
+
+func endingForProject(projectType models.ProjectType, storyType models.StoryType, request Request, moments []models.StoryMoment) string {
+	if projectType == models.ProjectTypePromo {
+		if cta := projectCallToAction(request); cta != "" {
+			return cta
+		}
+		return "Learn more"
+	}
+	if projectType == models.ProjectTypeReel {
+		return "More moments like this."
+	}
+	return endingFor(storyType, request, moments)
 }
 
 func validStoryType(value models.StoryType) bool {
@@ -1386,7 +1668,7 @@ func shouldCaption(entry candidate) bool {
 
 func planID(request Request, moments []models.StoryMoment) string {
 	hash := sha256.New()
-	for _, value := range []string{request.ProjectID, string(request.StoryType), string(request.VisualStyle), request.UserInstructions, fmt.Sprintf("%d", request.Version)} {
+	for _, value := range []string{request.ProjectID, string(request.ProjectType), string(request.StoryType), string(request.VisualStyle), request.UserInstructions, fmt.Sprintf("%d", request.Version)} {
 		_, _ = hash.Write([]byte(value))
 	}
 	for _, moment := range moments {

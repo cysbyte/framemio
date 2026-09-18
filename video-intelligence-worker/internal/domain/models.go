@@ -1,10 +1,15 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"strings"
+	"time"
+)
 
 type JobMessage struct {
 	JobID         string            `json:"jobId"`
 	ProjectID     string            `json:"projectId"`
+	ProjectType   string            `json:"projectType,omitempty"`
 	MediaID       string            `json:"mediaId"`
 	JobType       string            `json:"jobType"`
 	Configuration map[string]string `json:"configuration,omitempty"`
@@ -14,6 +19,7 @@ type ProcessingJob struct {
 	ID             string            `json:"id"`
 	UserID         string            `json:"user_id"`
 	ProjectID      string            `json:"project_id"`
+	ProjectType    string            `json:"project_type,omitempty"`
 	MediaID        string            `json:"media_id,omitempty"`
 	Type           string            `json:"type"`
 	Status         string            `json:"status"`
@@ -50,9 +56,10 @@ type MediaAsset struct {
 	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
-type StoryProject struct {
+type VideoProject struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"user_id"`
+	Type      string    `json:"type"`
 	Title     string    `json:"title"`
 	Context   string    `json:"context"`
 	MediaIDs  []string  `json:"media_ids"`
@@ -61,10 +68,32 @@ type StoryProject struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type StoryProject = VideoProject
+
+func (project VideoProject) normalized() VideoProject {
+	switch strings.ToLower(strings.TrimSpace(project.Type)) {
+	case "story", "promo", "reel":
+		project.Type = strings.ToLower(strings.TrimSpace(project.Type))
+	default:
+		project.Type = "story"
+	}
+	return project
+}
+
+func (project *VideoProject) UnmarshalJSON(data []byte) error {
+	type alias VideoProject
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*project = VideoProject(decoded).normalized()
+	return nil
+}
+
 type JobContext struct {
 	Job     ProcessingJob
 	Media   MediaAsset
-	Project StoryProject
+	Project VideoProject
 }
 
 type VideoMetadata struct {
