@@ -84,6 +84,26 @@ final class VideoProjectCreationTests: XCTestCase {
         XCTAssertEqual(story.lastModifiedAt, ISO8601DateFormatter().date(from: "2026-08-27T09:30:00Z"))
     }
 
+    func testGenericProjectContextFallsBackToSpecialMoments() throws {
+        let data = Data("""
+        {
+          "id": "promo-1",
+          "type": "promo",
+          "title": "App Promo",
+          "context": "Promo · App · Drive downloads",
+          "created_at": "2026-09-18T14:38:38Z",
+          "media_ids": ["media-1"],
+          "status": "analyzing"
+        }
+        """.utf8)
+
+        let story = try FrameMioJSONCoding.apiDecoder().decode(Story.self, from: data)
+
+        XCTAssertEqual(story.projectType, .promo)
+        XCTAssertEqual(story.context, .specialMoments)
+        XCTAssertEqual(story.assetIDs, ["media-1"])
+    }
+
     func testStoryLastModifiedFallsBackToCreatedAt() throws {
         let data = Data("""
         {

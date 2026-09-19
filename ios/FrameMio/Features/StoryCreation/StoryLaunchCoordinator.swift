@@ -181,6 +181,7 @@ final class StoryLaunchCoordinator: ObservableObject {
                 phaseTitle = processingTitle(for: draft.type)
                 phaseDetail = "Server-side planning and rendering will continue next."
                 storyLaunchDebugLog("phase=story_create_complete story=\(story.id) status=\(story.status.rawValue)")
+                refreshCreditBalance()
                 FrameMioHaptics.success()
             } catch is CancellationError {
                 storyLaunchDebugLog("phase=cancelled progress=\(progress)")
@@ -206,14 +207,28 @@ final class StoryLaunchCoordinator: ObservableObject {
         guard let creditService else { return }
         if action == .createStory {
             let quote = try await creditService.quote(action: action, stats: .createStory(assets: assets))
+            storyLaunchDebugLog("credit_preflight type=create_story required=\(quote.credits) balance=\(quote.balance) eligible=\(quote.eligible) reason=\(quote.reason ?? "none")")
             guard quote.eligible, quote.balance >= quote.credits else {
                 throw AppError.insufficientCredits(required: quote.credits, available: quote.balance)
             }
             return
         }
         let balance = try await creditService.balance()
+        storyLaunchDebugLog("credit_preflight type=\(action.rawValue) balance=\(balance.displayCredits) reserved=\(balance.reserved)")
         if let issue = CreditPreflight.issue(for: action, balance: balance) {
             throw AppError.insufficientCredits(required: issue.required, available: issue.available)
+        }
+    }
+
+    private func refreshCreditBalance() {
+        guard let creditService else { return }
+        Task { [creditService] in
+            do {
+                let balance = try await creditService.refreshBalance()
+                storyLaunchDebugLog("credit_balance_after_create available=\(balance.available) reserved=\(balance.reserved) display=\(balance.displayCredits)")
+            } catch {
+                storyLaunchDebugLog("credit_balance_after_create_failed error=\(error.localizedDescription)")
+            }
         }
     }
 

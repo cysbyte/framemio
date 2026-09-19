@@ -1,5 +1,11 @@
 import Foundation
 
+private func storyServiceDebugLog(_ message: @autoclosure () -> String) {
+#if DEBUG
+    print("[FrameMio][StoryService] \(message())")
+#endif
+}
+
 final class RemoteStoryService: StoryService, @unchecked Sendable {
     private let apiClient: APIClient
     private let persistence: StoryPersistence
@@ -103,6 +109,7 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
         }
 
         let idempotencyKey = "ios-\(request.draft.type.rawValue)-\(UUID().uuidString)"
+        storyServiceDebugLog("generic_project_create_start type=\(request.draft.type.rawValue) media_count=\(mediaIDs.count) idempotency_key_present=true")
         let projectData = try await apiClient.data(
             for: APIRequest(
                 method: .post,
@@ -118,6 +125,7 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
         } catch {
             throw AppError.invalidResponse
         }
+        storyServiceDebugLog("generic_project_create_complete type=\(project.type?.rawValue ?? request.draft.type.rawValue) project_id=\(project.id) status=\(project.status) media_count=\(project.mediaIDs.count)")
 
         _ = try await apiClient.data(
             for: APIRequest(
@@ -126,6 +134,7 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
                 headers: ["Idempotency-Key": "\(idempotencyKey)-analysis"]
             )
         )
+        storyServiceDebugLog("generic_project_analyze_accepted type=\(request.draft.type.rawValue) project_id=\(project.id)")
 
         let story = project.storyFallback
         let existing = try await persistence.loadStories()

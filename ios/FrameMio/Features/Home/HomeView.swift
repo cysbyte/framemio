@@ -344,12 +344,10 @@ struct AllStoriesView: View {
     }
 
     private var filteredStories: [Story] {
-        switch filter {
-        case .all:
-            viewModel.allStories
-        case let .type(projectType):
-            viewModel.allStories.filter { $0.projectType == projectType }
+        guard let projectType = filter.projectType else {
+            return viewModel.allStories
         }
+        return viewModel.allStories.filter { $0.projectType == projectType }
     }
 
     private var pageStories: [Story] {
@@ -376,13 +374,39 @@ struct AllStoriesView: View {
     }
 
     private var projectFilterPicker: some View {
-        Picker("Project type", selection: $filter) {
-            ForEach(ProjectFilter.allCases, id: \.self) { filter in
-                Text(filter.title).tag(filter)
+        HStack(spacing: 0) {
+            ForEach(ProjectFilter.allCases, id: \.self) { option in
+                Button {
+                    FrameMioHaptics.secondaryAction()
+                    filter = option
+                } label: {
+                    Text(option.title)
+                        .font(FrameMioTypography.footnote.weight(.bold))
+                        .foregroundStyle(filter == option ? FrameMioColors.inverseInk : FrameMioColors.secondaryInk)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .background {
+                    if filter == option {
+                        RoundedRectangle(cornerRadius: FrameMioRadius.medium, style: .continuous)
+                            .fill(FrameMioColors.accent)
+                    }
+                }
+                .accessibilityAddTraits(filter == option ? .isSelected : [])
             }
         }
-        .pickerStyle(.segmented)
-        .tint(FrameMioColors.accent)
+        .padding(4)
+        .background(
+            FrameMioColors.surface.opacity(0.92),
+            in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous)
+                .stroke(FrameMioColors.divider.opacity(0.64), lineWidth: FrameMioMetrics.borderWidth)
+        }
         .accessibilityLabel("Filter projects by type")
     }
 
@@ -440,18 +464,33 @@ struct AllStoriesView: View {
 
 private enum ProjectFilter: Hashable, CaseIterable {
     case all
-    case type(VideoProjectType)
-
-    static var allCases: [ProjectFilter] {
-        [.all, .type(.story), .type(.promo), .type(.reel)]
-    }
+    case story
+    case promo
+    case reel
 
     var title: String {
         switch self {
         case .all:
             "All"
-        case let .type(type):
-            type.title
+        case .story:
+            VideoProjectType.story.title
+        case .promo:
+            VideoProjectType.promo.title
+        case .reel:
+            VideoProjectType.reel.title
+        }
+    }
+
+    var projectType: VideoProjectType? {
+        switch self {
+        case .all:
+            nil
+        case .story:
+            .story
+        case .promo:
+            .promo
+        case .reel:
+            .reel
         }
     }
 }

@@ -30,7 +30,9 @@ Before making a significant architectural change:
 
 ## 1.1 Product
 
-**FrameMio** is an iPhone-first AI memory-video application.
+**FrameMio** is an iPhone-first AI video application for turning selected
+photos and videos into finished personal stories, promotional videos, and
+short-form reels.
 
 The product is NOT primarily:
 
@@ -43,25 +45,89 @@ The product is NOT primarily:
 
 The core product idea is:
 
-> **Turn everyday iPhone photos and videos into a coherent personal memory story.**
+> **Give FrameMio raw photos and videos and get a finished video.**
 
 The primary experience is:
 
 ```text
 Open FrameMio
     ↓
-Make My Day
+Choose Story, Promo, or Reel
     ↓
-FrameMio understands the selected/relevant memories
+Select photos and videos
     ↓
-Finds meaningful moments
+FrameMio analyzes the media and finds candidate scenes
     ↓
-Creates a short personal film
+The mode-specific edit strategy creates a normalized edit plan
+    ↓
+The shared composition/rendering pipeline creates the finished video
     ↓
 User watches / lightly edits / shares
 ```
 
-The product should feel like an **AI filmmaker for everyday life**, not a traditional editing timeline.
+The product should feel like an **AI filmmaker**, not a traditional
+professional editing timeline.
+
+Supported creation modes:
+
+```text
+Story
+  Personal stories, trips, memories, and everyday moments
+
+Promo
+  Products, apps, businesses, events, and persuasive messaging
+
+Reel
+  Short-form vertical social content for Instagram, TikTok, YouTube Shorts,
+  and general vertical video
+```
+
+The three modes are one product experience. They share media selection,
+analysis, planning, editing, rendering, project storage, and job
+infrastructure. The mode changes editorial intent and defaults; it does not
+create a separate application or worker system.
+
+## 1.2 Product UX contract
+
+The home screen should communicate the simple promise:
+
+> **Create videos from your photos and footage.**
+
+The primary action is Create. Creation offers three concise choices:
+
+```text
+Story
+For trips, memories and everyday moments
+
+Promo
+For products, apps and businesses
+
+Reel
+For short-form social content
+```
+
+Projects display a thumbnail, title, project type, last modified time, and
+processing status when applicable. Type indicators should make Story, Promo,
+and Reel easy to distinguish without turning the home screen into a feature
+catalog.
+
+The iOS product remains approachable:
+
+- do not expose professional editor terminology as a prerequisite
+- do not require users to learn a complex timeline
+- preserve the “give FrameMio footage and get a finished video” mental model
+- support VoiceOver labels, sufficient tap targets, Dynamic Type, and strong
+  contrast
+- preserve Story behavior and visual identity while adding Promo and Reel
+
+Empty states should offer the three useful starting points:
+
+```text
+Create your first video
+Story: Turn everyday moments into a story
+Promo: Turn your footage into a product or business video
+Reel: Create a short social video
+```
 
 ---
 
@@ -95,10 +161,21 @@ VideoAnalysis
   = persistent structured representation of what was understood
 
 Story Planner
-  = decide which meaningful moments form a coherent story
+  = apply the selected mode's editorial strategy to candidate scenes
+
+EditStrategy
+  = shared abstraction implemented by StoryEditStrategy,
+    PromoEditStrategy, and ReelEditStrategy
+
+Normalized EditPlan / StoryPlan
+  = validated, renderer-independent editorial artifact
+
+Composition
+  = deterministic canvas, scenes, overlays, captions, audio, and effects
 
 Typography Planner
-  = deferred first-release feature; model/validation may remain, but active StoryPlan generation/rendering is disabled
+  = conservative Story-only extension; Promo/Reel text overlays and captions
+    use validated StoryPlan fields and the shared composition builder
 
 StoryPlan Validator
   = deterministic validation
@@ -117,7 +194,13 @@ Do NOT collapse these concepts:
 ```text
 VideoAnalysis
     ≠
-StoryPlan
+Candidate Scenes
+    ≠
+EditStrategy
+    ≠
+Normalized EditPlan / StoryPlan
+    ≠
+Composition
     ≠
 RenderedVideo
 ```
@@ -130,17 +213,62 @@ Answers:
 
 > What is happening in the media?
 
-### StoryPlan
+### Candidate Scenes
+
+Answers:
+
+> Which time ranges or media items are plausible editorial candidates?
+
+Candidate scenes are evidence-backed selections. They are not yet the final
+ordering, pacing, captions, crop, or CTA.
+
+### EditStrategy
+
+Answers:
+
+> What should this project optimize for?
+
+`EditStrategy` is the mode-specific layer inside the shared AI pipeline:
+
+```text
+EditStrategy
+├── StoryEditStrategy
+├── PromoEditStrategy
+└── ReelEditStrategy
+```
+
+The strategy may influence candidate ranking, ordering, default crop/caption
+behavior, target duration, and incremental revisions. It must not create a
+second media-analysis pipeline, AI provider integration, StoryPlan schema,
+render worker, or renderer.
+
+### Normalized EditPlan / StoryPlan
 
 Answers:
 
 > Which moments should be used, and in what order?
+
+The existing `StoryPlan` domain type is the canonical normalized edit-plan
+artifact for the current implementation. It can carry Story, Promo, and Reel
+intent through validated fields such as `project_type`, `scene_purpose`,
+`scene_text`, `voiceover`, captions, crop intent, output settings, branding,
+and CTA metadata.
+
+AI revisions must modify the current plan when possible. A request such as
+“replace the opening” should primarily replace or refine the first scene.
+“Make the CTA stronger” should primarily update the CTA-related scene and
+plan fields. Full regeneration is reserved for cases where the existing plan
+cannot satisfy the instruction.
 
 ### Render
 
 Answers:
 
 > How should the selected story be visually composed into an MP4?
+
+The renderer consumes a validated normalized composition, not high-level
+business concepts such as “Promo hook” or “Reel retention.” High-level
+meaning belongs in planning and composition construction before rendering.
 
 This separation is one of the most important architectural invariants.
 
@@ -191,13 +319,20 @@ The intended production architecture is:
                     │                  VideoAnalysis              │
                     │                         │                   │
                     │                         ▼                   │
-                    │                   Story Planner              │
+                    │              Candidate Scenes               │
                     │                         │                   │
                     │                         ▼                   │
-                    │                    StoryPlan                 │
+                    │                  EditStrategy               │
+                    │              Story / Promo / Reel            │
                     │                         │                   │
                     │                         ▼                   │
-                    │                  StoryPlan Validator         │
+                    │              Normalized EditPlan             │
+                    │                         │                   │
+                    │                         ▼                   │
+                    │              Composition Builder             │
+                    │                         │                   │
+                    │                         ▼                   │
+                    │              Composition Validator            │
                     │                         │                   │
                     └─────────────────────────┼───────────────────┘
                                               │
@@ -264,6 +399,35 @@ The iPhone is NOT responsible for:
 - multimodal AI calls for video understanding
 - server-side rendering
 - FFmpeg-based backend processing
+
+The iOS app does support one shared creation flow for all project types:
+
+```text
+Create
+  ↓
+Story / Promo / Reel
+  ↓
+Media Picker
+  ↓
+Optional mode configuration
+  ↓
+Upload and launch shared project pipeline
+```
+
+Mode configuration is high-level and bounded:
+
+```text
+Promo
+  subject / goal / duration / optional instruction
+
+Reel
+  platform / duration / style / optional instruction
+  aspect ratio is always 9:16
+```
+
+The app sends project configuration and user intent. It must not send
+provider-specific AI settings, raw renderer commands, FFmpeg arguments,
+Remotion code, or a hand-authored final timeline.
 
 ## 5.2 Local media intelligence
 
@@ -657,7 +821,80 @@ GET  /v1/stories/:id
 POST /v1/stories/:id/versions
 ```
 
-`POST /v1/stories` and `POST /v1/stories/:id/versions` accept high-level generation/edit preferences such as style, prompt, scene detail level (`sceneDetailStyle`), target duration, `subtitlesEnabled`, and `subtitleStyle`. The iOS create screen keeps these options behind a compact Customize entry so first-time creation remains a one-tap flow; the sheet exposes Style, Prompt, Scene Details, Subtitles, and Length without exposing renderer terminology such as B-roll. The prompt is optional, sent as `instruction`, sanitized and bounded by the backend, then stored as `user_instructions` for story planning. The default create values are cinematic style, subtitles enabled with cinematic subtitles, balanced scene details, automatic length, and no prompt. Selected values are sent with the initial story request and stored in the story pipeline configuration. The edit endpoint additionally accepts selected/removed media and natural-language instructions. When an instruction is present, the edit job uses `revision_mode=ai_story_plan_revision`; the instruction is stored as `user_instructions`, while style, scene-detail, subtitle, and length controls stay as structured planner inputs (`requested_visual_style`, `broll_preference`, `subtitles_enabled`, `caption_style_preset`, and fixed duration constraints). Scene Details maps `Balanced` to the normal planner behavior, `More details` to `broll_preference=more`, and `Main moments` to `broll_preference=none`; the latter is enforced after planner output so no B-roll reaches rendering. The backend enforces those structured controls after planner output, so external planners cannot silently drop selected style, B-roll, or subtitle settings. Subtitle preferences affect only generated `StoryPlan` captions plus renderer-safe `caption_style`; iOS never sends raw renderer commands, font paths, STT provider information, or transcript text. Create Customize and Edit Story use the same live voice-prompt recorder, transcription status, and clear-transcript behavior; the resulting text follows the same `instruction` path as typed prompts.
+`POST /v1/stories` and `POST /v1/stories/:id/versions` accept high-level Story
+generation/edit preferences such as style, prompt, scene detail level
+(`sceneDetailStyle`), target duration, `subtitlesEnabled`, and
+`subtitleStyle`. The iOS create screen keeps these options behind a compact
+Customize entry so first-time creation remains a one-tap flow; the sheet
+exposes Style, Prompt, Scene Details, Subtitles, and Length without exposing
+renderer terminology such as B-roll. The prompt is optional, sent as
+`instruction`, sanitized and bounded by the backend, then stored as
+`user_instructions` for planning.
+
+The generic project API supports Promo and Reel without creating separate
+pipelines:
+
+```text
+POST /projects
+  { type, title, context, media_ids, configuration, analyses }
+
+POST /projects/:id/analyze
+```
+
+The current iOS implementation sends:
+
+```text
+configuration.promo:
+  promotion_goal
+  product_information
+  call_to_action
+  target_audience
+  desired_duration_seconds
+
+configuration.reel:
+  social_platform
+  target_duration_seconds
+  style
+  hook_preference
+  caption_style
+  aspect_ratio = 9:16
+
+configuration.composition:
+  aspect_ratio = 16:9 for Promo
+  aspect_ratio = 9:16 for Reel
+```
+
+Story projects retain the existing `/v1/stories` compatibility contract.
+Promo and Reel responses are converted by iOS into the shared `Story` display
+model so project lists, status polling, preview, and persistence remain
+compatible.
+
+The default Story create values are cinematic style, subtitles enabled with
+cinematic subtitles, balanced scene details, automatic length, and no prompt.
+Selected values are sent with the initial story request and stored in the
+story pipeline configuration. The edit endpoint additionally accepts
+selected/removed media and natural-language instructions. When an instruction
+is present, the edit job uses `revision_mode=ai_story_plan_revision`; the
+instruction is stored as `user_instructions`, while style, scene-detail,
+subtitle, and length controls stay as structured planner inputs
+(`requested_visual_style`, `broll_preference`, `subtitles_enabled`,
+`caption_style_preset`, and fixed duration constraints).
+
+For Promo and Reel, project instructions must include the project type,
+project configuration, current edit plan, current candidate scenes, and the
+user instruction before reaching the AI revision provider. The provider
+returns structured JSON only and must modify the current plan incrementally
+where possible.
+
+Scene Details maps `Balanced` to the normal planner behavior, `More details`
+to `broll_preference=more`, and `Main moments` to
+`broll_preference=none`; the latter is enforced after planner output so no
+B-roll reaches rendering. The backend enforces structured controls after
+planner output, so external planners cannot silently drop selected style,
+B-roll, subtitle, Promo CTA, or Reel vertical settings. Subtitle preferences
+affect only generated `StoryPlan` captions plus renderer-safe `caption_style`;
+iOS never sends raw renderer commands, font paths, STT provider information,
+or transcript text.
 
 ## 8.3 Edit Story contract
 
@@ -703,6 +940,47 @@ GET  /projects/:id/status
 GET  /projects/:id/story
 POST /projects/:id/render
 ```
+
+## 8.4 Project mode configuration
+
+The durable project model is shared:
+
+```text
+VideoProject
+  type: story | promo | reel
+  media_ids
+  configuration
+  status
+```
+
+Mode configuration is metadata and planning input:
+
+```text
+PromoProjectConfiguration
+  promotion_category
+  promotion_goal
+  product_information
+  call_to_action
+  target_audience
+  desired_duration_seconds
+  brand
+
+ReelProjectConfiguration
+  social_platform: instagram | tiktok | youtube_shorts | other
+  target_duration_seconds: auto | 15 | 30 | 60
+  style: dynamic | cinematic | clean | talking-head | auto
+  hook_preference
+  caption_style
+  aspect_ratio = 9:16
+```
+
+Promo defaults to a short product-focused composition and should not force
+every project into `HOOK -> PROBLEM -> PRODUCT -> BENEFIT -> PROOF -> CTA`.
+The strategy may omit stages unsupported by the media.
+
+Reel defaults to mobile-first `9:16`, short duration, and vertical crop/reframe.
+Supported platforms are labels for user intent; do not hardcode
+platform-specific behavior unless a real output requirement demands it.
 
 Internal worker routes:
 
@@ -933,6 +1211,42 @@ low redundancy
 reasonable AI cost
 ```
 
+Current adaptive sampling rule:
+
+```text
+duration < 1 minute       -> up to 3 frames / second
+1 minute to < 2 minutes   -> up to 2 frames / second
+2 minutes to < 5 minutes  -> up to 1 frame / second
+5 minutes to < 10 minutes -> up to 0.5 frames / second
+10 minutes and longer     -> progressively lower density, bounded by caps
+```
+
+This is a baseline candidate-frame budget, not a command to send every
+possible frame blindly. Dense sampling is appropriate when the video shows
+frequent visual changes, fast actions, screen recordings, text/UI changes,
+many cuts, significant camera motion, multiple people/events, or weak
+scene-boundary confidence. Sparse sampling is appropriate for static talking
+heads, long stable scenes, slow pans, repeated footage, and visually redundant
+segments.
+
+The worker should prefer high-information, low-redundancy frames. If 60
+frames from a 1-minute clip cost only a small token budget, it can still be
+wasteful if the extra frames are near-duplicates. Conversely, a 1-minute video
+with rapid scene changes may justify 180 candidate frames before deduplication.
+The final provider payload must remain bounded by model context limits,
+latency, cost, and useful evidence density.
+
+Frame sampling logs should expose enough detail to verify behavior:
+
+```text
+video duration
+selected sampling FPS / interval
+candidate frame count
+deduplicated frame count
+final model frame count
+dense-sampling reason when applicable
+```
+
 ---
 
 # 12. Transcription
@@ -1112,7 +1426,25 @@ The StoryPlan must explicitly reference the analysis version it used.
 
 # 15. Story Planner
 
-The Story Planner is an editorial layer.
+The Story Planner is now the shared edit-plan planner for Story, Promo, and
+Reel projects. The name remains for backward compatibility with the existing
+domain model and job names, but the implemented abstraction is mode-aware:
+
+```text
+Media
+  ↓
+Media Analysis
+  ↓
+Candidate Scenes
+  ↓
+EditStrategy
+  ↓
+Normalized EditPlan / StoryPlan
+  ↓
+Composition
+  ↓
+Render
+```
 
 It receives structured analysis.
 
@@ -1127,15 +1459,20 @@ Inputs can include:
 - locations
 - user-selected media
 - requested duration
+- project type
+- project configuration
 - story type
 - visual style
 - optional user instruction
 
-The planner can run as either the default deterministic local heuristic planner or a configured GPT/OpenAI-compatible planner. Both implementations must produce the same canonical `StoryPlan` model and must feed the same validation and render pipeline.
+The planner can run as either the default deterministic local heuristic
+planner or a configured GPT/OpenAI-compatible planner. Both implementations
+must produce the same canonical `StoryPlan` model and must feed the same
+validation and render pipeline.
 
 Its job is:
 
-> Decide which meaningful moments form the best coherent memory story.
+> Decide which candidate scenes form the best edit for the selected project type.
 
 Possible story types:
 
@@ -1150,6 +1487,32 @@ Pet
 Event
 Custom
 ```
+
+Current strategy objectives:
+
+```text
+StoryEditStrategy
+  Create a coherent personal story from everyday media.
+  Optimize for chronological/contextual coherence, important moments,
+  emotional progression, variety, natural pacing, and a meaningful ending.
+  Avoid excessive effects.
+
+PromoEditStrategy
+  Create a persuasive promotional video.
+  Optimize for hook, product visibility, benefits, proof/demo, clear messaging,
+  CTA, and brand consistency. A useful arc is HOOK -> PROBLEM -> PRODUCT ->
+  BENEFIT -> PROOF -> CTA, but stages may be omitted when unsupported by the
+  media.
+
+ReelEditStrategy
+  Create an engaging short-form social video.
+  Optimize for strong opening, concise storytelling, pacing, retention,
+  captions, vertical framing, and a clear ending. Do not promise or use
+  “viral” as a guaranteed outcome.
+```
+
+The strategy can change defaults and ranking, but the underlying pipeline is
+shared. Do not create `StoryAI`, `PromoAI`, and `ReelAI` as unrelated systems.
 
 ## 15.1 Story selection principles
 
@@ -1200,39 +1563,78 @@ Rules:
 - `STORY_PLANNER_BASE_URL` falls back to `OPENAI_BASE_URL`; `STORY_PLANNER_API_KEY` falls back to `OPENAI_API_KEY`.
 - External providers require both an API key and `STORY_PLANNER_MODEL`; startup must fail clearly when either is missing.
 - GPT receives bounded structured `PhotoAnalysis`, `VideoAnalysis`, transcript segments, media clusters, selected/excluded IDs, desired duration, style, and constraints; it does not receive original full-resolution media or provider secrets.
+- For user editing prompts, GPT receives a bounded structured request containing:
+
+  ```text
+  project_type
+  project_configuration
+  current_edit_plan
+  current_candidate_scenes
+  user_instruction
+  ```
+
+  Example:
+
+  ```text
+  Project type: promo
+  Goal: drive downloads
+  User instruction: "Make this feel like a premium tech advertisement."
+  ```
+
+  The response must include the updated plan, a human-readable explanation,
+  changes made, and warnings for unsatisfied instructions. Raw internal
+  reasoning must never be returned to iOS or stored as user-facing output.
+- Incremental revision is the default. “Replace the opening” should modify
+  Scene 1 or propose one valid replacement. “Make the CTA stronger” should
+  primarily modify the CTA-related scene and plan fields. The provider must
+  preserve unrelated scenes and media references whenever possible.
 - GPT must return the existing `models.StoryPlan` JSON shape only, with `schema_version` exactly `story_plan_v1`; it must never return Remotion code, FFmpeg commands, shell commands, SQL, JavaScript, or executable instructions. Current production deployment defaults use `chat_completions` for OpenAI-compatible gateway compatibility; `responses` remains supported when the upstream supports it. `STORY_PLANNER_FALLBACK_TIMEOUT` defaults to 80 seconds and bounds initial GPT planning latency before falling back to the deterministic local planner, while `STORY_PLANNER_TIMEOUT` remains the 90-second HTTP hard timeout; startup rejects a fallback timeout that is not below the HTTP timeout. The provider returns immediately when the complete upstream response body arrives; `story_planner_external_response_received` records that boundary so response latency can be distinguished from parsing and validation time.
 - The provider boundary canonicalizes narrow v1 schema aliases such as `1.0` to `story_plan_v1`, repairs bounded media-reference omissions from existing analysis data, sanitizes common renderer-facing aliases for transitions, crop intents, caption styles, caption timing, aspect ratio, and source-audio intent, coerces bounded `audio.original_audio` string booleans before typed decode, overwrites video moment and video b-roll `video_analysis_version` from the backend-owned `VideoAnalysis`, derives a deterministic local `broll_id` when an external B-roll row omits one, drops malformed caption rows, removes broad full-moment captions when more granular timed captions exist for the same moment, serializes the final caption timeline so only one subtitle is active at any timestamp, backfills top-level timed captions from transcript cues or moment captions when an external plan omits valid `captions` and subtitles are not disabled, then runs lightweight structural validation; structurally invalid GPT plans fall back to the local planner before persistence. JSON-level repair is traceable via `story_planner_external_json_sanitized`; caption/media-reference/B-roll metadata repair is traceable via `story_planner_external_output_sanitized` and `story_planner_primary_output_sanitized`; repaired primary plans should emit `story_planner_primary_succeeded` instead of falling back.
 - Provider sanitization must stay bounded. It may normalize aliases such as `contain` to `fit`, `center crop` to `fill`, `cinematic` to `cinematic_subtitle`, `Inter Bold` to `inter-bold`, named colors to `#RRGGBB`, and malformed caption timing to the owning moment range. It must not repair invented project identity, invented media, excluded media, excluded moments, unsupported media types, over-duration plans, or executable/renderer-specific instructions. Those outputs are invalid and must fall back locally.
 - Scene-detail preference is a bounded planner control, not a renderer command. `more` lowers the local planner's matching threshold to admit additional relevant cutaways while retaining the shared 35% B-roll duration cap; `none` removes B-roll after both local and external planning; an unset preference preserves the normal balanced behavior. The local planner and validator use the same cap so short fixed-duration fallback plans remain valid. The external prompt asks for B-roll identity, timing, reason, confidence, and score, but missing scores are not fabricated.
 - Story-plan observability is emitted at each boundary. `story_planner_request_ready` records the selected style, subtitle controls, scene-detail/B-roll preference, and duration constraint; `story_planner_external_response_received` records when the complete external response body arrives and its bounded byte count; `story_planner_external_output_sanitized` records missing B-roll IDs/scores, raw/final caption counts, and raw/final overlapping caption counts; `story_planner_primary_failed_falling_back` records `primary_timed_out` alongside the configured deadline; `story_planner_local_output_invalid` records local fallback B-roll count, used duration, duration limit, preference, and validation errors; `story planner output ready` records B-roll counts, score/confidence coverage, and a bounded `broll_scores` trace formatted as `broll_id:asset_id:start=...:duration=...:score=...:confidence=...`; backend `render input prepared`, render-worker `render input received`, and `render composition built` repeat the B-roll trace so a missing or dropped cutaway can be located between planning and rendering.
-- Initial external StoryPlan generation must strip `moments[].typography` during first-release stabilization, even if the model emits a valid-looking `TextOverlay`; photo typography remains deferred.
+- For Story projects, initial external StoryPlan generation must strip
+  `moments[].typography` during first-release stabilization, even if the model
+  emits a valid-looking `TextOverlay`; Story photo typography remains deferred.
+  Promo and Reel text overlays, captions, branding, and CTA metadata remain
+  supported through their validated structured fields.
 - `STORY_REVISION_FALLBACK_TIMEOUT` bounds external revision-planner latency before falling back to the deterministic local revision planner; `STORY_REVISION_TIMEOUT` remains the HTTP hard timeout for the provider request.
 - The backend validator deterministically rejects invalid media references, unsupported transitions/crop intents/typography/caption values, bad timings, over-duration plans, and missing render-required fields before persistence/rendering.
 - `VIDEO_UNDERSTANDING_MODEL`, such as `gpt-5.6-luna`, remains separate from `STORY_PLANNER_MODEL`; media understanding can use a cheaper bulk-analysis model while planning uses a stronger creative model.
 
 The configured planner must remain an implementation of the same Story Planner abstraction used by orchestration. It must not create a second StoryPlan format, a second renderer, a second job system, or a second media-analysis pipeline.
 
-## 15.4 Photo typography planning
+## 15.4 Text and typography planning
 
-Photo typography is a deferred post-first-publish feature. The repository may retain the domain model, validation helpers, and provider abstractions, but active first-release behavior is:
+Text overlays are a validated edit-plan feature for Promo and Reel projects
+and a conservative extension point for Story. They must remain structured
+domain data, not renderer code.
+
+Story creation should avoid excessive effects and should not add decorative
+typography that changes established Story output unless the user requested it
+or an explicit mode strategy requires it. Promo may use headline/supporting/CTA
+scene text. Reel may use mobile-safe captions and hook text where appropriate.
+
+Current shared behavior is:
 
 ```text
-PhotoAnalysis + VideoAnalysis + Story context
+PhotoAnalysis + VideoAnalysis + Project context
     ↓
-Story Planner selects ordered moments
+EditStrategy selects ordered scenes
     ↓
-StoryPlan is written without moments[].typography
+StoryPlan stores validated text/caption/CTA metadata when appropriate
     ↓
-Render Worker strips/ignores any legacy typography fields
+Composition builder normalizes text into safe overlays
     ↓
-Final MP4 renders photos, videos, captions, B-roll, audio, credits, and export policy only
+Render Worker renders media, captions, overlays, audio, branding, CTA, and export policy
 ```
 
-Do not re-enable typography during first-release stabilization. The Story Planner must not invoke a typography planner, must not attach `TextOverlay` values to `StoryPlan.moments[]`, and the render worker must not render legacy `typography` fields if an older plan contains them. Typography must also not be rasterized with ImageMagick or injected as FFmpeg `drawtext` overlays for the first publish.
+Backend validation owns enum support, text length limits, timing clamping,
+safe margins, max width, source metadata, and confidence bounds. AI output
+must never become renderer code, CSS, font paths, ImageMagick commands,
+FFmpeg arguments, or a second timeline.
 
-When the feature is reintroduced after first publish, the Typography Planner may be local/rule-based or an external OpenAI-compatible provider selected by backend configuration. It must return structured JSON only. Backend validation must own enum support, text length limits, timing clamping, safe margins, max width, source metadata, and confidence bounds. AI output must never become renderer code, CSS, font paths, ImageMagick commands, FFmpeg arguments, or a second timeline.
-
-Deferred backend configuration, for future reactivation only:
+Optional typography-provider configuration, if enabled later:
 
 ```text
 TYPOGRAPHY_ENABLED=true|false
@@ -1290,6 +1692,7 @@ Current schema version is `story_plan_v1`.
 Top-level fields include:
 
 ```text
+project_type
 id
 project_id
 version
@@ -1298,6 +1701,7 @@ story_type
 visual_style
 title_text
 ending_text
+call_to_action
 user_instructions
 moments
 captions
@@ -1324,16 +1728,26 @@ crop_intent
 transition
 reason
 score
-typography              deferred; should be omitted in first-release StoryPlans
+order
+scene_purpose           promo/reel-aware scene role when applicable
+scene_text              validated Promo text metadata
+voiceover               validated scene voiceover metadata
+typography              validated text overlay metadata
 ```
 
 Photo moments must have positive `duration_ms` and no source timestamps. Video moments must have `start_micros`, `end_micros`, a matching `duration_ms`, and a valid `video_analysis_version`.
 
-`moments[].typography` is a deferred renderer-stable `TextOverlay` extension for future cinematic photo typography. It is separate from speech captions/transcript subtitles and should normally be omitted in first-release StoryPlans. Reserved fields are:
+`moments[].scene_purpose`, `moments[].scene_text`, `moments[].voiceover`, and
+`moments[].typography` are renderer-stable mode extensions. They are used
+primarily by Promo and Reel planning/composition and remain validated data,
+not renderer code. Story output should not change unnecessarily because these
+fields exist.
+
+Reserved `TextOverlay` fields are:
 
 ```text
 enabled
-type              moment_title | moment_caption | location | date | chapter_title | story_intro | story_outro
+type              moment_title | moment_caption | location | date | chapter_title | story_intro | story_outro | promo_headline | promo_cta
 title
 subtitle
 style             cinematic | minimal | editorial | memory | location
@@ -1348,7 +1762,10 @@ reason
 confidence
 ```
 
-The backend retains V1 typography validation for future compatibility, but first-release planning should not emit typography and first-release rendering should ignore any legacy typography values.
+Typography and Promo/Reel text metadata must be generated or accepted only as
+structured, validated fields. AI output must never become Remotion code,
+CSS, arbitrary font paths, shell commands, ImageMagick commands, or FFmpeg
+arguments.
 
 `caption_style` is optional renderer-safe styling metadata for captions/subtitles. It may include whitelisted presets such as `bold_social`, `cinematic_subtitle`, `clean_minimal`, and `playful_pop`, plus validated fields for font family, font size, text/stroke/background colors, background opacity, position, bottom offset, max lines, and max characters per line. It must not contain raw FFmpeg/Remotion commands, arbitrary font file paths, provider information, or transcript source details.
 
@@ -1402,6 +1819,26 @@ Check:
 The validator must NOT use AI.
 
 Invalid StoryPlans must never reach rendering.
+
+The validated composition contract must also enforce:
+
+- all scene/media references resolve to project-owned assets
+- all asset IDs exist and are available to the render worker
+- scene order is deterministic and has no invalid duplicates
+- durations are positive and total duration matches the plan
+- target-duration limits are respected
+- supported effects and transitions only
+- captions and overlay text fit configured length limits
+- caption timing stays within the owning scene and canvas duration
+- safe-area margins keep text inside the canvas
+- audio references resolve to valid source media or supported generated audio
+- output dimensions match the requested aspect ratio
+- Reel output is always `9:16`
+- Promo branding and CTA references are valid when present
+
+Invalid external AI output should be rejected or repaired only through bounded
+deterministic normalization. Invented assets, missing media, unsupported
+effects, invalid timings, and executable instructions must be rejected.
 
 
 Current validator behavior includes:
@@ -1468,6 +1905,23 @@ Primary FrameMio output:
 9:16
 ```
 
+Mode defaults:
+
+```text
+Story
+  default existing Story composition; preserve current visual output
+
+Promo
+  default 16:9 unless the project explicitly requests another supported ratio
+  text overlays, captions, branding/logo, brand styling, CTA, product-focused
+  scene composition, and optional source voice/audio
+
+Reel
+  always 9:16
+  vertical crop/reframe, mobile-safe captions/text, short duration, and
+  social-friendly composition
+```
+
 ## 18.2 Rendering features
 
 Photos:
@@ -1500,13 +1954,72 @@ Text:
 
 - title
 - captions
-- optional photo typography from `moments[].typography`
+- validated Promo/Reel text overlays and optional Story typography
 - optional chapter text
 - ending
 
-Photo typography is rendered by Remotion when `RENDERER_MODE=remotion` using the checked-in Remotion entrypoint. The renderer applies controlled typography presets, safe-area placement, restrained fade/fade-up/fade-down/subtle-scale animation, text wrapping, shadows, and subtle gradient readability treatments. The renderer must not call AI and must not decide text content.
+Text overlays are rendered by Remotion when `RENDERER_MODE=remotion` using
+the checked-in Remotion entrypoint. The renderer applies controlled
+typography presets, safe-area placement, restrained animation, text wrapping,
+shadows, and readability treatments. The renderer must not call AI and must
+not decide text content.
 
-The FFmpeg fallback renderer keeps a deterministic `drawtext` path for environments not yet using Remotion mode, but `TextOverlay` remains the single source of truth in StoryPlan.
+The FFmpeg fallback renderer keeps a deterministic `drawtext` path, but the
+normalized composition's text/overlay fields remain the single source of
+truth. The renderer should not branch on high-level project purpose when a
+normalized scene property is sufficient.
+
+## 18.2.1 Normalized composition model
+
+The render worker consumes one validated `CompositionSpec` for all project
+types. The composition should expose stable rendering concepts:
+
+```text
+canvas
+  aspect_ratio
+  width / height
+  safe_area
+
+duration
+fps
+
+media
+  asset IDs
+  source/prepared paths
+  media type
+
+scenes
+  media
+  order
+  duration
+  crop/reframe
+  overlays
+  transition
+
+text
+captions
+audio
+transitions
+effects
+branding
+CTA
+```
+
+The worker may retain `clips`, `broll`, and other compatibility fields while
+the normalized `scenes`, `media`, `canvas`, `text`, `branding`, and `cta`
+fields are adopted. Remotion should receive a scene such as:
+
+```text
+Scene
+  media
+  duration
+  crop
+  overlays
+  transitions
+```
+
+It should not need logic such as `if projectType == "promo"` to decide the
+visual operation. Promo/Reel business meaning is resolved before this stage.
 
 
 ## 18.3 Current render-worker contract
@@ -1520,11 +2033,27 @@ The render worker currently:
 5. trims video moments to exact StoryPlan source ranges
 6. applies deterministic Ken Burns-style motion to photo moments
 7. builds a deterministic composition
-8. renders/encodes an MP4 with FFmpeg/Remotion-compatible composition logic, including optional typography overlays
+8. builds one normalized composition and renders/encodes an MP4 with
+   FFmpeg/Remotion-compatible composition logic, including captions, safe
+   overlays, branding, CTA, crop/reframe, and optional typography
 9. uploads the final MP4 to the configured S3 key
 10. calls `POST /internal/jobs/:id/status` with `COMPLETED` and `artifact_s3_key`
 
-The renderer must not call AI, must not call ElevenLabs/music providers, and must not choose or reorder story moments. It executes the StoryPlan.
+The renderer must not call AI, must not call ElevenLabs/music providers, and
+must not choose or reorder story moments. It executes the validated
+normalized composition derived from the StoryPlan.
+
+The render job remains compatible across all three modes and references:
+
+```text
+project_id
+project_type
+composition/story-plan version
+output settings
+```
+
+There is one render worker and one queue/job contract. Story, Promo, and Reel
+must not acquire separate rendering workers.
 
 Render workers use a render-specific SQS visibility timeout long enough for normal Remotion/FFmpeg work. If ECS sends `SIGTERM` during an active render, the worker shortens the active message visibility so deployment interruption does not leave a job hidden until the full render visibility timeout expires.
 
@@ -1670,6 +2199,19 @@ backend/scripts/stop-workers.sh  # scale video + render worker services to 0
 ```
 
 `desiredCount` is the ECS service's target number of running tasks. Setting `DESIRED_COUNT=2 backend/scripts/run-workers.sh` should request two running tasks for each configured worker service. Scaling services to 0 is acceptable for cost control, but queued jobs will not make progress unless either one-off ECS activation is enabled or a worker service/task is running.
+
+For test runs, scaling the backend ECS service to one task is a deployment
+operation, not a change to the application architecture:
+
+```text
+aws ecs update-service \
+  --cluster <cluster> \
+  --service <backend-service> \
+  --desired-count 1
+```
+
+Use the repository's configured cluster/service names and verify the result
+with `aws ecs describe-services`. Worker service scaling remains independent.
 
 ---
 
@@ -1902,6 +2444,34 @@ Check:
 - database schema
 - API response shape
 
+For the three-mode product, also check:
+
+- project type and normalized project configuration
+- `EditStrategy` selected by project type
+- current edit plan and candidate-scene references
+- composition canvas/aspect ratio
+- caption and overlay safe-area constraints
+- output dimensions and render settings
+
+When iOS reports “the data couldn’t be read because it isn’t in the correct
+format,” inspect the decoding boundary before changing upload or rendering
+logic. Confirm that the request used the intended route and matching response
+model:
+
+```text
+POST /v1/stories
+  returns the iOS compatibility Story shape
+
+POST /projects
+  returns the generic VideoProject shape with snake_case fields such as
+  created_at and media_ids
+```
+
+The iOS generic project decoder must accept the backend's normalized
+`VideoProject` response, including `created_at`, `updated_at`, `media_ids`,
+and `configuration`; it must not assume the legacy `/v1/stories` response
+shape.
+
 ## Step 4 — Fix the owner
 
 Fix the layer responsible for violating the contract.
@@ -2124,6 +2694,8 @@ requestId
 projectId
 jobId
 mediaId
+projectType
+storyPlanVersion / compositionVersion
 ```
 
 Logs should make it possible to trace:
@@ -2141,12 +2713,34 @@ worker execution
  ↓
 VideoAnalysis
  ↓
-StoryPlan
+Candidate Scenes
+ ↓
+EditStrategy
+ ↓
+Normalized EditPlan / StoryPlan
+ ↓
+Composition
  ↓
 render
  ↓
 final S3 object
 ```
+
+For iOS/API contract failures, log the request path, HTTP status, request ID,
+project type, and a bounded response-shape/error code. Do not log tokens or
+raw private media. In particular, distinguish:
+
+```text
+POST /v1/stories
+  legacy/Story compatibility flow
+
+POST /projects
+  generic Story/Promo/Reel project flow
+```
+
+The two responses are intentionally different. iOS must decode each route
+with its matching response model rather than treating a generic project
+response as an iOS Story response.
 
 Avoid logging:
 
@@ -2212,6 +2806,12 @@ Test:
 - StoryPlan validation
 - ownership checks
 - timestamp validation
+- Story, Promo, and Reel `EditStrategy` behavior
+- incremental edit-plan revisions
+- invalid AI JSON repair/rejection
+- missing asset references
+- unsupported user instructions
+- backward compatibility with existing Story projects
 
 ## Integration tests
 
@@ -2239,6 +2839,39 @@ Use a small fixed set of real representative videos:
 - fast motion
 - low-quality footage
 - portrait iPhone video
+
+Mode/render fixture coverage should include:
+
+```text
+Story
+  existing Story fixture and regression output
+
+Promo
+  product-focused scenes, text overlays, captions, logo/branding, CTA,
+  optional source voice/audio, and 16:9 default output
+
+Reel
+  9:16 output, vertical crop/reframe, mobile-safe caption placement,
+  short target duration, and social-friendly composition
+```
+
+All three modes must run through the same normalized composition builder and
+render worker. Do not create separate render workers or mode-specific
+composition schemas.
+
+Local Promo fixture generation is available through:
+
+```text
+scripts/generate-sample-promo-media.py
+```
+
+The script follows the landing-page image/video generation provider
+conventions, defines a coherent Hook/Problem/Product/Benefit/Proof/CTA set,
+requests spoken English voiceover for video clips, polls asynchronous video
+tasks, writes `sample-media/promo-framemio/manifest.json`, and validates that
+downloaded MP4s contain both video and audio tracks. It must not print
+provider credentials. Generated `sample-media/` files are local test fixtures
+and are ignored by Git.
 
 ## End-to-end test
 
@@ -2392,18 +3025,26 @@ Video Intelligence for videos + PhotoAnalysis for photos
        ↓
 VideoAnalysis
        ↓
-StoryPlan with selected photo moments and exact video ranges
+Mode-specific EditStrategy
+       ↓
+validated normalized EditPlan / StoryPlan with selected scenes and exact
+video ranges
        ↓
 deterministic Validator
        ↓
-Render Worker / Remotion / FFmpeg
+shared Composition builder
+       ↓
+one Render Worker / Remotion / FFmpeg
        ↓
 final MP4 in private S3
        ↓
 presigned iPhone playback
 ```
 
-The system should successfully do this repeatedly.
+The system should successfully do this repeatedly for Story, Promo, and Reel
+projects. Story must preserve its existing visual behavior; Promo must support
+validated product messaging, branding, captions, CTA, and optional voice/audio;
+Reel must produce mobile-safe 9:16 output with vertical crop/reframe.
 
 After that, optimize:
 
@@ -2441,4 +3082,4 @@ If the answer to any of these indicates architectural drift, stop and reconsider
 
 # 38. One-sentence architecture summary
 
-**FrameMio is an iPhone-first AI memory filmmaker where the iPhone performs lightweight media intelligence, S3 stores media, Go orchestrates authenticated asynchronous jobs, workers perform video preprocessing and AI understanding, VideoAnalysis represents evidence, StoryPlan represents editorial decisions, and Remotion/FFmpeg deterministically renders the final film.**
+**FrameMio is an iPhone-first AI video filmmaker where the iPhone performs lightweight media intelligence, S3 stores media, Go orchestrates authenticated asynchronous jobs, workers perform video preprocessing and AI understanding, VideoAnalysis represents evidence, EditStrategy and the normalized EditPlan represent editorial decisions, and Remotion/FFmpeg deterministically renders Story, Promo, and Reel videos.**

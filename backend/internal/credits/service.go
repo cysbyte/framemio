@@ -120,20 +120,29 @@ func (s *Service) GrantPurchasedCredits(ctx context.Context, userID, purchaseID 
 }
 
 func (s *Service) Reserve(ctx context.Context, userID string, action models.CreditAction, referenceType, referenceID string, stats StoryMediaStats, metadata map[string]any) (models.CreditReservation, models.CreditQuote, error) {
+	reservation, quote, _, err := s.reserve(ctx, userID, action, referenceType, referenceID, stats, metadata)
+	return reservation, quote, err
+}
+
+func (s *Service) ReserveWithCreation(ctx context.Context, userID string, action models.CreditAction, referenceType, referenceID string, stats StoryMediaStats, metadata map[string]any) (models.CreditReservation, models.CreditQuote, bool, error) {
+	return s.reserve(ctx, userID, action, referenceType, referenceID, stats, metadata)
+}
+
+func (s *Service) reserve(ctx context.Context, userID string, action models.CreditAction, referenceType, referenceID string, stats StoryMediaStats, metadata map[string]any) (models.CreditReservation, models.CreditQuote, bool, error) {
 	quote, err := s.Quote(ctx, userID, action, stats)
 	if err != nil {
-		return models.CreditReservation{}, models.CreditQuote{}, err
+		return models.CreditReservation{}, models.CreditQuote{}, false, err
 	}
 	if !quote.Eligible {
 		if quote.Reason == "" {
 			quote.Reason = "action not eligible"
 		}
-		return models.CreditReservation{}, quote, fmt.Errorf("%s", quote.Reason)
+		return models.CreditReservation{}, quote, false, fmt.Errorf("%s", quote.Reason)
 	}
 	if quote.Credits <= 0 {
-		return models.CreditReservation{}, quote, nil
+		return models.CreditReservation{}, quote, false, nil
 	}
-	reservation, _, err := s.Store.ReserveCredits(ctx, models.CreditReservation{
+	reservation, existing, err := s.Store.ReserveCredits(ctx, models.CreditReservation{
 		ID:            models.NewID("credit-reservation"),
 		UserID:        userID,
 		Action:        action,
@@ -145,7 +154,7 @@ func (s *Service) Reserve(ctx context.Context, userID string, action models.Cred
 		CreatedAt:     s.Now().UTC(),
 		UpdatedAt:     s.Now().UTC(),
 	})
-	return reservation, quote, err
+	return reservation, quote, !existing, err
 }
 
 func (s *Service) Commit(ctx context.Context, userID, reservationID string) (models.CreditReservation, error) {

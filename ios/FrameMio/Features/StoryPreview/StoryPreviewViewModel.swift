@@ -273,7 +273,7 @@ final class StoryPreviewViewModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             do {
-                let balance = try await creditService.balance()
+                let balance = try await creditService.refreshBalance()
                 creditBalance = balance.displayCredits
             } catch {
             }

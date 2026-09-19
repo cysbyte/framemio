@@ -98,6 +98,10 @@ struct AppRootView: View {
                 refreshCredits()
             }
         }
+        .onChange(of: storyLaunchCoordinator.storyID) { _, newStoryID in
+            guard newStoryID != nil else { return }
+            refreshCredits()
+        }
     }
 
     private var homeTab: some View {

@@ -1,7 +1,9 @@
 package api
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -502,26 +504,262 @@ func (s *Server) createProject(response http.ResponseWriter, request *http.Reque
 		s.writeError(response, http.StatusBadRequest, "invalid_project_type", "project type must be story, promo, or reel")
 		return
 	}
+	projectID := stableGenericProjectID(user.ID, idempotencyKey)
+	if existing, lookupErr := s.Store.GetProject(request.Context(), user.ID, projectID); lookupErr == nil {
+		if existing.CreditOperationKey != "" {
+			s.Logger.Info("generic project create idempotent replay",
+				"user_id", user.ID,
+				"project_id", existing.ID,
+				"project_type", string(existing.Type),
+				"requested_project_type", string(projectType),
+				"credit_operation_key", valueOrUnset(existing.CreditOperationKey),
+				"reason", "project_already_exists",
+			)
+			s.writeJSON(response, http.StatusOK, existing)
+			return
+		}
+	} else if !errors.Is(lookupErr, store.ErrNotFound) {
+		s.mapStoreError(response, lookupErr)
+		return
+	}
+	creditStats, err := s.genericProjectCreditStats(request, user.ID, input.MediaIDs)
+	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	reservation, reservationCreated, ok := s.reserveGenericProjectCredits(
+		response,
+		request,
+		user.ID,
+		projectID,
+		projectType,
+		creditStats,
+	)
+	if !ok {
+		return
+	}
+	cleanupReservation := reservationCreated
+	cleanupProject := false
+	defer func() {
+		if !cleanupReservation || reservation.ID == "" {
+			return
+		}
+		if _, releaseErr := s.Credits.Release(request.Context(), user.ID, reservation.ID); releaseErr != nil &&
+			!errors.Is(releaseErr, store.ErrConflict) &&
+			!errors.Is(releaseErr, store.ErrNotFound) {
+			s.Logger.Warn("generic project credit reservation cleanup failed",
+				"user_id", user.ID,
+				"project_id", projectID,
+				"project_type", string(projectType),
+				"reservation_id", reservation.ID,
+				"error", releaseErr,
+			)
+		}
+	}()
 	now := s.Now().UTC()
 	project := models.VideoProject{
-		ID: models.NewID("project"), UserID: user.ID, Type: projectType, Title: input.Title, Context: input.Context,
+		ID: projectID, UserID: user.ID, Type: projectType, Title: input.Title, Context: input.Context,
 		MediaIDs: append([]string(nil), input.MediaIDs...), Configuration: input.Configuration,
-		Status: models.ProjectStatusDraft, CreatedAt: now, UpdatedAt: now,
+		CreditOperationKey: creditOperationKeyForReservation(reservation),
+		Status:             models.ProjectStatusDraft, CreatedAt: now, UpdatedAt: now,
 	}
 	created, existing, err := s.Store.CreateProject(request.Context(), project, idempotencyKey)
 	if err != nil {
 		s.mapStoreError(response, err)
 		return
 	}
+	cleanupProject = !existing
+	if existing {
+		s.Logger.Info("generic project create idempotent replay",
+			"user_id", user.ID,
+			"project_id", created.ID,
+			"project_type", string(created.Type),
+			"requested_project_type", string(projectType),
+			"credit_operation_key", valueOrUnset(created.CreditOperationKey),
+			"reservation_id", valueOrUnset(reservation.ID),
+			"reservation_created", reservationCreated,
+		)
+		if created.CreditOperationKey == "" && reservation.ID != "" {
+			if err := s.Store.SetProjectCreditOperationKey(request.Context(), user.ID, created.ID, string(models.CreditActionCreateStory)); err != nil {
+				s.internalError(response, err, "store generic project credit operation")
+				return
+			}
+			created.CreditOperationKey = string(models.CreditActionCreateStory)
+		}
+	}
 	if err := s.saveProjectCreateAnalyses(request, user.ID, created.ID, input.Analyses); err != nil {
+		if cleanupProject {
+			if deleteErr := s.Store.DeleteProject(request.Context(), user.ID, created.ID); deleteErr != nil &&
+				!errors.Is(deleteErr, store.ErrNotFound) {
+				s.Logger.Warn("generic project cleanup failed after analysis error",
+					"user_id", user.ID,
+					"project_id", created.ID,
+					"error", deleteErr,
+				)
+			}
+		}
 		s.mapStoreError(response, err)
 		return
 	}
+	cleanupReservation = false
+	s.Logger.Info("generic project credit reservation attached",
+		"user_id", user.ID,
+		"project_id", created.ID,
+		"project_type", string(created.Type),
+		"credit_operation_key", valueOrUnset(created.CreditOperationKey),
+		"reservation_id", valueOrUnset(reservation.ID),
+		"reservation_created", reservationCreated,
+		"reserved_amount", reservation.Amount,
+		"photo_count", creditStats.PhotoCount,
+		"video_count", creditStats.VideoCount,
+		"total_video_seconds", creditStats.TotalVideoSeconds,
+	)
 	status := http.StatusCreated
 	if existing {
 		status = http.StatusOK
 	}
 	s.writeJSON(response, status, created)
+}
+
+func (s *Server) genericProjectCreditStats(request *http.Request, userID string, mediaIDs []string) (credits.StoryMediaStats, error) {
+	stats := credits.StoryMediaStats{TotalMediaCount: len(mediaIDs)}
+	for _, mediaID := range mediaIDs {
+		media, err := s.Store.GetMedia(request.Context(), userID, mediaID)
+		if err != nil {
+			return credits.StoryMediaStats{}, err
+		}
+		stats.TotalBytes += media.FileSizeBytes
+		switch media.Type {
+		case models.MediaTypePhoto, models.MediaTypeLivePhoto:
+			stats.PhotoCount++
+		case models.MediaTypeVideo:
+			stats.VideoCount++
+			if media.DurationSeconds != nil && *media.DurationSeconds > 0 {
+				stats.TotalVideoSeconds += int(*media.DurationSeconds + 0.5)
+			}
+		}
+	}
+	return stats, nil
+}
+
+func (s *Server) reserveGenericProjectCredits(
+	response http.ResponseWriter,
+	request *http.Request,
+	userID string,
+	projectID string,
+	projectType models.ProjectType,
+	stats credits.StoryMediaStats,
+) (models.CreditReservation, bool, bool) {
+	if s.Credits == nil {
+		s.internalError(response, errors.New("credit service not configured"), "credit service not configured")
+		return models.CreditReservation{}, false, false
+	}
+	action := models.CreditActionCreateStory
+	quote, err := s.Credits.Quote(request.Context(), userID, action, stats)
+	if err != nil {
+		s.internalError(response, err, "quote generic project credit action")
+		return models.CreditReservation{}, false, false
+	}
+	s.Logger.Info("generic project credit quote",
+		"user_id", userID,
+		"project_id", projectID,
+		"project_type", string(projectType),
+		"action", string(action),
+		"required_credits", quote.Credits,
+		"available_credits", quote.Balance,
+		"balance_after", quote.BalanceAfter,
+		"eligible", quote.Eligible,
+		"reason", valueOrUnset(quote.Reason),
+		"photo_count", stats.PhotoCount,
+		"video_count", stats.VideoCount,
+		"total_media_count", stats.TotalMediaCount,
+		"total_video_seconds", stats.TotalVideoSeconds,
+	)
+	if !quote.Eligible {
+		s.Logger.Warn("rejected generic project credit reservation as ineligible",
+			"user_id", userID,
+			"project_id", projectID,
+			"project_type", string(projectType),
+			"reason", quote.Reason,
+		)
+		s.writeJSON(response, http.StatusBadRequest, map[string]any{"error": "project_too_large", "reason": quote.Reason})
+		return models.CreditReservation{}, false, false
+	}
+	if quote.Balance < quote.Credits {
+		s.Logger.Warn("rejected generic project credit reservation for insufficient credits",
+			"user_id", userID,
+			"project_id", projectID,
+			"project_type", string(projectType),
+			"required_credits", quote.Credits,
+			"available_credits", quote.Balance,
+		)
+		s.writeJSON(response, http.StatusPaymentRequired, map[string]any{"error": "insufficient_credits", "required": quote.Credits, "available": quote.Balance})
+		return models.CreditReservation{}, false, false
+	}
+	if existing, lookupErr := s.Store.GetCreditReservationByReference(request.Context(), userID, action, "project", projectID); lookupErr == nil {
+		s.Logger.Info("reused generic project credit reservation",
+			"user_id", userID,
+			"project_id", projectID,
+			"project_type", string(projectType),
+			"reservation_id", existing.ID,
+			"reservation_state", string(existing.State),
+			"reserved_amount", existing.Amount,
+		)
+		return existing, false, true
+	} else if !errors.Is(lookupErr, store.ErrNotFound) {
+		s.internalError(response, lookupErr, "lookup generic project credit reservation")
+		return models.CreditReservation{}, false, false
+	}
+	reservation, _, reservationCreated, err := s.Credits.ReserveWithCreation(
+		request.Context(),
+		userID,
+		action,
+		"project",
+		projectID,
+		stats,
+		map[string]any{
+			"project_id":   projectID,
+			"project_type": string(projectType),
+			"media_count":  stats.TotalMediaCount,
+		},
+	)
+	if err != nil {
+		if errors.Is(err, store.ErrInsufficientCredits) {
+			s.Logger.Warn("generic project credit reservation raced insufficient credits",
+				"user_id", userID,
+				"project_id", projectID,
+				"project_type", string(projectType),
+				"required_credits", quote.Credits,
+				"available_credits", quote.Balance,
+			)
+			s.writeJSON(response, http.StatusPaymentRequired, map[string]any{"error": "insufficient_credits", "required": quote.Credits, "available": quote.Balance})
+			return models.CreditReservation{}, false, false
+		}
+		s.internalError(response, err, "reserve generic project credit action")
+		return models.CreditReservation{}, false, false
+	}
+	s.Logger.Info("created generic project credit reservation",
+		"user_id", userID,
+		"project_id", projectID,
+		"project_type", string(projectType),
+		"action", string(action),
+		"reservation_id", valueOrUnset(reservation.ID),
+		"reserved_amount", reservation.Amount,
+		"allocation_count", len(reservation.Allocations),
+	)
+	return reservation, reservationCreated, true
+}
+
+func creditOperationKeyForReservation(reservation models.CreditReservation) string {
+	if reservation.ID == "" {
+		return ""
+	}
+	return string(models.CreditActionCreateStory)
+}
+
+func stableGenericProjectID(userID, idempotencyKey string) string {
+	digest := sha256.Sum256([]byte("generic-project\x00" + userID + "\x00" + idempotencyKey))
+	return "project-" + hex.EncodeToString(digest[:16])
 }
 
 func (s *Server) saveProjectCreateAnalyses(request *http.Request, userID, projectID string, inputs []createProjectAnalysisRequest) error {
@@ -702,6 +940,11 @@ func (s *Server) analyzeProject(response http.ResponseWriter, request *http.Requ
 	if !s.allowExpensiveOperation(response, user.ID, "analyze_project") {
 		return
 	}
+	s.Logger.Info("generic project analysis requested",
+		"user_id", user.ID,
+		"project_id", projectID,
+		"idempotency_key_present", strings.TrimSpace(idempotencyKey) != "",
+	)
 	if s.Orchestrator == nil {
 		s.internalError(response, errors.New("job orchestrator not configured"), "job orchestrator not configured")
 		return
@@ -719,6 +962,12 @@ func (s *Server) analyzeProject(response http.ResponseWriter, request *http.Requ
 			responseBody.JobIDs = append(responseBody.JobIDs, job.ID)
 		}
 	}
+	s.Logger.Info("generic project analysis accepted",
+		"user_id", user.ID,
+		"project_id", projectID,
+		"job_count", len(jobs),
+		"job_ids", strings.Join(responseBody.JobIDs, ","),
+	)
 	s.writeJSON(response, http.StatusAccepted, responseBody)
 }
 

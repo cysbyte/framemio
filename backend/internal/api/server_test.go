@@ -1217,7 +1217,16 @@ func TestIOSStoryEditAddsUploadedPhotoOutsideOriginalStory(t *testing.T) {
 	if countType(jobs, models.JobTypeStoryPlan) != 2 {
 		t.Fatalf("expected initial story plan plus one revision, got %+v", jobs)
 	}
-	deferred := latestJobOfType(t, jobs, models.JobTypeStoryPlan)
+	var deferred models.ProcessingJob
+	for _, candidate := range jobs {
+		if candidate.Type == models.JobTypeStoryPlan && candidate.Configuration["selected_media_ids"] != "" {
+			deferred = candidate
+			break
+		}
+	}
+	if deferred.ID == "" {
+		t.Fatalf("missing story revision job with selected media: %+v", jobs)
+	}
 	if !strings.Contains(deferred.Configuration["selected_media_ids"], original.MediaID) || !strings.Contains(deferred.Configuration["selected_media_ids"], newPhoto.MediaID) {
 		t.Fatalf("selected media should include original and new photo: %+v", deferred.Configuration)
 	}

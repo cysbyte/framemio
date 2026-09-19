@@ -561,7 +561,11 @@ struct Story: Identifiable, Codable, Hashable, Sendable {
         id = try container.decode(String.self, forKey: .id)
         type = try container.decodeIfPresent(VideoProjectType.self, forKey: .type)
         title = try container.decode(String.self, forKey: .title)
-        context = try container.decode(MomentContext.self, forKey: .context)
+        // Generic Promo/Reel projects use descriptive context strings such as
+        // "Promo · App · Drive downloads". Keep the legacy Story display model
+        // compatible by falling back when that string is not a Story context.
+        let decodedContext = try container.decodeIfPresent(String.self, forKey: .context) ?? ""
+        context = MomentContext(rawValue: decodedContext) ?? .specialMoments
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
             ?? container.decode(Date.self, forKey: .createdAtSnake)
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)

@@ -347,6 +347,13 @@ final class RemoteCreditService: CreditService, @unchecked Sendable {
         }
     }
 
+    func refreshBalance() async throws -> CreditBalance {
+        await balanceCache.invalidate()
+        let balance = try await fetchRemoteBalance()
+        await balanceCache.store(balance)
+        return balance
+    }
+
     private func fetchRemoteBalance() async throws -> CreditBalance {
         let data = try await apiClient.data(for: APIRequest(method: .get, path: "/v1/me/credits"))
         return try decoder.decode(CreditBalance.self, from: data)
@@ -465,6 +472,10 @@ final class MockCreditService: CreditService, @unchecked Sendable {
     }
 
     func balance() async throws -> CreditBalance {
+        balanceValue
+    }
+
+    func refreshBalance() async throws -> CreditBalance {
         balanceValue
     }
 

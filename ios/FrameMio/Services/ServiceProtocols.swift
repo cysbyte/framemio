@@ -516,6 +516,7 @@ extension StoryEditRequest {
 
 protocol CreditService: Sendable {
     func balance() async throws -> CreditBalance
+    func refreshBalance() async throws -> CreditBalance
     func quote(action: CreditAction, stats: CreditMediaStats) async throws -> CreditQuote
     func creditPacks() async throws -> [CreditPack]
     func grantPurchasedCredits(packID: String, purchaseID: String) async throws -> CreditBalance
@@ -592,7 +593,7 @@ final class CreditBalanceStore: ObservableObject {
                 refreshTask = nil
             }
             do {
-                let latestBalance = try await creditService.balance()
+                let latestBalance = try await creditService.refreshBalance()
                 if balance != latestBalance {
                     balance = latestBalance
                 }
