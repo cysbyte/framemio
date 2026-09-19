@@ -498,6 +498,7 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
     const composition = buildComposition(fixtureStoryPlan({
       caption_style: {
         preset: 'clean_minimal',
+        presentation: 'word_by_word',
         font_family: 'inter-bold',
         font_size: 58,
         text_color: '#FFE066',
@@ -528,6 +529,10 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
     assert.match(filterComplex, /bordercolor=0x101010@0\.72/);
     assert.match(filterComplex, /box=0/);
     assert.match(filterComplex, /y=42/);
+    assert.match(filterComplex, /caption-0-0-/);
+    assert.match(filterComplex, /caption-0-1-/);
+    assert.match(filterComplex, /enable='between\(t,3\.200,3\.950\)'/);
+    assert.match(filterComplex, /enable='between\(t,3\.950,4\.700\)'/);
   } finally {
     if (previousArgsPath === undefined) {
       delete process.env.FRAMEMIO_FFMPEG_ARGS_PATH;

@@ -109,17 +109,6 @@ struct StoryCreationView: View {
                     processingStartedCard(story)
                 } else {
                     customizationEntry
-                    PrimaryButton(
-                        title: "Create Story (\(viewModel.createStoryCreditCost) credits)",
-                        systemImage: "sparkles",
-                        action: {
-                            let instruction = generationOptions.instruction?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                            storyCreationViewDebugLog("create_tapped style=\(generationOptions.style ?? "automatic") scene_detail=\(generationOptions.sceneDetailStyle ?? "balanced") subtitles=\(generationOptions.subtitlesEnabled.map(String.init) ?? "automatic") target_duration=\(generationOptions.targetDuration.map { String(Int($0.rounded())) } ?? "auto") prompt_present=\(!instruction.isEmpty) prompt_length=\(instruction.count)")
-                            viewModel.requestCreateStory { onCreate(configuredDraft) }
-                        },
-                        isDisabled: viewModel.isCheckingCredits,
-                        isLoading: viewModel.isCheckingCredits
-                    )
                 }
 
                 if let errorMessage = viewModel.errorMessage {
@@ -142,6 +131,11 @@ struct StoryCreationView: View {
             .ignoresSafeArea()
         }
         .navigationTitle("Create Story")
+        .safeAreaInset(edge: .bottom) {
+            if !viewModel.isCreating && viewModel.story == nil {
+                fixedCreateButton
+            }
+        }
         .task { await loadTemplates() }
         .onAppear {
             storyCreationViewDebugLog("create view appeared assets=\(viewModel.assets.count) cached_thumbnails=\(viewModel.thumbnails.count)")
@@ -154,8 +148,10 @@ struct StoryCreationView: View {
         .sheet(isPresented: $isShowingCustomization) {
             StoryGenerationOptionsSheet(
                 options: $generationOptions,
+                templateConfiguration: $templateConfiguration,
                 assets: viewModel.assets,
-                promptTranscriptionService: promptTranscriptionService
+                promptTranscriptionService: promptTranscriptionService,
+                template: selectedTemplate
             )
         }
         .toolbar {
@@ -175,6 +171,28 @@ struct StoryCreationView: View {
             guard newPhase == .active else { return }
             storyCreationViewDebugLog("create view scene became active cached_thumbnails=\(viewModel.thumbnails.count)")
             viewModel.loadMissingThumbnails(targetSize: FrameMioMetrics.mediaThumbnailRequestSize)
+        }
+    }
+
+    private var fixedCreateButton: some View {
+        VStack(spacing: 0) {
+            Divider()
+                .overlay(FrameMioColors.divider.opacity(0.7))
+            PrimaryButton(
+                title: "Create Story (\(viewModel.createStoryCreditCost) credits)",
+                systemImage: "sparkles",
+                action: {
+                    let instruction = generationOptions.instruction?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    storyCreationViewDebugLog("create_tapped style=\(generationOptions.style ?? "automatic") scene_detail=\(generationOptions.sceneDetailStyle ?? "balanced") subtitles=\(generationOptions.subtitlesEnabled.map(String.init) ?? "automatic") target_duration=\(generationOptions.targetDuration.map { String(Int($0.rounded())) } ?? "auto") prompt_present=\(!instruction.isEmpty) prompt_length=\(instruction.count)")
+                    viewModel.requestCreateStory { onCreate(configuredDraft) }
+                },
+                isDisabled: viewModel.isCheckingCredits,
+                isLoading: viewModel.isCheckingCredits
+            )
+            .padding(.horizontal, FrameMioSpacing.lg)
+            .padding(.top, FrameMioSpacing.md)
+            .padding(.bottom, FrameMioSpacing.md)
+            .background(FrameMioColors.canvas.opacity(0.96))
         }
     }
 
@@ -227,17 +245,29 @@ struct StoryCreationView: View {
         let style = (generationOptions.style ?? "cinematic").capitalized
         let sceneDetail: String
         switch generationOptions.sceneDetailStyle {
-        case "moreDetails":
+        case "more", "moreDetails":
             sceneDetail = "More details"
-        case "mainMoments":
+        case "none", "mainMoments":
             sceneDetail = "Main moments"
         default:
             sceneDetail = "Balanced"
         }
         let subtitles = generationOptions.subtitlesEnabled == false ? "Subtitles off" : "Subtitles on"
         let length = generationOptions.targetDuration.map { "\(Int($0.rounded()))s" } ?? "Auto length"
+        let overlay: String? = {
+            guard let selectedTemplate,
+                  selectedTemplate.editableOptions.contains("overlay_placement"),
+                  let configuration = templateConfiguration else {
+                return nil
+            }
+            let placement = configuration.overlayPlacement?
+                .replacingOccurrences(of: "_", with: " ")
+                .capitalized
+            let size = configuration.overlaySize?.capitalized
+            return [placement, size].compactMap { $0 }.joined(separator: " ")
+        }()
         let prompt = generationOptions.instruction?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? "Prompt added" : nil
-        return [style, sceneDetail, subtitles, length, prompt].compactMap { $0 }.joined(separator: " · ")
+        return [selectedTemplate?.name, style, sceneDetail, subtitles, length, overlay, prompt].compactMap { $0 }.joined(separator: " · ")
     }
 
     private var templateSection: some View {
@@ -256,7 +286,13 @@ struct StoryCreationView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: FrameMioSpacing.md) {
                         ForEach(templates) { template in
-                            TemplateCard(template: template, isSelected: selectedTemplateID == template.id) {
+                            TemplateCard(
+                                template: template,
+                                isSelected: selectedTemplateID == template.id,
+                                cardWidth: 184,
+                                previewHeight: 122,
+                                minHeight: 252
+                            ) {
                                 select(template)
                             }
                         }
@@ -264,52 +300,9 @@ struct StoryCreationView: View {
                 }
             }
 
-            if let template = selectedTemplate, let configuration = templateConfiguration {
-                VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
-                    Text("Template settings")
-                        .font(FrameMioTypography.headline)
-                        .foregroundStyle(FrameMioColors.ink)
-
-                    if template.editableOptions.contains("overlay_placement") {
-                        TemplateOptionMenu(
-                            title: "Overlay position",
-                            selection: configuration.overlayPlacement ?? "bottom_right",
-                            options: ["top_left", "top_right", "bottom_left", "bottom_right", "center"]
-                        ) { templateConfiguration?.overlayPlacement = $0 }
-                    }
-                    if template.editableOptions.contains("overlay_size") {
-                        TemplateOptionMenu(
-                            title: "Overlay size",
-                            selection: configuration.overlaySize ?? "medium",
-                            options: ["small", "medium", "large"]
-                        ) { templateConfiguration?.overlaySize = $0 }
-                    }
-                    if template.editableOptions.contains("overlay_opacity") {
-                        HStack(spacing: FrameMioSpacing.md) {
-                            Text("Overlay opacity")
-                                .foregroundStyle(FrameMioColors.ink)
-                            Spacer()
-                            Text("\(Int((configuration.overlayOpacity ?? 1) * 100))%")
-                                .monospacedDigit()
-                                .foregroundStyle(FrameMioColors.secondaryInk)
-                            Stepper(
-                                "",
-                                value: Binding(
-                                    get: { configuration.overlayOpacity ?? 1 },
-                                    set: { templateConfiguration?.overlayOpacity = min(1, max(0.35, $0)) }
-                                ),
-                                in: 0.35...1,
-                                step: 0.05
-                            )
-                        }
-                    }
-                }
-                .padding(FrameMioSpacing.md)
-                .background(FrameMioColors.surface.opacity(0.74), in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous))
-            }
         }
         .padding(FrameMioSpacing.md)
-        .background(FrameMioColors.surface.opacity(0.74), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
+        .background(FrameMioColors.surface.opacity(0.74), in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous))
     }
 
     private var selectedTemplate: VideoTemplate? {
@@ -450,121 +443,44 @@ struct StoryCreationView: View {
     }
 }
 
-private struct StoryGenerationOptionsSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @Binding var options: StoryGenerationOptions
-    let assets: [MediaAsset]
+struct FrameMioPromptInputSection: View {
+    let title: String
+    let subtitle: String
+    let placeholder: String
+    let quickPrompts: [String]
+    @Binding var prompt: String
     let promptTranscriptionService: PromptTranscriptionService?
+    let transcriptLogContext: String
     @StateObject private var voicePromptRecorder = VoicePromptRecorder()
 
-    private let styleOptions = ["Natural", "Cinematic", "Warm", "Playful"]
-    private let subtitleStyleOptions = ["Bold", "Cinematic", "Minimal", "Playful"]
-    private let sceneDetailOptions: [(title: String, value: String?, subtitle: String?)] = [
-        ("Balanced", nil, "Default"),
-        ("More details", "moreDetails", "Extra cutaways"),
-        ("Main moments", "mainMoments", "No cutaways")
-    ]
-    private let lengthOptions = [15, 30, 45, 60]
-
-    private var hasPhotoLikeSource: Bool {
-        assets.contains { !$0.isVideo }
-    }
-
-    private var hasUnknownVideoLengthSource: Bool {
-        assets.contains { $0.isVideo && $0.duration <= 0 }
-    }
-
-    private var totalVideoSourceDuration: TimeInterval {
-        assets.reduce(0) { total, asset in
-            guard asset.isVideo else { return total }
-            return total + max(0, asset.duration)
-        }
-    }
-
-    private var maxSelectableLengthSeconds: Int {
-        if hasPhotoLikeSource || hasUnknownVideoLengthSource {
-            return 60
-        }
-        return max(0, Int(totalVideoSourceDuration.rounded(.down)))
+    private var promptGridColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: 140), spacing: FrameMioSpacing.sm, alignment: .leading)]
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
-                    optionSection(title: "Style", options: styleOptions, selected: options.style ?? "cinematic") { option in
-                        options.style = option.lowercased()
-                    }
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            SectionHeader(title: title, subtitle: subtitle)
 
-                    Divider().overlay(FrameMioColors.divider.opacity(0.58))
-
-                    sceneDetailSection
-
-                    Divider().overlay(FrameMioColors.divider.opacity(0.58))
-
-                    subtitleSection
-
-                    Divider().overlay(FrameMioColors.divider.opacity(0.58))
-
-                    lengthSection
-
-                    Divider().overlay(FrameMioColors.divider.opacity(0.58))
-
-                    promptSection
-                }
-                .padding(FrameMioSpacing.lg)
-            }
-            .background(FrameMioColors.canvas.ignoresSafeArea())
-            .overlay {
-                if voicePromptRecorder.isListening {
-                    voicePromptListeningOverlay
-                }
-            }
-            .navigationTitle("Customize Story")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        Task {
-                            await stopVoicePromptRecording()
-                            dismiss()
+            if !quickPrompts.isEmpty {
+                LazyVGrid(columns: promptGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
+                    ForEach(quickPrompts, id: \.self) { suggestion in
+                        suggestionChip(title: suggestion, isSelected: prompt == suggestion) {
+                            prompt = suggestion
                         }
                     }
                 }
             }
-        }
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
-        .onDisappear {
-            Task { await stopVoicePromptRecording() }
-        }
-    }
 
-    private var promptSection: some View {
-        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            SectionHeader(title: "Prompt", subtitle: "Guide the story's feeling, focus, or pacing")
-
-            LazyVGrid(columns: promptGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
-                ForEach(["More cinematic", "More emotional", "More fun", "Focus on people", "Focus on places"], id: \.self) { prompt in
-                    optionChip(title: prompt, isSelected: options.instruction == prompt) {
-                        options.instruction = prompt
-                    }
+            TextField(placeholder, text: $prompt, axis: .vertical)
+                .lineLimit(2...4)
+                .font(FrameMioTypography.body)
+                .padding(FrameMioSpacing.md)
+                .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous)
+                        .stroke(FrameMioColors.divider.opacity(0.45), lineWidth: FrameMioMetrics.borderWidth)
                 }
-            }
-
-            TextField("Tell FrameMio what you want", text: Binding(
-                get: { options.instruction ?? "" },
-                set: { options.instruction = $0 }
-            ), axis: .vertical)
-            .lineLimit(2...4)
-            .font(FrameMioTypography.body)
-            .padding(FrameMioSpacing.md)
-            .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous)
-                    .stroke(FrameMioColors.divider.opacity(0.45), lineWidth: FrameMioMetrics.borderWidth)
-            }
-            .accessibilityLabel("Tell FrameMio what you want")
+                .accessibilityLabel(title)
 
             HStack {
                 Spacer()
@@ -583,11 +499,42 @@ private struct StoryGenerationOptionsSheet: View {
                 .onChange(of: voicePromptRecorder.currentTranscript) { _, transcript in
                     let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !trimmed.isEmpty {
-                        options.instruction = trimmed
-                        storyCreationViewDebugLog("voice prompt live transcript applied transcript_length=\(trimmed.count)")
+                        prompt = trimmed
+                        debugLog("voice prompt live transcript applied transcript_length=\(trimmed.count)")
                     }
                 }
         }
+        .overlay {
+            if voicePromptRecorder.isListening {
+                voicePromptListeningOverlay
+            }
+        }
+        .onDisappear {
+            Task { await stopVoicePromptRecording() }
+        }
+    }
+
+    private func suggestionChip(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            FrameMioHaptics.secondaryAction()
+            action()
+        } label: {
+            Text(title)
+                .font(FrameMioTypography.footnote)
+                .foregroundStyle(isSelected ? FrameMioColors.inverseInk : FrameMioColors.ink)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: FrameMioMetrics.compactButtonHeight)
+                .padding(.horizontal, FrameMioSpacing.sm)
+                .background(
+                    isSelected ? FrameMioColors.accent : FrameMioColors.surface.opacity(0.78),
+                    in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous)
+                        .stroke(isSelected ? FrameMioColors.accent : FrameMioColors.divider.opacity(0.45), lineWidth: FrameMioMetrics.borderWidth)
+                }
+        }
+        .buttonStyle(FrameMioPressButtonStyle())
     }
 
     private var voicePromptControl: some View {
@@ -657,10 +604,10 @@ private struct StoryGenerationOptionsSheet: View {
             Text("Stopped after a few quiet seconds.")
                 .foregroundStyle(FrameMioColors.secondaryInk)
         } else if voicePromptRecorder.isPreparing {
-            Text("Connecting… tap again to stop.")
+            Text("Connecting... tap again to stop.")
                 .foregroundStyle(FrameMioColors.secondaryInk)
         } else if voicePromptRecorder.isRecording {
-            Text("Listening live… auto-stops after silence.")
+            Text("Listening live... auto-stops after silence.")
                 .foregroundStyle(FrameMioColors.secondaryInk)
         } else {
             Text("Tap Voice Prompt and speak; the text field updates live.")
@@ -688,8 +635,8 @@ private struct StoryGenerationOptionsSheet: View {
 
     private var isPromptClearDisabled: Bool {
         let transcript = voicePromptRecorder.currentTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-        let instruction = options.instruction?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return transcript.isEmpty && instruction.isEmpty
+        let value = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        return transcript.isEmpty && value.isEmpty
     }
 
     @MainActor
@@ -700,9 +647,9 @@ private struct StoryGenerationOptionsSheet: View {
 
     private func clearVoicePromptTranscript() {
         voicePromptRecorder.clearTranscript()
-        if let instruction = options.instruction?.trimmingCharacters(in: .whitespacesAndNewlines), !instruction.isEmpty {
-            options.instruction = ""
-            storyCreationViewDebugLog("voice prompt transcript cleared")
+        if !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            prompt = ""
+            debugLog("voice prompt transcript cleared")
         }
     }
 
@@ -720,9 +667,173 @@ private struct StoryGenerationOptionsSheet: View {
         await voicePromptRecorder.stopRecording()
         let transcript = voicePromptRecorder.currentTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
         if !transcript.isEmpty {
-            options.instruction = transcript
-            storyCreationViewDebugLog("voice prompt applied transcript_length=\(transcript.count)")
+            prompt = transcript
+            debugLog("voice prompt applied transcript_length=\(transcript.count)")
         }
+    }
+
+    private func debugLog(_ message: @autoclosure () -> String) {
+#if DEBUG
+        print("[FrameMio][\(transcriptLogContext)] \(message())")
+#endif
+    }
+}
+
+private struct StoryGenerationOptionsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var options: StoryGenerationOptions
+    @Binding var templateConfiguration: VideoTemplateConfiguration?
+    let assets: [MediaAsset]
+    let promptTranscriptionService: PromptTranscriptionService?
+    let template: VideoTemplate?
+
+    private let styleOptions = ["Natural", "Cinematic", "Warm", "Minimal", "Playful"]
+    private let subtitleStyleOptions: [(title: String, value: String)] = [
+        ("Bold", "bold_social"),
+        ("Cinematic", "cinematic_subtitle"),
+        ("Minimal", "clean_minimal"),
+        ("Playful", "playful_pop")
+    ]
+    private let sceneDetailOptions: [(title: String, value: String?, subtitle: String?)] = [
+        ("Balanced", "balanced", "Default"),
+        ("More details", "more", "Extra cutaways"),
+        ("Main moments", "none", "No cutaways")
+    ]
+    private let lengthOptions = [15, 30, 45, 60]
+
+    private var hasPhotoLikeSource: Bool {
+        assets.contains { !$0.isVideo }
+    }
+
+    private var hasUnknownVideoLengthSource: Bool {
+        assets.contains { $0.isVideo && $0.duration <= 0 }
+    }
+
+    private var totalVideoSourceDuration: TimeInterval {
+        assets.reduce(0) { total, asset in
+            guard asset.isVideo else { return total }
+            return total + max(0, asset.duration)
+        }
+    }
+
+    private var maxSelectableLengthSeconds: Int {
+        if hasPhotoLikeSource || hasUnknownVideoLengthSource {
+            return 60
+        }
+        return max(0, Int(totalVideoSourceDuration.rounded(.down)))
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
+                    if let template {
+                        templateSummary(template)
+                    }
+
+                    if supports("visual_style") {
+                        optionSection(title: "Style", options: styleOptions, selected: options.style ?? "cinematic") { option in
+                            options.style = option.lowercased()
+                        }
+                        optionDivider
+                    }
+
+                    if supports("aspect_ratio") {
+                        aspectRatioSection
+                        optionDivider
+                    }
+
+                    if supports("scene_detail") {
+                        sceneDetailSection
+                        optionDivider
+                    }
+
+                    if supports("captions_enabled") || supports("caption_style") {
+                        subtitleSection
+                        optionDivider
+                    }
+
+                    if supports("duration_seconds") {
+                        lengthSection
+                        optionDivider
+                    }
+
+                    if supportsAny(["overlay_placement", "overlay_size", "overlay_opacity", "overlay_frame", "overlay_animation"]) {
+                        overlaySection
+                        optionDivider
+                    }
+
+                    promptSection
+                }
+                .padding(FrameMioSpacing.lg)
+            }
+            .background(FrameMioColors.canvas.ignoresSafeArea())
+            .navigationTitle(template.map { "Customize \($0.name)" } ?? "Customize Story")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private var optionDivider: some View {
+        Divider().overlay(FrameMioColors.divider.opacity(0.58))
+    }
+
+    private func supports(_ option: String) -> Bool {
+        template?.editableOptions.contains(option) ?? true
+    }
+
+    private func supportsAny(_ options: [String]) -> Bool {
+        guard template != nil else { return false }
+        return options.contains(where: supports)
+    }
+
+    private func templateSummary(_ template: VideoTemplate) -> some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            SectionHeader(title: "Template", subtitle: templateLayoutDescription(template))
+            HStack(alignment: .top, spacing: FrameMioSpacing.sm) {
+                Image(systemName: templateLayoutIcon(template))
+                    .font(FrameMioTypography.headline)
+                    .foregroundStyle(FrameMioColors.accent)
+                    .frame(width: FrameMioMetrics.minimumTouchTarget)
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
+                    Text(template.name)
+                        .font(FrameMioTypography.headline)
+                        .foregroundStyle(FrameMioColors.ink)
+                    Text(template.description)
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(FrameMioSpacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
+        }
+    }
+
+    private var promptSection: some View {
+        FrameMioPromptInputSection(
+            title: "Prompt",
+            subtitle: "Guide the story's feeling, focus, or pacing",
+            placeholder: "Tell FrameMio what you want",
+            quickPrompts: ["More cinematic", "More emotional", "More fun", "Focus on people", "Focus on places"],
+            prompt: Binding(
+                get: { options.instruction ?? "" },
+                set: { options.instruction = $0 }
+            ),
+            promptTranscriptionService: promptTranscriptionService,
+            transcriptLogContext: "StoryGenerationOptionsSheet"
+        )
     }
 
     private var sceneDetailSection: some View {
@@ -745,25 +856,102 @@ private struct StoryGenerationOptionsSheet: View {
     private var subtitleSection: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
             SectionHeader(title: "Subtitles", subtitle: "Show spoken dialogue as captions")
-            Toggle(isOn: Binding(
-                get: { options.subtitlesEnabled ?? true },
-                set: { options.subtitlesEnabled = $0 }
-            )) {
-                Label("Show subtitles", systemImage: "captions.bubble")
-                    .font(FrameMioTypography.body)
-                    .foregroundStyle(FrameMioColors.ink)
+            if supports("captions_enabled") {
+                Toggle(isOn: Binding(
+                    get: { options.subtitlesEnabled ?? true },
+                    set: { options.subtitlesEnabled = $0 }
+                )) {
+                    Label("Show subtitles", systemImage: "captions.bubble")
+                        .font(FrameMioTypography.body)
+                        .foregroundStyle(FrameMioColors.ink)
+                }
+                .tint(FrameMioColors.accent)
             }
-            .tint(FrameMioColors.accent)
 
-            if options.subtitlesEnabled ?? true {
+            if supports("caption_style") && (options.subtitlesEnabled ?? true) {
                 LazyVGrid(columns: optionGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
-                    ForEach(subtitleStyleOptions, id: \.self) { option in
-                        optionChip(title: option, isSelected: option.caseInsensitiveCompare(options.subtitleStyle ?? "cinematic") == .orderedSame) {
-                            options.subtitleStyle = option.lowercased()
+                    ForEach(subtitleStyleOptions, id: \.value) { option in
+                        optionChip(title: option.title, isSelected: option.value == normalizedSubtitleStyle(options.subtitleStyle)) {
+                            options.subtitleStyle = option.value
                         }
                     }
                 }
             }
+        }
+    }
+
+    private var overlaySection: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            SectionHeader(
+                title: "Overlay",
+                subtitle: template?.defaults.layout == "picture_in_picture"
+                    ? "Keep the main video playing while supporting media appears above it."
+                    : "Adjust the bounded supporting-media treatment."
+            )
+
+            if supports("overlay_placement") {
+                TemplateOptionMenu(
+                    title: "Position",
+                    selection: templateConfiguration?.overlayPlacement ?? "bottom_right",
+                    options: ["top_left", "top_right", "bottom_left", "bottom_right", "center"]
+                ) { templateConfiguration?.overlayPlacement = $0 }
+            }
+
+            if supports("overlay_size") {
+                TemplateOptionMenu(
+                    title: "Size",
+                    selection: templateConfiguration?.overlaySize ?? "medium",
+                    options: ["small", "medium", "large"]
+                ) { templateConfiguration?.overlaySize = $0 }
+            }
+
+            if supports("overlay_opacity") {
+                HStack(spacing: FrameMioSpacing.md) {
+                    Text("Opacity")
+                        .font(FrameMioTypography.body)
+                        .foregroundStyle(FrameMioColors.ink)
+                    Spacer()
+                    Text("\(Int((templateConfiguration?.overlayOpacity ?? 1) * 100))%")
+                        .monospacedDigit()
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                    Stepper(
+                        "",
+                        value: Binding(
+                            get: { templateConfiguration?.overlayOpacity ?? 1 },
+                            set: { templateConfiguration?.overlayOpacity = min(1, max(0.35, $0)) }
+                        ),
+                        in: 0.35...1,
+                        step: 0.05
+                    )
+                }
+            }
+
+            if supports("overlay_frame") {
+                TemplateOptionMenu(
+                    title: "Frame",
+                    selection: templateConfiguration?.overlayFrame ?? "subtle",
+                    options: ["none", "subtle", "bold"]
+                ) { templateConfiguration?.overlayFrame = $0 }
+            }
+
+            if supports("overlay_animation") {
+                TemplateOptionMenu(
+                    title: "Motion",
+                    selection: templateConfiguration?.overlayAnimation ?? "fade",
+                    options: ["none", "fade", "subtle_scale"]
+                ) { templateConfiguration?.overlayAnimation = $0 }
+            }
+        }
+    }
+
+    private var aspectRatioSection: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            SectionHeader(title: "Frame", subtitle: "Choose the output shape for this template")
+            TemplateOptionMenu(
+                title: "Aspect ratio",
+                selection: templateConfiguration?.aspectRatio ?? "9:16",
+                options: ["9:16", "16:9", "1:1"]
+            ) { templateConfiguration?.aspectRatio = $0 }
         }
     }
 
@@ -802,12 +990,49 @@ private struct StoryGenerationOptionsSheet: View {
         }
     }
 
-    private var optionGridColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: 108), spacing: FrameMioSpacing.sm, alignment: .leading)]
+    private func normalizedSubtitleStyle(_ value: String?) -> String {
+        switch value?.lowercased() {
+        case "bold", "bold_social":
+            return "bold_social"
+        case "cinematic", "cinematic_subtitle":
+            return "cinematic_subtitle"
+        case "minimal", "clean_minimal":
+            return "clean_minimal"
+        case "playful", "playful_pop":
+            return "playful_pop"
+        default:
+            return "cinematic_subtitle"
+        }
     }
 
-    private var promptGridColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: 140), spacing: FrameMioSpacing.sm, alignment: .leading)]
+    private func templateLayoutIcon(_ template: VideoTemplate) -> String {
+        switch template.defaults.layout {
+        case "picture_in_picture":
+            return "rectangle.on.rectangle"
+        case "split_screen":
+            return "rectangle.split.2x1"
+        case "montage":
+            return "square.grid.2x2"
+        default:
+            return "rectangle.fill"
+        }
+    }
+
+    private func templateLayoutDescription(_ template: VideoTemplate) -> String {
+        switch template.defaults.layout {
+        case "picture_in_picture":
+            return "Picture over continuing video"
+        case "split_screen":
+            return "Two moments share the frame"
+        case "montage":
+            return "Several moments cut together quickly"
+        default:
+            return "Full-screen cinematic moments"
+        }
+    }
+
+    private var optionGridColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: 108), spacing: FrameMioSpacing.sm, alignment: .leading)]
     }
 
     private func optionChip(title: String, subtitle: String? = nil, isSelected: Bool, isDisabled: Bool = false, action: @escaping () -> Void) -> some View {

@@ -166,9 +166,11 @@ export interface StoryCaption {
 
 export interface CaptionStyle {
   preset?: 'bold_social' | 'cinematic_subtitle' | 'clean_minimal' | 'playful_pop' | string;
+  presentation?: 'full_text' | 'word_by_word' | string;
   font_family?: 'inter' | 'inter-bold' | 'system' | 'system-bold' | 'noto-sans' | 'noto-sans-bold' | string;
   font_size?: number;
   text_color?: string;
+  highlight_color?: string;
   stroke_color?: string;
   stroke_width?: number;
   background_enabled?: boolean;

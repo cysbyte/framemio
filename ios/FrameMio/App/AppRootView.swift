@@ -50,10 +50,10 @@ struct AppRootView: View {
 
             createTab
                 .tabItem {
-                    Label("Create", systemImage: "plus.circle.fill")
+                    Label("Projects", systemImage: "folder")
                 }
                 .tag(RootTab.create)
-                .accessibilityLabel("Create")
+                .accessibilityLabel("Projects")
 
             NavigationStack {
                 ProfileView(creditStore: creditStore) {
@@ -145,11 +145,12 @@ struct AppRootView: View {
     private var createTab: some View {
         NavigationStack(path: $createPath) {
             CreateView(
+                viewModel: homeViewModel,
                 onSelect: { draft in
                     createPath.append(.mediaPicker(draft: draft))
                 },
-                onOpenProjects: {
-                    createPath.append(.allProjects)
+                onOpenStory: { story in
+                    createPath.append(.storyPreview(story: story))
                 }
             )
             .navigationDestination(for: AppRoute.self) { route in
@@ -270,7 +271,9 @@ struct AppRootView: View {
         case let .projectConfiguration(draft, assets):
             ProjectConfigurationView(
                 draft: draft,
+                assets: assets,
                 storyService: dependencies.storyService,
+                promptTranscriptionService: dependencies.promptTranscriptionService,
                 onContinue: { configuredDraft in
                     appendRoute(.storyCreating(draft: configuredDraft, assets: assets, launchID: UUID()))
                 }
@@ -343,18 +346,25 @@ private enum RootTab: Hashable {
 }
 
 struct CreateView: View {
+    @ObservedObject private var viewModel: HomeViewModel
     let onSelect: (VideoProjectDraft) -> Void
-    let onOpenProjects: () -> Void
+    let onOpenStory: (Story) -> Void
+
+    init(viewModel: HomeViewModel, onSelect: @escaping (VideoProjectDraft) -> Void, onOpenStory: @escaping (Story) -> Void) {
+        _viewModel = ObservedObject(wrappedValue: viewModel)
+        self.onSelect = onSelect
+        self.onOpenStory = onOpenStory
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
                 VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
-                    Text("Create")
-                        .font(FrameMioTypography.display)
+                    Text("New Project")
+                        .font(FrameMioTypography.title)
                         .foregroundStyle(FrameMioColors.ink)
 
-                    Text("Choose what FrameMio should make from your photos and footage.")
+                    Text("Start a new video, then review drafts, in-progress work, and completed projects below.")
                         .font(FrameMioTypography.body)
                         .foregroundStyle(FrameMioColors.secondaryInk)
                         .fixedSize(horizontal: false, vertical: true)
@@ -373,50 +383,23 @@ struct CreateView: View {
                     }
                 }
 
-                Button {
-                    FrameMioHaptics.secondaryAction()
-                    onOpenProjects()
-                } label: {
-                    HStack(spacing: FrameMioSpacing.md) {
-                        Image(systemName: "rectangle.stack.badge.play")
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(FrameMioColors.accent)
-                            .frame(width: 48, height: 48)
-                            .background(FrameMioColors.accentMuted.opacity(0.72), in: Circle())
-                            .accessibilityHidden(true)
+                Divider()
+                    .overlay(FrameMioColors.divider)
+                    .padding(.vertical, FrameMioSpacing.xs)
 
-                        VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
-                            Text("Projects")
-                                .font(FrameMioTypography.title)
-                                .foregroundStyle(FrameMioColors.ink)
-                            Text("Review drafts, in-progress videos, and completed projects.")
-                                .font(FrameMioTypography.body)
-                                .foregroundStyle(FrameMioColors.secondaryInk)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: FrameMioSpacing.sm)
-                        Image(systemName: "chevron.right")
-                            .font(FrameMioTypography.headline)
-                            .foregroundStyle(FrameMioColors.tertiaryInk)
-                            .accessibilityHidden(true)
-                    }
-                    .padding(FrameMioSpacing.lg)
-                    .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
-                    .background(FrameMioColors.surface.opacity(0.86), in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
-                            .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
-                    }
-                }
-                .buttonStyle(FrameMioPressButtonStyle())
-                .accessibilityLabel("Projects. Review drafts, in-progress videos, and completed projects.")
+                ProjectsHistoryList(viewModel: viewModel, onCreate: nil, onOpenStory: onOpenStory)
             }
             .padding(.horizontal, FrameMioSpacing.lg)
+            .padding(.top, FrameMioSpacing.lg)
             .padding(.bottom, FrameMioSpacing.xxxl)
         }
         .background(FrameMioColors.canvas.ignoresSafeArea())
-        .navigationTitle("Create")
+        .navigationTitle("Projects")
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            viewModel.load()
+        }
+        .refreshable { viewModel.load() }
     }
 
     private func creationOption(_ type: VideoProjectType, action: @escaping () -> Void) -> some View {
@@ -511,9 +494,14 @@ struct TemplatesView: View {
                 if isLoading && templates.isEmpty {
                     LoadingState(title: "Loading templates", message: "Fetching the latest reviewed styles.")
                 } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 226), spacing: FrameMioSpacing.md)], spacing: FrameMioSpacing.md) {
+                    LazyVGrid(columns: templateGridColumns, alignment: .leading, spacing: FrameMioSpacing.md) {
                         ForEach(visibleTemplates) { template in
-                            TemplateCard(template: template, isSelected: selectedTemplateID == template.id) {
+                            TemplateCard(
+                                template: template,
+                                isSelected: selectedTemplateID == template.id,
+                                cardWidth: nil,
+                                previewHeight: 132
+                            ) {
                                 selectedTemplateID = template.id
                             }
                         }
@@ -535,6 +523,7 @@ struct TemplatesView: View {
                         } label: {
                             Label("Use Template", systemImage: "plus.circle.fill")
                                 .frame(maxWidth: .infinity)
+                                .frame(minHeight: 45)
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(FrameMioColors.accent)
@@ -555,6 +544,13 @@ struct TemplatesView: View {
         .navigationTitle("Templates")
         .navigationBarTitleDisplayMode(.inline)
         .task { await loadTemplates() }
+    }
+
+    private var templateGridColumns: [GridItem] {
+        [
+            GridItem(.flexible(minimum: 0), spacing: FrameMioSpacing.md),
+            GridItem(.flexible(minimum: 0), spacing: FrameMioSpacing.md)
+        ]
     }
 
     private func loadTemplates() async {
@@ -583,14 +579,25 @@ struct ProjectConfigurationView: View {
     @State private var templates: [VideoTemplate] = []
     @State private var selectedTemplateID: String?
     @State private var templateConfiguration: VideoTemplateConfiguration?
+    @State private var isShowingCustomization = false
 
     let draft: VideoProjectDraft
+    let assets: [MediaAsset]
     let storyService: StoryService
+    let promptTranscriptionService: PromptTranscriptionService?
     let onContinue: (VideoProjectDraft) -> Void
 
-    init(draft: VideoProjectDraft, storyService: StoryService, onContinue: @escaping (VideoProjectDraft) -> Void) {
+    init(
+        draft: VideoProjectDraft,
+        assets: [MediaAsset],
+        storyService: StoryService,
+        promptTranscriptionService: PromptTranscriptionService? = nil,
+        onContinue: @escaping (VideoProjectDraft) -> Void
+    ) {
         self.draft = draft
+        self.assets = assets
         self.storyService = storyService
+        self.promptTranscriptionService = promptTranscriptionService
         self.onContinue = onContinue
         _promoSubject = State(initialValue: draft.promo?.subject ?? .product)
         _promoGoal = State(initialValue: draft.promo?.goal ?? .sell)
@@ -607,25 +614,17 @@ struct ProjectConfigurationView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
                 header
+                selectedMediaSection
                 templateSection
 
                 if draft.type == .promo {
                     optionPicker(title: "What are you promoting?", selection: $promoSubject, values: PromoSubject.allCases)
-                    optionPicker(title: "Goal", selection: $promoGoal, values: PromoGoal.allCases)
-                    optionPicker(title: "Duration", selection: $promoDuration, values: ProjectDurationOption.allCases)
+                    promoGoalPicker
                 } else {
                     optionPicker(title: "Platform", selection: $reelPlatform, values: ReelPlatform.allCases)
-                    optionPicker(title: "Duration", selection: $reelDuration, values: ProjectDurationOption.allCases)
-                    optionPicker(title: "Style", selection: $reelStyle, values: ReelStyle.allCases)
                 }
 
-                promptField
-                templateOptions
-
-                PrimaryButton(title: "Generate First Draft", systemImage: "sparkles") {
-                    onContinue(configuredDraft)
-                }
-                .padding(.top, FrameMioSpacing.sm)
+                customizationEntry
             }
             .padding(.horizontal, FrameMioSpacing.lg)
             .padding(.top, FrameMioSpacing.lg)
@@ -634,7 +633,54 @@ struct ProjectConfigurationView: View {
         .background(FrameMioColors.canvas.ignoresSafeArea())
         .navigationTitle(draft.type == .promo ? "Create Promo" : "Create Reel")
         .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom) {
+            fixedGenerateButton
+        }
         .task { await loadTemplates() }
+        .sheet(isPresented: $isShowingCustomization) {
+            if let template = selectedTemplate {
+                ProjectTemplateSettingsSheet(
+                    template: template,
+                    configuration: Binding(
+                        get: { templateConfiguration ?? template.defaults },
+                        set: { templateConfiguration = $0 }
+                    ),
+                    prompt: $prompt,
+                    promptTranscriptionService: promptTranscriptionService
+                )
+            }
+        }
+    }
+
+    private var fixedGenerateButton: some View {
+        VStack(spacing: 0) {
+            Divider()
+                .overlay(FrameMioColors.divider.opacity(0.7))
+            PrimaryButton(title: "Generate First Draft", systemImage: "sparkles") {
+                onContinue(configuredDraft)
+            }
+            .padding(.horizontal, FrameMioSpacing.lg)
+            .padding(.top, FrameMioSpacing.md)
+            .padding(.bottom, FrameMioSpacing.md)
+            .background(FrameMioColors.canvas.opacity(0.96))
+        }
+    }
+
+    private var selectedMediaSection: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            SectionHeader(title: "Selected moments", subtitle: "\(assets.count) photos and videos")
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: FrameMioSpacing.sm) {
+                ForEach(assets) { asset in
+                    MediaThumbnail(
+                        duration: asset.isVideo ? asset.duration : nil,
+                        isLivePhoto: asset.isLivePhoto,
+                        placeholderSystemImage: asset.isVideo ? "video.fill" : "photo.fill",
+                        accessibilityTitle: asset.isVideo ? "Selected video" : "Selected photo"
+                    )
+                    .id(asset.id)
+                }
+            }
+        }
     }
 
     private var templateSection: some View {
@@ -652,7 +698,13 @@ struct ProjectConfigurationView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: FrameMioSpacing.md) {
                         ForEach(templates) { template in
-                            TemplateCard(template: template, isSelected: selectedTemplateID == template.id) {
+                            TemplateCard(
+                                template: template,
+                                isSelected: selectedTemplateID == template.id,
+                                cardWidth: 184,
+                                previewHeight: 122,
+                                minHeight: 252
+                            ) {
                                 select(template)
                             }
                         }
@@ -664,46 +716,77 @@ struct ProjectConfigurationView: View {
         .background(FrameMioColors.surface.opacity(0.74), in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous))
     }
 
-    @ViewBuilder
-    private var templateOptions: some View {
-        if let template = selectedTemplate, let configuration = templateConfiguration {
-            VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-                Text("Template settings")
+    private var customizationEntry: some View {
+        Button {
+            guard selectedTemplate != nil else { return }
+            FrameMioHaptics.secondaryAction()
+            isShowingCustomization = true
+        } label: {
+            HStack(spacing: FrameMioSpacing.md) {
+                Image(systemName: "slider.horizontal.3")
                     .font(FrameMioTypography.headline)
-                    .foregroundStyle(FrameMioColors.ink)
-                if template.editableOptions.contains("duration_seconds") {
-                    Picker("Length", selection: Binding(get: { configuration.durationSeconds ?? template.defaults.durationSeconds ?? 30 }, set: { templateConfiguration?.durationSeconds = $0 })) {
-                        ForEach([15, 30, 60], id: \.self) { Text("\($0) sec").tag($0) }
-                    }
-                    .pickerStyle(.segmented)
+                    .foregroundStyle(FrameMioColors.accent)
+                    .frame(width: FrameMioMetrics.minimumTouchTarget)
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
+                    Text("Customize")
+                        .font(FrameMioTypography.headline)
+                        .foregroundStyle(FrameMioColors.ink)
+                    Text(templateConfigurationSummary)
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                if template.editableOptions.contains("visual_style") {
-                    Picker("Visual style", selection: Binding(get: { configuration.visualStyle ?? "cinematic" }, set: { templateConfiguration?.visualStyle = $0 })) {
-                        ForEach(["cinematic", "warm", "minimal", "playful"], id: \.self) { Text($0.capitalized).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                }
-                if template.editableOptions.contains("captions_enabled") {
-                    Toggle("Captions", isOn: Binding(get: { configuration.captionsEnabled ?? true }, set: { templateConfiguration?.captionsEnabled = $0 }))
-                }
-                if template.editableOptions.contains("overlay_placement") {
-                    TemplateOptionMenu(
-                        title: "Overlay position",
-                        selection: configuration.overlayPlacement ?? "bottom_right",
-                        options: ["top_left", "top_right", "bottom_left", "bottom_right", "center"]
-                    ) { templateConfiguration?.overlayPlacement = $0 }
-                }
-                if template.editableOptions.contains("overlay_size") {
-                    TemplateOptionMenu(
-                        title: "Overlay size",
-                        selection: configuration.overlaySize ?? "medium",
-                        options: ["small", "medium", "large", "half"]
-                    ) { templateConfiguration?.overlaySize = $0 }
-                }
+
+                Spacer(minLength: FrameMioSpacing.sm)
+
+                Image(systemName: "chevron.right")
+                    .font(FrameMioTypography.caption)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+                    .accessibilityHidden(true)
             }
-            .padding(FrameMioSpacing.md)
-            .background(FrameMioColors.surface.opacity(0.74), in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous))
+            .padding(.horizontal, FrameMioSpacing.md)
+            .padding(.vertical, FrameMioSpacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous)
+                    .stroke(FrameMioColors.divider.opacity(0.55), lineWidth: FrameMioMetrics.borderWidth)
+            }
         }
+        .buttonStyle(FrameMioPressButtonStyle())
+        .disabled(selectedTemplate == nil)
+        .accessibilityLabel("Customize \(draft.type.title.lowercased()) template")
+        .accessibilityValue(templateConfigurationSummary)
+    }
+
+    private var templateConfigurationSummary: String {
+        guard let template = selectedTemplate else { return "Select a template first" }
+        let configuration = templateConfiguration ?? template.defaults
+        var values = [template.name]
+        if template.editableOptions.contains("duration_seconds"), let duration = configuration.durationSeconds {
+            values.append("\(duration)s")
+        }
+        if template.editableOptions.contains("visual_style"), let style = configuration.visualStyle {
+            values.append(style.capitalized)
+        }
+        if template.editableOptions.contains("captions_enabled") {
+            values.append(configuration.captionsEnabled == false ? "Captions off" : "Captions on")
+        }
+        if template.editableOptions.contains("overlay_placement"),
+           let placement = configuration.overlayPlacement {
+            values.append(placement.replacingOccurrences(of: "_", with: " ").capitalized)
+        }
+        if template.editableOptions.contains("overlay_size"),
+           let size = configuration.overlaySize {
+            values.append(size.capitalized)
+        }
+        if !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            values.append("Prompt added")
+        }
+        return values.joined(separator: " · ")
     }
 
     private var header: some View {
@@ -747,31 +830,31 @@ struct ProjectConfigurationView: View {
         .background(FrameMioColors.surface.opacity(0.74), in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous))
     }
 
-    private var promptField: some View {
+    private var promoGoalPicker: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
-            Text("Custom prompt")
+            Text("Goal")
                 .font(FrameMioTypography.headline)
                 .foregroundStyle(FrameMioColors.ink)
 
-            TextEditor(text: $prompt)
-                .font(FrameMioTypography.body)
-                .foregroundStyle(FrameMioColors.ink)
-                .frame(minHeight: 112)
-                .scrollContentBackground(.hidden)
-                .padding(FrameMioSpacing.sm)
-                .background(FrameMioColors.elevatedSurface.opacity(0.86), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
-                .overlay(alignment: .topLeading) {
-                    if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text(draft.type == .promo ? "Create a premium 20-second advertisement for my app." : "Make this feel fast, bright, and ready for Instagram.")
-                            .font(FrameMioTypography.body)
-                            .foregroundStyle(FrameMioColors.tertiaryInk)
-                            .padding(FrameMioSpacing.md)
-                            .allowsHitTesting(false)
-                    }
+            Picker("Promotion goal", selection: $promoGoal) {
+                ForEach(PromoGoal.allCases) { goal in
+                    Text(goal.title)
+                        .tag(goal)
                 }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+            .tint(FrameMioColors.accent)
+            .environment(\.defaultMinListRowHeight, 40)
+            .onChange(of: promoGoal) { _, _ in
+                FrameMioHaptics.secondaryAction()
+            }
         }
-        .padding(FrameMioSpacing.md)
+        .padding(.horizontal, FrameMioSpacing.md)
+        .padding(.vertical, FrameMioSpacing.sm)
         .background(FrameMioColors.surface.opacity(0.74), in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous))
+        .accessibilityLabel("Promotion goal")
+        .accessibilityValue(promoGoal.title)
     }
 
     private var configuredDraft: VideoProjectDraft {
@@ -847,43 +930,482 @@ struct ProjectConfigurationView: View {
     }
 }
 
+private struct ProjectTemplateSettingsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let template: VideoTemplate
+    @Binding var configuration: VideoTemplateConfiguration
+    @Binding var prompt: String
+    let promptTranscriptionService: PromptTranscriptionService?
+
+    private let styleOptions = ["cinematic", "warm", "minimal", "playful", "elegant"]
+    private let captionStyleOptions: [(title: String, value: String)] = [
+        ("Bold", "bold_social"),
+        ("Cinematic", "cinematic_subtitle"),
+        ("Minimal", "clean_minimal"),
+        ("Playful", "playful_pop")
+    ]
+    private let sceneDetailOptions: [(title: String, value: String)] = [
+        ("Balanced", "balanced"),
+        ("More details", "more"),
+        ("Main moments", "none")
+    ]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
+                    templateSummary
+
+                    if supports("duration_seconds") {
+                        durationSection
+                    }
+
+                    if supports("aspect_ratio") {
+                        aspectRatioSection
+                    }
+
+                    if supports("visual_style") {
+                        styleSection
+                    }
+
+                    if supports("scene_detail") {
+                        sceneDetailSection
+                    }
+
+                    if supports("captions_enabled") || supports("caption_style") {
+                        captionSection
+                    }
+
+                    if supportsAny(["overlay_placement", "overlay_size", "overlay_opacity", "overlay_frame", "overlay_animation"]) {
+                        overlaySection
+                    }
+
+                    promptSection
+                }
+                .padding(FrameMioSpacing.lg)
+            }
+            .background(FrameMioColors.canvas.ignoresSafeArea())
+            .navigationTitle("Customize \(template.name)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private var templateSummary: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            SectionHeader(title: "Template", subtitle: layoutDescription)
+            HStack(alignment: .top, spacing: FrameMioSpacing.sm) {
+                Image(systemName: layoutIcon)
+                    .font(FrameMioTypography.headline)
+                    .foregroundStyle(FrameMioColors.accent)
+                    .frame(width: FrameMioMetrics.minimumTouchTarget)
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
+                    Text(template.name)
+                        .font(FrameMioTypography.headline)
+                        .foregroundStyle(FrameMioColors.ink)
+                    Text(template.description)
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(FrameMioSpacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
+        }
+    }
+
+    private var durationSection: some View {
+        settingsSection(title: "Length", subtitle: "Set the target duration for this template") {
+            LazyVGrid(columns: settingsGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
+                ForEach([15, 30, 45, 60], id: \.self) { seconds in
+                    settingChip(
+                        title: "\(seconds)s",
+                        isSelected: configuration.durationSeconds == seconds
+                    ) {
+                        configuration.durationSeconds = seconds
+                    }
+                }
+            }
+        }
+    }
+
+    private var aspectRatioSection: some View {
+        settingsSection(title: "Frame", subtitle: "Choose the output shape for this template") {
+            TemplateOptionMenu(
+                title: "Aspect ratio",
+                selection: configuration.aspectRatio ?? "9:16",
+                options: ["9:16", "16:9", "1:1"]
+            ) {
+                configuration.aspectRatio = $0
+            }
+        }
+    }
+
+    private var styleSection: some View {
+        settingsSection(title: "Visual style", subtitle: "Adjust the overall visual treatment") {
+            LazyVGrid(columns: settingsGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
+                ForEach(styleOptions, id: \.self) { style in
+                    settingChip(
+                        title: style.capitalized,
+                        isSelected: configuration.visualStyle?.lowercased() == style
+                    ) {
+                        configuration.visualStyle = style
+                    }
+                }
+            }
+        }
+    }
+
+    private var sceneDetailSection: some View {
+        settingsSection(title: "Scene details", subtitle: "Choose how much supporting footage to include") {
+            LazyVGrid(columns: settingsGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
+                ForEach(sceneDetailOptions, id: \.value) { option in
+                    settingChip(
+                        title: option.title,
+                        isSelected: normalizedSceneDetail(configuration.sceneDetail) == option.value
+                    ) {
+                        configuration.sceneDetail = option.value
+                    }
+                }
+            }
+        }
+    }
+
+    private var captionSection: some View {
+        settingsSection(title: "Captions", subtitle: "Control captions for this template") {
+            if supports("captions_enabled") {
+                Toggle("Show captions", isOn: Binding(
+                    get: { configuration.captionsEnabled ?? true },
+                    set: { configuration.captionsEnabled = $0 }
+                ))
+                .tint(FrameMioColors.accent)
+            }
+
+            if supports("caption_style") && (configuration.captionsEnabled ?? true) {
+                LazyVGrid(columns: settingsGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
+                    ForEach(captionStyleOptions, id: \.value) { option in
+                        settingChip(
+                            title: option.title,
+                            isSelected: normalizedCaptionStyle(configuration.captionStyle) == option.value
+                        ) {
+                            configuration.captionStyle = option.value
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var overlaySection: some View {
+        settingsSection(
+            title: "Overlay",
+            subtitle: template.defaults.layout == "picture_in_picture"
+                ? "Keep the base video playing while supporting media appears above it."
+                : "Adjust the bounded supporting-media treatment."
+        ) {
+            if supports("overlay_placement") {
+                TemplateOptionMenu(
+                    title: "Position",
+                    selection: configuration.overlayPlacement ?? "bottom_right",
+                    options: ["top_left", "top_right", "bottom_left", "bottom_right", "center"]
+                ) {
+                    configuration.overlayPlacement = $0
+                }
+            }
+
+            if supports("overlay_size") {
+                TemplateOptionMenu(
+                    title: "Size",
+                    selection: configuration.overlaySize ?? "medium",
+                    options: ["small", "medium", "large", "half"]
+                ) {
+                    configuration.overlaySize = $0
+                }
+            }
+
+            if supports("overlay_opacity") {
+                HStack(spacing: FrameMioSpacing.md) {
+                    Text("Opacity")
+                        .font(FrameMioTypography.body)
+                        .foregroundStyle(FrameMioColors.ink)
+                    Spacer()
+                    Text("\(Int((configuration.overlayOpacity ?? 1) * 100))%")
+                        .monospacedDigit()
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                    Stepper(
+                        "",
+                        value: Binding(
+                            get: { configuration.overlayOpacity ?? 1 },
+                            set: { configuration.overlayOpacity = min(1, max(0.35, $0)) }
+                        ),
+                        in: 0.35...1,
+                        step: 0.05
+                    )
+                }
+            }
+
+            if supports("overlay_frame") {
+                TemplateOptionMenu(
+                    title: "Frame",
+                    selection: configuration.overlayFrame ?? "subtle",
+                    options: ["none", "subtle", "bold"]
+                ) {
+                    configuration.overlayFrame = $0
+                }
+            }
+
+            if supports("overlay_animation") {
+                TemplateOptionMenu(
+                    title: "Motion",
+                    selection: configuration.overlayAnimation ?? "fade",
+                    options: ["none", "fade", "subtle_scale"]
+                ) {
+                    configuration.overlayAnimation = $0
+                }
+            }
+        }
+    }
+
+    private var promptSection: some View {
+        FrameMioPromptInputSection(
+            title: "Custom prompt",
+            subtitle: "Guide the feeling, message, or pacing of the generated video",
+            placeholder: templatePromptPlaceholder,
+            quickPrompts: templatePromptSuggestions,
+            prompt: $prompt,
+            promptTranscriptionService: promptTranscriptionService,
+            transcriptLogContext: "ProjectTemplateSettingsSheet"
+        )
+    }
+
+    private var templatePromptPlaceholder: String {
+        switch template.defaults.layout {
+        case "picture_in_picture":
+            return "Describe the supporting image or video you want to emphasize."
+        case "split_screen":
+            return "Describe the two moments or ideas that should be compared."
+        case "montage":
+            return "Describe the energy, order, or feeling for the montage."
+        default:
+            return "Describe the message, feeling, or pacing you want."
+        }
+    }
+
+    private var templatePromptSuggestions: [String] {
+        switch template.defaults.layout {
+        case "picture_in_picture":
+            return ["Highlight the product", "Emphasize the proof", "Keep it conversational"]
+        case "split_screen":
+            return ["Compare before and after", "Show the contrast", "Make the offer clear"]
+        case "montage":
+            return ["Make it fast and punchy", "Lead with the strongest moment", "Build momentum"]
+        default:
+            return ["More cinematic", "More premium", "Focus on the message"]
+        }
+    }
+
+    private func settingsSection<Content: View>(
+        title: String,
+        subtitle: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            SectionHeader(title: title, subtitle: subtitle)
+            content()
+        }
+        .padding(FrameMioSpacing.md)
+        .background(FrameMioColors.surface.opacity(0.74), in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous))
+    }
+
+    private func settingChip(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            FrameMioHaptics.secondaryAction()
+            action()
+        } label: {
+            Text(title)
+                .font(FrameMioTypography.footnote)
+                .foregroundStyle(isSelected ? FrameMioColors.inverseInk : FrameMioColors.ink)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: FrameMioMetrics.compactButtonHeight)
+                .padding(.horizontal, FrameMioSpacing.sm)
+                .background(
+                    isSelected ? FrameMioColors.accent : FrameMioColors.elevatedSurface.opacity(0.82),
+                    in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous)
+                )
+        }
+        .buttonStyle(FrameMioPressButtonStyle())
+    }
+
+    private var settingsGridColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: 108), spacing: FrameMioSpacing.sm, alignment: .leading)]
+    }
+
+    private func supports(_ option: String) -> Bool {
+        template.editableOptions.contains(option)
+    }
+
+    private func supportsAny(_ options: [String]) -> Bool {
+        options.contains(where: supports)
+    }
+
+    private func normalizedCaptionStyle(_ value: String?) -> String {
+        switch value?.lowercased() {
+        case "bold", "bold_social":
+            return "bold_social"
+        case "cinematic", "cinematic_subtitle":
+            return "cinematic_subtitle"
+        case "minimal", "clean_minimal":
+            return "clean_minimal"
+        case "playful", "playful_pop":
+            return "playful_pop"
+        default:
+            return "cinematic_subtitle"
+        }
+    }
+
+    private func normalizedSceneDetail(_ value: String?) -> String {
+        switch value?.lowercased() {
+        case "more", "more_details", "moredetails":
+            return "more"
+        case "none", "main_moments", "mainmoments":
+            return "none"
+        default:
+            return "balanced"
+        }
+    }
+
+    private var layoutIcon: String {
+        switch template.defaults.layout {
+        case "picture_in_picture":
+            return "rectangle.on.rectangle"
+        case "split_screen":
+            return "rectangle.split.2x1"
+        case "montage":
+            return "square.grid.2x2"
+        default:
+            return "rectangle.fill"
+        }
+    }
+
+    private var layoutDescription: String {
+        switch template.defaults.layout {
+        case "picture_in_picture":
+            return "Picture over continuing video"
+        case "split_screen":
+            return "Two moments share the frame"
+        case "montage":
+            return "Several moments cut together quickly"
+        default:
+            return "Full-screen visual treatment"
+        }
+    }
+}
+
 struct TemplateCard: View {
     let template: VideoTemplate
     let isSelected: Bool
     let onSelect: () -> Void
-    private let cardWidth: CGFloat = 226
-    private let previewHeight: CGFloat = 176
+    @State private var fullScreenDemo: TemplateDemoPlayback?
+    private let cardWidth: CGFloat?
+    private let previewHeight: CGFloat
+    private let minHeight: CGFloat
     private let cornerRadius: CGFloat = 8
 
+    init(
+        template: VideoTemplate,
+        isSelected: Bool,
+        cardWidth: CGFloat? = 226,
+        previewHeight: CGFloat = 176,
+        minHeight: CGFloat = 314,
+        onSelect: @escaping () -> Void
+    ) {
+        self.template = template
+        self.isSelected = isSelected
+        self.cardWidth = cardWidth
+        self.previewHeight = previewHeight
+        self.minHeight = minHeight
+        self.onSelect = onSelect
+    }
+
     var body: some View {
-        Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
+            ZStack(alignment: .bottomTrailing) {
                 InlineTemplateVideo(path: template.demoVideoPath)
-                    .frame(width: cardWidth - (FrameMioSpacing.md * 2), height: previewHeight)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: previewHeight)
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                Text(template.name)
-                    .font(FrameMioTypography.headline)
-                    .foregroundStyle(FrameMioColors.ink)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(template.description)
-                    .font(FrameMioTypography.caption)
-                    .foregroundStyle(FrameMioColors.secondaryInk)
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
+
+                Button {
+                    FrameMioHaptics.secondaryAction()
+                    if let url = templateDemoURL(template.demoVideoPath) {
+                        fullScreenDemo = TemplateDemoPlayback(title: template.name, url: url)
+                    }
+                } label: {
+                    Image(systemName: "play.fill")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 34, height: 34)
+                        .background(.black.opacity(0.62), in: Circle())
+                        .overlay {
+                            Circle().stroke(.white.opacity(0.24), lineWidth: FrameMioMetrics.borderWidth)
+                        }
+                }
+                .buttonStyle(FrameMioPressButtonStyle())
+                .padding(FrameMioSpacing.xs)
+                .accessibilityLabel("Play \(template.name) fullscreen")
             }
-            .padding(FrameMioSpacing.md)
-            .frame(width: cardWidth, alignment: .topLeading)
-            .frame(minHeight: 314, alignment: .topLeading)
-            .background(isSelected ? FrameMioColors.accentMuted : FrameMioColors.elevatedSurface, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(isSelected ? FrameMioColors.accent : FrameMioColors.divider, lineWidth: isSelected ? 2 : 1)
-            }
+
+            Text(template.name)
+                .font(FrameMioTypography.headline)
+                .foregroundStyle(FrameMioColors.ink)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(template.description)
+                .font(FrameMioTypography.caption)
+                .foregroundStyle(FrameMioColors.secondaryInk)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .buttonStyle(.plain)
+        .padding(FrameMioSpacing.md)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(width: cardWidth, alignment: .topLeading)
+        .frame(minHeight: minHeight, alignment: .topLeading)
+        .background(isSelected ? FrameMioColors.accentMuted : FrameMioColors.elevatedSurface, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .stroke(isSelected ? FrameMioColors.accent : FrameMioColors.divider, lineWidth: isSelected ? 2 : 1)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .onTapGesture(perform: onSelect)
+        .fullScreenCover(item: $fullScreenDemo) { demo in
+            FullScreenTemplateDemoPlayer(url: demo.url, title: demo.title)
+        }
         .accessibilityLabel("\(template.name). \(template.description)")
         .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction {
+            onSelect()
+        }
+    }
+}
+
+private struct TemplateDemoPlayback: Identifiable {
+    let title: String
+    let url: URL
+
+    var id: String {
+        "\(title)-\(url.absoluteString)"
     }
 }
 
@@ -1032,16 +1554,78 @@ struct InlineTemplateVideo: View {
         player = nil
     }
 
-    private func templateDemoURL(_ value: String) -> URL? {
-        if let url = URL(string: value), url.scheme != nil {
-            return url
+}
+
+private func templateDemoURL(_ value: String) -> URL? {
+    if let url = URL(string: value), url.scheme != nil {
+        return url
+    }
+    let fileName = URL(fileURLWithPath: value).deletingPathExtension().lastPathComponent
+    if let bundled = Bundle.main.url(forResource: fileName, withExtension: "mp4") {
+        return bundled
+    }
+    guard value.hasPrefix("/") else { return nil }
+    return AppConfiguration.templateDemoBaseURL.appendingPathComponent(String(value.dropFirst()))
+}
+
+private struct FullScreenTemplateDemoPlayer: View {
+    @Environment(\.dismiss) private var dismiss
+    let url: URL
+    let title: String
+    @State private var player = AVPlayer()
+    @State private var endObserver: NSObjectProtocol?
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black
+                .ignoresSafeArea()
+
+            TemplateDemoPlayer(player: player, showsPlaybackControls: true, videoGravity: .resizeAspect)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black)
+                .ignoresSafeArea()
+
+            Button {
+                FrameMioHaptics.secondaryAction()
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: FrameMioMetrics.minimumTouchTarget, height: FrameMioMetrics.minimumTouchTarget)
+                    .background(.black.opacity(0.56), in: Circle())
+                    .overlay {
+                        Circle().stroke(.white.opacity(0.18), lineWidth: FrameMioMetrics.borderWidth)
+                    }
+            }
+            .buttonStyle(FrameMioPressButtonStyle())
+            .padding(FrameMioSpacing.lg)
+            .accessibilityLabel("Close \(title) preview")
         }
-        let fileName = URL(fileURLWithPath: value).deletingPathExtension().lastPathComponent
-        if let bundled = Bundle.main.url(forResource: fileName, withExtension: "mp4") {
-            return bundled
+        .background(Color.black)
+        .onAppear {
+            let item = AVPlayerItem(url: url)
+            player.replaceCurrentItem(with: item)
+            player.isMuted = true
+            player.play()
+            endObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime,
+                object: item,
+                queue: .main
+            ) { _ in
+                player.seek(to: .zero)
+                player.play()
+            }
         }
-        guard value.hasPrefix("/") else { return nil }
-        return AppConfiguration.templateDemoBaseURL.appendingPathComponent(String(value.dropFirst()))
+        .onDisappear {
+            if let endObserver {
+                NotificationCenter.default.removeObserver(endObserver)
+                self.endObserver = nil
+            }
+            player.pause()
+            player.replaceCurrentItem(with: nil)
+        }
+        .accessibilityLabel("\(title) fullscreen template demo")
     }
 }
 
@@ -1064,6 +1648,27 @@ private struct InlineTemplatePlayer: UIViewControllerRepresentable {
         controller.showsPlaybackControls = false
         controller.entersFullScreenWhenPlaybackBegins = false
         controller.exitsFullScreenWhenPlaybackEnds = false
+    }
+}
+
+private struct TemplateDemoPlayer: UIViewControllerRepresentable {
+    let player: AVPlayer
+    let showsPlaybackControls: Bool
+    let videoGravity: AVLayerVideoGravity
+
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.player = player
+        controller.showsPlaybackControls = showsPlaybackControls
+        controller.videoGravity = videoGravity
+        controller.view.backgroundColor = .black
+        return controller
+    }
+
+    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
+        controller.player = player
+        controller.showsPlaybackControls = showsPlaybackControls
+        controller.videoGravity = videoGravity
     }
 }
 

@@ -118,6 +118,7 @@ interface ResolvedCaptionStyle {
   fontFamily?: string;
   fontSize: number;
   textColor: string;
+  presentation: 'full_text' | 'word_by_word';
   strokeColor: string;
   strokeWidth: number;
   backgroundEnabled: boolean;
@@ -146,6 +147,7 @@ interface ResolvedTypographyStyle {
 const DEFAULT_CAPTION_STYLE: ResolvedCaptionStyle = {
   fontSize: 44,
   textColor: 'white',
+  presentation: 'full_text',
   strokeColor: 'black',
   strokeWidth: 3,
   backgroundEnabled: true,
@@ -494,10 +496,13 @@ function countLines(value: string): number {
 
 function resolveCaptionStyle(style?: CaptionStyle): ResolvedCaptionStyle {
   const position = style?.position === 'top' || style?.position === 'middle' || style?.position === 'bottom' ? style.position : DEFAULT_CAPTION_STYLE.position;
+  const presentation = style?.presentation === 'word_by_word' ? style.presentation : DEFAULT_CAPTION_STYLE.presentation;
+  const defaultTextColor = presentation === 'word_by_word' ? '0xFFD60A' : DEFAULT_CAPTION_STYLE.textColor;
   return {
     fontFamily: fontFamily(style?.font_family),
-    fontSize: wholeNumber(style?.font_size, DEFAULT_CAPTION_STYLE.fontSize, 12, 96),
-    textColor: ffmpegColor(style?.text_color, DEFAULT_CAPTION_STYLE.textColor),
+    fontSize: wholeNumber(style?.font_size, presentation === 'word_by_word' ? 72 : DEFAULT_CAPTION_STYLE.fontSize, 12, presentation === 'word_by_word' ? 112 : 96),
+    textColor: ffmpegColor(style?.text_color, defaultTextColor),
+    presentation,
     strokeColor: ffmpegColor(style?.stroke_color, DEFAULT_CAPTION_STYLE.strokeColor),
     strokeWidth: wholeNumber(style?.stroke_width, DEFAULT_CAPTION_STYLE.strokeWidth, 0, 12),
     backgroundEnabled: style?.background_enabled ?? DEFAULT_CAPTION_STYLE.backgroundEnabled,
@@ -701,6 +706,25 @@ function captionTiming(caption: StoryCaption, composition: CompositionSpec): {st
   return {startSeconds: (startMs / 1000).toFixed(3), endSeconds: (endMs / 1000).toFixed(3)};
 }
 
+function expandCaptionTextAndTiming(text: string, timing: {startSeconds: string; endSeconds: string}, style: ResolvedCaptionStyle): Array<{text: string; startSeconds: string; endSeconds: string}> {
+  if (style.presentation !== 'word_by_word') {
+    return [{text: normalizeCaptionText(text, style), startSeconds: timing.startSeconds, endSeconds: timing.endSeconds}];
+  }
+  const words = text.trim().replace(/\s+/g, ' ').split(' ').map((word) => word.trim()).filter(Boolean);
+  if (words.length <= 1) {
+    return [{text: words[0] ?? '', startSeconds: timing.startSeconds, endSeconds: timing.endSeconds}];
+  }
+  const start = Number.parseFloat(timing.startSeconds);
+  const end = Number.parseFloat(timing.endSeconds);
+  const duration = Math.max(0.25, end - start);
+  const step = duration / words.length;
+  return words.map((word, index) => ({
+    text: word.toUpperCase(),
+    startSeconds: (start + (step * index)).toFixed(3),
+    endSeconds: (index === words.length - 1 ? end : start + (step * (index + 1))).toFixed(3),
+  }));
+}
+
 function clampNumber(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) {
     return min;
@@ -835,8 +859,8 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
     const captionsDir = path.dirname(outputPath);
     const captionStyle = resolveCaptionStyle(composition.caption_style);
     for (const [index, caption] of composition.captions.entries()) {
-      const text = normalizeCaptionText(caption.text, captionStyle);
-      if (!text) {
+      const sourceText = caption.text.trim().replace(/\s+/g, ' ');
+      if (!sourceText) {
         console.info(JSON.stringify({level: 'info', msg: 'skipping empty caption overlay', project_id: composition.project_id, story_plan_id: composition.story_plan_id, caption_index: index, moment_id: caption.moment_id}));
         continue;
       }
@@ -845,9 +869,14 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
         console.info(JSON.stringify({level: 'info', msg: 'skipping caption overlay with invalid timing', project_id: composition.project_id, story_plan_id: composition.story_plan_id, caption_index: index, moment_id: caption.moment_id, start_ms: caption.start_ms ?? null, end_ms: caption.end_ms ?? null, duration_ms: composition.duration_ms}));
         continue;
       }
-      const textFilePath = path.join(captionsDir, `caption-${index}-${stableHash({text, timing}).slice(0, 12)}.txt`);
-      await writeFile(textFilePath, text, 'utf8');
-      overlays.push({textFilePath, startSeconds: timing.startSeconds, endSeconds: timing.endSeconds});
+      for (const [partIndex, part] of expandCaptionTextAndTiming(sourceText, timing, captionStyle).entries()) {
+        if (!part.text) {
+          continue;
+        }
+        const textFilePath = path.join(captionsDir, `caption-${index}-${partIndex}-${stableHash(part).slice(0, 12)}.txt`);
+        await writeFile(textFilePath, part.text, 'utf8');
+        overlays.push({textFilePath, startSeconds: part.startSeconds, endSeconds: part.endSeconds});
+      }
     }
     return overlays;
   }

@@ -180,13 +180,26 @@ func TestValidateStoryPlanAcceptsCaptionStyle(t *testing.T) {
 	t.Parallel()
 	validator, plan := validStoryPlanFixture(t)
 	plan.CaptionStyle = &models.CaptionStyle{
-		Preset: "cinematic_subtitle", FontFamily: "inter-bold", FontSize: 48, TextColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 4,
+		Preset: "cinematic_subtitle", Presentation: "word_by_word", FontFamily: "inter-bold", FontSize: 48, TextColor: "#FFFFFF", HighlightColor: "#FFD60A", StrokeColor: "#000000", StrokeWidth: 4,
 		BackgroundEnabled: true, BackgroundColor: "#000000", BackgroundOpacity: 0.32, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 32,
 	}
 
 	if err := validator.Validate(context.Background(), "user-1", plan); err != nil {
 		t.Fatalf("validate caption style: %v", err)
 	}
+}
+
+func TestValidateStoryPlanRejectsInvalidCaptionPresentation(t *testing.T) {
+	t.Parallel()
+	validator, plan := validStoryPlanFixture(t)
+	plan.CaptionStyle = &models.CaptionStyle{Preset: "bold_social", Presentation: "raw_css_animation", TextColor: "#FFFFFF"}
+
+	err := validator.Validate(context.Background(), "user-1", plan)
+	validationErr, ok := AsValidationError(err)
+	if !ok {
+		t.Fatalf("expected validation error, got %v", err)
+	}
+	assertFieldError(t, validationErr, "caption_style.presentation", "unsupported_caption_presentation")
 }
 
 func TestValidateStoryPlanAcceptsTypography(t *testing.T) {

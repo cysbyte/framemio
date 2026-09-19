@@ -356,6 +356,9 @@ func (v *Validator) Validate(ctx context.Context, userID string, plan models.Sto
 		if strings.TrimSpace(style.Preset) != "" && !v.allowedCaptionPreset(style.Preset) {
 			problems.Add("caption_style.preset", "unsupported_caption_preset", "caption style preset is unsupported")
 		}
+		if strings.TrimSpace(style.Presentation) != "" && !v.allowedCaptionPresentation(style.Presentation) {
+			problems.Add("caption_style.presentation", "unsupported_caption_presentation", "caption presentation is unsupported")
+		}
 		if strings.TrimSpace(style.FontFamily) != "" && !v.allowedCaptionFont(style.FontFamily) {
 			problems.Add("caption_style.font_family", "unsupported_caption_font", "caption font is unsupported")
 		}
@@ -364,6 +367,9 @@ func (v *Validator) Validate(ctx context.Context, userID string, plan models.Sto
 		}
 		if strings.TrimSpace(style.TextColor) != "" && !isHexColor(style.TextColor) {
 			problems.Add("caption_style.text_color", "invalid_color", "caption text color must be a #RRGGBB color")
+		}
+		if strings.TrimSpace(style.HighlightColor) != "" && !isHexColor(style.HighlightColor) {
+			problems.Add("caption_style.highlight_color", "invalid_color", "caption highlight color must be a #RRGGBB color")
 		}
 		if strings.TrimSpace(style.StrokeColor) != "" && !isHexColor(style.StrokeColor) {
 			problems.Add("caption_style.stroke_color", "invalid_color", "caption stroke color must be a #RRGGBB color")
@@ -629,6 +635,11 @@ func (v *Validator) supportedAspectRatio(aspectRatio string) bool {
 
 func (v *Validator) allowedCaptionPreset(preset string) bool {
 	_, ok := v.config().AllowedCaptionPresets[strings.ToLower(strings.TrimSpace(preset))]
+	return ok
+}
+
+func (v *Validator) allowedCaptionPresentation(presentation string) bool {
+	_, ok := v.config().AllowedCaptionPresentations[strings.ToLower(strings.TrimSpace(presentation))]
 	return ok
 }
 

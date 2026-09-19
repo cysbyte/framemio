@@ -268,6 +268,31 @@ struct HomeView: View {
 
 struct AllStoriesView: View {
     @ObservedObject private var viewModel: HomeViewModel
+    let onCreate: (() -> Void)?
+    let onOpenStory: (Story) -> Void
+
+    init(viewModel: HomeViewModel, onCreate: (() -> Void)? = nil, onOpenStory: @escaping (Story) -> Void) {
+        _viewModel = ObservedObject(wrappedValue: viewModel)
+        self.onCreate = onCreate
+        self.onOpenStory = onOpenStory
+    }
+
+    var body: some View {
+        ScrollView {
+            ProjectsHistoryList(viewModel: viewModel, onCreate: onCreate, onOpenStory: onOpenStory)
+            .padding(.horizontal, FrameMioSpacing.lg)
+            .padding(.top, FrameMioSpacing.lg)
+            .padding(.bottom, FrameMioSpacing.xxxl)
+        }
+        .background(FrameMioColors.canvas.ignoresSafeArea())
+        .navigationTitle("Projects")
+        .navigationBarTitleDisplayMode(.inline)
+        .refreshable { viewModel.load() }
+    }
+}
+
+struct ProjectsHistoryList: View {
+    @ObservedObject private var viewModel: HomeViewModel
     @State private var pageIndex = 0
     @State private var filter: ProjectFilter = .all
     let onCreate: (() -> Void)?
@@ -282,59 +307,50 @@ struct AllStoriesView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
-                SectionHeader(
-                    title: "Projects",
-                    subtitle: pageSubtitle
+        VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
+            SectionHeader(
+                title: "Project History",
+                subtitle: pageSubtitle
+            )
+
+            if shouldShowFilters {
+                projectFilterPicker
+            }
+
+            if filteredStories.isEmpty {
+                EmptyState(
+                    systemImage: "rectangle.stack.badge.play",
+                    title: "No \(filter.title.lowercased()) projects yet",
+                    message: "Create a Story, Promo, or Reel from your photos and footage.",
+                    actionTitle: onCreate == nil ? nil : "Create",
+                    action: onCreate
                 )
-
-                if shouldShowFilters {
-                    projectFilterPicker
-                }
-
-                if filteredStories.isEmpty {
-                    EmptyState(
-                        systemImage: "rectangle.stack.badge.play",
-                        title: "No \(filter.title.lowercased()) projects yet",
-                        message: "Create a Story, Promo, or Reel from your photos and footage.",
-                        actionTitle: onCreate == nil ? nil : "Create",
-                        action: onCreate
-                    )
-                    .frame(maxWidth: .infinity)
-                } else {
-                    LazyVStack(spacing: FrameMioSpacing.md) {
-                        ForEach(pageStories) { story in
-                            StoryCard(
-                                title: story.title,
-                                subtitle: storySubtitle(for: story),
-                                image: viewModel.coverImage(for: story),
-                                isImageLoading: viewModel.isCoverLoading(for: story),
-                                duration: story.duration,
-                                projectType: story.projectType,
-                                lastModified: story.lastModifiedAt,
-                                status: story.status,
-                                action: { onOpenStory(story) }
-                            )
-                        }
+                .frame(maxWidth: .infinity)
+            } else {
+                LazyVStack(spacing: FrameMioSpacing.md) {
+                    ForEach(pageStories) { story in
+                        StoryCard(
+                            title: story.title,
+                            subtitle: storySubtitle(for: story),
+                            image: viewModel.coverImage(for: story),
+                            isImageLoading: viewModel.isCoverLoading(for: story),
+                            duration: story.duration,
+                            projectType: story.projectType,
+                            lastModified: story.lastModifiedAt,
+                            status: story.status,
+                            action: { onOpenStory(story) }
+                        )
                     }
                 }
-
-                if pageCount > 1 {
-                    paginationControls
-                }
             }
-            .padding(.horizontal, FrameMioSpacing.lg)
-            .padding(.top, FrameMioSpacing.lg)
-            .padding(.bottom, FrameMioSpacing.xxxl)
+
+            if pageCount > 1 {
+                paginationControls
+            }
         }
-        .background(FrameMioColors.canvas.ignoresSafeArea())
-        .navigationTitle("Projects")
-        .navigationBarTitleDisplayMode(.inline)
         .task(id: pageIndex) {
             viewModel.loadCovers(for: pageStories)
         }
-        .refreshable { viewModel.load() }
         .onChange(of: viewModel.allStories.count) { _, _ in
             pageIndex = min(pageIndex, max(pageCount - 1, 0))
         }

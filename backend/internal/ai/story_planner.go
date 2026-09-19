@@ -529,9 +529,9 @@ func captionStyleForProject(projectType models.ProjectType, storyType models.Sto
 		}
 	case models.ProjectTypeReel:
 		return &models.CaptionStyle{
-			Preset: "bold_social", FontFamily: "inter-bold", FontSize: 52, TextColor: "#FFFFFF",
+			Preset: "bold_social", Presentation: "word_by_word", FontFamily: "inter-bold", FontSize: 72, TextColor: "#FFD60A", HighlightColor: "#FFFFFF",
 			StrokeColor: "#000000", StrokeWidth: 4, BackgroundEnabled: true, BackgroundColor: "#000000",
-			BackgroundOpacity: 0.32, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 32,
+			BackgroundOpacity: 0.24, Position: "bottom", BottomOffset: 170, MaxLines: 1, MaxCharactersPerLine: 18,
 		}
 	default:
 		return captionStyleFor(storyType, visualStyle)
@@ -551,7 +551,7 @@ func captionStylePresetForProject(preset string, projectType models.ProjectType,
 		}
 	case "playful_pop":
 		return &models.CaptionStyle{
-			Preset: "playful_pop", FontFamily: "inter-bold", FontSize: 56, TextColor: "#FFFFFF", StrokeColor: "#111111", StrokeWidth: 5,
+			Preset: "playful_pop", FontFamily: "inter-bold", FontSize: 56, TextColor: "#FFFFFF", HighlightColor: "#FFD60A", StrokeColor: "#111111", StrokeWidth: 5,
 			BackgroundEnabled: true, BackgroundColor: "#111111", BackgroundOpacity: 0.28, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 28,
 		}
 	case "cinematic_subtitle":
@@ -561,8 +561,8 @@ func captionStylePresetForProject(preset string, projectType models.ProjectType,
 		}
 	case "bold_social":
 		return &models.CaptionStyle{
-			Preset: "bold_social", FontFamily: "inter-bold", FontSize: 52, TextColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 4,
-			BackgroundEnabled: true, BackgroundColor: "#000000", BackgroundOpacity: 0.32, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 32,
+			Preset: "bold_social", Presentation: "word_by_word", FontFamily: "inter-bold", FontSize: 72, TextColor: "#FFD60A", HighlightColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 4,
+			BackgroundEnabled: true, BackgroundColor: "#000000", BackgroundOpacity: 0.24, Position: "bottom", BottomOffset: 170, MaxLines: 1, MaxCharactersPerLine: 18,
 		}
 	default:
 		return captionStyleForProject(projectType, storyType, visualStyle)

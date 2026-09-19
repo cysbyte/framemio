@@ -6,6 +6,7 @@ type Config struct {
 	SchemaVersion               string
 	SupportedAspectRatios       map[string]struct{}
 	AllowedCaptionPresets       map[string]struct{}
+	AllowedCaptionPresentations map[string]struct{}
 	AllowedCaptionFonts         map[string]struct{}
 	AllowedTransitions          map[string]struct{}
 	AllowedCropIntents          map[string]struct{}
@@ -59,6 +60,10 @@ func DefaultConfig() Config {
 			"cinematic_subtitle": {},
 			"clean_minimal":      {},
 			"playful_pop":        {},
+		},
+		AllowedCaptionPresentations: map[string]struct{}{
+			"full_text":    {},
+			"word_by_word": {},
 		},
 		AllowedCaptionFonts: map[string]struct{}{
 			"inter":          {},

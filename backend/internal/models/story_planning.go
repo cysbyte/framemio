@@ -170,9 +170,11 @@ type StoryCaption struct {
 
 type CaptionStyle struct {
 	Preset               string  `json:"preset,omitempty"`
+	Presentation         string  `json:"presentation,omitempty"`
 	FontFamily           string  `json:"font_family,omitempty"`
 	FontSize             int     `json:"font_size,omitempty"`
 	TextColor            string  `json:"text_color,omitempty"`
+	HighlightColor       string  `json:"highlight_color,omitempty"`
 	StrokeColor          string  `json:"stroke_color,omitempty"`
 	StrokeWidth          int     `json:"stroke_width,omitempty"`
 	BackgroundEnabled    bool    `json:"background_enabled,omitempty"`

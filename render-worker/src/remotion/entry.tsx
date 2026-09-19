@@ -33,6 +33,7 @@ const typographyPresets = {
 const captionDefaults = {
   fontSize: 44,
   textColor: '#FFFFFF',
+  socialTextColor: '#FFD60A',
   strokeColor: '#000000',
   strokeWidth: 3,
   backgroundColor: 'rgba(0,0,0,0.32)',
@@ -239,14 +240,42 @@ const CaptionLayer: React.FC<{caption: StoryCaption; styleSpec?: CaptionStyle; f
   if (!text) {
     return null;
   }
-  const fontSize = clamp(styleSpec?.font_size ?? captionDefaults.fontSize, 20, 88);
+  const presentation = captionPresentation(styleSpec);
+  const displayText = presentation === 'word_by_word' ? activeCaptionWord(text, frame, start, end) : text;
+  if (!displayText) {
+    return null;
+  }
+  const fontSize = clamp(styleSpec?.font_size ?? captionDefaults.fontSize, 20, presentation === 'word_by_word' ? 112 : 88);
   const bottom = clamp(styleSpec?.bottom_offset ?? captionDefaults.bottomOffset, 40, 420);
+  const color = styleSpec?.text_color ?? (presentation === 'word_by_word' ? captionDefaults.socialTextColor : captionDefaults.textColor);
+  const maxWidth = presentation === 'word_by_word' ? '92%' : `${captionDefaults.maxWidth * 100}%`;
+  const horizontalPadding = presentation === 'word_by_word' ? '10px 20px' : '12px 22px';
   return (
     <AbsoluteFill style={{justifyContent: 'flex-end', alignItems: 'center', paddingBottom: bottom, pointerEvents: 'none'}}>
-      <div style={{maxWidth: `${captionDefaults.maxWidth * 100}%`, padding: '12px 22px', borderRadius: 16, background: styleSpec?.background_enabled === false ? 'transparent' : captionDefaults.backgroundColor, color: styleSpec?.text_color ?? captionDefaults.textColor, fontFamily: 'Liberation Sans, Arial, sans-serif', fontSize, fontWeight: 700, lineHeight: 1.12, textAlign: 'center', WebkitTextStroke: `${clamp(styleSpec?.stroke_width ?? captionDefaults.strokeWidth, 0, 8)}px ${styleSpec?.stroke_color ?? captionDefaults.strokeColor}`, textShadow: '0 3px 12px rgba(0,0,0,0.55)'}}>{text}</div>
+      <div style={{maxWidth, padding: horizontalPadding, borderRadius: 16, background: styleSpec?.background_enabled === false ? 'transparent' : captionDefaults.backgroundColor, color, fontFamily: 'Liberation Sans, Arial, sans-serif', fontSize, fontWeight: 800, lineHeight: 1.02, textAlign: 'center', textTransform: presentation === 'word_by_word' ? 'uppercase' : 'none', WebkitTextStroke: `${clamp(styleSpec?.stroke_width ?? captionDefaults.strokeWidth, 0, 8)}px ${styleSpec?.stroke_color ?? captionDefaults.strokeColor}`, textShadow: '0 3px 12px rgba(0,0,0,0.55)'}}>{displayText}</div>
     </AbsoluteFill>
   );
 };
+
+function captionPresentation(styleSpec?: CaptionStyle): 'full_text' | 'word_by_word' {
+  const value = styleSpec?.presentation;
+  if (value === 'word_by_word') {
+    return value;
+  }
+  return 'full_text';
+}
+
+function activeCaptionWord(text: string, frame: number, startFrame: number, endFrame: number): string {
+  const words = text.split(/\s+/).map((word) => word.trim()).filter(Boolean);
+  if (words.length === 0) {
+    return '';
+  }
+  if (words.length === 1 || endFrame <= startFrame) {
+    return words[0];
+  }
+  const progress = clamp((frame - startFrame) / Math.max(1, endFrame - startFrame), 0, 0.999999);
+  return words[Math.min(words.length - 1, Math.floor(progress * words.length))] ?? words[0];
+}
 
 const BrandLayer: React.FC<{composition: CompositionSpec}> = ({composition}) => {
   const maybeBrand = composition.branding;
