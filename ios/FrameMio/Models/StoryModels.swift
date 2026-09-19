@@ -361,6 +361,31 @@ struct VideoProjectDraft: Codable, Hashable, Sendable {
         VideoProjectDraft(type: .reel, context: .specialMoments, storyOptions: .automatic, promo: nil, reel: configuration, templateID: nil, templateVersion: nil, templateConfiguration: nil)
     }
 
+    static func fromTemplate(_ template: VideoTemplate, projectType: VideoProjectType) -> VideoProjectDraft {
+        var draft: VideoProjectDraft
+        switch projectType {
+        case .story:
+            draft = .story()
+            var options = draft.storyOptions
+            if let visualStyle = template.defaults.visualStyle {
+                options.style = visualStyle
+            }
+            options.subtitlesEnabled = template.defaults.captionsEnabled
+            options.subtitleStyle = template.defaults.captionStyle
+            options.sceneDetailStyle = template.defaults.sceneDetail
+            options.targetDuration = template.defaults.durationSeconds.map(TimeInterval.init)
+            draft.storyOptions = options
+        case .promo:
+            draft = .promo()
+        case .reel:
+            draft = .reel()
+        }
+        draft.templateID = template.id
+        draft.templateVersion = template.version
+        draft.templateConfiguration = template.defaults
+        return draft
+    }
+
     var prompt: String? {
         switch type {
         case .story:
@@ -441,60 +466,24 @@ struct VideoTemplate: Codable, Hashable, Identifiable, Sendable {
     }
 
     static let localFallbackCatalog: [VideoTemplate] = [
-        VideoTemplate(
-            id: "full-screen-cinematic-cutaways", version: 1, name: "Cinematic cutaways",
-            description: "Let each supporting moment take the full frame.",
-            demoVideoPath: "/videos/templates/full-screen-cinematic-cutaways.mp4",
-            supportedProjectTypes: [.story, .promo, .reel],
-            defaults: VideoTemplateConfiguration(aspectRatio: "9:16", durationSeconds: 30, visualStyle: "cinematic", captionsEnabled: true, captionStyle: "cinematic_subtitle", sceneDetail: "balanced", layout: "full_frame"),
-            editableOptions: ["duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail"],
-            mediaSlots: [], plannerGuidance: "", rendererCapabilities: ["full_frame_media", "fade"]
-        ),
-        VideoTemplate(
-            id: "photo-over-video", version: 1, name: "Photo over video",
-            description: "Keep the video moving while a supporting photo appears above it.",
-            demoVideoPath: "/videos/templates/photo-over-video.mp4",
-            supportedProjectTypes: [.story, .promo, .reel],
-            defaults: VideoTemplateConfiguration(aspectRatio: "9:16", durationSeconds: 30, visualStyle: "cinematic", captionsEnabled: true, captionStyle: "cinematic_subtitle", sceneDetail: "balanced", layout: "picture_in_picture", overlayPlacement: "bottom_right", overlaySize: "medium", overlayOpacity: 1, overlayFrame: "subtle", overlayAnimation: "fade"),
-            editableOptions: ["duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail", "overlay_placement", "overlay_size", "overlay_opacity", "overlay_frame", "overlay_animation"],
-            mediaSlots: [], plannerGuidance: "", rendererCapabilities: ["full_frame_media", "picture_in_picture", "placement", "bounded_size", "opacity", "frame", "fade"]
-        ),
-        VideoTemplate(
-            id: "picture-in-picture", version: 1, name: "Picture in picture",
-            description: "Layer a secondary moment over the main video like a small memory window.",
-            demoVideoPath: "/videos/templates/picture-in-picture.mp4",
-            supportedProjectTypes: [.story, .promo, .reel],
-            defaults: VideoTemplateConfiguration(aspectRatio: "9:16", durationSeconds: 30, visualStyle: "warm", captionsEnabled: true, captionStyle: "clean_minimal", sceneDetail: "more", layout: "picture_in_picture", overlayPlacement: "top_right", overlaySize: "small", overlayOpacity: 1, overlayFrame: "subtle", overlayAnimation: "subtle_scale"),
-            editableOptions: ["duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail", "overlay_placement", "overlay_size", "overlay_opacity", "overlay_frame", "overlay_animation"],
-            mediaSlots: [], plannerGuidance: "", rendererCapabilities: ["picture_in_picture", "placement", "bounded_size", "opacity", "frame", "fade", "subtle_scale"]
-        ),
-        VideoTemplate(
-            id: "split-screen-memory", version: 1, name: "Split screen",
-            description: "Show two related moments together in a balanced frame.",
-            demoVideoPath: "/videos/templates/split-screen-memory.mp4",
-            supportedProjectTypes: [.promo, .reel],
-            defaults: VideoTemplateConfiguration(aspectRatio: "9:16", durationSeconds: 30, visualStyle: "minimal", captionsEnabled: false, captionStyle: "clean_minimal", sceneDetail: "balanced", layout: "split_screen", overlayPlacement: "right", overlaySize: "half", overlayOpacity: 1, overlayFrame: "none", overlayAnimation: "none"),
-            editableOptions: ["duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail"],
-            mediaSlots: [], plannerGuidance: "", rendererCapabilities: ["split_screen", "placement", "bounded_size"]
-        ),
-        VideoTemplate(
-            id: "talking-head-supporting-images", version: 1, name: "Talking head with images",
-            description: "Keep the speaker present while relevant photos support what they say.",
-            demoVideoPath: "/videos/templates/talking-head-supporting-images.mp4",
-            supportedProjectTypes: [.promo, .reel],
-            defaults: VideoTemplateConfiguration(aspectRatio: "9:16", durationSeconds: 30, visualStyle: "minimal", captionsEnabled: true, captionStyle: "bold_social", sceneDetail: "more", layout: "picture_in_picture", overlayPlacement: "bottom_left", overlaySize: "medium", overlayOpacity: 1, overlayFrame: "subtle", overlayAnimation: "fade"),
-            editableOptions: ["duration_seconds", "visual_style", "captions_enabled", "caption_style", "scene_detail", "overlay_placement", "overlay_size", "overlay_frame", "overlay_animation"],
-            mediaSlots: [], plannerGuidance: "", rendererCapabilities: ["picture_in_picture", "placement", "bounded_size", "frame", "fade"]
-        ),
-        VideoTemplate(
-            id: "fast-montage", version: 1, name: "Fast montage",
-            description: "Build a lively sequence of short, high-energy moments.",
-            demoVideoPath: "/videos/templates/fast-montage.mp4",
-            supportedProjectTypes: [.promo, .reel],
-            defaults: VideoTemplateConfiguration(aspectRatio: "9:16", durationSeconds: 15, visualStyle: "playful", captionsEnabled: true, captionStyle: "bold_social", sceneDetail: "more", layout: "montage", overlayPlacement: "center", overlaySize: "large", overlayOpacity: 1, overlayFrame: "none", overlayAnimation: "none"),
-            editableOptions: ["duration_seconds", "visual_style", "captions_enabled", "caption_style", "scene_detail"],
-            mediaSlots: [], plannerGuidance: "", rendererCapabilities: ["full_frame_media", "cut"]
-        ),
+        .fallbackFullFrame(id: "full-screen-cinematic-cutaways", type: .story, name: "Cinematic cutaways", description: "Let each supporting moment take the full frame.", demo: "/videos/templates/full-screen-cinematic-cutaways.mp4", duration: 30, style: "cinematic", captions: true, captionStyle: "cinematic_subtitle", sceneDetail: "balanced"),
+        .fallbackPIP(id: "photo-over-video", type: .story, name: "Photo over video", description: "Keep the video moving while a supporting photo appears above it.", demo: "/videos/templates/photo-over-video.mp4", duration: 30, style: "cinematic", captions: true, captionStyle: "cinematic_subtitle", sceneDetail: "balanced", placement: "bottom_right", size: "medium", animation: "fade"),
+        .fallbackPIP(id: "picture-in-picture", type: .story, name: "Picture in picture", description: "Layer a secondary moment over the main video like a small memory window.", demo: "/videos/templates/picture-in-picture.mp4", duration: 30, style: "warm", captions: true, captionStyle: "clean_minimal", sceneDetail: "more", placement: "top_right", size: "small", animation: "subtle_scale"),
+        .fallbackFullFrame(id: "warm-memory-recap", type: .story, name: "Warm memory recap", description: "A gentle story with soft pacing and warm full-frame moments.", demo: "/videos/templates/warm-memory-recap.mp4", duration: 30, style: "warm", captions: true, captionStyle: "clean_minimal", sceneDetail: "balanced"),
+        .fallbackPIP(id: "caption-led-memory", type: .story, name: "Caption-led memory", description: "A readable story where captions carry the emotional thread.", demo: "/videos/templates/caption-led-memory.mp4", duration: 30, style: "minimal", captions: true, captionStyle: "bold_social", sceneDetail: "more", placement: "bottom_left", size: "medium", animation: "fade"),
+        .fallbackMontage(id: "quick-family-recap", type: .story, name: "Quick family recap", description: "A short upbeat memory built from several quick moments.", demo: "/videos/templates/quick-family-recap.mp4", duration: 15, style: "playful", captions: true, captionStyle: "bold_social", sceneDetail: "more"),
+        .fallbackFullFrame(id: "product-spotlight", type: .promo, name: "Product spotlight", description: "A clean promo that keeps the product or offer full frame.", demo: "/videos/templates/product-spotlight.mp4", duration: 30, style: "elegant", captions: true, captionStyle: "clean_minimal", sceneDetail: "balanced"),
+        .fallbackPIP(id: "app-demo-overlay", type: .promo, name: "App demo overlay", description: "Show a supporting screen or image above a continuing product video.", demo: "/videos/templates/app-demo-overlay.mp4", duration: 30, style: "minimal", captions: true, captionStyle: "clean_minimal", sceneDetail: "more", placement: "bottom_right", size: "medium", animation: "fade"),
+        .fallbackPIP(id: "testimonial-with-images", type: .promo, name: "Testimonial with images", description: "Keep the speaker or main clip present while proof images appear.", demo: "/videos/templates/testimonial-with-images.mp4", duration: 30, style: "minimal", captions: true, captionStyle: "bold_social", sceneDetail: "more", placement: "bottom_left", size: "medium", animation: "fade"),
+        .fallbackSplit(id: "split-screen-offer", type: .promo, name: "Split-screen offer", description: "Compare two product moments in a balanced promotional frame.", demo: "/videos/templates/split-screen-offer.mp4", duration: 30, style: "minimal", captions: false, captionStyle: "clean_minimal", sceneDetail: "balanced"),
+        .fallbackMontage(id: "fast-social-ad", type: .promo, name: "Fast social ad", description: "A high-energy promo sequence for quick attention.", demo: "/videos/templates/fast-social-ad.mp4", duration: 15, style: "playful", captions: true, captionStyle: "bold_social", sceneDetail: "more"),
+        .fallbackFullFrame(id: "premium-brand-story", type: .promo, name: "Premium brand story", description: "A polished brand edit with calm full-frame visuals.", demo: "/videos/templates/premium-brand-story.mp4", duration: 30, style: "elegant", captions: true, captionStyle: "cinematic_subtitle", sceneDetail: "balanced"),
+        .fallbackMontage(id: "fast-montage", type: .reel, name: "Fast montage", description: "Build a lively sequence of short, high-energy moments.", demo: "/videos/templates/fast-montage.mp4", duration: 15, style: "playful", captions: true, captionStyle: "bold_social", sceneDetail: "more"),
+        .fallbackPIP(id: "reel-picture-in-picture", type: .reel, name: "Reel picture-in-picture", description: "Layer a secondary moment over the main vertical clip.", demo: "/videos/templates/reel-picture-in-picture.mp4", duration: 15, style: "cinematic", captions: true, captionStyle: "bold_social", sceneDetail: "more", placement: "top_right", size: "small", animation: "subtle_scale"),
+        .fallbackSplit(id: "before-after-split", type: .reel, name: "Before/after split", description: "Show two related moments side by side for comparison.", demo: "/videos/templates/before-after-split.mp4", duration: 15, style: "minimal", captions: true, captionStyle: "bold_social", sceneDetail: "balanced"),
+        .fallbackFullFrame(id: "cinematic-reel-cutaways", type: .reel, name: "Cinematic reel cutaways", description: "A vertical reel with full-frame cinematic inserts.", demo: "/videos/templates/cinematic-reel-cutaways.mp4", duration: 30, style: "cinematic", captions: true, captionStyle: "cinematic_subtitle", sceneDetail: "balanced"),
+        .fallbackPIP(id: "talking-head-reel", type: .reel, name: "Talking-head reel", description: "Keep the speaker present while supporting visuals appear.", demo: "/videos/templates/talking-head-reel.mp4", duration: 30, style: "minimal", captions: true, captionStyle: "bold_social", sceneDetail: "more", placement: "bottom_right", size: "medium", animation: "fade"),
+        .fallbackMontage(id: "travel-highlight-reel", type: .reel, name: "Travel highlight reel", description: "A bright vertical recap built from quick place and people moments.", demo: "/videos/templates/travel-highlight-reel.mp4", duration: 15, style: "warm", captions: true, captionStyle: "bold_social", sceneDetail: "more"),
     ]
 
     init(
@@ -521,6 +510,38 @@ struct VideoTemplate: Codable, Hashable, Identifiable, Sendable {
         self.mediaSlots = mediaSlots
         self.plannerGuidance = plannerGuidance
         self.rendererCapabilities = rendererCapabilities
+    }
+
+    private static func fallbackFullFrame(id: String, type: VideoProjectType, name: String, description: String, demo: String, duration: Int, style: String, captions: Bool, captionStyle: String, sceneDetail: String) -> VideoTemplate {
+        fallbackTemplate(id: id, type: type, name: name, description: description, demo: demo, duration: duration, style: style, captions: captions, captionStyle: captionStyle, sceneDetail: sceneDetail, layout: "full_frame", placement: "center", size: "large", frame: "none", animation: "fade", editableOptions: ["duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail"], rendererCapabilities: ["full_frame_media", "fade"])
+    }
+
+    private static func fallbackPIP(id: String, type: VideoProjectType, name: String, description: String, demo: String, duration: Int, style: String, captions: Bool, captionStyle: String, sceneDetail: String, placement: String, size: String, animation: String) -> VideoTemplate {
+        fallbackTemplate(id: id, type: type, name: name, description: description, demo: demo, duration: duration, style: style, captions: captions, captionStyle: captionStyle, sceneDetail: sceneDetail, layout: "picture_in_picture", placement: placement, size: size, frame: "subtle", animation: animation, editableOptions: ["duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail", "overlay_placement", "overlay_size", "overlay_opacity", "overlay_frame", "overlay_animation"], rendererCapabilities: ["full_frame_media", "picture_in_picture", "placement", "bounded_size", "opacity", "frame", "fade", "subtle_scale"])
+    }
+
+    private static func fallbackSplit(id: String, type: VideoProjectType, name: String, description: String, demo: String, duration: Int, style: String, captions: Bool, captionStyle: String, sceneDetail: String) -> VideoTemplate {
+        fallbackTemplate(id: id, type: type, name: name, description: description, demo: demo, duration: duration, style: style, captions: captions, captionStyle: captionStyle, sceneDetail: sceneDetail, layout: "split_screen", placement: "right", size: "half", frame: "none", animation: "none", editableOptions: ["duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail"], rendererCapabilities: ["full_frame_media", "split_screen", "placement", "bounded_size"])
+    }
+
+    private static func fallbackMontage(id: String, type: VideoProjectType, name: String, description: String, demo: String, duration: Int, style: String, captions: Bool, captionStyle: String, sceneDetail: String) -> VideoTemplate {
+        fallbackTemplate(id: id, type: type, name: name, description: description, demo: demo, duration: duration, style: style, captions: captions, captionStyle: captionStyle, sceneDetail: sceneDetail, layout: "montage", placement: "center", size: "large", frame: "none", animation: "none", editableOptions: ["duration_seconds", "visual_style", "captions_enabled", "caption_style", "scene_detail"], rendererCapabilities: ["full_frame_media", "cut"])
+    }
+
+    private static func fallbackTemplate(id: String, type: VideoProjectType, name: String, description: String, demo: String, duration: Int, style: String, captions: Bool, captionStyle: String, sceneDetail: String, layout: String, placement: String, size: String, frame: String, animation: String, editableOptions: [String], rendererCapabilities: [String]) -> VideoTemplate {
+        VideoTemplate(
+            id: id,
+            version: 1,
+            name: name,
+            description: description,
+            demoVideoPath: demo,
+            supportedProjectTypes: [type],
+            defaults: VideoTemplateConfiguration(aspectRatio: "9:16", durationSeconds: duration, visualStyle: style, captionsEnabled: captions, captionStyle: captionStyle, sceneDetail: sceneDetail, layout: layout, overlayPlacement: placement, overlaySize: size, overlayOpacity: 1, overlayFrame: frame, overlayAnimation: animation),
+            editableOptions: editableOptions,
+            mediaSlots: [],
+            plannerGuidance: "",
+            rendererCapabilities: rendererCapabilities
+        )
     }
 }
 

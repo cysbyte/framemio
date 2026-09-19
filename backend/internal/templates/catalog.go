@@ -8,122 +8,56 @@ import (
 )
 
 var catalog = []models.VideoTemplate{
-	{
-		ID:                    "full-screen-cinematic-cutaways",
-		Version:               1,
-		Name:                  "Cinematic cutaways",
-		Description:           "Let each supporting moment take the full frame.",
-		DemoVideoPath:         "/videos/templates/full-screen-cinematic-cutaways.mp4",
-		SupportedProjectTypes: []models.ProjectType{models.ProjectTypeStory, models.ProjectTypePromo, models.ProjectTypeReel},
+	fullFrameTemplate("full-screen-cinematic-cutaways", models.ProjectTypeStory, "Cinematic cutaways", "Let each supporting moment take the full frame.", "/videos/templates/full-screen-cinematic-cutaways.mp4", 30, models.VisualStyleCinematic, true, "cinematic_subtitle", "balanced", "Use relevant supporting media as full-frame cutaways while preserving the primary story audio."),
+	pipTemplate("photo-over-video", models.ProjectTypeStory, "Photo over video", "Keep the video moving while a supporting photo appears above it.", "/videos/templates/photo-over-video.mp4", 30, models.VisualStyleCinematic, true, "cinematic_subtitle", "balanced", models.VideoTemplatePlacementBottomRight, models.VideoTemplateSizeMedium, models.VideoTemplateAnimationFade, "Prefer one strong base video and one semantically related supporting photo. The base video must continue playing underneath the photo."),
+	pipTemplate("picture-in-picture", models.ProjectTypeStory, "Picture in picture", "Layer a secondary moment over the main video like a small memory window.", "/videos/templates/picture-in-picture.mp4", 30, models.VisualStyleWarm, true, "clean_minimal", "more", models.VideoTemplatePlacementTopRight, models.VideoTemplateSizeSmall, models.VideoTemplateAnimationSubtleScale, "Use a visually distinct supporting moment in a small secondary window over the strongest base scene."),
+	fullFrameTemplate("warm-memory-recap", models.ProjectTypeStory, "Warm memory recap", "A gentle story with soft pacing and warm full-frame moments.", "/videos/templates/warm-memory-recap.mp4", 30, models.VisualStyleWarm, true, "clean_minimal", "balanced", "Favor emotionally connected moments, warm crops, and gentle full-frame cutaways."),
+	pipTemplate("caption-led-memory", models.ProjectTypeStory, "Caption-led memory", "A readable story where captions carry the emotional thread.", "/videos/templates/caption-led-memory.mp4", 30, models.VisualStyleMinimal, true, "bold_social", "more", models.VideoTemplatePlacementBottomLeft, models.VideoTemplateSizeMedium, models.VideoTemplateAnimationFade, "Use overlays sparingly and keep captions readable while selecting supporting images that reinforce the narration."),
+	montageTemplate("quick-family-recap", models.ProjectTypeStory, "Quick family recap", "A short upbeat memory built from several quick moments.", "/videos/templates/quick-family-recap.mp4", 15, models.VisualStylePlayful, true, "bold_social", "more", "Favor a concise sequence of distinct family or everyday moments with quick cuts."),
+
+	fullFrameTemplate("product-spotlight", models.ProjectTypePromo, "Product spotlight", "A clean promo that keeps the product or offer full frame.", "/videos/templates/product-spotlight.mp4", 30, models.VisualStyleElegant, true, "clean_minimal", "balanced", "Lead with the strongest product or offer visuals and use full-frame supporting scenes."),
+	pipTemplate("app-demo-overlay", models.ProjectTypePromo, "App demo overlay", "Show a supporting screen or image above a continuing product video.", "/videos/templates/app-demo-overlay.mp4", 30, models.VisualStyleMinimal, true, "clean_minimal", "more", models.VideoTemplatePlacementBottomRight, models.VideoTemplateSizeMedium, models.VideoTemplateAnimationFade, "Use a clear base video and overlay related product screenshots or proof points without blocking the main action."),
+	pipTemplate("testimonial-with-images", models.ProjectTypePromo, "Testimonial with images", "Keep the speaker or main clip present while proof images appear.", "/videos/templates/testimonial-with-images.mp4", 30, models.VisualStyleMinimal, true, "bold_social", "more", models.VideoTemplatePlacementBottomLeft, models.VideoTemplateSizeMedium, models.VideoTemplateAnimationFade, "Use transcript or prompt context to place supporting proof images while keeping the subject visible."),
+	splitTemplate("split-screen-offer", models.ProjectTypePromo, "Split-screen offer", "Compare two product moments in a balanced promotional frame.", "/videos/templates/split-screen-offer.mp4", 30, models.VisualStyleMinimal, false, "clean_minimal", "balanced", "Pair complementary product or offer visuals and keep the secondary panel at half width."),
+	montageTemplate("fast-social-ad", models.ProjectTypePromo, "Fast social ad", "A high-energy promo sequence for quick attention.", "/videos/templates/fast-social-ad.mp4", 15, models.VisualStylePlayful, true, "bold_social", "more", "Favor several distinct promotional moments with short durations and direct visual pacing."),
+	fullFrameTemplate("premium-brand-story", models.ProjectTypePromo, "Premium brand story", "A polished brand edit with calm full-frame visuals.", "/videos/templates/premium-brand-story.mp4", 30, models.VisualStyleElegant, true, "cinematic_subtitle", "balanced", "Use elegant full-frame scenes, slower pacing, and clear brand-oriented visual progression."),
+
+	montageTemplate("fast-montage", models.ProjectTypeReel, "Fast montage", "Build a lively sequence of short, high-energy moments.", "/videos/templates/fast-montage.mp4", 15, models.VisualStylePlayful, true, "bold_social", "more", "Favor several distinct high-quality moments with short durations and cut transitions."),
+	pipTemplate("reel-picture-in-picture", models.ProjectTypeReel, "Reel picture-in-picture", "Layer a secondary moment over the main vertical clip.", "/videos/templates/reel-picture-in-picture.mp4", 15, models.VisualStyleCinematic, true, "bold_social", "more", models.VideoTemplatePlacementTopRight, models.VideoTemplateSizeSmall, models.VideoTemplateAnimationSubtleScale, "Use a strong vertical base clip and a visually distinct supporting moment as a compact overlay."),
+	splitTemplate("before-after-split", models.ProjectTypeReel, "Before/after split", "Show two related moments side by side for comparison.", "/videos/templates/before-after-split.mp4", 15, models.VisualStyleMinimal, true, "bold_social", "balanced", "Pair before/after or contrast moments and maintain a clear half-frame comparison."),
+	fullFrameTemplate("cinematic-reel-cutaways", models.ProjectTypeReel, "Cinematic reel cutaways", "A vertical reel with full-frame cinematic inserts.", "/videos/templates/cinematic-reel-cutaways.mp4", 30, models.VisualStyleCinematic, true, "cinematic_subtitle", "balanced", "Use punchy full-frame cutaways while maintaining short-form pacing."),
+	pipTemplate("talking-head-reel", models.ProjectTypeReel, "Talking-head reel", "Keep the speaker present while supporting visuals appear.", "/videos/templates/talking-head-reel.mp4", 30, models.VisualStyleMinimal, true, "bold_social", "more", models.VideoTemplatePlacementBottomRight, models.VideoTemplateSizeMedium, models.VideoTemplateAnimationFade, "Use transcript timing to place supporting visuals without obscuring the speaker or captions."),
+	montageTemplate("travel-highlight-reel", models.ProjectTypeReel, "Travel highlight reel", "A bright vertical recap built from quick place and people moments.", "/videos/templates/travel-highlight-reel.mp4", 15, models.VisualStyleWarm, true, "bold_social", "more", "Favor varied travel or activity clips with quick pacing and readable captions."),
+}
+
+func fullFrameTemplate(id string, projectType models.ProjectType, name, description, demoPath string, duration int, style models.VisualStyle, captions bool, captionStyle, sceneDetail, guidance string) models.VideoTemplate {
+	return baseTemplate(id, projectType, name, description, demoPath, duration, style, captions, captionStyle, sceneDetail, models.VideoTemplateLayoutFullFrame, models.VideoTemplatePlacementCenter, models.VideoTemplateSizeLarge, models.VideoTemplateFrameNone, models.VideoTemplateAnimationFade, []string{"duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail"}, []models.VideoTemplateMediaSlot{{ID: "cutaways", Role: "supporting_cutaways", MediaTypes: []models.MediaType{models.MediaTypePhoto, models.MediaTypeVideo}, Required: false, Presentation: models.VideoTemplateLayoutFullFrame}}, guidance, []string{"full_frame_media", "fade"})
+}
+
+func pipTemplate(id string, projectType models.ProjectType, name, description, demoPath string, duration int, style models.VisualStyle, captions bool, captionStyle, sceneDetail string, placement models.VideoTemplatePlacement, size models.VideoTemplateSize, animation models.VideoTemplateAnimation, guidance string) models.VideoTemplate {
+	return baseTemplate(id, projectType, name, description, demoPath, duration, style, captions, captionStyle, sceneDetail, models.VideoTemplateLayoutPictureInPicture, placement, size, models.VideoTemplateFrameSubtle, animation, []string{"duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail", "overlay_placement", "overlay_size", "overlay_opacity", "overlay_frame", "overlay_animation"}, []models.VideoTemplateMediaSlot{
+		{ID: "base_video", Role: "primary_video", MediaTypes: []models.MediaType{models.MediaTypeVideo}, Required: true, Presentation: models.VideoTemplateLayoutFullFrame},
+		{ID: "overlay_media", Role: "supporting_media", MediaTypes: []models.MediaType{models.MediaTypePhoto, models.MediaTypeLivePhoto, models.MediaTypeVideo}, Required: true, Presentation: models.VideoTemplateLayoutPictureInPicture, AllowedPlacements: []models.VideoTemplatePlacement{models.VideoTemplatePlacementTopLeft, models.VideoTemplatePlacementTopRight, models.VideoTemplatePlacementBottomLeft, models.VideoTemplatePlacementBottomRight, models.VideoTemplatePlacementCenter}, AllowedSizes: []models.VideoTemplateSize{models.VideoTemplateSizeSmall, models.VideoTemplateSizeMedium, models.VideoTemplateSizeLarge}},
+	}, guidance, []string{"full_frame_media", "picture_in_picture", "placement", "bounded_size", "opacity", "frame", "fade", "subtle_scale"})
+}
+
+func splitTemplate(id string, projectType models.ProjectType, name, description, demoPath string, duration int, style models.VisualStyle, captions bool, captionStyle, sceneDetail, guidance string) models.VideoTemplate {
+	return baseTemplate(id, projectType, name, description, demoPath, duration, style, captions, captionStyle, sceneDetail, models.VideoTemplateLayoutSplitScreen, models.VideoTemplatePlacementRight, models.VideoTemplateSizeHalf, models.VideoTemplateFrameNone, models.VideoTemplateAnimationNone, []string{"duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail"}, []models.VideoTemplateMediaSlot{{ID: "secondary_panel", Role: "paired_media", MediaTypes: []models.MediaType{models.MediaTypePhoto, models.MediaTypeVideo}, Required: true, Presentation: models.VideoTemplateLayoutSplitScreen, AllowedPlacements: []models.VideoTemplatePlacement{models.VideoTemplatePlacementLeft, models.VideoTemplatePlacementRight}, AllowedSizes: []models.VideoTemplateSize{models.VideoTemplateSizeHalf}}}, guidance, []string{"full_frame_media", "split_screen", "placement", "bounded_size"})
+}
+
+func montageTemplate(id string, projectType models.ProjectType, name, description, demoPath string, duration int, style models.VisualStyle, captions bool, captionStyle, sceneDetail, guidance string) models.VideoTemplate {
+	return baseTemplate(id, projectType, name, description, demoPath, duration, style, captions, captionStyle, sceneDetail, models.VideoTemplateLayoutMontage, models.VideoTemplatePlacementCenter, models.VideoTemplateSizeLarge, models.VideoTemplateFrameNone, models.VideoTemplateAnimationNone, []string{"duration_seconds", "visual_style", "captions_enabled", "caption_style", "scene_detail"}, []models.VideoTemplateMediaSlot{{ID: "montage_moments", Role: "rapid_sequence", MediaTypes: []models.MediaType{models.MediaTypePhoto, models.MediaTypeVideo}, Required: true, Presentation: models.VideoTemplateLayoutMontage}}, guidance, []string{"full_frame_media", "cut"})
+}
+
+func baseTemplate(id string, projectType models.ProjectType, name, description, demoPath string, duration int, style models.VisualStyle, captions bool, captionStyle, sceneDetail string, layout models.VideoTemplateLayout, placement models.VideoTemplatePlacement, size models.VideoTemplateSize, frame models.VideoTemplateFrame, animation models.VideoTemplateAnimation, editable []string, slots []models.VideoTemplateMediaSlot, guidance string, capabilities []string) models.VideoTemplate {
+	return models.VideoTemplate{
+		ID: id, Version: 1, Name: name, Description: description, DemoVideoPath: demoPath, SupportedProjectTypes: []models.ProjectType{projectType},
 		Defaults: models.VideoTemplateConfiguration{
-			AspectRatio: "9:16", DurationSeconds: 30, VisualStyle: models.VisualStyleCinematic,
-			CaptionsEnabled: boolPtr(true), CaptionStyle: "cinematic_subtitle", SceneDetail: "balanced", Layout: models.VideoTemplateLayoutFullFrame,
-			OverlayPlacement: models.VideoTemplatePlacementCenter, OverlaySize: models.VideoTemplateSizeLarge,
-			OverlayOpacity: 1, OverlayFrame: models.VideoTemplateFrameNone, OverlayAnimation: models.VideoTemplateAnimationFade,
+			AspectRatio: "9:16", DurationSeconds: duration, VisualStyle: style, CaptionsEnabled: boolPtr(captions), CaptionStyle: captionStyle, SceneDetail: sceneDetail,
+			Layout: layout, OverlayPlacement: placement, OverlaySize: size, OverlayOpacity: 1, OverlayFrame: frame, OverlayAnimation: animation,
 		},
-		EditableOptions:      []string{"duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail"},
-		MediaSlots:           []models.VideoTemplateMediaSlot{{ID: "cutaways", Role: "supporting_cutaways", MediaTypes: []models.MediaType{models.MediaTypePhoto, models.MediaTypeVideo}, Required: false, Presentation: models.VideoTemplateLayoutFullFrame}},
-		PlannerGuidance:      "Use relevant supporting media as full-frame cutaways while preserving the primary story audio.",
-		RendererCapabilities: []string{"full_frame_media", "fade"},
-	},
-	{
-		ID:                    "photo-over-video",
-		Version:               1,
-		Name:                  "Photo over video",
-		Description:           "Keep the video moving while a supporting photo appears above it.",
-		DemoVideoPath:         "/videos/templates/photo-over-video.mp4",
-		SupportedProjectTypes: []models.ProjectType{models.ProjectTypeStory, models.ProjectTypePromo, models.ProjectTypeReel},
-		Defaults: models.VideoTemplateConfiguration{
-			AspectRatio: "9:16", DurationSeconds: 30, VisualStyle: models.VisualStyleCinematic,
-			CaptionsEnabled: boolPtr(true), CaptionStyle: "cinematic_subtitle", SceneDetail: "balanced",
-			Layout: models.VideoTemplateLayoutPictureInPicture, OverlayPlacement: models.VideoTemplatePlacementBottomRight,
-			OverlaySize: models.VideoTemplateSizeMedium, OverlayOpacity: 1, OverlayFrame: models.VideoTemplateFrameSubtle,
-			OverlayAnimation: models.VideoTemplateAnimationFade,
-		},
-		EditableOptions: []string{"duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail", "overlay_placement", "overlay_size", "overlay_opacity", "overlay_frame", "overlay_animation"},
-		MediaSlots: []models.VideoTemplateMediaSlot{
-			{ID: "base_video", Role: "primary_video", MediaTypes: []models.MediaType{models.MediaTypeVideo}, Required: true, Presentation: models.VideoTemplateLayoutFullFrame},
-			{ID: "supporting_photo", Role: "supporting_photo", MediaTypes: []models.MediaType{models.MediaTypePhoto, models.MediaTypeLivePhoto}, Required: true, Presentation: models.VideoTemplateLayoutPictureInPicture, AllowedPlacements: []models.VideoTemplatePlacement{models.VideoTemplatePlacementTopLeft, models.VideoTemplatePlacementTopRight, models.VideoTemplatePlacementBottomLeft, models.VideoTemplatePlacementBottomRight, models.VideoTemplatePlacementCenter}, AllowedSizes: []models.VideoTemplateSize{models.VideoTemplateSizeSmall, models.VideoTemplateSizeMedium, models.VideoTemplateSizeLarge}},
-		},
-		PlannerGuidance:      "Prefer one strong base video and one semantically related supporting photo. The base video must continue playing underneath the photo.",
-		RendererCapabilities: []string{"full_frame_media", "picture_in_picture", "placement", "bounded_size", "opacity", "frame", "fade", "subtle_scale"},
-	},
-	{
-		ID:                    "picture-in-picture",
-		Version:               1,
-		Name:                  "Picture in picture",
-		Description:           "Layer a secondary moment over the main video like a small memory window.",
-		DemoVideoPath:         "/videos/templates/picture-in-picture.mp4",
-		SupportedProjectTypes: []models.ProjectType{models.ProjectTypeStory, models.ProjectTypePromo, models.ProjectTypeReel},
-		Defaults: models.VideoTemplateConfiguration{
-			AspectRatio: "9:16", DurationSeconds: 30, VisualStyle: models.VisualStyleWarm,
-			CaptionsEnabled: boolPtr(true), CaptionStyle: "clean_minimal", SceneDetail: "more",
-			Layout: models.VideoTemplateLayoutPictureInPicture, OverlayPlacement: models.VideoTemplatePlacementTopRight,
-			OverlaySize: models.VideoTemplateSizeSmall, OverlayOpacity: 1, OverlayFrame: models.VideoTemplateFrameSubtle,
-			OverlayAnimation: models.VideoTemplateAnimationSubtleScale,
-		},
-		EditableOptions:      []string{"duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail", "overlay_placement", "overlay_size", "overlay_opacity", "overlay_frame", "overlay_animation"},
-		MediaSlots:           []models.VideoTemplateMediaSlot{{ID: "secondary_window", Role: "supporting_media", MediaTypes: []models.MediaType{models.MediaTypePhoto, models.MediaTypeVideo}, Required: true, Presentation: models.VideoTemplateLayoutPictureInPicture, AllowedPlacements: []models.VideoTemplatePlacement{models.VideoTemplatePlacementTopLeft, models.VideoTemplatePlacementTopRight, models.VideoTemplatePlacementBottomLeft, models.VideoTemplatePlacementBottomRight}, AllowedSizes: []models.VideoTemplateSize{models.VideoTemplateSizeSmall, models.VideoTemplateSizeMedium}}},
-		PlannerGuidance:      "Use a visually distinct supporting moment in a small secondary window over the strongest base scene.",
-		RendererCapabilities: []string{"full_frame_media", "picture_in_picture", "placement", "bounded_size", "opacity", "frame", "fade", "subtle_scale"},
-	},
-	{
-		ID:                    "split-screen-memory",
-		Version:               1,
-		Name:                  "Split screen",
-		Description:           "Show two related moments together in a balanced frame.",
-		DemoVideoPath:         "/videos/templates/split-screen-memory.mp4",
-		SupportedProjectTypes: []models.ProjectType{models.ProjectTypePromo, models.ProjectTypeReel},
-		Defaults: models.VideoTemplateConfiguration{
-			AspectRatio: "9:16", DurationSeconds: 30, VisualStyle: models.VisualStyleMinimal,
-			CaptionsEnabled: boolPtr(false), CaptionStyle: "clean_minimal", SceneDetail: "balanced",
-			Layout: models.VideoTemplateLayoutSplitScreen, OverlayPlacement: models.VideoTemplatePlacementRight,
-			OverlaySize: models.VideoTemplateSizeHalf, OverlayOpacity: 1, OverlayFrame: models.VideoTemplateFrameNone,
-			OverlayAnimation: models.VideoTemplateAnimationNone,
-		},
-		EditableOptions:      []string{"duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail"},
-		MediaSlots:           []models.VideoTemplateMediaSlot{{ID: "secondary_panel", Role: "paired_media", MediaTypes: []models.MediaType{models.MediaTypePhoto, models.MediaTypeVideo}, Required: true, Presentation: models.VideoTemplateLayoutSplitScreen, AllowedPlacements: []models.VideoTemplatePlacement{models.VideoTemplatePlacementLeft, models.VideoTemplatePlacementRight}, AllowedSizes: []models.VideoTemplateSize{models.VideoTemplateSizeHalf}}},
-		PlannerGuidance:      "Pair two complementary moments and keep the secondary panel at half width.",
-		RendererCapabilities: []string{"full_frame_media", "split_screen", "placement", "bounded_size"},
-	},
-	{
-		ID:                    "talking-head-supporting-images",
-		Version:               1,
-		Name:                  "Talking head with images",
-		Description:           "Keep the speaker present while relevant photos support what they say.",
-		DemoVideoPath:         "/videos/templates/talking-head-supporting-images.mp4",
-		SupportedProjectTypes: []models.ProjectType{models.ProjectTypePromo, models.ProjectTypeReel},
-		Defaults: models.VideoTemplateConfiguration{
-			AspectRatio: "9:16", DurationSeconds: 30, VisualStyle: models.VisualStyleMinimal,
-			CaptionsEnabled: boolPtr(true), CaptionStyle: "bold_social", SceneDetail: "more",
-			Layout: models.VideoTemplateLayoutPictureInPicture, OverlayPlacement: models.VideoTemplatePlacementBottomLeft,
-			OverlaySize: models.VideoTemplateSizeMedium, OverlayOpacity: 1, OverlayFrame: models.VideoTemplateFrameSubtle,
-			OverlayAnimation: models.VideoTemplateAnimationFade,
-		},
-		EditableOptions:      []string{"duration_seconds", "visual_style", "captions_enabled", "caption_style", "scene_detail", "overlay_placement", "overlay_size", "overlay_frame", "overlay_animation"},
-		MediaSlots:           []models.VideoTemplateMediaSlot{{ID: "supporting_images", Role: "spoken_context_cutaways", MediaTypes: []models.MediaType{models.MediaTypePhoto, models.MediaTypeLivePhoto}, Required: false, Presentation: models.VideoTemplateLayoutPictureInPicture, AllowedPlacements: []models.VideoTemplatePlacement{models.VideoTemplatePlacementBottomLeft, models.VideoTemplatePlacementBottomRight}, AllowedSizes: []models.VideoTemplateSize{models.VideoTemplateSizeSmall, models.VideoTemplateSizeMedium}}},
-		PlannerGuidance:      "Use transcript timing to place relevant supporting photos without obscuring the speaker or captions.",
-		RendererCapabilities: []string{"full_frame_media", "picture_in_picture", "placement", "bounded_size", "frame", "fade"},
-	},
-	{
-		ID:                    "fast-montage",
-		Version:               1,
-		Name:                  "Fast montage",
-		Description:           "Build a lively sequence of short, high-energy moments.",
-		DemoVideoPath:         "/videos/templates/fast-montage.mp4",
-		SupportedProjectTypes: []models.ProjectType{models.ProjectTypePromo, models.ProjectTypeReel},
-		Defaults: models.VideoTemplateConfiguration{
-			AspectRatio: "9:16", DurationSeconds: 15, VisualStyle: models.VisualStylePlayful,
-			CaptionsEnabled: boolPtr(true), CaptionStyle: "bold_social", SceneDetail: "more",
-			Layout: models.VideoTemplateLayoutMontage, OverlayPlacement: models.VideoTemplatePlacementCenter,
-			OverlaySize: models.VideoTemplateSizeLarge, OverlayOpacity: 1, OverlayFrame: models.VideoTemplateFrameNone,
-			OverlayAnimation: models.VideoTemplateAnimationNone,
-		},
-		EditableOptions:      []string{"duration_seconds", "visual_style", "captions_enabled", "caption_style", "scene_detail"},
-		MediaSlots:           []models.VideoTemplateMediaSlot{{ID: "montage_moments", Role: "rapid_sequence", MediaTypes: []models.MediaType{models.MediaTypePhoto, models.MediaTypeVideo}, Required: true, Presentation: models.VideoTemplateLayoutMontage}},
-		PlannerGuidance:      "Favor several distinct high-quality moments with short durations and cut transitions.",
-		RendererCapabilities: []string{"full_frame_media", "cut"},
-	},
+		EditableOptions: editable, MediaSlots: slots, PlannerGuidance: guidance, RendererCapabilities: capabilities,
+	}
 }
 
 func Catalog() []models.VideoTemplate {

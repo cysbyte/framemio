@@ -13,9 +13,21 @@ func TestCatalogContainsVersionedInitialTemplates(t *testing.T) {
 		"full-screen-cinematic-cutaways": {},
 		"photo-over-video":               {},
 		"picture-in-picture":             {},
-		"split-screen-memory":            {},
-		"talking-head-supporting-images": {},
+		"warm-memory-recap":              {},
+		"caption-led-memory":             {},
+		"quick-family-recap":             {},
+		"product-spotlight":              {},
+		"app-demo-overlay":               {},
+		"testimonial-with-images":        {},
+		"split-screen-offer":             {},
+		"fast-social-ad":                 {},
+		"premium-brand-story":            {},
 		"fast-montage":                   {},
+		"reel-picture-in-picture":        {},
+		"before-after-split":             {},
+		"cinematic-reel-cutaways":        {},
+		"talking-head-reel":              {},
+		"travel-highlight-reel":          {},
 	}
 	for _, template := range Catalog() {
 		delete(expected, template.ID)
@@ -31,6 +43,26 @@ func TestCatalogContainsVersionedInitialTemplates(t *testing.T) {
 	}
 	if len(expected) != 0 {
 		t.Fatalf("missing initial templates: %+v", expected)
+	}
+}
+
+func TestCatalogHasSixTemplatesPerProjectType(t *testing.T) {
+	t.Parallel()
+	tests := []models.ProjectType{models.ProjectTypeStory, models.ProjectTypePromo, models.ProjectTypeReel}
+	for _, projectType := range tests {
+		templates := CatalogForProjectType(projectType)
+		if len(templates) != 6 {
+			t.Fatalf("%s templates = %d, want 6: %+v", projectType, len(templates), templates)
+		}
+	}
+	if _, ok := Find("photo-over-video", 1, models.ProjectTypePromo); ok {
+		t.Fatal("promo catalog should not include story photo-over-video template")
+	}
+	if _, ok := Find("product-spotlight", 1, models.ProjectTypeStory); ok {
+		t.Fatal("story catalog should not include promo product-spotlight template")
+	}
+	if _, ok := Find("fast-montage", 1, models.ProjectTypePromo); ok {
+		t.Fatal("promo catalog should not include reel fast-montage template")
 	}
 }
 
@@ -60,7 +92,7 @@ func TestResolveAppliesDefaultsAndSupportedOverrides(t *testing.T) {
 
 func TestResolveRejectsUnsupportedOverrides(t *testing.T) {
 	t.Parallel()
-	_, _, err := Resolve(models.ProjectTypePromo, "fast-montage", 1, models.VideoTemplateConfiguration{
+	_, _, err := Resolve(models.ProjectTypePromo, "fast-social-ad", 1, models.VideoTemplateConfiguration{
 		OverlayPlacement: models.VideoTemplatePlacementBottomRight,
 	})
 	if err == nil || !strings.Contains(err.Error(), "overlay placement") {
@@ -71,7 +103,7 @@ func TestResolveRejectsUnsupportedOverrides(t *testing.T) {
 func TestNormalizeCompatibleConfigurationPreservesOnlyEditableSettings(t *testing.T) {
 	t.Parallel()
 	captions := false
-	_, resolved, err := NormalizeCompatibleConfiguration(models.ProjectTypePromo, "fast-montage", 1, models.VideoTemplateConfiguration{
+	_, resolved, err := NormalizeCompatibleConfiguration(models.ProjectTypePromo, "fast-social-ad", 1, models.VideoTemplateConfiguration{
 		AspectRatio:      "16:9",
 		DurationSeconds:  30,
 		VisualStyle:      models.VisualStyleMinimal,
@@ -97,7 +129,10 @@ func TestNormalizeCompatibleConfigurationPreservesOnlyEditableSettings(t *testin
 
 func TestUnsupportedProjectTypeTemplateIsRejected(t *testing.T) {
 	t.Parallel()
-	if _, _, err := Resolve(models.ProjectTypeStory, "split-screen-memory", 1, models.VideoTemplateConfiguration{}); err == nil {
-		t.Fatal("expected story project to reject promo/reel split-screen template")
+	if _, _, err := Resolve(models.ProjectTypeStory, "split-screen-offer", 1, models.VideoTemplateConfiguration{}); err == nil {
+		t.Fatal("expected story project to reject promo split-screen template")
+	}
+	if _, _, err := Resolve(models.ProjectTypePromo, "photo-over-video", 1, models.VideoTemplateConfiguration{}); err == nil {
+		t.Fatal("expected promo project to reject story photo-over-video template")
 	}
 }

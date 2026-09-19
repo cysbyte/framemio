@@ -21,7 +21,6 @@ struct StoryCreationView: View {
     @State private var templates: [VideoTemplate] = []
     @State private var selectedTemplateID: String?
     @State private var templateConfiguration: VideoTemplateConfiguration?
-    @State private var templateErrorMessage: String?
 
     init(
         viewModel: StoryCreationViewModel,
@@ -144,11 +143,6 @@ struct StoryCreationView: View {
         }
         .navigationTitle("Create Story")
         .task { await loadTemplates() }
-        .alert("Templates unavailable", isPresented: Binding(get: { templateErrorMessage != nil }, set: { if !$0 { templateErrorMessage = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(templateErrorMessage ?? "")
-        }
         .onAppear {
             storyCreationViewDebugLog("create view appeared assets=\(viewModel.assets.count) cached_thumbnails=\(viewModel.thumbnails.count)")
             viewModel.loadMissingThumbnails(targetSize: FrameMioMetrics.mediaThumbnailRequestSize)
@@ -277,31 +271,29 @@ struct StoryCreationView: View {
                         .foregroundStyle(FrameMioColors.ink)
 
                     if template.editableOptions.contains("overlay_placement") {
-                        Picker("Overlay position", selection: Binding(
-                            get: { configuration.overlayPlacement ?? "bottom_right" },
-                            set: { templateConfiguration?.overlayPlacement = $0 }
-                        )) {
-                            ForEach(["top_left", "top_right", "bottom_left", "bottom_right", "center"], id: \.self) {
-                                Text($0.replacingOccurrences(of: "_", with: " ").capitalized).tag($0)
-                            }
-                        }
+                        TemplateOptionMenu(
+                            title: "Overlay position",
+                            selection: configuration.overlayPlacement ?? "bottom_right",
+                            options: ["top_left", "top_right", "bottom_left", "bottom_right", "center"]
+                        ) { templateConfiguration?.overlayPlacement = $0 }
                     }
                     if template.editableOptions.contains("overlay_size") {
-                        Picker("Overlay size", selection: Binding(
-                            get: { configuration.overlaySize ?? "medium" },
-                            set: { templateConfiguration?.overlaySize = $0 }
-                        )) {
-                            ForEach(["small", "medium", "large"], id: \.self) {
-                                Text($0.capitalized).tag($0)
-                            }
-                        }
+                        TemplateOptionMenu(
+                            title: "Overlay size",
+                            selection: configuration.overlaySize ?? "medium",
+                            options: ["small", "medium", "large"]
+                        ) { templateConfiguration?.overlaySize = $0 }
                     }
                     if template.editableOptions.contains("overlay_opacity") {
-                        HStack {
+                        HStack(spacing: FrameMioSpacing.md) {
                             Text("Overlay opacity")
+                                .foregroundStyle(FrameMioColors.ink)
                             Spacer()
+                            Text("\(Int((configuration.overlayOpacity ?? 1) * 100))%")
+                                .monospacedDigit()
+                                .foregroundStyle(FrameMioColors.secondaryInk)
                             Stepper(
-                                "\(Int((configuration.overlayOpacity ?? 1) * 100))%",
+                                "",
                                 value: Binding(
                                     get: { configuration.overlayOpacity ?? 1 },
                                     set: { templateConfiguration?.overlayOpacity = min(1, max(0.35, $0)) }
@@ -313,7 +305,7 @@ struct StoryCreationView: View {
                     }
                 }
                 .padding(FrameMioSpacing.md)
-                .background(FrameMioColors.surface.opacity(0.74), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
+                .background(FrameMioColors.surface.opacity(0.74), in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous))
             }
         }
         .padding(FrameMioSpacing.md)
@@ -368,7 +360,7 @@ struct StoryCreationView: View {
             if selectedTemplateID == nil, let first = templates.first {
                 select(first)
             }
-            templateErrorMessage = "Using the built-in template catalog. We could not refresh the latest templates."
+            storyCreationViewDebugLog("template_catalog_fallback error=\(String(describing: error))")
         }
     }
 

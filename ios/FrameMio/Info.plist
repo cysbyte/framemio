@@ -4,6 +4,8 @@
 <dict>
 	<key>APIBaseURL</key>
 	<string>https://api.framemio.com</string>
+	<key>TemplateDemoBaseURL</key>
+	<string>https://framemio.com</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>

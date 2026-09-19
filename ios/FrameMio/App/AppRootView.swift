@@ -10,7 +10,7 @@ struct AppRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     let dependencies: AppDependencies
     @State private var homePath: [AppRoute] = []
-    @State private var projectsPath: [AppRoute] = []
+    @State private var templatesPath: [AppRoute] = []
     @State private var createPath: [AppRoute] = []
     @State private var purchaseDestination: PurchaseDestination?
     @State private var selectedTab: RootTab = .home
@@ -41,12 +41,12 @@ struct AppRootView: View {
                 .tag(RootTab.home)
                 .accessibilityLabel("Home")
 
-            projectsTab
+            templatesTab
                 .tabItem {
-                    Label("Projects", systemImage: "rectangle.stack.badge.play")
+                    Label("Templates", systemImage: "rectangle.stack.badge.play")
                 }
-                .tag(RootTab.projects)
-                .accessibilityLabel("Projects")
+                .tag(RootTab.templates)
+                .accessibilityLabel("Templates")
 
             createTab
                 .tabItem {
@@ -120,7 +120,8 @@ struct AppRootView: View {
                     homePath.append(.storyPreview(story: story))
                 },
                 onOpenAllStories: {
-                    selectedTab = .projects
+                    selectedTab = .create
+                    createPath.append(.allProjects)
                 },
                 onOpenPricing: openPricing
             )
@@ -130,28 +131,27 @@ struct AppRootView: View {
         }
     }
 
-    private var projectsTab: some View {
-        NavigationStack(path: $projectsPath) {
-            AllStoriesView(
-                viewModel: homeViewModel,
-                onCreate: {
-                    selectedTab = .create
-                },
-                onOpenStory: { story in
-                    projectsPath.append(.storyPreview(story: story))
-                }
-            )
+    private var templatesTab: some View {
+        NavigationStack(path: $templatesPath) {
+            TemplatesView(storyService: dependencies.storyService) { template, projectType in
+                templatesPath.append(.mediaPicker(draft: .fromTemplate(template, projectType: projectType)))
+            }
             .navigationDestination(for: AppRoute.self) { route in
-                destination(for: route) { projectsPath.append($0) }
+                destination(for: route) { templatesPath.append($0) }
             }
         }
     }
 
     private var createTab: some View {
         NavigationStack(path: $createPath) {
-            CreateView { draft in
-                createPath.append(.mediaPicker(draft: draft))
-            }
+            CreateView(
+                onSelect: { draft in
+                    createPath.append(.mediaPicker(draft: draft))
+                },
+                onOpenProjects: {
+                    createPath.append(.allProjects)
+                }
+            )
             .navigationDestination(for: AppRoute.self) { route in
                 destination(for: route) { createPath.append($0) }
             }
@@ -337,13 +337,14 @@ struct AppRootView: View {
 
 private enum RootTab: Hashable {
     case home
-    case projects
+    case templates
     case create
     case profile
 }
 
 struct CreateView: View {
     let onSelect: (VideoProjectDraft) -> Void
+    let onOpenProjects: () -> Void
 
     var body: some View {
         ScrollView {
@@ -371,6 +372,44 @@ struct CreateView: View {
                         onSelect(.reel())
                     }
                 }
+
+                Button {
+                    FrameMioHaptics.secondaryAction()
+                    onOpenProjects()
+                } label: {
+                    HStack(spacing: FrameMioSpacing.md) {
+                        Image(systemName: "rectangle.stack.badge.play")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(FrameMioColors.accent)
+                            .frame(width: 48, height: 48)
+                            .background(FrameMioColors.accentMuted.opacity(0.72), in: Circle())
+                            .accessibilityHidden(true)
+
+                        VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
+                            Text("Projects")
+                                .font(FrameMioTypography.title)
+                                .foregroundStyle(FrameMioColors.ink)
+                            Text("Review drafts, in-progress videos, and completed projects.")
+                                .font(FrameMioTypography.body)
+                                .foregroundStyle(FrameMioColors.secondaryInk)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: FrameMioSpacing.sm)
+                        Image(systemName: "chevron.right")
+                            .font(FrameMioTypography.headline)
+                            .foregroundStyle(FrameMioColors.tertiaryInk)
+                            .accessibilityHidden(true)
+                    }
+                    .padding(FrameMioSpacing.lg)
+                    .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
+                    .background(FrameMioColors.surface.opacity(0.86), in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                            .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+                    }
+                }
+                .buttonStyle(FrameMioPressButtonStyle())
+                .accessibilityLabel("Projects. Review drafts, in-progress videos, and completed projects.")
             }
             .padding(.horizontal, FrameMioSpacing.lg)
             .padding(.bottom, FrameMioSpacing.xxxl)
@@ -429,6 +468,110 @@ struct CreateView: View {
     }
 }
 
+struct TemplatesView: View {
+    let storyService: StoryService
+    let onUseTemplate: (VideoTemplate, VideoProjectType) -> Void
+    @State private var selectedProjectType: VideoProjectType = .story
+    @State private var templates: [VideoTemplate] = []
+    @State private var selectedTemplateID: String?
+    @State private var isLoading = false
+
+    private var visibleTemplates: [VideoTemplate] {
+        templates.filter { $0.supportedProjectTypes.contains(selectedProjectType) }
+    }
+
+    private var selectedTemplate: VideoTemplate? {
+        visibleTemplates.first { $0.id == selectedTemplateID } ?? visibleTemplates.first
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
+                VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
+                    Text("Templates")
+                        .font(FrameMioTypography.display)
+                        .foregroundStyle(FrameMioColors.ink)
+                    Text("Browse reviewed edit styles, preview the motion, then start with the defaults already filled in.")
+                        .font(FrameMioTypography.body)
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, FrameMioSpacing.lg)
+
+                Picker("Project type", selection: $selectedProjectType) {
+                    ForEach(VideoProjectType.allCases, id: \.self) { type in
+                        Text(type.title).tag(type)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: selectedProjectType) { _, _ in
+                    selectedTemplateID = visibleTemplates.first?.id
+                }
+
+                if isLoading && templates.isEmpty {
+                    LoadingState(title: "Loading templates", message: "Fetching the latest reviewed styles.")
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 226), spacing: FrameMioSpacing.md)], spacing: FrameMioSpacing.md) {
+                        ForEach(visibleTemplates) { template in
+                            TemplateCard(template: template, isSelected: selectedTemplateID == template.id) {
+                                selectedTemplateID = template.id
+                            }
+                        }
+                    }
+                }
+
+                if let selectedTemplate {
+                    VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
+                        Text(selectedTemplate.name)
+                            .font(FrameMioTypography.title)
+                            .foregroundStyle(FrameMioColors.ink)
+                        Text(selectedTemplate.description)
+                            .font(FrameMioTypography.body)
+                            .foregroundStyle(FrameMioColors.secondaryInk)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button {
+                            FrameMioHaptics.primaryAction()
+                            onUseTemplate(selectedTemplate, selectedProjectType)
+                        } label: {
+                            Label("Use Template", systemImage: "plus.circle.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(FrameMioColors.accent)
+                        .padding(.top, FrameMioSpacing.sm)
+                    }
+                    .padding(FrameMioSpacing.lg)
+                    .background(FrameMioColors.surface.opacity(0.86), in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous)
+                            .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+                    }
+                }
+            }
+            .padding(.horizontal, FrameMioSpacing.lg)
+            .padding(.bottom, FrameMioSpacing.xxxl)
+        }
+        .background(FrameMioColors.canvas.ignoresSafeArea())
+        .navigationTitle("Templates")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await loadTemplates() }
+    }
+
+    private func loadTemplates() async {
+        guard templates.isEmpty else { return }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let loaded = try await storyService.videoTemplates(for: nil)
+            templates = loaded.isEmpty ? VideoTemplate.localFallbackCatalog : loaded
+        } catch {
+            purchaseRoutingDebugLog("templates_tab_catalog_fallback error=\(String(describing: error))")
+            templates = VideoTemplate.localFallbackCatalog
+        }
+        selectedTemplateID = visibleTemplates.first?.id
+    }
+}
+
 struct ProjectConfigurationView: View {
     @State private var promoSubject: PromoSubject
     @State private var promoGoal: PromoGoal
@@ -440,7 +583,6 @@ struct ProjectConfigurationView: View {
     @State private var templates: [VideoTemplate] = []
     @State private var selectedTemplateID: String?
     @State private var templateConfiguration: VideoTemplateConfiguration?
-    @State private var templateErrorMessage: String?
 
     let draft: VideoProjectDraft
     let storyService: StoryService
@@ -493,11 +635,6 @@ struct ProjectConfigurationView: View {
         .navigationTitle(draft.type == .promo ? "Create Promo" : "Create Reel")
         .navigationBarTitleDisplayMode(.inline)
         .task { await loadTemplates() }
-        .alert("Templates unavailable", isPresented: Binding(get: { templateErrorMessage != nil }, set: { if !$0 { templateErrorMessage = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(templateErrorMessage ?? "")
-        }
     }
 
     private var templateSection: some View {
@@ -550,14 +687,18 @@ struct ProjectConfigurationView: View {
                     Toggle("Captions", isOn: Binding(get: { configuration.captionsEnabled ?? true }, set: { templateConfiguration?.captionsEnabled = $0 }))
                 }
                 if template.editableOptions.contains("overlay_placement") {
-                    Picker("Overlay position", selection: Binding(get: { configuration.overlayPlacement ?? "bottom_right" }, set: { templateConfiguration?.overlayPlacement = $0 })) {
-                        ForEach(["top_left", "top_right", "bottom_left", "bottom_right", "center"], id: \.self) { Text($0.replacingOccurrences(of: "_", with: " ").capitalized).tag($0) }
-                    }
+                    TemplateOptionMenu(
+                        title: "Overlay position",
+                        selection: configuration.overlayPlacement ?? "bottom_right",
+                        options: ["top_left", "top_right", "bottom_left", "bottom_right", "center"]
+                    ) { templateConfiguration?.overlayPlacement = $0 }
                 }
                 if template.editableOptions.contains("overlay_size") {
-                    Picker("Overlay size", selection: Binding(get: { configuration.overlaySize ?? "medium" }, set: { templateConfiguration?.overlaySize = $0 })) {
-                        ForEach(["small", "medium", "large", "half"], id: \.self) { Text($0.capitalized).tag($0) }
-                    }
+                    TemplateOptionMenu(
+                        title: "Overlay size",
+                        selection: configuration.overlaySize ?? "medium",
+                        options: ["small", "medium", "large", "half"]
+                    ) { templateConfiguration?.overlaySize = $0 }
                 }
             }
             .padding(FrameMioSpacing.md)
@@ -679,7 +820,7 @@ struct ProjectConfigurationView: View {
             if selectedTemplateID == nil, let first = templates.first {
                 select(first)
             }
-            templateErrorMessage = "Using the built-in template catalog. We could not refresh the latest templates."
+            purchaseRoutingDebugLog("template_catalog_fallback type=\(draft.type.rawValue) error=\(String(describing: error))")
         }
     }
 
@@ -710,26 +851,33 @@ struct TemplateCard: View {
     let template: VideoTemplate
     let isSelected: Bool
     let onSelect: () -> Void
+    private let cardWidth: CGFloat = 226
+    private let previewHeight: CGFloat = 176
+    private let cornerRadius: CGFloat = 8
 
     var body: some View {
         Button(action: onSelect) {
             VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
                 InlineTemplateVideo(path: template.demoVideoPath)
-                    .frame(width: 150, height: 190)
-                    .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
+                    .frame(width: cardWidth - (FrameMioSpacing.md * 2), height: previewHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                 Text(template.name)
                     .font(FrameMioTypography.headline)
                     .foregroundStyle(FrameMioColors.ink)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(template.description)
                     .font(FrameMioTypography.caption)
                     .foregroundStyle(FrameMioColors.secondaryInk)
                     .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(FrameMioSpacing.sm)
-            .frame(width: 174, alignment: .leading)
-            .background(isSelected ? FrameMioColors.accentMuted : FrameMioColors.elevatedSurface, in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
+            .padding(FrameMioSpacing.md)
+            .frame(width: cardWidth, alignment: .topLeading)
+            .frame(minHeight: 314, alignment: .topLeading)
+            .background(isSelected ? FrameMioColors.accentMuted : FrameMioColors.elevatedSurface, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .stroke(isSelected ? FrameMioColors.accent : FrameMioColors.divider, lineWidth: isSelected ? 2 : 1)
             }
         }
@@ -739,10 +887,62 @@ struct TemplateCard: View {
     }
 }
 
+struct TemplateOptionMenu: View {
+    let title: String
+    let selection: String
+    let options: [String]
+    let onSelect: (String) -> Void
+
+    var body: some View {
+        Menu {
+            ForEach(options, id: \.self) { option in
+                Button {
+                    onSelect(option)
+                } label: {
+                    if option == selection {
+                        Label(displayName(option), systemImage: "checkmark")
+                    } else {
+                        Text(displayName(option))
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: FrameMioSpacing.sm) {
+                Text(title)
+                    .font(FrameMioTypography.body)
+                    .foregroundStyle(FrameMioColors.ink)
+                Spacer()
+                Text(displayName(selection))
+                    .font(FrameMioTypography.body)
+                    .foregroundStyle(FrameMioColors.accent)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(FrameMioColors.accent)
+                    .accessibilityHidden(true)
+            }
+            .padding(.vertical, FrameMioSpacing.xs)
+            .contentShape(Rectangle())
+        }
+        .accessibilityLabel(title)
+        .accessibilityValue(displayName(selection))
+    }
+
+    private func displayName(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "_", with: " ")
+            .split(separator: " ")
+            .map { $0.capitalized }
+            .joined(separator: " ")
+    }
+}
+
 struct InlineTemplateVideo: View {
     let path: String
     @State private var player: AVPlayer?
     @State private var endObserver: NSObjectProtocol?
+    @State private var itemStatusObserver: NSKeyValueObservation?
+    @State private var failedToLoad = false
 
     var body: some View {
         ZStack {
@@ -753,31 +953,65 @@ struct InlineTemplateVideo: View {
                         player.play()
                     }
             } else {
-                Color.black.opacity(0.12)
-                    .overlay(Image(systemName: "play.rectangle").font(.title2).foregroundStyle(.white))
+                templateDemoPlaceholder
             }
         }
         .task(id: path) {
             preparePlayer()
         }
+        .onChange(of: path) { _, _ in
+            resetPlayer()
+            preparePlayer()
+        }
         .onDisappear {
-            if let endObserver {
-                NotificationCenter.default.removeObserver(endObserver)
-                self.endObserver = nil
-            }
-            player?.pause()
+            resetPlayer()
         }
         .accessibilityLabel("Muted template demo")
     }
 
+    private var templateDemoPlaceholder: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    FrameMioColors.accentMuted.opacity(0.78),
+                    FrameMioColors.elevatedSurface.opacity(0.94)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            VStack(spacing: FrameMioSpacing.xs) {
+                Image(systemName: failedToLoad ? "video.slash" : "play.rectangle")
+                    .font(.title2)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+                    .accessibilityHidden(true)
+                Text(failedToLoad ? "Demo pending" : "Loading demo")
+                    .font(FrameMioTypography.caption)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+            }
+        }
+    }
+
     private func preparePlayer() {
-        guard player == nil, let url = templateDemoURL(path) else { return }
-        let loaded = AVPlayer(url: url)
+        guard player == nil else { return }
+        guard let url = templateDemoURL(path) else {
+            failedToLoad = true
+            return
+        }
+        failedToLoad = false
+        let item = AVPlayerItem(url: url)
+        let loaded = AVPlayer(playerItem: item)
         loaded.isMuted = true
         loaded.actionAtItemEnd = .none
+        itemStatusObserver = item.observe(\.status, options: [.new]) { observedItem, _ in
+            guard observedItem.status == .failed else { return }
+            Task { @MainActor in
+                resetPlayer()
+                failedToLoad = true
+            }
+        }
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
-            object: loaded.currentItem,
+            object: item,
             queue: .main
         ) { _ in
             loaded.seek(to: .zero)
@@ -785,6 +1019,17 @@ struct InlineTemplateVideo: View {
         }
         player = loaded
         loaded.play()
+    }
+
+    private func resetPlayer() {
+        if let endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
+            self.endObserver = nil
+        }
+        itemStatusObserver?.invalidate()
+        itemStatusObserver = nil
+        player?.pause()
+        player = nil
     }
 
     private func templateDemoURL(_ value: String) -> URL? {
@@ -796,7 +1041,7 @@ struct InlineTemplateVideo: View {
             return bundled
         }
         guard value.hasPrefix("/") else { return nil }
-        return AppConfiguration.apiBaseURL.appendingPathComponent(String(value.dropFirst()))
+        return AppConfiguration.templateDemoBaseURL.appendingPathComponent(String(value.dropFirst()))
     }
 }
 

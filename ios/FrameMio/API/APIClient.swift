@@ -30,10 +30,7 @@ final class URLSessionAPIClient: APIClient, @unchecked Sendable {
     }
 
     func data(for request: APIRequest) async throws -> Data {
-        var url = baseURL
-        for component in request.path.split(separator: "/") {
-            url.appendPathComponent(String(component))
-        }
+        let url = try url(for: request.path)
 
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = request.method.rawValue
@@ -67,6 +64,30 @@ final class URLSessionAPIClient: APIClient, @unchecked Sendable {
         }
 
         return data
+    }
+
+    private func url(for path: String) throws -> URL {
+        guard var baseComponents = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            throw APIClientError.invalidURL
+        }
+        guard let requestComponents = URLComponents(string: path) else {
+            throw APIClientError.invalidURL
+        }
+
+        var resolvedPath = baseComponents.path
+        if !resolvedPath.hasSuffix("/") {
+            resolvedPath += "/"
+        }
+        let requestPath = requestComponents.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        resolvedPath += requestPath
+        baseComponents.path = resolvedPath
+        baseComponents.queryItems = requestComponents.queryItems
+        baseComponents.percentEncodedQuery = requestComponents.percentEncodedQuery
+
+        guard let url = baseComponents.url else {
+            throw APIClientError.invalidURL
+        }
+        return url
     }
 
     private func dataWithTransientRetry(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {

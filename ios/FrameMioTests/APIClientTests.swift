@@ -31,6 +31,28 @@ final class APIClientTests: XCTestCase {
         let requestCount = RetryURLProtocol.requestCount
         XCTAssertEqual(requestCount, 2)
     }
+
+    func testRequestPathPreservesQueryItems() async throws {
+        RetryURLProtocol.responses = [
+            .success(statusCode: 200, data: Data("[]".utf8))
+        ]
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RetryURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let client = URLSessionAPIClient(
+            baseURL: URL(string: "https://api.framemio.test")!,
+            session: session,
+            tokenProvider: StaticAuthTokenProvider(token: "token"),
+            maxNetworkRetries: 0
+        )
+
+        _ = try await client.data(
+            for: APIRequest(method: .get, path: "/v1/video-templates?project_type=story")
+        )
+
+        XCTAssertEqual(RetryURLProtocol.lastURL?.path, "/v1/video-templates")
+        XCTAssertEqual(RetryURLProtocol.lastURL?.query, "project_type=story")
+    }
 }
 
 private actor StaticAuthTokenProvider: AuthTokenProvider {
@@ -56,6 +78,7 @@ private final class RetryURLProtocol: URLProtocol, @unchecked Sendable {
     private static let lock = NSLock()
     private static var storedResponses: [Response] = []
     private static var storedRequestCount = 0
+    private static var storedLastURL: URL?
 
     static var responses: [Response] {
         get {
@@ -77,10 +100,17 @@ private final class RetryURLProtocol: URLProtocol, @unchecked Sendable {
         return storedRequestCount
     }
 
+    static var lastURL: URL? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedLastURL
+    }
+
     static func reset() {
         lock.lock()
         storedResponses = []
         storedRequestCount = 0
+        storedLastURL = nil
         lock.unlock()
     }
 
@@ -93,6 +123,7 @@ private final class RetryURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override func startLoading() {
+        Self.record(request)
         let response: Response = Self.nextResponse()
         switch response {
         case let .failure(error):
@@ -120,6 +151,12 @@ private final class RetryURLProtocol: URLProtocol, @unchecked Sendable {
             return .success(statusCode: 200, data: Data())
         }
         return storedResponses.removeFirst()
+    }
+
+    private static func record(_ request: URLRequest) {
+        lock.lock()
+        storedLastURL = request.url
+        lock.unlock()
     }
 }
 

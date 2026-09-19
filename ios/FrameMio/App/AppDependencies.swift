@@ -109,6 +109,11 @@ enum AppConfiguration {
         return URL(string: configuredValue ?? "https://api.framemio.com")!
     }
 
+    static var templateDemoBaseURL: URL {
+        let configuredValue = Bundle.main.object(forInfoDictionaryKey: "TemplateDemoBaseURL") as? String
+        return URL(string: configuredValue ?? "https://framemio.com")!
+    }
+
     static var deepgramAPIKey: String? {
         let value = stringConfigurationValue(infoKey: "FrameMioDeepgramAPIKey", environmentKey: "DEEPGRAM_API_KEY")
         if value == "dg-mock-replace-with-real-key" {

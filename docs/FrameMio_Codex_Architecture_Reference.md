@@ -93,7 +93,12 @@ The home screen should communicate the simple promise:
 
 > **Create videos from your photos and footage.**
 
-The primary action is Create. Creation offers three concise choices:
+The primary discovery surfaces are Templates and Create. Templates is a
+first-class tab for browsing reviewed visual recipes with playable demos.
+Create remains the direct path for starting a Story, Promo, or Reel without
+browsing templates first.
+
+Creation offers three concise choices:
 
 ```text
 Story
@@ -109,7 +114,24 @@ For short-form social content
 Projects display a thumbnail, title, project type, last modified time, and
 processing status when applicable. Type indicators should make Story, Promo,
 and Reel easy to distinguish without turning the home screen into a feature
-catalog.
+catalog. The project list lives inside the Create flow rather than as a primary
+tab; project management is important, but template discovery is the main
+top-level product surface.
+
+Template discovery must stay curated, not combinatorially infinite:
+
+```text
+Templates tab
+  Story presets: 6
+  Promo presets: 6
+  Reel presets: 6
+```
+
+Each preset is backend-owned and versioned. The iOS app may cache/fallback to
+the built-in catalog, but it must not define arbitrary renderer behavior.
+Selecting a template starts the normal media-selection and creation flow with
+`template_id`, `template_version`, and the template defaults prefilled. Users
+may still edit supported settings in the creation configuration screen.
 
 The iOS product remains approachable:
 
@@ -403,6 +425,16 @@ The iPhone is NOT responsible for:
 The iOS app does support one shared creation flow for all project types:
 
 ```text
+Templates
+  ↓
+Choose a reviewed template
+  ↓
+Media Picker
+  ↓
+Optional mode configuration
+  ↓
+Upload and launch shared project pipeline
+
 Create
   ↓
 Story / Promo / Reel
@@ -981,6 +1013,77 @@ The strategy may omit stages unsupported by the media.
 Reel defaults to mobile-first `9:16`, short duration, and vertical crop/reframe.
 Supported platforms are labels for user intent; do not hardcode
 platform-specific behavior unless a real output requirement demands it.
+
+## 8.5 Video template catalog
+
+FrameMio has one backend-owned, versioned video-template catalog. It is a
+bounded set of curated presets, not a template marketplace and not a way for
+iOS to send renderer instructions.
+
+Current catalog shape:
+
+```text
+Story
+  full-screen-cinematic-cutaways
+  photo-over-video
+  picture-in-picture
+  warm-memory-recap
+  caption-led-memory
+  quick-family-recap
+
+Promo
+  product-spotlight
+  app-demo-overlay
+  testimonial-with-images
+  split-screen-offer
+  fast-social-ad
+  premium-brand-story
+
+Reel
+  fast-montage
+  reel-picture-in-picture
+  before-after-split
+  cinematic-reel-cutaways
+  talking-head-reel
+  travel-highlight-reel
+```
+
+Each template includes:
+
+```text
+template_id
+version
+name
+description
+demo_video_path
+supported_project_types
+defaults
+editable_options
+media_slots
+planner_guidance
+renderer_capabilities
+```
+
+Template defaults are resolved in this order:
+
+```text
+template defaults
+  -> user edits for supported options only
+  -> backend normalization and validation
+  -> planner output constrained by the validated template
+```
+
+The external planner may select media, timing, ordering, crop intent, and
+bounded overlay placement/size values. It must not return renderer code, CSS,
+FFmpeg commands, arbitrary coordinates, unknown media IDs, or unsupported
+layouts. The backend must enforce the selected template identity, version,
+aspect ratio, captions, layout, and supported visual-overlay constraints after
+planner output.
+
+Demo MP4s are static reviewed assets. They may be served from
+`landing-page/public/videos/templates/` and may also be bundled in iOS as a
+local fallback for reliable device previews. Apps and the Next.js site must not
+generate demo videos at runtime.
 
 Internal worker routes:
 

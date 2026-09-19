@@ -21,8 +21,8 @@ func TestVideoTemplateCatalogAPI(t *testing.T) {
 	}
 	var all []models.VideoTemplate
 	decodeResponse(t, allResponse, &all)
-	if len(all) < 6 {
-		t.Fatalf("expected initial templates, got %+v", all)
+	if len(all) != 18 {
+		t.Fatalf("expected curated templates, got %d: %+v", len(all), all)
 	}
 
 	storyResponse := performJSON(t, handler, http.MethodGet, "/v1/video-templates?project_type=story", nil, "", true, nil)
@@ -31,9 +31,27 @@ func TestVideoTemplateCatalogAPI(t *testing.T) {
 	}
 	var storyTemplates []models.VideoTemplate
 	decodeResponse(t, storyResponse, &storyTemplates)
+	if len(storyTemplates) != 6 {
+		t.Fatalf("story templates = %d, want 6: %+v", len(storyTemplates), storyTemplates)
+	}
 	for _, template := range storyTemplates {
 		if template.ID == "split-screen-memory" || template.ID == "fast-montage" {
 			t.Fatalf("story catalog included unsupported template: %+v", template)
+		}
+	}
+
+	promoResponse := performJSON(t, handler, http.MethodGet, "/v1/video-templates?project_type=promo", nil, "", true, nil)
+	if promoResponse.Code != http.StatusOK {
+		t.Fatalf("promo template catalog status = %d, body = %s", promoResponse.Code, promoResponse.Body.String())
+	}
+	var promoTemplates []models.VideoTemplate
+	decodeResponse(t, promoResponse, &promoTemplates)
+	if len(promoTemplates) != 6 {
+		t.Fatalf("promo templates = %d, want 6: %+v", len(promoTemplates), promoTemplates)
+	}
+	for _, template := range promoTemplates {
+		if template.ID == "photo-over-video" || template.ID == "picture-in-picture" || template.ID == "fast-montage" {
+			t.Fatalf("promo catalog included template from another project type: %+v", template)
 		}
 	}
 
@@ -156,7 +174,7 @@ func TestGenericProjectAPINormalizesTemplateConfiguration(t *testing.T) {
 		"context":   "Template project",
 		"media_ids": []string{"media-asset-template-project"},
 		"configuration": map[string]any{
-			"template_id":      "photo-over-video",
+			"template_id":      "app-demo-overlay",
 			"template_version": 1,
 			"template_configuration": map[string]any{
 				"duration_seconds":  45,
@@ -170,7 +188,7 @@ func TestGenericProjectAPINormalizesTemplateConfiguration(t *testing.T) {
 	}
 	var project models.VideoProject
 	decodeResponse(t, response, &project)
-	if project.Configuration.TemplateID != "photo-over-video" || project.Configuration.TemplateVersion != 1 {
+	if project.Configuration.TemplateID != "app-demo-overlay" || project.Configuration.TemplateVersion != 1 {
 		t.Fatalf("template identity was not stored: %+v", project.Configuration)
 	}
 	config := project.Configuration.TemplateConfiguration
@@ -192,7 +210,7 @@ func TestGenericProjectAPIRejectsInvalidTemplateConfiguration(t *testing.T) {
 		"context":   "Template project",
 		"media_ids": []string{"media-asset-invalid-template-project"},
 		"configuration": map[string]any{
-			"template_id": "fast-montage",
+			"template_id": "fast-social-ad",
 			"template_configuration": map[string]any{
 				"overlay_placement": "bottom_right",
 			},
