@@ -1,6 +1,7 @@
 import AVKit
 import StoreKit
 import SwiftUI
+import UIKit
 
 private func purchaseRoutingDebugLog(_ message: @autoclosure () -> String) {
     print("[FrameMio][Purchases] \(message())")
@@ -272,6 +273,7 @@ struct AppRootView: View {
             ProjectConfigurationView(
                 draft: draft,
                 assets: assets,
+                photoLibrary: dependencies.photoLibrary,
                 storyService: dependencies.storyService,
                 promptTranscriptionService: dependencies.promptTranscriptionService,
                 onContinue: { configuredDraft in
@@ -569,6 +571,7 @@ struct TemplatesView: View {
 }
 
 struct ProjectConfigurationView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var promoSubject: PromoSubject
     @State private var promoGoal: PromoGoal
     @State private var promoDuration: ProjectDurationOption
@@ -580,9 +583,12 @@ struct ProjectConfigurationView: View {
     @State private var selectedTemplateID: String?
     @State private var templateConfiguration: VideoTemplateConfiguration?
     @State private var isShowingCustomization = false
+    @State private var thumbnails: [String: UIImage] = [:]
+    @State private var thumbnailTasks: [String: Task<Void, Never>] = [:]
 
     let draft: VideoProjectDraft
     let assets: [MediaAsset]
+    let photoLibrary: PhotoLibraryService
     let storyService: StoryService
     let promptTranscriptionService: PromptTranscriptionService?
     let onContinue: (VideoProjectDraft) -> Void
@@ -590,12 +596,14 @@ struct ProjectConfigurationView: View {
     init(
         draft: VideoProjectDraft,
         assets: [MediaAsset],
+        photoLibrary: PhotoLibraryService,
         storyService: StoryService,
         promptTranscriptionService: PromptTranscriptionService? = nil,
         onContinue: @escaping (VideoProjectDraft) -> Void
     ) {
         self.draft = draft
         self.assets = assets
+        self.photoLibrary = photoLibrary
         self.storyService = storyService
         self.promptTranscriptionService = promptTranscriptionService
         self.onContinue = onContinue
@@ -615,6 +623,8 @@ struct ProjectConfigurationView: View {
             VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
                 header
                 selectedMediaSection
+                Divider()
+                    .overlay(FrameMioColors.divider)
                 templateSection
 
                 if draft.type == .promo {
@@ -636,7 +646,14 @@ struct ProjectConfigurationView: View {
         .safeAreaInset(edge: .bottom) {
             fixedGenerateButton
         }
-        .task { await loadTemplates() }
+        .task {
+            await loadTemplates()
+            loadMissingThumbnails()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            loadMissingThumbnails()
+        }
         .sheet(isPresented: $isShowingCustomization) {
             if let template = selectedTemplate {
                 ProjectTemplateSettingsSheet(
@@ -672,15 +689,69 @@ struct ProjectConfigurationView: View {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: FrameMioSpacing.sm) {
                 ForEach(assets) { asset in
                     MediaThumbnail(
+                        image: thumbnailImage(for: asset),
+                        isLoading: isThumbnailLoading(for: asset),
                         duration: asset.isVideo ? asset.duration : nil,
                         isLivePhoto: asset.isLivePhoto,
                         placeholderSystemImage: asset.isVideo ? "video.fill" : "photo.fill",
                         accessibilityTitle: asset.isVideo ? "Selected video" : "Selected photo"
                     )
+                    .onAppear {
+                        loadThumbnail(for: asset)
+                    }
+                    .onDisappear {
+                        cancelThumbnail(for: asset)
+                    }
                     .id(asset.id)
                 }
             }
         }
+    }
+
+    private func thumbnailImage(for asset: MediaAsset) -> Image? {
+        guard let image = thumbnails[asset.id] else { return nil }
+        return Image(uiImage: image)
+    }
+
+    private func isThumbnailLoading(for asset: MediaAsset) -> Bool {
+        thumbnailTasks[asset.id] != nil
+    }
+
+    private func loadMissingThumbnails() {
+        for asset in assets where thumbnails[asset.id] == nil {
+            loadThumbnail(for: asset)
+        }
+    }
+
+    private func loadThumbnail(for asset: MediaAsset) {
+        let assetID = asset.id
+        guard thumbnails[assetID] == nil, thumbnailTasks[assetID] == nil else { return }
+        thumbnailTasks[assetID] = Task { [photoLibrary] in
+            do {
+                let data = try await photoLibrary.requestThumbnail(for: asset, targetSize: FrameMioMetrics.mediaThumbnailRequestSize)
+                try Task.checkCancellation()
+                guard let image = UIImage(data: data) else {
+                    await MainActor.run {
+                        thumbnailTasks[assetID] = nil
+                    }
+                    return
+                }
+                await MainActor.run {
+                    thumbnails[assetID] = image
+                    thumbnailTasks[assetID] = nil
+                }
+            } catch {
+                await MainActor.run {
+                    thumbnailTasks[assetID] = nil
+                }
+            }
+        }
+    }
+
+    private func cancelThumbnail(for asset: MediaAsset) {
+        let assetID = asset.id
+        thumbnailTasks[assetID]?.cancel()
+        thumbnailTasks[assetID] = nil
     }
 
     private var templateSection: some View {

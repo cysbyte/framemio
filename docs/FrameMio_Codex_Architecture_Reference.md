@@ -858,10 +858,13 @@ generation/edit preferences such as style, prompt, scene detail level
 (`sceneDetailStyle`), target duration, `subtitlesEnabled`, and
 `subtitleStyle`. The iOS create screen keeps these options behind a compact
 Customize entry so first-time creation remains a one-tap flow; the sheet
-exposes Style, Prompt, Scene Details, Subtitles, and Length without exposing
-renderer terminology such as B-roll. The prompt is optional, sent as
-`instruction`, sanitized and bounded by the backend, then stored as
-`user_instructions` for planning.
+exposes Style, Prompt, Scene Details, Subtitles, Length, and template-supported
+overlay options without exposing renderer terminology such as B-roll, FFmpeg,
+CSS, or raw coordinates. The prompt is optional, sent as `instruction`,
+sanitized and bounded by the backend, then stored as `user_instructions` for
+planning. Story, Promo, and Reel creation all use the same shared prompt input
+component, including quick prompt chips and voice prompt transcription where
+the build has a `PromptTranscriptionService`.
 
 The generic project API supports Promo and Reel without creating separate
 pipelines:
@@ -876,6 +879,10 @@ POST /projects/:id/analyze
 The current iOS implementation sends:
 
 ```text
+template_id
+template_version
+template_configuration        resolved, user-editable supported options only
+
 configuration.promo:
   promotion_goal
   product_information
@@ -927,6 +934,13 @@ B-roll, subtitle, Promo CTA, or Reel vertical settings. Subtitle preferences
 affect only generated `StoryPlan` captions plus renderer-safe `caption_style`;
 iOS never sends raw renderer commands, font paths, STT provider information,
 or transcript text.
+
+The Create Story, Create Promo, and Create Reel screens keep the final create
+action fixed in the bottom safe-area inset. Create Story shows selected media
+with locally loaded thumbnails. Create Promo and Create Reel show the same
+Selected moments section with stable media placeholders, video duration badges,
+and Live Photo badges before template selection so the user can confirm the
+media set before generating.
 
 ## 8.3 Edit Story contract
 
@@ -1064,6 +1078,36 @@ planner_guidance
 renderer_capabilities
 ```
 
+iOS surfaces templates in two places:
+
+```text
+Templates tab
+  two-column browsable catalog
+  inline muted looping MP4 demo
+  fullscreen demo playback button
+  Use Template starts normal media selection and creation
+
+Create Story / Promo / Reel
+  selected-media review
+  smaller horizontal template cards
+  Customize sheet populated from selected template defaults
+  fixed bottom create/generate action
+```
+
+When a template is selected, iOS stores the template identity separately from
+the resolved user configuration:
+
+```text
+template_id
+template_version
+template_configuration
+```
+
+Changing templates preserves compatible options such as duration, captions,
+visual style, and supported overlay settings where valid. Unsupported or
+incompatible options reset to the new template defaults. The UI must never
+leave an invalid template configuration active.
+
 Template defaults are resolved in this order:
 
 ```text
@@ -1079,6 +1123,12 @@ FFmpeg commands, arbitrary coordinates, unknown media IDs, or unsupported
 layouts. The backend must enforce the selected template identity, version,
 aspect ratio, captions, layout, and supported visual-overlay constraints after
 planner output.
+
+Photo-over-video and picture-in-picture templates use structured visual
+overlays so the base video continues playing underneath supporting photos or
+videos. Full-frame B-roll remains backward compatible and still replaces the
+visible frame for its timed range. Renderers branch on normalized composition
+properties, not on high-level project type.
 
 Demo MP4s are static reviewed assets. They may be served from
 `landing-page/public/videos/templates/` and may also be bundled in iOS as a
@@ -1870,7 +1920,18 @@ structured, validated fields. AI output must never become Remotion code,
 CSS, arbitrary font paths, shell commands, ImageMagick commands, or FFmpeg
 arguments.
 
-`caption_style` is optional renderer-safe styling metadata for captions/subtitles. It may include whitelisted presets such as `bold_social`, `cinematic_subtitle`, `clean_minimal`, and `playful_pop`, plus validated fields for font family, font size, text/stroke/background colors, background opacity, position, bottom offset, max lines, and max characters per line. It must not contain raw FFmpeg/Remotion commands, arbitrary font file paths, provider information, or transcript source details.
+`caption_style` is optional renderer-safe styling metadata for captions/subtitles. It may include whitelisted presets such as `bold_social`, `cinematic_subtitle`, `clean_minimal`, and `playful_pop`, plus validated fields for font family, font size, text/stroke/background colors, background opacity, position, bottom offset, max lines, and max characters per line. It may also include bounded presentation controls:
+
+```text
+presentation       full_text | word_by_word
+highlight_color    #RRGGBB
+```
+
+`word_by_word` is intended for Reel-style social captions. When exact word
+timestamps are unavailable, renderers deterministically distribute each
+caption's validated time range across its words. It must not contain raw
+FFmpeg/Remotion commands, arbitrary font file paths, provider information, or
+transcript source details.
 
 ## 16.2 V1 audio and future background music
 
@@ -2060,6 +2121,15 @@ Text:
 - validated Promo/Reel text overlays and optional Story typography
 - optional chapter text
 - ending
+
+Captions render from validated `StoryPlan.captions` plus bounded
+`caption_style`. Full-text captions remain the default. `word_by_word`
+captions are supported for social/Reel-style output by both Remotion and the
+FFmpeg fallback; when word-level transcript timing is not persisted, the
+renderer deterministically distributes the caption duration across words.
+Caption color and size come from validated style fields such as `font_size`,
+`text_color`, `highlight_color`, `stroke_color`, and `stroke_width`; fixed
+white captions are not required.
 
 Text overlays are rendered by Remotion when `RENDERER_MODE=remotion` using
 the checked-in Remotion entrypoint. The renderer applies controlled
