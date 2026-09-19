@@ -262,10 +262,61 @@ function brollVideoFilters(composition: CompositionSpec): {filters: string[]; ou
     filters.push(isPhotoTimelineBRoll(overlay)
       ? brollPhotoVideoFilter(overlay, inputIndex, sourceLabel, composition)
       : brollSourceVideoFilter(overlay, inputIndex, sourceLabel, composition));
-    filters.push(`[${baseInput}][${sourceLabel}]overlay=0:0:enable='between(t,${secondsFromFrames(overlay.start_frame, composition.fps)},${secondsFromFrames(overlay.start_frame + overlay.duration_frames, composition.fps)})'[${outputLabel}]`);
+    const start = secondsFromFrames(overlay.start_frame, composition.fps);
+    const end = secondsFromFrames(overlay.start_frame + overlay.duration_frames, composition.fps);
+    if (overlay.presentation === 'full_frame') {
+      filters.push(`[${baseInput}][${sourceLabel}]overlay=0:0:enable='between(t,${start},${end})'[${outputLabel}]`);
+    } else {
+      const layerLabel = `bo${index}`;
+      filters.push(`[${sourceLabel}]${brollLayerFilter(overlay, composition)}[${layerLabel}]`);
+      filters.push(`[${baseInput}][${layerLabel}]overlay=${brollPlacementExpression(overlay)}:enable='between(t,${start},${end})'[${outputLabel}]`);
+    }
     baseInput = outputLabel;
   });
   return {filters, outputLabel: baseInput};
+}
+
+function brollLayerFilter(overlay: TimelineBRoll, composition: CompositionSpec): string {
+  const size = overlaySizeFactor(overlay.size);
+  const scale = overlay.size === 'half'
+    ? `scale=${Math.round(composition.resolution.width * 0.5)}:${composition.resolution.height}:force_original_aspect_ratio=decrease,pad=${Math.round(composition.resolution.width * 0.5)}:${composition.resolution.height}:(ow-iw)/2:(oh-ih)/2`
+    : `scale=iw*${ffmpegNumber(size)}:ih*${ffmpegNumber(size)}`;
+  const filters = [`${scale}`, 'format=rgba'];
+  if (overlay.opacity < 1) {
+    filters.push(`colorchannelmixer=aa=${ffmpegNumber(overlay.opacity)}`);
+  }
+  if (overlay.frame === 'subtle' || overlay.frame === 'bold') {
+    const thickness = overlay.frame === 'bold' ? 6 : 3;
+    filters.push(`drawbox=x=0:y=0:w=iw-1:h=ih-1:color=white@0.9:t=${thickness}`);
+  }
+  if (overlay.animation === 'fade') {
+    const duration = clipDurationSeconds(overlay);
+    const fadeDuration = Math.min(0.35, Math.max(0.05, overlay.duration_ms / 1000 / 3));
+    filters.push(`fade=t=in:st=0:d=${ffmpegNumber(fadeDuration)}:alpha=1`);
+    filters.push(`fade=t=out:st=${ffmpegNumber(Math.max(0, Number(duration) - fadeDuration))}:d=${ffmpegNumber(fadeDuration)}:alpha=1`);
+  }
+  return filters.join(',');
+}
+
+function overlaySizeFactor(size: TimelineBRoll['size']): number {
+  switch (size) {
+    case 'small': return 0.28;
+    case 'large': return 0.52;
+    case 'half': return 0.5;
+    default: return 0.38;
+  }
+}
+
+function brollPlacementExpression(overlay: TimelineBRoll): string {
+  switch (overlay.placement) {
+    case 'top_left': return 'W*0.05:H*0.05';
+    case 'top_right': return 'W-w-W*0.05:H*0.05';
+    case 'bottom_left': return 'W*0.05:H-h-H*0.08';
+    case 'center': return '(W-w)/2:(H-h)/2';
+    case 'left': return '0:0';
+    case 'right': return 'W-w:0';
+    default: return 'W-w-W*0.05:H-h-H*0.08';
+  }
 }
 
 function captionVideoFilter(captions: CaptionOverlay[], requestedStyle?: CaptionStyle, inputLabel = 'basev'): string {

@@ -5,6 +5,26 @@ export type ProjectType = 'story' | 'promo' | 'reel';
 export type AspectRatio = '9:16' | '1:1' | '16:9';
 export type TransitionType = 'cut' | 'fade' | 'dissolve' | 'crossfade';
 export type CropIntent = 'fill' | 'fit' | 'pan' | 'zoom' | string;
+export type VideoTemplateLayout = 'full_frame' | 'picture_in_picture' | 'split_screen' | 'montage';
+export type VideoTemplatePlacement = 'top_left' | 'top_right' | 'bottom_left' | 'bottom_right' | 'center' | 'left' | 'right';
+export type VideoTemplateSize = 'small' | 'medium' | 'large' | 'half';
+export type VideoTemplateFrame = 'none' | 'subtle' | 'bold';
+export type VideoTemplateAnimation = 'none' | 'fade' | 'subtle_scale';
+
+export interface VideoTemplateConfiguration {
+  aspect_ratio?: AspectRatio | string;
+  duration_seconds?: number;
+  visual_style?: string;
+  captions_enabled?: boolean;
+  caption_style?: string;
+  scene_detail?: string;
+  layout?: VideoTemplateLayout;
+  overlay_placement?: VideoTemplatePlacement;
+  overlay_size?: VideoTemplateSize;
+  overlay_opacity?: number;
+  overlay_frame?: VideoTemplateFrame;
+  overlay_animation?: VideoTemplateAnimation;
+}
 
 export interface StoryPlan {
   schema_version: string;
@@ -12,6 +32,9 @@ export interface StoryPlan {
   project_id: string;
   project_type?: ProjectType;
   version: number;
+  template_id?: string;
+  template_version?: number;
+  template_configuration?: VideoTemplateConfiguration;
   requested_duration_ms?: number;
   title_text?: string;
   ending_text?: string;
@@ -43,6 +66,13 @@ export interface StoryMoment {
   transition?: TransitionType | string;
   reason?: string;
   score?: number;
+  presentation?: VideoTemplateLayout;
+  placement?: VideoTemplatePlacement;
+  size?: VideoTemplateSize;
+  opacity?: number;
+  frame?: VideoTemplateFrame;
+  animation?: VideoTemplateAnimation;
+  z_index?: number;
   speed?: number;
   volume?: number;
   typography?: TextOverlay;
@@ -111,6 +141,13 @@ export interface StoryBRoll {
   reason?: string;
   confidence?: number;
   score?: number;
+  presentation?: VideoTemplateLayout;
+  placement?: VideoTemplatePlacement;
+  size?: VideoTemplateSize;
+  opacity?: number;
+  frame?: VideoTemplateFrame;
+  animation?: VideoTemplateAnimation;
+  z_index?: number;
 }
 
 export interface StoryBRollAnchor {
@@ -248,6 +285,13 @@ export interface TimelineBRoll {
   source_end_micros?: number;
   crop_intent: string;
   transform: KenBurnsTransform | VideoTransform;
+  presentation: VideoTemplateLayout;
+  placement: VideoTemplatePlacement;
+  size: VideoTemplateSize;
+  opacity: number;
+  frame: VideoTemplateFrame;
+  animation: VideoTemplateAnimation;
+  z_index: number;
 }
 
 export interface KenBurnsTransform {
@@ -273,6 +317,9 @@ export interface CompositionSpec {
   story_plan_id: string;
   story_plan_version: number;
   project_id: string;
+  template_id?: string;
+  template_version?: number;
+  template_configuration?: VideoTemplateConfiguration;
   canvas?: CanvasSpec;
   fps: number;
   resolution: Resolution;

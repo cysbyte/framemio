@@ -13,6 +13,7 @@ import (
 	"github.com/framemio/backend/internal/storage"
 	"github.com/framemio/backend/internal/store"
 	"github.com/framemio/backend/internal/storyvalidation"
+	"github.com/framemio/backend/internal/templates"
 )
 
 func TestBRollScoresReportsIdentityAndUnsetScoreClearly(t *testing.T) {
@@ -239,6 +240,104 @@ func TestStoryPlanHandlerPersistsExternalPlannerOutput(t *testing.T) {
 	}
 	if latest.ID != "plan-external-valid" || latest.Version != 2 || len(latest.Captions) != 1 {
 		t.Fatalf("external planner output was not persisted: %+v", latest)
+	}
+}
+
+func TestStoryPlanHandlerMapsTemplateDefaultsToPlannerRequest(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore := store.NewMemoryStore()
+	now := time.Date(2026, time.September, 19, 12, 0, 0, 0, time.UTC)
+	photo := models.MediaAsset{ID: "photo-template-request", UserID: "user-1", Type: models.MediaTypePhoto, Status: models.MediaStatusReady, FileName: "photo.jpg", ContentType: "image/jpeg", FileSizeBytes: 100, S3Key: "source/photo-template-request", UploadID: "upload-photo-template-request", CreatedAt: now, UpdatedAt: now}
+	if err := memoryStore.CreateMediaUpload(ctx, photo, models.UploadSession{ID: photo.UploadID, UserID: photo.UserID, MediaID: photo.ID, S3Key: photo.S3Key, Strategy: models.UploadStrategySingle, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	template, resolved, err := templates.Resolve(models.ProjectTypeStory, "picture-in-picture", 1, models.VideoTemplateConfiguration{DurationSeconds: 45})
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := models.StoryProject{
+		ID: "project-template-request", UserID: photo.UserID, Type: models.ProjectTypeStory, Title: "Template", MediaIDs: []string{photo.ID}, Status: models.ProjectStatusAnalyzing, CreatedAt: now, UpdatedAt: now,
+		Configuration: models.VideoProjectConfiguration{TemplateID: template.ID, TemplateVersion: template.Version, TemplateConfiguration: resolved},
+	}
+	if _, _, err := memoryStore.CreateProject(ctx, project, "project-template-request-key"); err != nil {
+		t.Fatal(err)
+	}
+	if err := memoryStore.SaveAnalysis(ctx, photo.UserID, models.MediaAnalysis{ID: "analysis-photo-template-request", MediaID: photo.ID, ProjectID: project.ID, QualityScore: 0.8, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	planner := &capturingStoryPlanner{}
+	job := models.ProcessingJob{ID: "job-template-request", UserID: photo.UserID, ProjectID: project.ID, Type: models.JobTypeStoryPlan, Status: models.JobStatusRunning, CreatedAt: now, UpdatedAt: now}
+	handler := StoryPlanHandler{Store: memoryStore, Planner: planner, Now: func() time.Time { return now }}
+	if err := handler.HandleJob(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	if planner.input.TemplateID != template.ID || planner.input.TemplateVersion != template.Version {
+		t.Fatalf("template identity not mapped to planner request: %+v", planner.input)
+	}
+	if planner.input.DesiredDuration != 45*time.Second || !planner.input.TargetDurationFixed || planner.input.VisualStyle != models.VisualStyleWarm || planner.input.CaptionStylePreset != "clean_minimal" || planner.input.BRollPreference != "more" {
+		t.Fatalf("template defaults not reflected in planner request: %+v", planner.input)
+	}
+}
+
+func TestStoryPlanHandlerEnforcesTemplateIdentityFromExternalPlanner(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	memoryStore, project := storyRevisionHandlerFixture(t)
+	now := project.CreatedAt
+	template, resolved, err := templates.Resolve(models.ProjectTypeStory, "photo-over-video", 1, models.VideoTemplateConfiguration{OverlayPlacement: models.VideoTemplatePlacementTopLeft})
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.Configuration.TemplateID = template.ID
+	project.Configuration.TemplateVersion = template.Version
+	project.Configuration.TemplateConfiguration = resolved
+	if _, err := memoryStore.UpdateProject(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	planner := fixedStoryPlanner{plan: models.StoryPlan{
+		SchemaVersion:         models.StoryPlanSchemaVersionV1,
+		ID:                    "plan-template-enforced",
+		ProjectID:             project.ID,
+		ProjectType:           project.Type,
+		Version:               2,
+		TemplateID:            "invented-template",
+		TemplateVersion:       9,
+		TemplateConfiguration: models.VideoTemplateConfiguration{AspectRatio: "16:9"},
+		RequestedDurationMS:   4000,
+		StoryType:             models.StoryTypeTrip,
+		VisualStyle:           models.VisualStyleCinematic,
+		TitleText:             "Template story",
+		EndingText:            "Done",
+		Moments: []models.StoryMoment{{
+			MomentID: "moment-photo-revision", AssetID: "photo-revision", MediaID: "photo-revision", MediaType: models.MediaTypePhoto,
+			Narrative: "A beach memory opens the story.", Caption: "Beach memory", DurationMS: 4000, CropIntent: "fit", Transition: "fade_in",
+		}},
+		BRoll: []models.StoryBRoll{{
+			BrollID: "broll-photo-revision", AssetID: "photo-revision", MediaID: "photo-revision", MediaType: models.MediaTypePhoto,
+			StartMS: 1000, DurationMS: 1000, CropIntent: "fit", Confidence: 0.8, Score: 0.7,
+		}},
+		Output:          models.StoryOutput{AspectRatio: "16:9", MaxDurationS: 4, Preset: "premium-memory"},
+		TotalDurationMS: 4000,
+		CreatedAt:       now,
+	}}
+	job := models.ProcessingJob{ID: "job-template-enforced", UserID: project.UserID, ProjectID: project.ID, Type: models.JobTypeStoryPlan, Status: models.JobStatusRunning, Configuration: map[string]string{"story_plan_version": "2"}, CreatedAt: now, UpdatedAt: now}
+	handler := StoryPlanHandler{Store: memoryStore, Planner: planner, Validator: storyvalidation.New(memoryStore, storage.StaticObjectStorage{}, storyvalidation.DefaultConfig()), Now: func() time.Time { return now }}
+	if err := handler.HandleJob(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	latest, err := memoryStore.GetStoryPlan(ctx, project.UserID, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latest.TemplateID != template.ID || latest.TemplateVersion != template.Version || latest.TemplateConfiguration.OverlayPlacement != models.VideoTemplatePlacementTopLeft {
+		t.Fatalf("template identity/configuration not enforced: %+v", latest)
+	}
+	if latest.Output.AspectRatio != "9:16" {
+		t.Fatalf("template aspect ratio not enforced: %+v", latest.Output)
+	}
+	if len(latest.BRoll) != 1 || latest.BRoll[0].Presentation != models.VideoTemplateLayoutPictureInPicture || latest.BRoll[0].Placement != models.VideoTemplatePlacementTopLeft {
+		t.Fatalf("template overlay defaults not applied: %+v", latest.BRoll)
 	}
 }
 
@@ -657,5 +756,31 @@ func (planner fixedStoryPlanner) Plan(context.Context, ai.Request) (models.Story
 func (fixedStoryPlanner) Name() string { return "openai-compatible" }
 
 func (fixedStoryPlanner) Model() string { return "gpt-test" }
+
+type capturingStoryPlanner struct {
+	input ai.Request
+}
+
+func (planner *capturingStoryPlanner) Plan(_ context.Context, input ai.Request) (models.StoryPlan, error) {
+	planner.input = input
+	return models.StoryPlan{
+		SchemaVersion:       models.StoryPlanSchemaVersionV1,
+		ID:                  "plan-capturing-template",
+		ProjectID:           input.ProjectID,
+		ProjectType:         input.ProjectType,
+		Version:             1,
+		RequestedDurationMS: int(input.DesiredDuration.Milliseconds()),
+		StoryType:           input.StoryType,
+		VisualStyle:         input.VisualStyle,
+		TitleText:           "Template",
+		EndingText:          "Done",
+		Moments:             []models.StoryMoment{{MomentID: "moment-template", AssetID: input.SelectedMediaIDs[0], MediaID: input.SelectedMediaIDs[0], MediaType: models.MediaTypePhoto, DurationMS: 3000, CropIntent: "fit", Transition: "fade_in"}},
+		Output:              models.StoryOutput{AspectRatio: input.TemplateConfiguration.AspectRatio, MaxDurationS: 45, Preset: "premium-memory"},
+		TotalDurationMS:     3000,
+		CreatedAt:           time.Now().UTC(),
+	}, nil
+}
+
+func (capturingStoryPlanner) Name() string { return "capturing" }
 
 func boolPtr(value bool) *bool { return &value }

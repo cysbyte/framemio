@@ -215,26 +215,29 @@ type MediaAnalysis struct {
 }
 
 type StoryPlan struct {
-	SchemaVersion       string         `json:"schema_version,omitempty"`
-	ID                  string         `json:"id"`
-	ProjectID           string         `json:"project_id"`
-	ProjectType         ProjectType    `json:"project_type,omitempty"`
-	Version             int            `json:"version"`
-	RequestedDurationMS int            `json:"requested_duration_ms,omitempty"`
-	StoryType           StoryType      `json:"story_type,omitempty"`
-	VisualStyle         VisualStyle    `json:"visual_style,omitempty"`
-	TitleText           string         `json:"title_text,omitempty"`
-	EndingText          string         `json:"ending_text,omitempty"`
-	CallToAction        string         `json:"call_to_action,omitempty"`
-	UserInstructions    string         `json:"user_instructions,omitempty"`
-	Moments             []StoryMoment  `json:"moments"`
-	BRoll               []StoryBRoll   `json:"broll,omitempty"`
-	Captions            []StoryCaption `json:"captions,omitempty"`
-	CaptionStyle        *CaptionStyle  `json:"caption_style,omitempty"`
-	Audio               *StoryAudio    `json:"audio,omitempty"`
-	Output              StoryOutput    `json:"output"`
-	TotalDurationMS     int            `json:"total_duration_ms,omitempty"`
-	CreatedAt           time.Time      `json:"created_at"`
+	SchemaVersion         string                     `json:"schema_version,omitempty"`
+	ID                    string                     `json:"id"`
+	ProjectID             string                     `json:"project_id"`
+	ProjectType           ProjectType                `json:"project_type,omitempty"`
+	Version               int                        `json:"version"`
+	TemplateID            string                     `json:"template_id,omitempty"`
+	TemplateVersion       int                        `json:"template_version,omitempty"`
+	TemplateConfiguration VideoTemplateConfiguration `json:"template_configuration,omitempty"`
+	RequestedDurationMS   int                        `json:"requested_duration_ms,omitempty"`
+	StoryType             StoryType                  `json:"story_type,omitempty"`
+	VisualStyle           VisualStyle                `json:"visual_style,omitempty"`
+	TitleText             string                     `json:"title_text,omitempty"`
+	EndingText            string                     `json:"ending_text,omitempty"`
+	CallToAction          string                     `json:"call_to_action,omitempty"`
+	UserInstructions      string                     `json:"user_instructions,omitempty"`
+	Moments               []StoryMoment              `json:"moments"`
+	BRoll                 []StoryBRoll               `json:"broll,omitempty"`
+	Captions              []StoryCaption             `json:"captions,omitempty"`
+	CaptionStyle          *CaptionStyle              `json:"caption_style,omitempty"`
+	Audio                 *StoryAudio                `json:"audio,omitempty"`
+	Output                StoryOutput                `json:"output"`
+	TotalDurationMS       int                        `json:"total_duration_ms,omitempty"`
+	CreatedAt             time.Time                  `json:"created_at"`
 }
 
 type TextOverlayType string
@@ -367,20 +370,27 @@ type StoryMoment struct {
 }
 
 type StoryBRoll struct {
-	BrollID              string            `json:"broll_id,omitempty"`
-	AssetID              string            `json:"asset_id"`
-	MediaID              string            `json:"media_id,omitempty"`
-	MediaType            MediaType         `json:"media_type,omitempty"`
-	VideoAnalysisVersion string            `json:"video_analysis_version,omitempty"`
-	SourceStartMicros    int64             `json:"source_start_micros,omitempty"`
-	SourceEndMicros      int64             `json:"source_end_micros,omitempty"`
-	StartMS              int               `json:"start_ms"`
-	DurationMS           int               `json:"duration_ms"`
-	Anchor               *StoryBRollAnchor `json:"anchor,omitempty"`
-	CropIntent           string            `json:"crop_intent,omitempty"`
-	Reason               string            `json:"reason,omitempty"`
-	Confidence           float64           `json:"confidence,omitempty"`
-	Score                float64           `json:"score,omitempty"`
+	BrollID              string                 `json:"broll_id,omitempty"`
+	AssetID              string                 `json:"asset_id"`
+	MediaID              string                 `json:"media_id,omitempty"`
+	MediaType            MediaType              `json:"media_type,omitempty"`
+	VideoAnalysisVersion string                 `json:"video_analysis_version,omitempty"`
+	SourceStartMicros    int64                  `json:"source_start_micros,omitempty"`
+	SourceEndMicros      int64                  `json:"source_end_micros,omitempty"`
+	StartMS              int                    `json:"start_ms"`
+	DurationMS           int                    `json:"duration_ms"`
+	Anchor               *StoryBRollAnchor      `json:"anchor,omitempty"`
+	CropIntent           string                 `json:"crop_intent,omitempty"`
+	Reason               string                 `json:"reason,omitempty"`
+	Confidence           float64                `json:"confidence,omitempty"`
+	Score                float64                `json:"score,omitempty"`
+	Presentation         VideoTemplateLayout    `json:"presentation,omitempty"`
+	Placement            VideoTemplatePlacement `json:"placement,omitempty"`
+	Size                 VideoTemplateSize      `json:"size,omitempty"`
+	Opacity              float64                `json:"opacity,omitempty"`
+	Frame                VideoTemplateFrame     `json:"frame,omitempty"`
+	Animation            VideoTemplateAnimation `json:"animation,omitempty"`
+	ZIndex               int                    `json:"z_index,omitempty"`
 }
 
 type StoryBRollAnchor struct {

@@ -10,6 +10,7 @@ import (
 	"github.com/framemio/backend/internal/models"
 	"github.com/framemio/backend/internal/storage"
 	"github.com/framemio/backend/internal/store"
+	"github.com/framemio/backend/internal/templates"
 )
 
 type Service interface {
@@ -187,6 +188,9 @@ func (v *Validator) Validate(ctx context.Context, userID string, plan models.Sto
 		problems.Add("output.aspect_ratio", "required", "output aspect ratio is required")
 	} else if !v.supportedAspectRatio(plan.Output.AspectRatio) {
 		problems.Add("output.aspect_ratio", "unsupported_aspect_ratio", "output aspect ratio is unsupported")
+	}
+	if err := templates.ValidatePlan(plan); err != nil {
+		problems.Add("template", "invalid_template", err.Error())
 	}
 	if strings.TrimSpace(plan.Output.Preset) == "" {
 		problems.Add("output.preset", "required", "output preset is required")

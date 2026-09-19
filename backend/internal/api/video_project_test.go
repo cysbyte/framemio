@@ -11,6 +11,38 @@ import (
 	"github.com/framemio/backend/internal/store"
 )
 
+func TestVideoTemplateCatalogAPI(t *testing.T) {
+	t.Parallel()
+	handler := newTestServer(store.NewMemoryStore(), queue.NewMemoryPublisher()).Handler()
+
+	allResponse := performJSON(t, handler, http.MethodGet, "/v1/video-templates", nil, "", true, nil)
+	if allResponse.Code != http.StatusOK {
+		t.Fatalf("template catalog status = %d, body = %s", allResponse.Code, allResponse.Body.String())
+	}
+	var all []models.VideoTemplate
+	decodeResponse(t, allResponse, &all)
+	if len(all) < 6 {
+		t.Fatalf("expected initial templates, got %+v", all)
+	}
+
+	storyResponse := performJSON(t, handler, http.MethodGet, "/v1/video-templates?project_type=story", nil, "", true, nil)
+	if storyResponse.Code != http.StatusOK {
+		t.Fatalf("story template catalog status = %d, body = %s", storyResponse.Code, storyResponse.Body.String())
+	}
+	var storyTemplates []models.VideoTemplate
+	decodeResponse(t, storyResponse, &storyTemplates)
+	for _, template := range storyTemplates {
+		if template.ID == "split-screen-memory" || template.ID == "fast-montage" {
+			t.Fatalf("story catalog included unsupported template: %+v", template)
+		}
+	}
+
+	invalid := performJSON(t, handler, http.MethodGet, "/v1/video-templates?project_type=editor", nil, "", true, nil)
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid project type status = %d, body = %s", invalid.Code, invalid.Body.String())
+	}
+}
+
 func TestGenericProjectAPICreatesAllVideoProjectTypes(t *testing.T) {
 	t.Parallel()
 
@@ -108,6 +140,104 @@ func TestGenericProjectAPICreatesAllVideoProjectTypes(t *testing.T) {
 	}, "", true, nil)
 	if typeChange.Code != http.StatusConflict {
 		t.Fatalf("type change status = %d, body = %s", typeChange.Code, typeChange.Body.String())
+	}
+}
+
+func TestGenericProjectAPINormalizesTemplateConfiguration(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	handler := newTestServer(memoryStore, queue.NewMemoryPublisher()).Handler()
+	createReadyIOSMediaInStore(t, memoryStore, "asset-template-project", models.MediaTypePhoto, 1024)
+
+	response := performJSON(t, handler, http.MethodPost, "/projects", map[string]any{
+		"type":      models.ProjectTypePromo,
+		"title":     "Template promo",
+		"context":   "Template project",
+		"media_ids": []string{"media-asset-template-project"},
+		"configuration": map[string]any{
+			"template_id":      "photo-over-video",
+			"template_version": 1,
+			"template_configuration": map[string]any{
+				"duration_seconds":  45,
+				"overlay_placement": "top_left",
+				"overlay_size":      "large",
+			},
+		},
+	}, "template-project", true, nil)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create template project status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var project models.VideoProject
+	decodeResponse(t, response, &project)
+	if project.Configuration.TemplateID != "photo-over-video" || project.Configuration.TemplateVersion != 1 {
+		t.Fatalf("template identity was not stored: %+v", project.Configuration)
+	}
+	config := project.Configuration.TemplateConfiguration
+	if config.DurationSeconds != 45 || config.OverlayPlacement != models.VideoTemplatePlacementTopLeft || config.OverlaySize != models.VideoTemplateSizeLarge || config.Layout != models.VideoTemplateLayoutPictureInPicture || project.Configuration.Composition.AspectRatio != "9:16" {
+		t.Fatalf("template configuration was not normalized: %+v", project.Configuration)
+	}
+}
+
+func TestGenericProjectAPIRejectsInvalidTemplateConfiguration(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	handler := newTestServer(memoryStore, queue.NewMemoryPublisher()).Handler()
+	createReadyIOSMediaInStore(t, memoryStore, "asset-invalid-template-project", models.MediaTypePhoto, 1024)
+
+	response := performJSON(t, handler, http.MethodPost, "/projects", map[string]any{
+		"type":      models.ProjectTypePromo,
+		"title":     "Invalid template promo",
+		"context":   "Template project",
+		"media_ids": []string{"media-asset-invalid-template-project"},
+		"configuration": map[string]any{
+			"template_id": "fast-montage",
+			"template_configuration": map[string]any{
+				"overlay_placement": "bottom_right",
+			},
+		},
+	}, "invalid-template-project", true, nil)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid template status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), "invalid_template_configuration") {
+		t.Fatalf("expected invalid_template_configuration, body = %s", response.Body.String())
+	}
+}
+
+func TestIOSStoryCreationStoresTemplateConfiguration(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	handler := newTestServer(memoryStore, queue.NewMemoryPublisher()).Handler()
+	createReadyIOSMediaInStore(t, memoryStore, "asset-ios-template", models.MediaTypePhoto, 1024)
+
+	response := performJSON(t, handler, http.MethodPost, "/v1/stories", map[string]any{
+		"context":          "Special moments",
+		"assets":           []map[string]any{{"id": "asset-ios-template", "kind": "image", "pixelWidth": 3024, "pixelHeight": 4032}},
+		"template_id":      "photo-over-video",
+		"template_version": 1,
+		"template_configuration": map[string]any{
+			"duration_seconds":  35,
+			"overlay_placement": "bottom_left",
+			"overlay_size":      "large",
+		},
+	}, "ios-template-story", true, nil)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create iOS template story status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var story iosStory
+	decodeResponse(t, response, &story)
+	project, err := memoryStore.GetProject(context.Background(), "user-1", story.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if project.Configuration.TemplateID != "photo-over-video" || project.Configuration.TemplateVersion != 1 {
+		t.Fatalf("template identity was not stored: %+v", project.Configuration)
+	}
+	if project.Configuration.TemplateConfiguration.DurationSeconds != 35 || project.Configuration.TemplateConfiguration.OverlayPlacement != models.VideoTemplatePlacementBottomLeft || project.Configuration.TemplateConfiguration.OverlaySize != models.VideoTemplateSizeLarge {
+		t.Fatalf("template configuration was not resolved: %+v", project.Configuration.TemplateConfiguration)
 	}
 }
 

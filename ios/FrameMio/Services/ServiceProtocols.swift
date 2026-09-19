@@ -621,6 +621,7 @@ protocol StoryService: Sendable {
     func story(id: String) async throws -> Story
     func createStory(request: CreateStoryRequest) async throws -> Story
     func createProject(request: CreateVideoProjectRequest) async throws -> Story
+    func videoTemplates(for projectType: VideoProjectType?) async throws -> [VideoTemplate]
     func retryProcessing(id: String) async throws -> Story
     func regenerateStory(id: String) async throws -> Story
     func renderAgain(id: String) async throws -> Story

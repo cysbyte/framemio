@@ -1,3 +1,4 @@
+import AVKit
 import StoreKit
 import SwiftUI
 
@@ -269,6 +270,7 @@ struct AppRootView: View {
         case let .projectConfiguration(draft, assets):
             ProjectConfigurationView(
                 draft: draft,
+                storyService: dependencies.storyService,
                 onContinue: { configuredDraft in
                     appendRoute(.storyCreating(draft: configuredDraft, assets: assets, launchID: UUID()))
                 }
@@ -285,9 +287,11 @@ struct AppRootView: View {
                     creditService: dependencies.creditService,
                     onCreditsUpdated: refreshCredits
                 ),
+                draft: draft,
+                storyService: dependencies.storyService,
                 promptTranscriptionService: dependencies.promptTranscriptionService,
-                onCreate: { options in
-                    appendRoute(.storyCreating(draft: .story(context: draft.context, options: options), assets: assets, launchID: UUID()))
+                onCreate: { configuredDraft in
+                    appendRoute(.storyCreating(draft: configuredDraft, assets: assets, launchID: UUID()))
                 },
                 onCreated: { story in
                     appendRoute(.storyPreview(story: story))
@@ -433,12 +437,18 @@ struct ProjectConfigurationView: View {
     @State private var reelDuration: ProjectDurationOption
     @State private var reelStyle: ReelStyle
     @State private var prompt: String
+    @State private var templates: [VideoTemplate] = []
+    @State private var selectedTemplateID: String?
+    @State private var templateConfiguration: VideoTemplateConfiguration?
+    @State private var templateErrorMessage: String?
 
     let draft: VideoProjectDraft
+    let storyService: StoryService
     let onContinue: (VideoProjectDraft) -> Void
 
-    init(draft: VideoProjectDraft, onContinue: @escaping (VideoProjectDraft) -> Void) {
+    init(draft: VideoProjectDraft, storyService: StoryService, onContinue: @escaping (VideoProjectDraft) -> Void) {
         self.draft = draft
+        self.storyService = storyService
         self.onContinue = onContinue
         _promoSubject = State(initialValue: draft.promo?.subject ?? .product)
         _promoGoal = State(initialValue: draft.promo?.goal ?? .sell)
@@ -447,12 +457,15 @@ struct ProjectConfigurationView: View {
         _reelDuration = State(initialValue: draft.reel?.duration ?? .automatic)
         _reelStyle = State(initialValue: draft.reel?.style ?? .automatic)
         _prompt = State(initialValue: draft.prompt ?? "")
+        _selectedTemplateID = State(initialValue: draft.templateID)
+        _templateConfiguration = State(initialValue: draft.templateConfiguration)
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
                 header
+                templateSection
 
                 if draft.type == .promo {
                     optionPicker(title: "What are you promoting?", selection: $promoSubject, values: PromoSubject.allCases)
@@ -465,6 +478,7 @@ struct ProjectConfigurationView: View {
                 }
 
                 promptField
+                templateOptions
 
                 PrimaryButton(title: "Generate First Draft", systemImage: "sparkles") {
                     onContinue(configuredDraft)
@@ -478,6 +492,77 @@ struct ProjectConfigurationView: View {
         .background(FrameMioColors.canvas.ignoresSafeArea())
         .navigationTitle(draft.type == .promo ? "Create Promo" : "Create Reel")
         .navigationBarTitleDisplayMode(.inline)
+        .task { await loadTemplates() }
+        .alert("Templates unavailable", isPresented: Binding(get: { templateErrorMessage != nil }, set: { if !$0 { templateErrorMessage = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(templateErrorMessage ?? "")
+        }
+    }
+
+    private var templateSection: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            Text("Choose a visual template")
+                .font(FrameMioTypography.headline)
+                .foregroundStyle(FrameMioColors.ink)
+            Text("Preview the rhythm first. FrameMio will use your media to create this kind of edit.")
+                .font(FrameMioTypography.footnote)
+                .foregroundStyle(FrameMioColors.secondaryInk)
+            if templates.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity, minHeight: 120)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: FrameMioSpacing.md) {
+                        ForEach(templates) { template in
+                            TemplateCard(template: template, isSelected: selectedTemplateID == template.id) {
+                                select(template)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .padding(FrameMioSpacing.md)
+        .background(FrameMioColors.surface.opacity(0.74), in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var templateOptions: some View {
+        if let template = selectedTemplate, let configuration = templateConfiguration {
+            VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+                Text("Template settings")
+                    .font(FrameMioTypography.headline)
+                    .foregroundStyle(FrameMioColors.ink)
+                if template.editableOptions.contains("duration_seconds") {
+                    Picker("Length", selection: Binding(get: { configuration.durationSeconds ?? template.defaults.durationSeconds ?? 30 }, set: { templateConfiguration?.durationSeconds = $0 })) {
+                        ForEach([15, 30, 60], id: \.self) { Text("\($0) sec").tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                if template.editableOptions.contains("visual_style") {
+                    Picker("Visual style", selection: Binding(get: { configuration.visualStyle ?? "cinematic" }, set: { templateConfiguration?.visualStyle = $0 })) {
+                        ForEach(["cinematic", "warm", "minimal", "playful"], id: \.self) { Text($0.capitalized).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                if template.editableOptions.contains("captions_enabled") {
+                    Toggle("Captions", isOn: Binding(get: { configuration.captionsEnabled ?? true }, set: { templateConfiguration?.captionsEnabled = $0 }))
+                }
+                if template.editableOptions.contains("overlay_placement") {
+                    Picker("Overlay position", selection: Binding(get: { configuration.overlayPlacement ?? "bottom_right" }, set: { templateConfiguration?.overlayPlacement = $0 })) {
+                        ForEach(["top_left", "top_right", "bottom_left", "bottom_right", "center"], id: \.self) { Text($0.replacingOccurrences(of: "_", with: " ").capitalized).tag($0) }
+                    }
+                }
+                if template.editableOptions.contains("overlay_size") {
+                    Picker("Overlay size", selection: Binding(get: { configuration.overlaySize ?? "medium" }, set: { templateConfiguration?.overlaySize = $0 })) {
+                        ForEach(["small", "medium", "large", "half"], id: \.self) { Text($0.capitalized).tag($0) }
+                    }
+                }
+            }
+            .padding(FrameMioSpacing.md)
+            .background(FrameMioColors.surface.opacity(0.74), in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous))
+        }
     }
 
     private var header: some View {
@@ -551,7 +636,7 @@ struct ProjectConfigurationView: View {
     private var configuredDraft: VideoProjectDraft {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         if draft.type == .promo {
-            return .promo(
+            var configured = VideoProjectDraft.promo(
                 configuration: PromoCreationConfiguration(
                     subject: promoSubject,
                     goal: promoGoal,
@@ -559,8 +644,12 @@ struct ProjectConfigurationView: View {
                     prompt: trimmedPrompt.isEmpty ? nil : trimmedPrompt
                 )
             )
+            configured.templateID = selectedTemplateID
+            configured.templateVersion = selectedTemplate?.version
+            configured.templateConfiguration = templateConfiguration
+            return configured
         }
-        return .reel(
+        var configured = VideoProjectDraft.reel(
             configuration: ReelCreationConfiguration(
                 platform: reelPlatform,
                 duration: reelDuration,
@@ -568,6 +657,168 @@ struct ProjectConfigurationView: View {
                 prompt: trimmedPrompt.isEmpty ? nil : trimmedPrompt
             )
         )
+        configured.templateID = selectedTemplateID
+        configured.templateVersion = selectedTemplate?.version
+        configured.templateConfiguration = templateConfiguration
+        return configured
+    }
+
+    private var selectedTemplate: VideoTemplate? {
+        templates.first(where: { $0.id == selectedTemplateID })
+    }
+
+    private func loadTemplates() async {
+        do {
+            let loaded = try await storyService.videoTemplates(for: draft.type)
+            templates = loaded.isEmpty ? VideoTemplate.localFallbackCatalog.filter { $0.supportedProjectTypes.contains(draft.type) } : loaded
+            if selectedTemplateID == nil, let first = templates.first {
+                select(first)
+            }
+        } catch {
+            templates = VideoTemplate.localFallbackCatalog.filter { $0.supportedProjectTypes.contains(draft.type) }
+            if selectedTemplateID == nil, let first = templates.first {
+                select(first)
+            }
+            templateErrorMessage = "Using the built-in template catalog. We could not refresh the latest templates."
+        }
+    }
+
+    private func select(_ template: VideoTemplate) {
+        selectedTemplateID = template.id
+        templateConfiguration = compatibleConfiguration(templateConfiguration, with: template)
+    }
+
+    private func compatibleConfiguration(_ previous: VideoTemplateConfiguration?, with template: VideoTemplate) -> VideoTemplateConfiguration {
+        var resolved = template.defaults
+        guard let previous else { return resolved }
+        if template.editableOptions.contains("duration_seconds") { resolved.durationSeconds = previous.durationSeconds }
+        if template.editableOptions.contains("aspect_ratio") { resolved.aspectRatio = previous.aspectRatio }
+        if template.editableOptions.contains("visual_style") { resolved.visualStyle = previous.visualStyle }
+        if template.editableOptions.contains("captions_enabled") { resolved.captionsEnabled = previous.captionsEnabled }
+        if template.editableOptions.contains("caption_style") { resolved.captionStyle = previous.captionStyle }
+        if template.editableOptions.contains("scene_detail") { resolved.sceneDetail = previous.sceneDetail }
+        if template.editableOptions.contains("overlay_placement") { resolved.overlayPlacement = previous.overlayPlacement }
+        if template.editableOptions.contains("overlay_size") { resolved.overlaySize = previous.overlaySize }
+        if template.editableOptions.contains("overlay_opacity") { resolved.overlayOpacity = previous.overlayOpacity }
+        if template.editableOptions.contains("overlay_frame") { resolved.overlayFrame = previous.overlayFrame }
+        if template.editableOptions.contains("overlay_animation") { resolved.overlayAnimation = previous.overlayAnimation }
+        return resolved
+    }
+}
+
+struct TemplateCard: View {
+    let template: VideoTemplate
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
+                InlineTemplateVideo(path: template.demoVideoPath)
+                    .frame(width: 150, height: 190)
+                    .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
+                Text(template.name)
+                    .font(FrameMioTypography.headline)
+                    .foregroundStyle(FrameMioColors.ink)
+                Text(template.description)
+                    .font(FrameMioTypography.caption)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+                    .lineLimit(3)
+            }
+            .padding(FrameMioSpacing.sm)
+            .frame(width: 174, alignment: .leading)
+            .background(isSelected ? FrameMioColors.accentMuted : FrameMioColors.elevatedSurface, in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous)
+                    .stroke(isSelected ? FrameMioColors.accent : FrameMioColors.divider, lineWidth: isSelected ? 2 : 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(template.name). \(template.description)")
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+    }
+}
+
+struct InlineTemplateVideo: View {
+    let path: String
+    @State private var player: AVPlayer?
+    @State private var endObserver: NSObjectProtocol?
+
+    var body: some View {
+        ZStack {
+            if let player {
+                InlineTemplatePlayer(player: player)
+                    .onAppear {
+                        player.isMuted = true
+                        player.play()
+                    }
+            } else {
+                Color.black.opacity(0.12)
+                    .overlay(Image(systemName: "play.rectangle").font(.title2).foregroundStyle(.white))
+            }
+        }
+        .task(id: path) {
+            preparePlayer()
+        }
+        .onDisappear {
+            if let endObserver {
+                NotificationCenter.default.removeObserver(endObserver)
+                self.endObserver = nil
+            }
+            player?.pause()
+        }
+        .accessibilityLabel("Muted template demo")
+    }
+
+    private func preparePlayer() {
+        guard player == nil, let url = templateDemoURL(path) else { return }
+        let loaded = AVPlayer(url: url)
+        loaded.isMuted = true
+        loaded.actionAtItemEnd = .none
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: loaded.currentItem,
+            queue: .main
+        ) { _ in
+            loaded.seek(to: .zero)
+            loaded.play()
+        }
+        player = loaded
+        loaded.play()
+    }
+
+    private func templateDemoURL(_ value: String) -> URL? {
+        if let url = URL(string: value), url.scheme != nil {
+            return url
+        }
+        let fileName = URL(fileURLWithPath: value).deletingPathExtension().lastPathComponent
+        if let bundled = Bundle.main.url(forResource: fileName, withExtension: "mp4") {
+            return bundled
+        }
+        guard value.hasPrefix("/") else { return nil }
+        return AppConfiguration.apiBaseURL.appendingPathComponent(String(value.dropFirst()))
+    }
+}
+
+private struct InlineTemplatePlayer: UIViewControllerRepresentable {
+    let player: AVPlayer
+
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.player = player
+        controller.showsPlaybackControls = false
+        controller.entersFullScreenWhenPlaybackBegins = false
+        controller.exitsFullScreenWhenPlaybackEnds = false
+        controller.videoGravity = .resizeAspectFill
+        controller.view.backgroundColor = .clear
+        return controller
+    }
+
+    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
+        controller.player = player
+        controller.showsPlaybackControls = false
+        controller.entersFullScreenWhenPlaybackBegins = false
+        controller.exitsFullScreenWhenPlaybackEnds = false
     }
 }
 

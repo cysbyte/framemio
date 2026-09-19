@@ -1,3 +1,4 @@
+import AVKit
 import SwiftUI
 
 private func storyCreationViewDebugLog(_ message: @autoclosure () -> String) {
@@ -9,21 +10,34 @@ private func storyCreationViewDebugLog(_ message: @autoclosure () -> String) {
 struct StoryCreationView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel: StoryCreationViewModel
-    let onCreate: (StoryGenerationOptions) -> Void
+    let draft: VideoProjectDraft
+    let storyService: StoryService
+    let onCreate: (VideoProjectDraft) -> Void
     let onCreated: (Story) -> Void
     let onOpenPricing: (PricingEntryPoint) -> Void
     let promptTranscriptionService: PromptTranscriptionService?
     @State private var generationOptions = StoryGenerationOptions.automatic
     @State private var isShowingCustomization = false
+    @State private var templates: [VideoTemplate] = []
+    @State private var selectedTemplateID: String?
+    @State private var templateConfiguration: VideoTemplateConfiguration?
+    @State private var templateErrorMessage: String?
 
     init(
         viewModel: StoryCreationViewModel,
+        draft: VideoProjectDraft,
+        storyService: StoryService,
         promptTranscriptionService: PromptTranscriptionService? = nil,
-        onCreate: @escaping (StoryGenerationOptions) -> Void,
+        onCreate: @escaping (VideoProjectDraft) -> Void,
         onCreated: @escaping (Story) -> Void,
         onOpenPricing: @escaping (PricingEntryPoint) -> Void
     ) {
         _viewModel = StateObject(wrappedValue: viewModel)
+        self.draft = draft
+        self.storyService = storyService
+        _generationOptions = State(initialValue: draft.storyOptions)
+        _selectedTemplateID = State(initialValue: draft.templateID)
+        _templateConfiguration = State(initialValue: draft.templateConfiguration)
         self.promptTranscriptionService = promptTranscriptionService
         self.onCreate = onCreate
         self.onCreated = onCreated
@@ -84,6 +98,8 @@ struct StoryCreationView: View {
                     }
                 }
 
+                templateSection
+
                 if viewModel.isCreating {
                     VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
                         LoadingState(title: viewModel.phaseTitle, message: "You can leave this screen; FrameMio will keep the work focused and quiet.")
@@ -100,7 +116,7 @@ struct StoryCreationView: View {
                         action: {
                             let instruction = generationOptions.instruction?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                             storyCreationViewDebugLog("create_tapped style=\(generationOptions.style ?? "automatic") scene_detail=\(generationOptions.sceneDetailStyle ?? "balanced") subtitles=\(generationOptions.subtitlesEnabled.map(String.init) ?? "automatic") target_duration=\(generationOptions.targetDuration.map { String(Int($0.rounded())) } ?? "auto") prompt_present=\(!instruction.isEmpty) prompt_length=\(instruction.count)")
-                            viewModel.requestCreateStory { onCreate(generationOptions) }
+                            viewModel.requestCreateStory { onCreate(configuredDraft) }
                         },
                         isDisabled: viewModel.isCheckingCredits,
                         isLoading: viewModel.isCheckingCredits
@@ -127,6 +143,12 @@ struct StoryCreationView: View {
             .ignoresSafeArea()
         }
         .navigationTitle("Create Story")
+        .task { await loadTemplates() }
+        .alert("Templates unavailable", isPresented: Binding(get: { templateErrorMessage != nil }, set: { if !$0 { templateErrorMessage = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(templateErrorMessage ?? "")
+        }
         .onAppear {
             storyCreationViewDebugLog("create view appeared assets=\(viewModel.assets.count) cached_thumbnails=\(viewModel.thumbnails.count)")
             viewModel.loadMissingThumbnails(targetSize: FrameMioMetrics.mediaThumbnailRequestSize)
@@ -222,6 +244,165 @@ struct StoryCreationView: View {
         let length = generationOptions.targetDuration.map { "\(Int($0.rounded()))s" } ?? "Auto length"
         let prompt = generationOptions.instruction?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? "Prompt added" : nil
         return [style, sceneDetail, subtitles, length, prompt].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private var templateSection: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            Text("Choose a visual template")
+                .font(FrameMioTypography.headline)
+                .foregroundStyle(FrameMioColors.ink)
+            Text("Preview the edit style. FrameMio will choose your media for the template.")
+                .font(FrameMioTypography.footnote)
+                .foregroundStyle(FrameMioColors.secondaryInk)
+
+            if templates.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity, minHeight: 110)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: FrameMioSpacing.md) {
+                        ForEach(templates) { template in
+                            TemplateCard(template: template, isSelected: selectedTemplateID == template.id) {
+                                select(template)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let template = selectedTemplate, let configuration = templateConfiguration {
+                VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
+                    Text("Template settings")
+                        .font(FrameMioTypography.headline)
+                        .foregroundStyle(FrameMioColors.ink)
+
+                    if template.editableOptions.contains("overlay_placement") {
+                        Picker("Overlay position", selection: Binding(
+                            get: { configuration.overlayPlacement ?? "bottom_right" },
+                            set: { templateConfiguration?.overlayPlacement = $0 }
+                        )) {
+                            ForEach(["top_left", "top_right", "bottom_left", "bottom_right", "center"], id: \.self) {
+                                Text($0.replacingOccurrences(of: "_", with: " ").capitalized).tag($0)
+                            }
+                        }
+                    }
+                    if template.editableOptions.contains("overlay_size") {
+                        Picker("Overlay size", selection: Binding(
+                            get: { configuration.overlaySize ?? "medium" },
+                            set: { templateConfiguration?.overlaySize = $0 }
+                        )) {
+                            ForEach(["small", "medium", "large"], id: \.self) {
+                                Text($0.capitalized).tag($0)
+                            }
+                        }
+                    }
+                    if template.editableOptions.contains("overlay_opacity") {
+                        HStack {
+                            Text("Overlay opacity")
+                            Spacer()
+                            Stepper(
+                                "\(Int((configuration.overlayOpacity ?? 1) * 100))%",
+                                value: Binding(
+                                    get: { configuration.overlayOpacity ?? 1 },
+                                    set: { templateConfiguration?.overlayOpacity = min(1, max(0.35, $0)) }
+                                ),
+                                in: 0.35...1,
+                                step: 0.05
+                            )
+                        }
+                    }
+                }
+                .padding(FrameMioSpacing.md)
+                .background(FrameMioColors.surface.opacity(0.74), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
+            }
+        }
+        .padding(FrameMioSpacing.md)
+        .background(FrameMioColors.surface.opacity(0.74), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
+    }
+
+    private var selectedTemplate: VideoTemplate? {
+        templates.first(where: { $0.id == selectedTemplateID })
+    }
+
+    private var configuredDraft: VideoProjectDraft {
+        var configured = draft
+        configured.storyOptions = generationOptions
+        configured.templateID = selectedTemplateID
+        configured.templateVersion = selectedTemplate?.version
+        configured.templateConfiguration = resolvedTemplateConfiguration
+        return configured
+    }
+
+    private var resolvedTemplateConfiguration: VideoTemplateConfiguration? {
+        guard let template = selectedTemplate else { return templateConfiguration }
+        var resolved = templateConfiguration ?? template.defaults
+        if template.editableOptions.contains("duration_seconds") {
+            resolved.durationSeconds = generationOptions.targetDuration.map { Int($0.rounded()) } ?? resolved.durationSeconds
+        }
+        if template.editableOptions.contains("visual_style") {
+            resolved.visualStyle = generationOptions.style
+        }
+        if template.editableOptions.contains("captions_enabled") {
+            resolved.captionsEnabled = generationOptions.subtitlesEnabled
+        }
+        if template.editableOptions.contains("caption_style") {
+            resolved.captionStyle = generationOptions.subtitleStyle
+        }
+        if template.editableOptions.contains("scene_detail") {
+            resolved.sceneDetail = generationOptions.sceneDetailStyle
+        }
+        return resolved
+    }
+
+    private func loadTemplates() async {
+        do {
+            let loaded = try await storyService.videoTemplates(for: .story)
+            templates = loaded.isEmpty
+                ? VideoTemplate.localFallbackCatalog.filter { $0.supportedProjectTypes.contains(.story) }
+                : loaded
+            if selectedTemplateID == nil, let first = templates.first {
+                select(first)
+            }
+        } catch {
+            templates = VideoTemplate.localFallbackCatalog.filter { $0.supportedProjectTypes.contains(.story) }
+            if selectedTemplateID == nil, let first = templates.first {
+                select(first)
+            }
+            templateErrorMessage = "Using the built-in template catalog. We could not refresh the latest templates."
+        }
+    }
+
+    private func select(_ template: VideoTemplate) {
+        selectedTemplateID = template.id
+        templateConfiguration = compatibleConfiguration(templateConfiguration, with: template)
+        applyTemplateDefaultsToStoryOptions(templateConfiguration)
+    }
+
+    private func compatibleConfiguration(_ previous: VideoTemplateConfiguration?, with template: VideoTemplate) -> VideoTemplateConfiguration {
+        var resolved = template.defaults
+        guard let previous else { return resolved }
+        if template.editableOptions.contains("duration_seconds") { resolved.durationSeconds = previous.durationSeconds }
+        if template.editableOptions.contains("visual_style") { resolved.visualStyle = previous.visualStyle }
+        if template.editableOptions.contains("captions_enabled") { resolved.captionsEnabled = previous.captionsEnabled }
+        if template.editableOptions.contains("caption_style") { resolved.captionStyle = previous.captionStyle }
+        if template.editableOptions.contains("scene_detail") { resolved.sceneDetail = previous.sceneDetail }
+        if template.editableOptions.contains("overlay_placement") { resolved.overlayPlacement = previous.overlayPlacement }
+        if template.editableOptions.contains("overlay_size") { resolved.overlaySize = previous.overlaySize }
+        if template.editableOptions.contains("overlay_opacity") { resolved.overlayOpacity = previous.overlayOpacity }
+        if template.editableOptions.contains("overlay_frame") { resolved.overlayFrame = previous.overlayFrame }
+        if template.editableOptions.contains("overlay_animation") { resolved.overlayAnimation = previous.overlayAnimation }
+        return resolved
+    }
+
+    private func applyTemplateDefaultsToStoryOptions(_ configuration: VideoTemplateConfiguration?) {
+        guard let configuration else { return }
+        if let style = configuration.visualStyle {
+            generationOptions.style = style
+        }
+        generationOptions.subtitlesEnabled = configuration.captionsEnabled
+        generationOptions.subtitleStyle = configuration.captionStyle
+        generationOptions.sceneDetailStyle = configuration.sceneDetail
+        generationOptions.targetDuration = configuration.durationSeconds.map(TimeInterval.init)
     }
 
     private func processingStartedCard(_ story: Story) -> some View {

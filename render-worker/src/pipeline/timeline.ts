@@ -29,6 +29,12 @@ import type {
   TextOverlay,
   TransitionType,
   VideoTransform,
+  VideoTemplateAnimation,
+  VideoTemplateConfiguration,
+  VideoTemplateFrame,
+  VideoTemplateLayout,
+  VideoTemplatePlacement,
+  VideoTemplateSize,
 } from '../types.js';
 import {RENDER_VERSION} from '../types.js';
 import {RenderInputError} from './errors.js';
@@ -120,6 +126,13 @@ export function buildComposition(
       source_end_micros: overlay.source_end_micros,
       crop_intent: overlay.crop_intent ?? 'fill',
       transform: asset.media_type === 'video' ? brollVideoTransform(overlay) : brollPhotoTransform(overlay, overlayID),
+      presentation: normalizePresentation(overlay.presentation),
+      placement: normalizePlacement(overlay.placement),
+      size: normalizeSize(overlay.size),
+      opacity: clamp(overlay.opacity || 1, 0.35, 1),
+      frame: normalizeFrame(overlay.frame),
+      animation: normalizeAnimation(overlay.animation),
+      z_index: normalizeZIndex(overlay.z_index),
     };
   });
   const media = compositionMediaAssets(mediaAssets, assetPaths, preparedPaths, clips, broll);
@@ -136,6 +149,9 @@ export function buildComposition(
     story_plan_id: storyPlan.id,
     story_plan_version: storyPlan.version,
     project_id: storyPlan.project_id,
+    template_id: cleanOptionalString(storyPlan.template_id),
+    template_version: positiveOrUndefined(storyPlan.template_version),
+    template_configuration: normalizeTemplateConfiguration(storyPlan.template_configuration),
     canvas: {
       width: resolution.width,
       height: resolution.height,
@@ -165,6 +181,50 @@ export function buildComposition(
     caption_style: storyPlan.caption_style,
     audio: resolveAudio(storyPlan, paths, fps),
   };
+}
+
+function normalizePresentation(value?: VideoTemplateLayout): VideoTemplateLayout {
+  return value === 'picture_in_picture' || value === 'split_screen' || value === 'montage' || value === 'full_frame' ? value : 'full_frame';
+}
+
+function normalizePlacement(value?: VideoTemplatePlacement): VideoTemplatePlacement {
+  return value === 'top_left' || value === 'top_right' || value === 'bottom_left' || value === 'bottom_right' || value === 'center' || value === 'left' || value === 'right' ? value : 'bottom_right';
+}
+
+function normalizeSize(value?: VideoTemplateSize): VideoTemplateSize {
+  return value === 'small' || value === 'medium' || value === 'large' || value === 'half' ? value : 'medium';
+}
+
+function normalizeFrame(value?: VideoTemplateFrame): VideoTemplateFrame {
+  return value === 'subtle' || value === 'bold' || value === 'none' ? value : 'none';
+}
+
+function normalizeAnimation(value?: VideoTemplateAnimation): VideoTemplateAnimation {
+  return value === 'fade' || value === 'subtle_scale' || value === 'none' ? value : 'none';
+}
+
+function normalizeZIndex(value?: number): number {
+  return clamp(Math.round(value ?? 1), 0, 10);
+}
+
+function normalizeTemplateConfiguration(value?: VideoTemplateConfiguration): VideoTemplateConfiguration | undefined {
+  if (!value) {
+    return undefined;
+  }
+  return {
+    ...value,
+    duration_seconds: value.duration_seconds ? clamp(Math.round(value.duration_seconds), 5, 120) : undefined,
+    overlay_opacity: value.overlay_opacity === undefined ? undefined : clamp(value.overlay_opacity, 0.35, 1),
+  };
+}
+
+function cleanOptionalString(value?: string): string | undefined {
+  const result = value?.trim();
+  return result || undefined;
+}
+
+function positiveOrUndefined(value?: number): number | undefined {
+  return value && value > 0 ? Math.round(value) : undefined;
 }
 
 function normalizeSceneOverlays(moment: StoryMoment, momentDurationMs: number): TextOverlay[] {

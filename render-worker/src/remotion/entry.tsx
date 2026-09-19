@@ -104,11 +104,78 @@ function fadeDurationFrames(clip: TimelineClip, fps: number): number {
 }
 
 const BRollLayer: React.FC<{overlay: TimelineBRoll}> = ({overlay}) => {
-  if (overlay.media_type === 'video') {
-    return <OffthreadVideo src={sourceURL(overlay.prepared_path)} muted style={mediaStyle(overlay.crop_intent)} />;
+  const frame = useCurrentFrame();
+  const {fps} = useVideoConfig();
+  const opacity = overlay.animation === 'fade'
+    ? fadeValue(frame, overlay.duration_frames, fps)
+    : overlay.opacity;
+  const scale = overlay.animation === 'subtle_scale'
+    ? interpolate(frame, [0, Math.max(1, Math.round(0.35 * fps))], [0.96, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})
+    : 1;
+  const content = overlay.media_type === 'video'
+    ? <OffthreadVideo src={sourceURL(overlay.prepared_path)} muted style={mediaStyle(overlay.crop_intent)} />
+    : <PhotoLayer clip={overlay} />;
+  if (overlay.presentation === 'full_frame') {
+    return <AbsoluteFill style={{opacity}}>{content}</AbsoluteFill>;
   }
-  return <PhotoLayer clip={overlay} />;
+  return (
+    <AbsoluteFill style={{pointerEvents: 'none'}}>
+      <div style={{...overlayPlacementStyle(overlay), opacity, transform: `scale(${scale})`, border: overlayFrameStyle(overlay.frame), overflow: 'hidden'}}>
+        {content}
+      </div>
+    </AbsoluteFill>
+  );
 };
+
+function fadeValue(frame: number, durationFrames: number, fps: number): number {
+  const fadeFrames = Math.max(1, Math.round(0.35 * fps));
+  return Math.min(
+    interpolate(frame, [0, fadeFrames], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'}),
+    interpolate(frame, [Math.max(0, durationFrames - fadeFrames), durationFrames], [1, 0], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'}),
+  );
+}
+
+function overlayPlacementStyle(overlay: TimelineBRoll): React.CSSProperties {
+  const size = overlaySize(overlay.size);
+  const style: React.CSSProperties = {
+    position: 'absolute',
+    width: size.width,
+    height: size.height,
+    backgroundColor: '#111',
+  };
+  switch (overlay.placement) {
+    case 'top_left':
+      style.top = '5%'; style.left = '5%'; break;
+    case 'top_right':
+      style.top = '5%'; style.right = '5%'; break;
+    case 'bottom_left':
+      style.bottom = '8%'; style.left = '5%'; break;
+    case 'center':
+      style.top = '50%'; style.left = '50%'; style.transform = 'translate(-50%, -50%)'; break;
+    case 'left':
+      style.top = '0'; style.bottom = '0'; style.left = '0'; break;
+    case 'right':
+      style.top = '0'; style.bottom = '0'; style.right = '0'; break;
+    default:
+      style.bottom = '8%'; style.right = '5%';
+  }
+  return style;
+}
+
+function overlaySize(size: TimelineBRoll['size']): {width: string; height: string} {
+  switch (size) {
+    case 'small': return {width: '28%', height: '28%'};
+    case 'large': return {width: '52%', height: '52%'};
+    case 'half': return {width: '50%', height: '100%'};
+    default: return {width: '38%', height: '38%'};
+  }
+}
+
+function overlayFrameStyle(frame: TimelineBRoll['frame']): string {
+  if (frame === 'bold') return '6px solid rgba(255,255,255,0.92)';
+  if (frame === 'subtle') return '3px solid rgba(255,255,255,0.72)';
+  return 'none';
+}
 
 const PhotoLayer: React.FC<{clip: TimelineClip | TimelineBRoll}> = ({clip}) => {
   const frame = useCurrentFrame();

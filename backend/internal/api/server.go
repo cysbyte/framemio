@@ -23,6 +23,7 @@ import (
 	"github.com/framemio/backend/internal/storage"
 	"github.com/framemio/backend/internal/store"
 	"github.com/framemio/backend/internal/storyvalidation"
+	"github.com/framemio/backend/internal/templates"
 	"github.com/framemio/backend/internal/workeractivation"
 )
 
@@ -274,6 +275,14 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
+	if request.URL.Path == "/v1/video-templates" {
+		if request.Method == http.MethodGet {
+			s.listVideoTemplates(response, request)
+			return
+		}
+		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
 	if strings.HasPrefix(request.URL.Path, "/projects/") {
 		parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
 		if len(parts) == 2 && request.Method == http.MethodGet {
@@ -307,6 +316,24 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 		}
 	}
 	s.writeError(response, http.StatusNotFound, "not_found", "route not found")
+}
+
+func (s *Server) listVideoTemplates(response http.ResponseWriter, request *http.Request) {
+	if _, ok := s.authenticate(response, request); !ok {
+		return
+	}
+	projectType := models.ProjectType(strings.TrimSpace(request.URL.Query().Get("project_type")))
+	if projectType != "" {
+		normalized, valid := models.NormalizeProjectType(projectType)
+		if !valid {
+			s.writeError(response, http.StatusBadRequest, "invalid_project_type", "project_type must be story, promo, or reel")
+			return
+		}
+		projectType = normalized
+		s.writeJSON(response, http.StatusOK, templates.CatalogForProjectType(projectType))
+		return
+	}
+	s.writeJSON(response, http.StatusOK, templates.Catalog())
 }
 
 type uploadSessionRequest struct {
@@ -504,6 +531,12 @@ func (s *Server) createProject(response http.ResponseWriter, request *http.Reque
 		s.writeError(response, http.StatusBadRequest, "invalid_project_type", "project type must be story, promo, or reel")
 		return
 	}
+	normalizedConfiguration, err := templates.NormalizeProjectConfiguration(projectType, input.Configuration)
+	if err != nil {
+		s.writeError(response, http.StatusBadRequest, "invalid_template_configuration", err.Error())
+		return
+	}
+	input.Configuration = normalizedConfiguration
 	projectID := stableGenericProjectID(user.ID, idempotencyKey)
 	if existing, lookupErr := s.Store.GetProject(request.Context(), user.ID, projectID); lookupErr == nil {
 		if existing.CreditOperationKey != "" {
@@ -861,7 +894,12 @@ func (s *Server) updateProject(response http.ResponseWriter, request *http.Reque
 		}
 	}
 	if input.Configuration != nil {
-		project.Configuration = *input.Configuration
+		normalizedConfiguration, err := templates.NormalizeProjectConfiguration(project.Type, *input.Configuration)
+		if err != nil {
+			s.writeError(response, http.StatusBadRequest, "invalid_template_configuration", err.Error())
+			return
+		}
+		project.Configuration = normalizedConfiguration
 	}
 	updated, err := s.Store.UpdateProject(request.Context(), project)
 	if err != nil {
@@ -1662,6 +1700,12 @@ func (s *Server) saveJobStoryPlan(response http.ResponseWriter, request *http.Re
 		return
 	}
 	plan.ProjectType = project.Type
+	if project.Configuration.TemplateID != "" {
+		plan.TemplateID = project.Configuration.TemplateID
+		plan.TemplateVersion = project.Configuration.TemplateVersion
+		plan.TemplateConfiguration = project.Configuration.TemplateConfiguration
+		templates.ApplyPlanDefaults(&plan, project.Configuration.TemplateConfiguration)
+	}
 	if plan.ID == "" {
 		plan.ID = models.NewID("plan")
 	}

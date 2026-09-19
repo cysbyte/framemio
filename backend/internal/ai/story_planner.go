@@ -13,30 +13,34 @@ import (
 	"time"
 
 	"github.com/framemio/backend/internal/models"
+	"github.com/framemio/backend/internal/templates"
 )
 
 type Request struct {
-	ProjectID            string
-	Version              int
-	ProjectType          models.ProjectType
-	ProjectConfiguration models.VideoProjectConfiguration
-	DesiredDuration      time.Duration
-	TargetDurationFixed  bool
-	StoryType            models.StoryType
-	VisualStyle          models.VisualStyle
-	UserInstructions     string
-	SelectedMediaIDs     []string
-	PreferredMediaOrder  []string
-	ExcludedMediaIDs     []string
-	ExcludedMomentIDs    []string
-	SubtitlesEnabled     *bool
-	CaptionStylePreset   string
-	BRollPreference      string
-	Timestamps           []time.Time
-	Locations            []string
-	PhotoAnalyses        []models.PhotoAnalysis
-	VideoAnalyses        []models.VideoAnalysis
-	MediaClusters        []models.MediaCluster
+	ProjectID             string
+	Version               int
+	ProjectType           models.ProjectType
+	ProjectConfiguration  models.VideoProjectConfiguration
+	TemplateID            string
+	TemplateVersion       int
+	TemplateConfiguration models.VideoTemplateConfiguration
+	DesiredDuration       time.Duration
+	TargetDurationFixed   bool
+	StoryType             models.StoryType
+	VisualStyle           models.VisualStyle
+	UserInstructions      string
+	SelectedMediaIDs      []string
+	PreferredMediaOrder   []string
+	ExcludedMediaIDs      []string
+	ExcludedMomentIDs     []string
+	SubtitlesEnabled      *bool
+	CaptionStylePreset    string
+	BRollPreference       string
+	Timestamps            []time.Time
+	Locations             []string
+	PhotoAnalyses         []models.PhotoAnalysis
+	VideoAnalyses         []models.VideoAnalysis
+	MediaClusters         []models.MediaCluster
 }
 
 type Planner struct {
@@ -156,22 +160,25 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 		captionStyle = captionStylePresetForProject(preset, projectType, storyType, visualStyle)
 	}
 	plan := models.StoryPlan{
-		SchemaVersion:       models.StoryPlanSchemaVersionV1,
-		ID:                  planID(request, moments),
-		ProjectID:           request.ProjectID,
-		ProjectType:         projectType,
-		Version:             versionFor(request.Version),
-		RequestedDurationMS: max(1, int(request.DesiredDuration.Milliseconds())),
-		StoryType:           storyType,
-		VisualStyle:         visualStyle,
-		TitleText:           titleText,
-		EndingText:          endingText,
-		CallToAction:        projectCallToAction(request),
-		UserInstructions:    strings.TrimSpace(request.UserInstructions),
-		Moments:             moments,
-		BRoll:               broll,
-		Captions:            captions,
-		CaptionStyle:        captionStyle,
+		SchemaVersion:         models.StoryPlanSchemaVersionV1,
+		ID:                    planID(request, moments),
+		ProjectID:             request.ProjectID,
+		ProjectType:           projectType,
+		Version:               versionFor(request.Version),
+		TemplateID:            request.TemplateID,
+		TemplateVersion:       request.TemplateVersion,
+		TemplateConfiguration: request.TemplateConfiguration,
+		RequestedDurationMS:   max(1, int(request.DesiredDuration.Milliseconds())),
+		StoryType:             storyType,
+		VisualStyle:           visualStyle,
+		TitleText:             titleText,
+		EndingText:            endingText,
+		CallToAction:          projectCallToAction(request),
+		UserInstructions:      strings.TrimSpace(request.UserInstructions),
+		Moments:               moments,
+		BRoll:                 broll,
+		Captions:              captions,
+		CaptionStyle:          captionStyle,
 		Output: models.StoryOutput{
 			AspectRatio:  projectAspectRatio(request),
 			MaxDurationS: max(1, int(math.Ceil(request.DesiredDuration.Seconds()))),
@@ -181,6 +188,7 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 		CreatedAt:       now,
 	}
 	strategy.ApplyPlanDefaults(&plan, request)
+	templates.ApplyPlanDefaults(&plan, request.TemplateConfiguration)
 	EnforceSceneTransitions(&plan, request.VideoAnalyses, visualStyle)
 	applyCaptionColorInstruction(&plan, request.UserInstructions)
 	if err := ValidateStoryPlan(plan); err != nil {
@@ -695,6 +703,9 @@ func ValidateStoryPlan(plan models.StoryPlan) error {
 	if !validVisualStyle(plan.VisualStyle) {
 		return fmt.Errorf("invalid visual style %q", plan.VisualStyle)
 	}
+	if err := templates.ValidatePlan(plan); err != nil {
+		return err
+	}
 	if strings.TrimSpace(plan.TitleText) == "" || strings.TrimSpace(plan.EndingText) == "" {
 		return errors.New("story plan requires title and ending")
 	}
@@ -1152,6 +1163,15 @@ func validateRequest(request Request) error {
 	if request.VisualStyle != "" && !validVisualStyle(request.VisualStyle) {
 		return fmt.Errorf("unsupported visual style %q", request.VisualStyle)
 	}
+	if request.TemplateID != "" {
+		template, resolved, err := templates.Resolve(request.ProjectType, request.TemplateID, request.TemplateVersion, request.TemplateConfiguration)
+		if err != nil {
+			return err
+		}
+		if request.TemplateVersion != template.Version || resolved.AspectRatio != projectAspectRatio(request) {
+			return errors.New("template request was not normalized")
+		}
+	}
 	if len(request.PhotoAnalyses) == 0 && len(request.VideoAnalyses) == 0 {
 		return errors.New("story planner requires photo or video analyses")
 	}
@@ -1165,6 +1185,21 @@ func normalizeRequest(request Request) Request {
 	}
 	request.ProjectType = projectType
 	request.ProjectConfiguration = models.NormalizeVideoProjectConfiguration(projectType, request.ProjectConfiguration)
+	request.TemplateID = strings.TrimSpace(request.ProjectConfiguration.TemplateID)
+	request.TemplateVersion = request.ProjectConfiguration.TemplateVersion
+	request.TemplateConfiguration = request.ProjectConfiguration.TemplateConfiguration
+	if request.TemplateID != "" {
+		if template, resolved, err := templates.Resolve(projectType, request.TemplateID, request.TemplateVersion, request.TemplateConfiguration); err == nil {
+			request.TemplateVersion = template.Version
+			request.TemplateConfiguration = resolved
+			request.ProjectConfiguration.TemplateConfiguration = resolved
+			request.ProjectConfiguration.Composition.AspectRatio = resolved.AspectRatio
+			if projectType == models.ProjectTypeReel {
+				request.TemplateConfiguration.AspectRatio = "9:16"
+				request.ProjectConfiguration.Composition.AspectRatio = "9:16"
+			}
+		}
+	}
 	if request.StoryType == "" {
 		request.StoryType = models.StoryTypeCustom
 	}
@@ -1190,6 +1225,9 @@ func normalizeRequest(request Request) Request {
 }
 
 func projectAspectRatio(request Request) string {
+	if request.TemplateID != "" && request.TemplateConfiguration.AspectRatio != "" {
+		return request.TemplateConfiguration.AspectRatio
+	}
 	if request.ProjectType == models.ProjectTypeReel {
 		return "9:16"
 	}

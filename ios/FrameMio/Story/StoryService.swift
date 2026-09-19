@@ -19,6 +19,16 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
         decoder = FrameMioJSONCoding.apiDecoder()
     }
 
+    func videoTemplates(for projectType: VideoProjectType? = nil) async throws -> [VideoTemplate] {
+        let path = projectType.map { "/v1/video-templates?project_type=\($0.rawValue)" } ?? "/v1/video-templates"
+        let data = try await apiClient.data(for: APIRequest(method: .get, path: path))
+        do {
+            return try decoder.decode([VideoTemplate].self, from: data)
+        } catch {
+            throw AppError.invalidResponse
+        }
+    }
+
     func cachedStories() async throws -> [Story] {
         try await persistence.loadStories()
     }
@@ -91,7 +101,10 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
                     context: request.draft.context,
                     assets: request.assets,
                     analyses: request.analyses,
-                    options: request.draft.storyOptions
+                    options: request.draft.storyOptions,
+                    templateID: request.draft.templateID,
+                    templateVersion: request.draft.templateVersion,
+                    templateConfiguration: request.draft.templateConfiguration
                 )
             )
         }
@@ -384,12 +397,18 @@ private struct GenericProjectConfiguration: Encodable {
     let promo: PromoConfigurationPayload?
     let reel: ReelConfigurationPayload?
     let composition: CompositionConfigurationPayload
+    let templateID: String?
+    let templateVersion: Int?
+    let templateConfiguration: VideoTemplateConfiguration?
 
     enum CodingKeys: String, CodingKey {
         case aiInstructions = "ai_instructions"
         case promo
         case reel
         case composition
+        case templateID = "template_id"
+        case templateVersion = "template_version"
+        case templateConfiguration = "template_configuration"
     }
 
     init(draft: VideoProjectDraft) {
@@ -397,6 +416,9 @@ private struct GenericProjectConfiguration: Encodable {
         promo = draft.type == .promo ? PromoConfigurationPayload(configuration: draft.promo ?? .automatic) : nil
         reel = draft.type == .reel ? ReelConfigurationPayload(configuration: draft.reel ?? .automatic) : nil
         composition = CompositionConfigurationPayload(aspectRatio: draft.type == .promo ? "16:9" : "9:16")
+        templateID = draft.templateID
+        templateVersion = draft.templateVersion
+        templateConfiguration = draft.templateConfiguration
     }
 }
 
@@ -611,7 +633,10 @@ final class MockStoryService: StoryService, @unchecked Sendable {
                     context: request.draft.context,
                     assets: request.assets,
                     analyses: request.analyses,
-                    options: request.draft.storyOptions
+                    options: request.draft.storyOptions,
+                    templateID: request.draft.templateID,
+                    templateVersion: request.draft.templateVersion,
+                    templateConfiguration: request.draft.templateConfiguration
                 )
             )
         }
@@ -632,6 +657,12 @@ final class MockStoryService: StoryService, @unchecked Sendable {
         let existing = try await persistence.loadStories()
         try await persistence.saveStories([story] + existing)
         return story
+    }
+
+    func videoTemplates(for projectType: VideoProjectType?) async throws -> [VideoTemplate] {
+        let templates = VideoTemplate.localFallbackCatalog
+        guard let projectType else { return templates }
+        return templates.filter { $0.supportedProjectTypes.contains(projectType) }
     }
 
     func retryProcessing(id: String) async throws -> Story {

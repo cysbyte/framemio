@@ -8,6 +8,7 @@ import (
 	"github.com/framemio/backend/internal/models"
 	"github.com/framemio/backend/internal/storage"
 	"github.com/framemio/backend/internal/store"
+	"github.com/framemio/backend/internal/templates"
 )
 
 type testObjectStorage struct {
@@ -72,6 +73,78 @@ func TestValidateStoryPlanAcceptsValidBRoll(t *testing.T) {
 	if err := validator.Validate(context.Background(), "user-1", plan); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestValidateStoryPlanAcceptsTemplateOverlay(t *testing.T) {
+	t.Parallel()
+	validator, plan := validStoryPlanFixture(t)
+	template, resolved, err := templates.Resolve(models.ProjectTypeStory, "photo-over-video", 1, models.VideoTemplateConfiguration{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.TemplateID = template.ID
+	plan.TemplateVersion = template.Version
+	plan.TemplateConfiguration = resolved
+	plan.ProjectType = models.ProjectTypeStory
+	plan.BRoll = []models.StoryBRoll{{
+		BrollID:      "broll-photo-overlay",
+		AssetID:      "video-1",
+		MediaType:    models.MediaTypeVideo,
+		StartMS:      1000,
+		DurationMS:   1000,
+		Presentation: models.VideoTemplateLayoutPictureInPicture,
+		Placement:    models.VideoTemplatePlacementBottomRight,
+		Size:         models.VideoTemplateSizeMedium,
+		Opacity:      1,
+		Frame:        models.VideoTemplateFrameSubtle,
+		Animation:    models.VideoTemplateAnimationFade,
+		CropIntent:   "fill",
+	}}
+	plan.BRoll[0].VideoAnalysisVersion = "video-analysis-v1"
+	plan.BRoll[0].SourceStartMicros = 4_000_000
+	plan.BRoll[0].SourceEndMicros = 5_000_000
+
+	if err := validator.Validate(context.Background(), "user-1", plan); err != nil {
+		t.Fatalf("validate template overlay: %v", err)
+	}
+}
+
+func TestValidateStoryPlanRejectsUnsupportedTemplateOverlay(t *testing.T) {
+	t.Parallel()
+	validator, plan := validStoryPlanFixture(t)
+	template, resolved, err := templates.Resolve(models.ProjectTypeStory, "photo-over-video", 1, models.VideoTemplateConfiguration{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.TemplateID = template.ID
+	plan.TemplateVersion = template.Version
+	plan.TemplateConfiguration = resolved
+	plan.ProjectType = models.ProjectTypeStory
+	plan.BRoll = []models.StoryBRoll{{
+		BrollID:      "broll-photo-overlay",
+		AssetID:      "video-1",
+		MediaType:    models.MediaTypeVideo,
+		StartMS:      1000,
+		DurationMS:   1000,
+		Presentation: models.VideoTemplateLayoutSplitScreen,
+		Placement:    models.VideoTemplatePlacementLeft,
+		Size:         models.VideoTemplateSizeHalf,
+		Opacity:      1,
+		CropIntent:   "fill",
+	}}
+	plan.BRoll[0].VideoAnalysisVersion = "video-analysis-v1"
+	plan.BRoll[0].SourceStartMicros = 4_000_000
+	plan.BRoll[0].SourceEndMicros = 5_000_000
+
+	err = validator.Validate(context.Background(), "user-1", plan)
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	validationErr, ok := AsValidationError(err)
+	if !ok {
+		t.Fatalf("unexpected error type: %T %v", err, err)
+	}
+	assertFieldError(t, validationErr, "template", "invalid_template")
 }
 
 func TestValidateStoryPlanAcceptsMultipleSegmentsFromSameVideo(t *testing.T) {

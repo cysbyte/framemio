@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/framemio/backend/internal/models"
+	"github.com/framemio/backend/internal/templates"
 )
 
 func TestOpenAICompatibleStoryPlannerResponsesReturnsStoryPlan(t *testing.T) {
@@ -87,6 +88,59 @@ func TestOpenAICompatibleStoryPlannerNormalizesTotalDurationMismatch(t *testing.
 	}
 	if err := ValidateStoryPlan(plan); err != nil {
 		t.Fatalf("expected repaired plan to pass lightweight validation: %v", err)
+	}
+}
+
+func TestOpenAICompatibleStoryPlannerSendsTemplateInputAndEnforcesIdentity(t *testing.T) {
+	t.Parallel()
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		var request struct {
+			Input []struct {
+				Content []struct {
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		prompt := request.Input[1].Content[0].Text
+		for _, expected := range []string{`"templateId":"photo-over-video"`, `"templateVersion":1`, `"overlay_placement":"bottom_left"`, `"rendererCapabilities"`} {
+			if !strings.Contains(prompt, expected) {
+				t.Fatalf("template planner prompt missing %s: %s", expected, prompt)
+			}
+		}
+		planJSON := strings.Replace(storyPlannerProviderPlanJSON(), `"output":{"aspect_ratio":"9:16"`, `"template_id":"invented-template","template_version":99,"template_configuration":{"aspect_ratio":"16:9"},"output":{"aspect_ratio":"16:9"`, 1)
+		planJSON = strings.Replace(planJSON, `"captions":[`, `"broll":[{"asset_id":"photo-gpt","media_id":"photo-gpt","media_type":"photo","start_ms":1000,"duration_ms":1000,"confidence":0.8,"score":0.7}],"captions":[`, 1)
+		return typographyHTTPResponse(http.StatusOK, responsesTypographyResponse(planJSON)), nil
+	})}
+	request := storyPlannerProviderRequest()
+	_, resolved, err := templates.Resolve(models.ProjectTypeStory, "photo-over-video", 1, models.VideoTemplateConfiguration{
+		OverlayPlacement: models.VideoTemplatePlacementBottomLeft,
+		OverlaySize:      models.VideoTemplateSizeLarge,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.ProjectConfiguration.TemplateID = "photo-over-video"
+	request.ProjectConfiguration.TemplateVersion = 1
+	request.ProjectConfiguration.TemplateConfiguration = resolved
+	planner := OpenAICompatibleStoryPlanner{BaseURL: "https://planner.test", APIKey: "test-key", ModelName: "gpt-story", WireAPI: "responses", Client: client}
+	plan, err := planner.Plan(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.TemplateID != "photo-over-video" || plan.TemplateVersion != 1 || plan.TemplateConfiguration.OverlayPlacement != models.VideoTemplatePlacementBottomLeft {
+		t.Fatalf("template identity/configuration were not enforced: %+v", plan)
+	}
+	if plan.Output.AspectRatio != "9:16" {
+		t.Fatalf("template aspect ratio was not enforced: %+v", plan.Output)
+	}
+	if len(plan.BRoll) == 0 || plan.BRoll[0].Presentation != models.VideoTemplateLayoutPictureInPicture || plan.BRoll[0].Placement != models.VideoTemplatePlacementBottomLeft || plan.BRoll[0].Size != models.VideoTemplateSizeLarge {
+		t.Fatalf("template overlay defaults were not applied: %+v", plan.BRoll)
+	}
+	if err := ValidateStoryPlan(plan); err != nil {
+		t.Fatalf("expected template plan to pass lightweight validation: %v", err)
 	}
 }
 

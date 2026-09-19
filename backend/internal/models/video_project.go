@@ -167,12 +167,15 @@ type RenderConfiguration struct {
 }
 
 type VideoProjectConfiguration struct {
-	AIInstructions string                     `json:"ai_instructions,omitempty"`
-	Story          *StoryProjectConfiguration `json:"story,omitempty"`
-	Promo          *PromoProjectConfiguration `json:"promo,omitempty"`
-	Reel           *ReelProjectConfiguration  `json:"reel,omitempty"`
-	Composition    CompositionConfiguration   `json:"composition,omitempty"`
-	Render         RenderConfiguration        `json:"render,omitempty"`
+	AIInstructions        string                     `json:"ai_instructions,omitempty"`
+	Story                 *StoryProjectConfiguration `json:"story,omitempty"`
+	Promo                 *PromoProjectConfiguration `json:"promo,omitempty"`
+	Reel                  *ReelProjectConfiguration  `json:"reel,omitempty"`
+	Composition           CompositionConfiguration   `json:"composition,omitempty"`
+	Render                RenderConfiguration        `json:"render,omitempty"`
+	TemplateID            string                     `json:"template_id,omitempty"`
+	TemplateVersion       int                        `json:"template_version,omitempty"`
+	TemplateConfiguration VideoTemplateConfiguration `json:"template_configuration,omitempty"`
 }
 
 // VideoProject is the shared durable project record for every creation mode.

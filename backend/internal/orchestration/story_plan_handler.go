@@ -15,6 +15,7 @@ import (
 	"github.com/framemio/backend/internal/models"
 	"github.com/framemio/backend/internal/store"
 	"github.com/framemio/backend/internal/storyvalidation"
+	"github.com/framemio/backend/internal/templates"
 )
 
 type StoryPlanHandler struct {
@@ -85,6 +86,9 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		slog.String("subtitles_enabled", boolPointerLogValue(request.SubtitlesEnabled)),
 		slog.String("caption_style_preset", valueOrUnset(request.CaptionStylePreset)),
 		slog.String("broll_preference", valueOrUnset(request.BRollPreference)),
+		slog.String("template_id", valueOrUnset(request.TemplateID)),
+		slog.Int("template_version", request.TemplateVersion),
+		slog.Any("template_configuration", request.TemplateConfiguration),
 		slog.Int64("suggested_duration_ms", request.DesiredDuration.Milliseconds()),
 		slog.Bool("target_duration_fixed", request.TargetDurationFixed),
 		slog.Int("max_duration_ms", storyPlannerMaxDurationLogMS(request)),
@@ -99,6 +103,14 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		return err
 	}
 	ai.SanitizeExternalStoryPlannerOutput(&plan)
+	plan.ProjectType = request.ProjectType
+	plan.TemplateID = request.TemplateID
+	plan.TemplateVersion = request.TemplateVersion
+	plan.TemplateConfiguration = request.TemplateConfiguration
+	if request.TemplateID != "" && request.TemplateConfiguration.AspectRatio != "" {
+		plan.Output.AspectRatio = request.TemplateConfiguration.AspectRatio
+	}
+	templates.ApplyPlanDefaults(&plan, request.TemplateConfiguration)
 	ai.EnforceSceneTransitions(&plan, videoAnalyses, request.VisualStyle)
 	if plannerProvider != "local" {
 		h.logger().Info("story_planner_ai_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("story_plan_version", plan.Version), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Int("requested_duration_ms", plan.RequestedDurationMS), slog.Int("planned_duration_ms", plan.TotalDurationMS), slog.Int("output_max_duration_seconds", plan.Output.MaxDurationS), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)))
@@ -257,31 +269,66 @@ func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configur
 		instructions = project.Context
 	}
 	style := models.VisualStyle(strings.TrimSpace(configuration["visual_style"]))
+	templateConfiguration := project.Configuration.TemplateConfiguration
+	if style == "" && templateConfiguration.VisualStyle != "" {
+		style = templateConfiguration.VisualStyle
+	}
 	if style == "" {
 		style = models.VisualStyleCinematic
 	}
 	subtitlesEnabled := boolPointerFromConfig(configuration["subtitles_enabled"])
-	return ai.Request{
-		ProjectID:            project.ID,
-		Version:              version,
-		ProjectType:          project.Type,
-		ProjectConfiguration: project.Configuration,
-		DesiredDuration:      duration,
-		TargetDurationFixed:  targetDurationFixed,
-		StoryType:            storyTypeFromContext(project.Context),
-		VisualStyle:          style,
-		UserInstructions:     instructions,
-		SelectedMediaIDs:     selectedMediaIDs,
-		PreferredMediaOrder:  splitStoryPlanConfigList(configuration["preferred_media_order"]),
-		ExcludedMediaIDs:     splitStoryPlanConfigList(configuration["excluded_media_ids"]),
-		ExcludedMomentIDs:    splitStoryPlanConfigList(configuration["excluded_moment_ids"]),
-		SubtitlesEnabled:     subtitlesEnabled,
-		CaptionStylePreset:   strings.TrimSpace(configuration["caption_style_preset"]),
-		BRollPreference:      strings.TrimSpace(configuration["broll_preference"]),
-		PhotoAnalyses:        photoAnalyses,
-		VideoAnalyses:        videoAnalyses,
-		MediaClusters:        clusters,
+	if subtitlesEnabled == nil && templateConfiguration.CaptionsEnabled != nil {
+		subtitlesEnabled = templateConfiguration.CaptionsEnabled
 	}
+	captionStylePreset := strings.TrimSpace(configuration["caption_style_preset"])
+	if captionStylePreset == "" {
+		captionStylePreset = strings.TrimSpace(templateConfiguration.CaptionStyle)
+	}
+	brollPreference := strings.TrimSpace(configuration["broll_preference"])
+	if brollPreference == "" {
+		switch strings.ToLower(strings.TrimSpace(templateConfiguration.SceneDetail)) {
+		case "more", "more_details":
+			brollPreference = "more"
+		case "none", "main_moments":
+			brollPreference = "none"
+		}
+	}
+	if !targetDurationFixed && templateConfiguration.DurationSeconds > 0 {
+		duration = time.Duration(templateConfiguration.DurationSeconds) * time.Second
+		targetDurationFixed = true
+	}
+	return ai.Request{
+		ProjectID:             project.ID,
+		Version:               version,
+		ProjectType:           normalizedProjectType(project.Type),
+		ProjectConfiguration:  project.Configuration,
+		DesiredDuration:       duration,
+		TargetDurationFixed:   targetDurationFixed,
+		StoryType:             storyTypeFromContext(project.Context),
+		VisualStyle:           style,
+		UserInstructions:      instructions,
+		SelectedMediaIDs:      selectedMediaIDs,
+		PreferredMediaOrder:   splitStoryPlanConfigList(configuration["preferred_media_order"]),
+		ExcludedMediaIDs:      splitStoryPlanConfigList(configuration["excluded_media_ids"]),
+		ExcludedMomentIDs:     splitStoryPlanConfigList(configuration["excluded_moment_ids"]),
+		SubtitlesEnabled:      subtitlesEnabled,
+		CaptionStylePreset:    captionStylePreset,
+		BRollPreference:       brollPreference,
+		TemplateID:            project.Configuration.TemplateID,
+		TemplateVersion:       project.Configuration.TemplateVersion,
+		TemplateConfiguration: project.Configuration.TemplateConfiguration,
+		PhotoAnalyses:         photoAnalyses,
+		VideoAnalyses:         videoAnalyses,
+		MediaClusters:         clusters,
+	}
+}
+
+func normalizedProjectType(value models.ProjectType) models.ProjectType {
+	normalized, ok := models.NormalizeProjectType(value)
+	if !ok {
+		return models.ProjectTypeStory
+	}
+	return normalized
 }
 
 func isAIStoryPlanRevision(configuration map[string]string) bool {

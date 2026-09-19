@@ -17,6 +17,7 @@ import (
 	"github.com/framemio/backend/internal/orchestration"
 	"github.com/framemio/backend/internal/queue"
 	"github.com/framemio/backend/internal/store"
+	"github.com/framemio/backend/internal/templates"
 )
 
 const iosMaxStoryUploadBytes int64 = 1_000_000_000
@@ -57,15 +58,18 @@ type iosStoryMoment struct {
 }
 
 type iosCreateStoryRequest struct {
-	Context          string             `json:"context"`
-	Assets           []iosStoryAsset    `json:"assets"`
-	Analyses         []iosStoryAnalysis `json:"analyses"`
-	Style            string             `json:"style,omitempty"`
-	SubtitlesEnabled *bool              `json:"subtitlesEnabled,omitempty"`
-	SubtitleStyle    string             `json:"subtitleStyle,omitempty"`
-	SceneDetailStyle string             `json:"sceneDetailStyle,omitempty"`
-	TargetDuration   float64            `json:"targetDuration,omitempty"`
-	Instruction      string             `json:"instruction,omitempty"`
+	Context          string                            `json:"context"`
+	Assets           []iosStoryAsset                   `json:"assets"`
+	Analyses         []iosStoryAnalysis                `json:"analyses"`
+	Style            string                            `json:"style,omitempty"`
+	SubtitlesEnabled *bool                             `json:"subtitlesEnabled,omitempty"`
+	SubtitleStyle    string                            `json:"subtitleStyle,omitempty"`
+	SceneDetailStyle string                            `json:"sceneDetailStyle,omitempty"`
+	TargetDuration   float64                           `json:"targetDuration,omitempty"`
+	Instruction      string                            `json:"instruction,omitempty"`
+	TemplateID       string                            `json:"template_id,omitempty"`
+	TemplateVersion  int                               `json:"template_version,omitempty"`
+	TemplateConfig   models.VideoTemplateConfiguration `json:"template_configuration,omitempty"`
 }
 
 type iosStoryEditRequest struct {
@@ -1181,6 +1185,16 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 		s.writeError(response, http.StatusBadRequest, "invalid_story", "context and at least one asset are required")
 		return
 	}
+	templateConfiguration := models.VideoProjectConfiguration{
+		TemplateID:            strings.TrimSpace(input.TemplateID),
+		TemplateVersion:       input.TemplateVersion,
+		TemplateConfiguration: input.TemplateConfig,
+	}
+	normalizedTemplateConfiguration, err := templates.NormalizeProjectConfiguration(models.ProjectTypeStory, templateConfiguration)
+	if err != nil {
+		s.writeError(response, http.StatusBadRequest, "invalid_template_configuration", err.Error())
+		return
+	}
 	if !s.allowExpensiveOperation(response, user.ID, "create_ios_story") {
 		return
 	}
@@ -1262,6 +1276,7 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 		Title:              iosStoryTitle(input.Context, resolved),
 		Context:            input.Context,
 		MediaIDs:           mediaIDs,
+		Configuration:      normalizedTemplateConfiguration,
 		CreditOperationKey: string(models.CreditActionCreateStory),
 		Status:             models.ProjectStatusDraft,
 		CreatedAt:          s.Now().UTC(),

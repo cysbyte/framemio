@@ -345,17 +345,20 @@ struct VideoProjectDraft: Codable, Hashable, Sendable {
     var storyOptions: StoryGenerationOptions
     var promo: PromoCreationConfiguration?
     var reel: ReelCreationConfiguration?
+    var templateID: String?
+    var templateVersion: Int?
+    var templateConfiguration: VideoTemplateConfiguration?
 
     static func story(context: MomentContext = .specialMoments, options: StoryGenerationOptions = .automatic) -> VideoProjectDraft {
-        VideoProjectDraft(type: .story, context: context, storyOptions: options)
+        VideoProjectDraft(type: .story, context: context, storyOptions: options, promo: nil, reel: nil, templateID: nil, templateVersion: nil, templateConfiguration: nil)
     }
 
     static func promo(configuration: PromoCreationConfiguration = .automatic) -> VideoProjectDraft {
-        VideoProjectDraft(type: .promo, context: .specialMoments, storyOptions: .automatic, promo: configuration)
+        VideoProjectDraft(type: .promo, context: .specialMoments, storyOptions: .automatic, promo: configuration, reel: nil, templateID: nil, templateVersion: nil, templateConfiguration: nil)
     }
 
     static func reel(configuration: ReelCreationConfiguration = .automatic) -> VideoProjectDraft {
-        VideoProjectDraft(type: .reel, context: .specialMoments, storyOptions: .automatic, reel: configuration)
+        VideoProjectDraft(type: .reel, context: .specialMoments, storyOptions: .automatic, promo: nil, reel: configuration, templateID: nil, templateVersion: nil, templateConfiguration: nil)
     }
 
     var prompt: String? {
@@ -367,6 +370,157 @@ struct VideoProjectDraft: Codable, Hashable, Sendable {
         case .reel:
             reel?.prompt
         }
+    }
+}
+
+struct VideoTemplateConfiguration: Codable, Hashable, Sendable {
+    var aspectRatio: String?
+    var durationSeconds: Int?
+    var visualStyle: String?
+    var captionsEnabled: Bool?
+    var captionStyle: String?
+    var sceneDetail: String?
+    var layout: String?
+    var overlayPlacement: String?
+    var overlaySize: String?
+    var overlayOpacity: Double?
+    var overlayFrame: String?
+    var overlayAnimation: String?
+
+    enum CodingKeys: String, CodingKey {
+        case aspectRatio = "aspect_ratio"
+        case durationSeconds = "duration_seconds"
+        case visualStyle = "visual_style"
+        case captionsEnabled = "captions_enabled"
+        case captionStyle = "caption_style"
+        case sceneDetail = "scene_detail"
+        case layout
+        case overlayPlacement = "overlay_placement"
+        case overlaySize = "overlay_size"
+        case overlayOpacity = "overlay_opacity"
+        case overlayFrame = "overlay_frame"
+        case overlayAnimation = "overlay_animation"
+    }
+}
+
+struct VideoTemplateMediaSlot: Codable, Hashable, Sendable {
+    let id: String
+    let role: String
+    let mediaTypes: [String]
+    let required: Bool
+    let presentation: String
+    let allowedPlacements: [String]?
+    let allowedSizes: [String]?
+}
+
+struct VideoTemplate: Codable, Hashable, Identifiable, Sendable {
+    let id: String
+    let version: Int
+    let name: String
+    let description: String
+    let demoVideoPath: String
+    let supportedProjectTypes: [VideoProjectType]
+    let defaults: VideoTemplateConfiguration
+    let editableOptions: [String]
+    let mediaSlots: [VideoTemplateMediaSlot]
+    let plannerGuidance: String
+    let rendererCapabilities: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case id = "template_id"
+        case version
+        case name
+        case description
+        case demoVideoPath = "demo_video_path"
+        case supportedProjectTypes = "supported_project_types"
+        case defaults
+        case editableOptions = "editable_options"
+        case mediaSlots = "media_slots"
+        case plannerGuidance = "planner_guidance"
+        case rendererCapabilities = "renderer_capabilities"
+    }
+
+    static let localFallbackCatalog: [VideoTemplate] = [
+        VideoTemplate(
+            id: "full-screen-cinematic-cutaways", version: 1, name: "Cinematic cutaways",
+            description: "Let each supporting moment take the full frame.",
+            demoVideoPath: "/videos/templates/full-screen-cinematic-cutaways.mp4",
+            supportedProjectTypes: [.story, .promo, .reel],
+            defaults: VideoTemplateConfiguration(aspectRatio: "9:16", durationSeconds: 30, visualStyle: "cinematic", captionsEnabled: true, captionStyle: "cinematic_subtitle", sceneDetail: "balanced", layout: "full_frame"),
+            editableOptions: ["duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail"],
+            mediaSlots: [], plannerGuidance: "", rendererCapabilities: ["full_frame_media", "fade"]
+        ),
+        VideoTemplate(
+            id: "photo-over-video", version: 1, name: "Photo over video",
+            description: "Keep the video moving while a supporting photo appears above it.",
+            demoVideoPath: "/videos/templates/photo-over-video.mp4",
+            supportedProjectTypes: [.story, .promo, .reel],
+            defaults: VideoTemplateConfiguration(aspectRatio: "9:16", durationSeconds: 30, visualStyle: "cinematic", captionsEnabled: true, captionStyle: "cinematic_subtitle", sceneDetail: "balanced", layout: "picture_in_picture", overlayPlacement: "bottom_right", overlaySize: "medium", overlayOpacity: 1, overlayFrame: "subtle", overlayAnimation: "fade"),
+            editableOptions: ["duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail", "overlay_placement", "overlay_size", "overlay_opacity", "overlay_frame", "overlay_animation"],
+            mediaSlots: [], plannerGuidance: "", rendererCapabilities: ["full_frame_media", "picture_in_picture", "placement", "bounded_size", "opacity", "frame", "fade"]
+        ),
+        VideoTemplate(
+            id: "picture-in-picture", version: 1, name: "Picture in picture",
+            description: "Layer a secondary moment over the main video like a small memory window.",
+            demoVideoPath: "/videos/templates/picture-in-picture.mp4",
+            supportedProjectTypes: [.story, .promo, .reel],
+            defaults: VideoTemplateConfiguration(aspectRatio: "9:16", durationSeconds: 30, visualStyle: "warm", captionsEnabled: true, captionStyle: "clean_minimal", sceneDetail: "more", layout: "picture_in_picture", overlayPlacement: "top_right", overlaySize: "small", overlayOpacity: 1, overlayFrame: "subtle", overlayAnimation: "subtle_scale"),
+            editableOptions: ["duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail", "overlay_placement", "overlay_size", "overlay_opacity", "overlay_frame", "overlay_animation"],
+            mediaSlots: [], plannerGuidance: "", rendererCapabilities: ["picture_in_picture", "placement", "bounded_size", "opacity", "frame", "fade", "subtle_scale"]
+        ),
+        VideoTemplate(
+            id: "split-screen-memory", version: 1, name: "Split screen",
+            description: "Show two related moments together in a balanced frame.",
+            demoVideoPath: "/videos/templates/split-screen-memory.mp4",
+            supportedProjectTypes: [.promo, .reel],
+            defaults: VideoTemplateConfiguration(aspectRatio: "9:16", durationSeconds: 30, visualStyle: "minimal", captionsEnabled: false, captionStyle: "clean_minimal", sceneDetail: "balanced", layout: "split_screen", overlayPlacement: "right", overlaySize: "half", overlayOpacity: 1, overlayFrame: "none", overlayAnimation: "none"),
+            editableOptions: ["duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail"],
+            mediaSlots: [], plannerGuidance: "", rendererCapabilities: ["split_screen", "placement", "bounded_size"]
+        ),
+        VideoTemplate(
+            id: "talking-head-supporting-images", version: 1, name: "Talking head with images",
+            description: "Keep the speaker present while relevant photos support what they say.",
+            demoVideoPath: "/videos/templates/talking-head-supporting-images.mp4",
+            supportedProjectTypes: [.promo, .reel],
+            defaults: VideoTemplateConfiguration(aspectRatio: "9:16", durationSeconds: 30, visualStyle: "minimal", captionsEnabled: true, captionStyle: "bold_social", sceneDetail: "more", layout: "picture_in_picture", overlayPlacement: "bottom_left", overlaySize: "medium", overlayOpacity: 1, overlayFrame: "subtle", overlayAnimation: "fade"),
+            editableOptions: ["duration_seconds", "visual_style", "captions_enabled", "caption_style", "scene_detail", "overlay_placement", "overlay_size", "overlay_frame", "overlay_animation"],
+            mediaSlots: [], plannerGuidance: "", rendererCapabilities: ["picture_in_picture", "placement", "bounded_size", "frame", "fade"]
+        ),
+        VideoTemplate(
+            id: "fast-montage", version: 1, name: "Fast montage",
+            description: "Build a lively sequence of short, high-energy moments.",
+            demoVideoPath: "/videos/templates/fast-montage.mp4",
+            supportedProjectTypes: [.promo, .reel],
+            defaults: VideoTemplateConfiguration(aspectRatio: "9:16", durationSeconds: 15, visualStyle: "playful", captionsEnabled: true, captionStyle: "bold_social", sceneDetail: "more", layout: "montage", overlayPlacement: "center", overlaySize: "large", overlayOpacity: 1, overlayFrame: "none", overlayAnimation: "none"),
+            editableOptions: ["duration_seconds", "visual_style", "captions_enabled", "caption_style", "scene_detail"],
+            mediaSlots: [], plannerGuidance: "", rendererCapabilities: ["full_frame_media", "cut"]
+        ),
+    ]
+
+    init(
+        id: String,
+        version: Int,
+        name: String,
+        description: String,
+        demoVideoPath: String,
+        supportedProjectTypes: [VideoProjectType],
+        defaults: VideoTemplateConfiguration,
+        editableOptions: [String],
+        mediaSlots: [VideoTemplateMediaSlot],
+        plannerGuidance: String,
+        rendererCapabilities: [String]
+    ) {
+        self.id = id
+        self.version = version
+        self.name = name
+        self.description = description
+        self.demoVideoPath = demoVideoPath
+        self.supportedProjectTypes = supportedProjectTypes
+        self.defaults = defaults
+        self.editableOptions = editableOptions
+        self.mediaSlots = mediaSlots
+        self.plannerGuidance = plannerGuidance
+        self.rendererCapabilities = rendererCapabilities
     }
 }
 
@@ -748,12 +902,33 @@ struct CreateStoryRequest: Codable, Hashable, Sendable {
     let sceneDetailStyle: String?
     let targetDuration: TimeInterval?
     let instruction: String?
+    let templateID: String?
+    let templateVersion: Int?
+    let templateConfiguration: VideoTemplateConfiguration?
+
+    enum CodingKeys: String, CodingKey {
+        case context
+        case assets
+        case analyses
+        case style
+        case subtitlesEnabled
+        case subtitleStyle
+        case sceneDetailStyle
+        case targetDuration
+        case instruction
+        case templateID = "template_id"
+        case templateVersion = "template_version"
+        case templateConfiguration = "template_configuration"
+    }
 
     init(
         context: MomentContext,
         assets: [MediaAsset],
         analyses: [MediaAnalysis],
-        options: StoryGenerationOptions = .automatic
+        options: StoryGenerationOptions = .automatic,
+        templateID: String? = nil,
+        templateVersion: Int? = nil,
+        templateConfiguration: VideoTemplateConfiguration? = nil
     ) {
         self.context = context
         self.assets = assets
@@ -765,6 +940,9 @@ struct CreateStoryRequest: Codable, Hashable, Sendable {
         self.targetDuration = options.targetDuration
         let trimmedInstruction = options.instruction?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.instruction = trimmedInstruction?.isEmpty == true ? nil : trimmedInstruction
+        self.templateID = templateID
+        self.templateVersion = templateVersion
+        self.templateConfiguration = templateConfiguration
     }
 }
 

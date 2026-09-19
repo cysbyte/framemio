@@ -264,6 +264,24 @@ function validateInput(input: RenderInput, rendererVersion: string): void {
     if (asset.media_type === 'video' && (sourceStartMicros < 0 || (overlay.source_end_micros ?? 0) <= sourceStartMicros)) {
       throw new RenderInputError(`invalid b-roll source segment at index ${index}`);
     }
+    if (overlay.presentation && !['full_frame', 'picture_in_picture', 'split_screen', 'montage'].includes(overlay.presentation)) {
+      throw new RenderInputError(`unsupported b-roll presentation at index ${index}`);
+    }
+    if (overlay.placement && !['top_left', 'top_right', 'bottom_left', 'bottom_right', 'center', 'left', 'right'].includes(overlay.placement)) {
+      throw new RenderInputError(`unsupported b-roll placement at index ${index}`);
+    }
+    if (overlay.size && !['small', 'medium', 'large', 'half'].includes(overlay.size)) {
+      throw new RenderInputError(`unsupported b-roll size at index ${index}`);
+    }
+    if (overlay.opacity !== undefined && (overlay.opacity < 0.35 || overlay.opacity > 1)) {
+      throw new RenderInputError(`invalid b-roll opacity at index ${index}`);
+    }
+    if (overlay.frame && !['none', 'subtle', 'bold'].includes(overlay.frame)) {
+      throw new RenderInputError(`unsupported b-roll frame at index ${index}`);
+    }
+    if (overlay.animation && !['none', 'fade', 'subtle_scale'].includes(overlay.animation)) {
+      throw new RenderInputError(`unsupported b-roll animation at index ${index}`);
+    }
   }
   for (const [index, caption] of (input.story_plan.captions ?? []).entries()) {
     validateTextLength(caption.text, 220, `captions[${index}].text`);

@@ -113,6 +113,80 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
   }
 });
 
+test('normalizes a photo-over-video overlay without replacing the base video', () => {
+  const assets = fixtureMediaAssets();
+  const basePlan = fixtureStoryPlan({
+    template_id: 'photo-over-video',
+    template_version: 1,
+    template_configuration: {
+      aspect_ratio: '9:16',
+      duration_seconds: 8,
+      visual_style: 'cinematic',
+      captions_enabled: true,
+      caption_style: 'cinematic_subtitle',
+      scene_detail: 'balanced',
+      layout: 'picture_in_picture',
+      overlay_placement: 'bottom_right',
+      overlay_size: 'medium',
+      overlay_opacity: 0.8,
+      overlay_frame: 'subtle',
+      overlay_animation: 'fade',
+    },
+    broll: [{
+      broll_id: 'photo-overlay',
+      asset_id: 'photo-2',
+      media_type: 'photo',
+      start_ms: 1200,
+      duration_ms: 1800,
+      presentation: 'picture_in_picture',
+      placement: 'bottom_right',
+      size: 'medium',
+      opacity: 0.8,
+      frame: 'subtle',
+      animation: 'fade',
+      reason: 'supporting_photo',
+    }],
+  });
+  const composition = buildComposition(
+    basePlan,
+    assets,
+    new Map(assets.map((asset) => [asset.id, `/asset/${asset.file_name}`])),
+    new Map(),
+    {
+      work_dir: '/work',
+      assets_dir: '/work/assets',
+      clips_dir: '/work/clips',
+      output_file: '/work/story.mp4',
+      composition_file: '/work/composition.json',
+    },
+  );
+
+  assert.equal(composition.clips.some((clip) => clip.media_type === 'video'), true);
+  assert.equal(composition.broll.length, 1);
+  assert.equal(composition.broll[0].presentation, 'picture_in_picture');
+  assert.equal(composition.broll[0].start_frame, 36);
+  assert.equal(composition.broll[0].duration_frames, 54);
+  assert.equal(composition.broll[0].placement, 'bottom_right');
+  assert.equal(composition.broll[0].size, 'medium');
+  assert.equal(composition.broll[0].opacity, 0.8);
+});
+
+test('rejects unsupported structured b-roll layout and unknown media', async () => {
+  const invalidLayout = fixtureRenderInput({
+    story_plan: fixtureStoryPlan({
+      broll: [{asset_id: 'photo-2', start_ms: 1000, duration_ms: 1000, presentation: 'freeform' as never}],
+    }),
+  });
+  const harness = await createHarness();
+  await assert.rejects(() => harness.worker.render(invalidLayout), /unsupported b-roll presentation/);
+  const invalidMedia = fixtureRenderInput({
+    story_plan: fixtureStoryPlan({
+      broll: [{asset_id: 'unknown', start_ms: 1000, duration_ms: 1000}],
+    }),
+  });
+  await assert.rejects(() => harness.worker.render(invalidMedia), /invalid b-roll overlay/);
+});
+
 test('renders a validated story plan deterministically', async () => {
   const harness = await createHarness();
   const input = fixtureRenderInput();
