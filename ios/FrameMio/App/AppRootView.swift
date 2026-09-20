@@ -837,8 +837,17 @@ struct ProjectConfigurationView: View {
         guard let template = selectedTemplate else { return "Select a template first" }
         let configuration = templateConfiguration ?? template.defaults
         var values = [template.name]
-        if template.editableOptions.contains("duration_seconds"), let duration = configuration.durationSeconds {
-            values.append("\(duration)s")
+        if template.editableOptions.contains("duration_seconds") {
+            switch configuration.durationMode ?? .fixed {
+            case .fullSource:
+                values.append(configuration.removeFillerAndPauses == true ? "Full length, cleaned" : "Full length")
+            case .auto:
+                values.append("Auto length")
+            case .fixed:
+                if let duration = configuration.durationSeconds {
+                    values.append("\(duration)s")
+                }
+            }
         }
         if template.editableOptions.contains("visual_style"), let style = configuration.visualStyle {
             values.append(style.capitalized)
@@ -936,6 +945,7 @@ struct ProjectConfigurationView: View {
                     subject: promoSubject,
                     goal: promoGoal,
                     duration: promoDuration,
+                    removeFillerAndPauses: templateConfiguration?.removeFillerAndPauses == true && templateConfiguration?.durationMode == .fullSource,
                     prompt: trimmedPrompt.isEmpty ? nil : trimmedPrompt
                 )
             )
@@ -948,6 +958,7 @@ struct ProjectConfigurationView: View {
             configuration: ReelCreationConfiguration(
                 platform: reelPlatform,
                 duration: reelDuration,
+                removeFillerAndPauses: templateConfiguration?.removeFillerAndPauses == true && templateConfiguration?.durationMode == .fullSource,
                 style: reelStyle,
                 prompt: trimmedPrompt.isEmpty ? nil : trimmedPrompt
             )
@@ -987,6 +998,13 @@ struct ProjectConfigurationView: View {
         var resolved = template.defaults
         guard let previous else { return resolved }
         if template.editableOptions.contains("duration_seconds") { resolved.durationSeconds = previous.durationSeconds }
+        if template.supportsFullSourceDuration && template.editableOptions.contains("duration_mode") {
+            resolved.durationMode = previous.durationMode
+            resolved.removeFillerAndPauses = previous.durationMode == .fullSource && previous.removeFillerAndPauses == true
+        } else {
+            resolved.durationMode = resolved.durationSeconds == nil ? .auto : .fixed
+            resolved.removeFillerAndPauses = false
+        }
         if template.editableOptions.contains("aspect_ratio") { resolved.aspectRatio = previous.aspectRatio }
         if template.editableOptions.contains("visual_style") { resolved.visualStyle = previous.visualStyle }
         if template.editableOptions.contains("captions_enabled") { resolved.captionsEnabled = previous.captionsEnabled }
@@ -1020,6 +1038,7 @@ private struct ProjectTemplateSettingsSheet: View {
         ("More details", "more"),
         ("Main moments", "none")
     ]
+    private let durationOptions = [15, 30, 45, 60]
 
     var body: some View {
         NavigationStack {
@@ -1099,16 +1118,43 @@ private struct ProjectTemplateSettingsSheet: View {
     private var durationSection: some View {
         settingsSection(title: "Length", subtitle: "Set the target duration for this template") {
             LazyVGrid(columns: settingsGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
-                ForEach([15, 30, 45, 60], id: \.self) { seconds in
+                settingChip(
+                    title: "Auto",
+                    isSelected: (configuration.durationMode ?? .fixed) == .auto
+                ) {
+                    configuration.durationMode = .auto
+                    configuration.durationSeconds = nil
+                    configuration.removeFillerAndPauses = false
+                }
+                ForEach(durationOptions, id: \.self) { seconds in
                     settingChip(
                         title: "\(seconds)s",
-                        isSelected: configuration.durationSeconds == seconds
+                        isSelected: (configuration.durationMode ?? .fixed) == .fixed && configuration.durationSeconds == seconds
                     ) {
+                        configuration.durationMode = .fixed
                         configuration.durationSeconds = seconds
+                        configuration.removeFillerAndPauses = false
+                    }
+                }
+                if supportsFullLength {
+                    settingChip(
+                        title: "Full length",
+                        isSelected: configuration.durationMode == .fullSource
+                    ) {
+                        configuration.durationMode = .fullSource
+                        configuration.durationSeconds = nil
                     }
                 }
             }
+            if configuration.durationMode == .fullSource {
+                Toggle("Remove filler words and pauses", isOn: Binding(
+                    get: { configuration.removeFillerAndPauses ?? false },
+                    set: { configuration.removeFillerAndPauses = $0 }
+                ))
+                .tint(FrameMioColors.accent)
+            }
         }
+        .onAppear(perform: normalizeDurationSelection)
     }
 
     private var aspectRatioSection: some View {
@@ -1326,8 +1372,22 @@ private struct ProjectTemplateSettingsSheet: View {
         template.editableOptions.contains(option)
     }
 
+    private var supportsFullLength: Bool {
+        template.supportsFullSourceDuration
+    }
+
     private func supportsAny(_ options: [String]) -> Bool {
         options.contains(where: supports)
+    }
+
+    private func normalizeDurationSelection() {
+        if configuration.durationMode == .fullSource && !supportsFullLength {
+            configuration.durationMode = configuration.durationSeconds == nil ? .auto : .fixed
+            configuration.removeFillerAndPauses = false
+        }
+        if configuration.durationMode != .fullSource {
+            configuration.removeFillerAndPauses = false
+        }
     }
 
     private func normalizedCaptionStyle(_ value: String?) -> String {

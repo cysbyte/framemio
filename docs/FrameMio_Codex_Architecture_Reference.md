@@ -855,16 +855,19 @@ POST /v1/stories/:id/versions
 
 `POST /v1/stories` and `POST /v1/stories/:id/versions` accept high-level Story
 generation/edit preferences such as style, prompt, scene detail level
-(`sceneDetailStyle`), target duration, `subtitlesEnabled`, and
-`subtitleStyle`. The iOS create screen keeps these options behind a compact
-Customize entry so first-time creation remains a one-tap flow; the sheet
-exposes Style, Prompt, Scene Details, Subtitles, Length, and template-supported
-overlay options without exposing renderer terminology such as B-roll, FFmpeg,
-CSS, or raw coordinates. The prompt is optional, sent as `instruction`,
-sanitized and bounded by the backend, then stored as `user_instructions` for
-planning. Story, Promo, and Reel creation all use the same shared prompt input
-component, including quick prompt chips and voice prompt transcription where
-the build has a `PromptTranscriptionService`.
+(`sceneDetailStyle`), duration mode, `subtitlesEnabled`, and `subtitleStyle`.
+Duration is represented explicitly as `duration_mode=auto|fixed|full_source`,
+optional `targetDuration` / `target_duration_seconds` for fixed mode, and
+`remove_filler_and_pauses` for full-source cleanup. `nil` target duration still
+means Auto; it is not overloaded to mean Full length. The iOS create screen
+keeps these options behind a compact Customize entry so first-time creation
+remains a one-tap flow; the sheet exposes Style, Prompt, Scene Details,
+Subtitles, Length, and template-supported overlay options without exposing
+renderer terminology such as B-roll, FFmpeg, CSS, or raw coordinates. The prompt
+is optional, sent as `instruction`, sanitized and bounded by the backend, then
+stored as `user_instructions` for planning. Story, Promo, and Reel creation all
+use the same shared prompt input component, including quick prompt chips and
+voice prompt transcription where the build has a `PromptTranscriptionService`.
 
 The generic project API supports Promo and Reel without creating separate
 pipelines:
@@ -888,11 +891,15 @@ configuration.promo:
   product_information
   call_to_action
   target_audience
+  duration_mode
   desired_duration_seconds
+  remove_filler_and_pauses
 
 configuration.reel:
   social_platform
+  duration_mode
   target_duration_seconds
+  remove_filler_and_pauses
   style
   hook_preference
   caption_style
@@ -902,6 +909,13 @@ configuration.composition:
   aspect_ratio = 16:9 for Promo
   aspect_ratio = 9:16 for Reel
 ```
+
+`duration_mode=fixed` requires a target duration and remains capped at the
+short-output maximum. `duration_mode=auto` preserves the existing short
+generation behavior. `duration_mode=full_source` preserves the selected source
+video timeline up to the backend full-source safety limit
+(`FULL_SOURCE_MAX_DURATION_SECONDS`, default 600 seconds) and may exceed the
+normal 60-second short-output cap.
 
 Story projects retain the existing `/v1/stories` compatibility contract.
 Promo and Reel responses are converted by iOS into the shared `Story` display
@@ -1108,6 +1122,12 @@ visual style, and supported overlay settings where valid. Unsupported or
 incompatible options reset to the new template defaults. The UI must never
 leave an invalid template configuration active.
 
+Templates that support long talking-head or supporting-image workflows advertise
+the `duration_mode_full_source` renderer capability and expose `duration_mode`
+as an editable option. Short montage and split-screen templates do not expose
+Full length. When a user switches to an incompatible template, iOS and the
+backend reset Full length and `remove_filler_and_pauses` to valid defaults.
+
 Template defaults are resolved in this order:
 
 ```text
@@ -1129,6 +1149,13 @@ overlays so the base video continues playing underneath supporting photos or
 videos. Full-frame B-roll remains backward compatible and still replaces the
 visible frame for its timed range. Renderers branch on normalized composition
 properties, not on high-level project type.
+
+Full-source plans remain ordinary `StoryPlan` artifacts. The planner receives
+`duration_mode`, `target_duration_seconds`, `remove_filler_and_pauses`, and
+`max_full_source_duration_ms`; the renderer receives only the validated
+StoryPlan and normalized composition. Cleanup cuts may only be applied from
+validated transcript or silence timing. If that evidence is unavailable, the
+backend keeps the full source timeline and logs the fallback.
 
 Demo MP4s are static reviewed assets. They may be served from
 `landing-page/public/videos/templates/` and may also be bundled in iOS as a

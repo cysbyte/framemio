@@ -83,6 +83,51 @@ func TestPlannerAppliesSubtitleColorInstruction(t *testing.T) {
 	}
 }
 
+func TestPlannerFullSourcePreservesFiveMinuteVideo(t *testing.T) {
+	t.Parallel()
+	planner := &Planner{Now: func() time.Time { return time.Date(2026, time.September, 19, 12, 0, 0, 0, time.UTC) }}
+	request := Request{
+		ProjectID:             "project-full-source",
+		ProjectType:           models.ProjectTypeReel,
+		DurationMode:          models.DurationModeFullSource,
+		RemoveFillerAndPauses: true,
+		MaxFullSourceDuration: 10 * time.Minute,
+		DesiredDuration:       5 * time.Minute,
+		StoryType:             models.StoryTypeCustom,
+		VisualStyle:           models.VisualStyleMinimal,
+		SelectedMediaIDs:      []string{"video-long"},
+		VideoAnalyses: []models.VideoAnalysis{{
+			ID:              "analysis-video-long",
+			VideoID:         "video-long",
+			ProjectID:       "project-full-source",
+			AnalysisVersion: "video-v1",
+			DurationMicros:  300_000_000,
+			Transcript: models.VideoTranscript{HasSpeech: true, Segments: []models.VideoTranscriptSegment{
+				{StartMicros: 1_000_000, EndMicros: 3_000_000, Text: "Welcome to the presentation."},
+				{StartMicros: 120_000_000, EndMicros: 122_000_000, Text: "This is the middle section."},
+			}},
+			QualitySignals: models.VideoQualitySignals{OverallScore: 0.9},
+		}},
+	}
+
+	plan, err := planner.Plan(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateStoryPlan(plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.TotalDurationMS != 300_000 || len(plan.Moments) != 1 {
+		t.Fatalf("expected one retained 5-minute moment, got duration=%d moments=%+v", plan.TotalDurationMS, plan.Moments)
+	}
+	if plan.Moments[0].StartMicros != 0 || plan.Moments[0].EndMicros != 300_000_000 {
+		t.Fatalf("full-source range was not preserved: %+v", plan.Moments[0])
+	}
+	if len(plan.Captions) < 2 || plan.Captions[1].StartMS < 120_000 {
+		t.Fatalf("expected full-timeline captions, got %+v", plan.Captions)
+	}
+}
+
 func TestPlannerKeepsPhotoWhenSelectedVideoSegmentsOutscorePhotos(t *testing.T) {
 	t.Parallel()
 	planner := &Planner{Now: func() time.Time { return time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC) }}

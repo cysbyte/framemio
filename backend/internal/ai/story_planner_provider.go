@@ -338,29 +338,36 @@ type StoryPlannerInput struct {
 }
 
 type StoryPlannerProject struct {
-	ProjectID             string                            `json:"projectId"`
-	ProjectType           models.ProjectType                `json:"projectType,omitempty"`
-	StoryPlanVersion      int                               `json:"storyPlanVersion"`
-	DesiredDurationMS     int                               `json:"desiredDurationMs"`
-	StoryType             models.StoryType                  `json:"storyType,omitempty"`
-	VisualStyle           models.VisualStyle                `json:"visualStyle,omitempty"`
-	UserInstructions      string                            `json:"userInstructions,omitempty"`
-	SubtitlesEnabled      *bool                             `json:"subtitlesEnabled,omitempty"`
-	CaptionStylePreset    string                            `json:"captionStylePreset,omitempty"`
-	BRollPreference       string                            `json:"brollPreference,omitempty"`
-	ModeConfiguration     models.VideoProjectConfiguration  `json:"modeConfiguration,omitempty"`
-	TemplateID            string                            `json:"templateId,omitempty"`
-	TemplateVersion       int                               `json:"templateVersion,omitempty"`
-	TemplateConfiguration models.VideoTemplateConfiguration `json:"templateConfiguration,omitempty"`
-	TemplateMediaSlots    []models.VideoTemplateMediaSlot   `json:"templateMediaSlots,omitempty"`
-	TemplateGuidance      string                            `json:"templateGuidance,omitempty"`
-	RendererCapabilities  []string                          `json:"rendererCapabilities,omitempty"`
-	RequestedOutput       models.StoryOutput                `json:"requestedOutput"`
+	ProjectID               string                            `json:"projectId"`
+	ProjectType             models.ProjectType                `json:"projectType,omitempty"`
+	StoryPlanVersion        int                               `json:"storyPlanVersion"`
+	DesiredDurationMS       int                               `json:"desiredDurationMs"`
+	StoryType               models.StoryType                  `json:"storyType,omitempty"`
+	VisualStyle             models.VisualStyle                `json:"visualStyle,omitempty"`
+	UserInstructions        string                            `json:"userInstructions,omitempty"`
+	SubtitlesEnabled        *bool                             `json:"subtitlesEnabled,omitempty"`
+	CaptionStylePreset      string                            `json:"captionStylePreset,omitempty"`
+	BRollPreference         string                            `json:"brollPreference,omitempty"`
+	DurationMode            models.DurationMode               `json:"durationMode"`
+	TargetDurationSeconds   int                               `json:"targetDurationSeconds,omitempty"`
+	RemoveFillerAndPauses   bool                              `json:"removeFillerAndPauses,omitempty"`
+	MaxFullSourceDurationMS int                               `json:"maxFullSourceDurationMs,omitempty"`
+	ModeConfiguration       models.VideoProjectConfiguration  `json:"modeConfiguration,omitempty"`
+	TemplateID              string                            `json:"templateId,omitempty"`
+	TemplateVersion         int                               `json:"templateVersion,omitempty"`
+	TemplateConfiguration   models.VideoTemplateConfiguration `json:"templateConfiguration,omitempty"`
+	TemplateMediaSlots      []models.VideoTemplateMediaSlot   `json:"templateMediaSlots,omitempty"`
+	TemplateGuidance        string                            `json:"templateGuidance,omitempty"`
+	RendererCapabilities    []string                          `json:"rendererCapabilities,omitempty"`
+	RequestedOutput         models.StoryOutput                `json:"requestedOutput"`
 }
 
 type StoryPlannerConstraints struct {
 	MaxDurationMS             int                        `json:"maxDurationMs"`
+	DurationMode              models.DurationMode        `json:"durationMode"`
 	TargetDurationFixed       bool                       `json:"targetDurationFixed"`
+	RemoveFillerAndPauses     bool                       `json:"removeFillerAndPauses"`
+	MaxFullSourceDurationMS   int                        `json:"maxFullSourceDurationMs,omitempty"`
 	MinMomentDurationMS       int                        `json:"minMomentDurationMs"`
 	MaxMomentDurationMS       int                        `json:"maxMomentDurationMs"`
 	AllowedTransitions        []string                   `json:"allowedTransitions"`
@@ -468,6 +475,7 @@ The backend renderer is deterministic and will render only the StoryPlan.
 Use captions for spoken transcript cues or short photo captions. Keep every moment caption and timed caption at or below 220 characters. Use typography only as structured TextOverlay objects when useful and supported.
 For promo projects, moments are scenes. You may include order, scene_purpose, scene_text, voiceover, and typography on each moment using only supported values. Prefer a simple arc such as hook, product, feature, benefit, CTA when the supplied media supports it. Do not invent CTA URLs; only include a URL when it is supplied in modeConfiguration.
 For reel projects, optimize for a strong opening hook, removing boring footage, tight pacing, clear story progression, readable captions when appropriate, vertical framing, and a strong ending/CTA when appropriate. Do not blindly maximize cuts; preserve important context and natural pacing when necessary. Reel output must be 9:16, fill-framed, mobile-readable, and caption-safe.
+For durationMode "full_source", preserve the selected primary video timeline and useful source order instead of summarizing into a short montage. The plan may exceed 60 seconds but must not exceed constraints.maxDurationMs. Use images and B-roll as supporting overlays or cutaways when compatible. If removeFillerAndPauses is true, only cut filler words or pauses when validated transcript segment timing or silence timing is available; otherwise keep the source timeline intact.
 If project.brollPreference is "more", include more relevant supporting B-roll cutaways using only allowed media. If it is "none", return no B-roll items.
 When a template is selected, preserve project.templateId, project.templateVersion, and project.templateConfiguration exactly. Treat the template as a bounded visual recipe. For layered media, use only structured B-roll presentation values: presentation full_frame, picture_in_picture, split_screen, or montage; placement top_left, top_right, bottom_left, bottom_right, center, left, or right; size small, medium, large, or half; opacity 0.35 to 1; frame none, subtle, or bold; animation none, fade, or subtle_scale. Never return CSS, coordinates, renderer options, Remotion code, FFmpeg commands, or invented media IDs. For picture-in-picture, the base video remains the continuing underlying moment.
 When returning B-roll, include a stable broll_id when possible, the existing asset_id/media_id, start_ms, duration_ms, reason, confidence, score, and an anchor when the cutaway is tied to a moment. Keep confidence and score between 0 and 1. The backend derives a stable ID if broll_id is omitted and records missing scores as unset; do not invent media references.
@@ -615,7 +623,12 @@ func storyPlannerInputFromRequest(request Request) StoryPlannerInput {
 		desiredMS = 30000
 	}
 	maxDurationMS := desiredMS
-	if !request.TargetDurationFixed {
+	if request.DurationMode == models.DurationModeFullSource {
+		maxDurationMS = int(request.MaxFullSourceDuration.Milliseconds())
+		if maxDurationMS <= 0 {
+			maxDurationMS = int(defaultMaxFullSourceDuration.Milliseconds())
+		}
+	} else if !request.TargetDurationFixed {
 		maxDurationMS = storyPlannerMaxGeneratedDurationMS
 	}
 	storyType := normalizeStoryType(request.StoryType)
@@ -627,23 +640,27 @@ func storyPlannerInputFromRequest(request Request) StoryPlannerInput {
 	return StoryPlannerInput{
 		Task: "generate_story_plan",
 		Project: StoryPlannerProject{
-			ProjectID:             request.ProjectID,
-			ProjectType:           request.ProjectType,
-			StoryPlanVersion:      versionFor(request.Version),
-			DesiredDurationMS:     desiredMS,
-			StoryType:             storyType,
-			VisualStyle:           visualStyle,
-			UserInstructions:      strings.TrimSpace(request.UserInstructions),
-			SubtitlesEnabled:      request.SubtitlesEnabled,
-			CaptionStylePreset:    strings.TrimSpace(request.CaptionStylePreset),
-			BRollPreference:       normalizedBRollPreference(request.BRollPreference),
-			ModeConfiguration:     request.ProjectConfiguration,
-			TemplateID:            request.TemplateID,
-			TemplateVersion:       request.TemplateVersion,
-			TemplateConfiguration: request.TemplateConfiguration,
-			TemplateMediaSlots:    template.MediaSlots,
-			TemplateGuidance:      template.PlannerGuidance,
-			RendererCapabilities:  template.RendererCapabilities,
+			ProjectID:               request.ProjectID,
+			ProjectType:             request.ProjectType,
+			StoryPlanVersion:        versionFor(request.Version),
+			DesiredDurationMS:       desiredMS,
+			StoryType:               storyType,
+			VisualStyle:             visualStyle,
+			UserInstructions:        strings.TrimSpace(request.UserInstructions),
+			SubtitlesEnabled:        request.SubtitlesEnabled,
+			CaptionStylePreset:      strings.TrimSpace(request.CaptionStylePreset),
+			BRollPreference:         normalizedBRollPreference(request.BRollPreference),
+			DurationMode:            request.DurationMode,
+			TargetDurationSeconds:   targetDurationSecondsForRequest(request),
+			RemoveFillerAndPauses:   request.RemoveFillerAndPauses,
+			MaxFullSourceDurationMS: int(request.MaxFullSourceDuration.Milliseconds()),
+			ModeConfiguration:       request.ProjectConfiguration,
+			TemplateID:              request.TemplateID,
+			TemplateVersion:         request.TemplateVersion,
+			TemplateConfiguration:   request.TemplateConfiguration,
+			TemplateMediaSlots:      template.MediaSlots,
+			TemplateGuidance:        template.PlannerGuidance,
+			RendererCapabilities:    template.RendererCapabilities,
 			RequestedOutput: models.StoryOutput{
 				AspectRatio:  projectAspectRatio(request),
 				MaxDurationS: max(1, int(math.Ceil(float64(maxDurationMS)/1000))),
@@ -652,7 +669,10 @@ func storyPlannerInputFromRequest(request Request) StoryPlannerInput {
 		},
 		Constraints: StoryPlannerConstraints{
 			MaxDurationMS:             maxDurationMS,
+			DurationMode:              request.DurationMode,
 			TargetDurationFixed:       request.TargetDurationFixed,
+			RemoveFillerAndPauses:     request.RemoveFillerAndPauses,
+			MaxFullSourceDurationMS:   int(request.MaxFullSourceDuration.Milliseconds()),
 			MinMomentDurationMS:       1000,
 			MaxMomentDurationMS:       int(maxVideoMomentDuration.Milliseconds()),
 			AllowedTransitions:        []string{"fade_in", "fade", "crossfade", "cut"},
@@ -1808,10 +1828,24 @@ func storyPlannerDurationLimitMS(request Request) int {
 	if desiredMS <= 0 {
 		desiredMS = 30000
 	}
+	if request.DurationMode == models.DurationModeFullSource {
+		maxMS := int(request.MaxFullSourceDuration.Milliseconds())
+		if maxMS > 0 {
+			return maxMS
+		}
+		return int(defaultMaxFullSourceDuration.Milliseconds())
+	}
 	if request.TargetDurationFixed {
 		return desiredMS
 	}
 	return storyPlannerMaxGeneratedDurationMS
+}
+
+func targetDurationSecondsForRequest(request Request) int {
+	if request.DurationMode != models.DurationModeFixed || request.DesiredDuration <= 0 {
+		return 0
+	}
+	return int(math.Ceil(request.DesiredDuration.Seconds()))
 }
 
 func storyPlannerMaxOutputTokens(value int) int {

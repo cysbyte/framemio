@@ -171,6 +171,55 @@ test('normalizes a photo-over-video overlay without replacing the base video', (
   assert.equal(composition.broll[0].opacity, 0.8);
 });
 
+test('normalizes a full-source composition longer than 60 seconds', () => {
+  const assets = fixtureMediaAssets();
+  const fullSourceMoment = {
+    ...fixtureStoryPlan().moments[1],
+    moment_id: 'moment-video-full-source',
+    start_micros: 0,
+    end_micros: 300_000_000,
+    duration_ms: 300_000,
+    speed: undefined,
+  };
+  const composition = buildComposition(
+    fixtureStoryPlan({
+      template_id: 'talking-head-reel',
+      template_version: 1,
+      template_configuration: {
+        aspect_ratio: '9:16',
+        duration_mode: 'full_source',
+        remove_filler_and_pauses: true,
+        visual_style: 'minimal',
+        captions_enabled: true,
+        caption_style: 'bold_social',
+        scene_detail: 'more',
+        layout: 'picture_in_picture',
+      },
+      moments: [fullSourceMoment],
+      captions: [{moment_id: 'moment-video-full-source', text: 'Full source caption', start_ms: 120_000, end_ms: 124_000}],
+      output: {aspect_ratio: '9:16', max_duration_seconds: 600, preset: 'social'},
+      requested_duration_ms: 300_000,
+      total_duration_ms: 300_000,
+    }),
+    assets,
+    new Map(assets.map((asset) => [asset.id, `/asset/${asset.file_name}`])),
+    new Map(),
+    {
+      work_dir: '/work',
+      assets_dir: '/work/assets',
+      clips_dir: '/work/clips',
+      output_file: '/work/story.mp4',
+      composition_file: '/work/composition.json',
+    },
+  );
+
+  assert.equal(composition.duration_ms, 300_000);
+  assert.equal(composition.duration_frames, 9000);
+  assert.equal(composition.template_configuration?.duration_mode, 'full_source');
+  assert.equal(composition.template_configuration?.remove_filler_and_pauses, true);
+  assert.equal(composition.captions[0].start_ms, 120_000);
+});
+
 test('rejects unsupported structured b-roll layout and unknown media', async () => {
   const invalidLayout = fixtureRenderInput({
     story_plan: fixtureStoryPlan({

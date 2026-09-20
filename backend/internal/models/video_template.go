@@ -48,11 +48,21 @@ const (
 	VideoTemplateAnimationSubtleScale VideoTemplateAnimation = "subtle_scale"
 )
 
+type DurationMode string
+
+const (
+	DurationModeAuto       DurationMode = "auto"
+	DurationModeFixed      DurationMode = "fixed"
+	DurationModeFullSource DurationMode = "full_source"
+)
+
 // VideoTemplateConfiguration is the resolved, user-editable configuration
 // applied on top of a catalog template's defaults.
 type VideoTemplateConfiguration struct {
 	AspectRatio      string                 `json:"aspect_ratio,omitempty"`
 	DurationSeconds  int                    `json:"duration_seconds,omitempty"`
+	DurationMode     DurationMode           `json:"duration_mode,omitempty"`
+	RemoveFiller     bool                   `json:"remove_filler_and_pauses,omitempty"`
 	VisualStyle      VisualStyle            `json:"visual_style,omitempty"`
 	CaptionsEnabled  *bool                  `json:"captions_enabled,omitempty"`
 	CaptionStyle     string                 `json:"caption_style,omitempty"`

@@ -230,7 +230,9 @@ final class StoryModelTests: XCTestCase {
                 subtitlesEnabled: true,
                 subtitleStyle: "bold",
                 sceneDetailStyle: "moreDetails",
+                durationMode: .fixed,
                 targetDuration: 30,
+                removeFillerAndPauses: false,
                 instruction: "Focus on the people and keep the pacing gentle."
             )
         )
@@ -242,8 +244,30 @@ final class StoryModelTests: XCTestCase {
         XCTAssertEqual(object["subtitlesEnabled"] as? Bool, true)
         XCTAssertEqual(object["subtitleStyle"] as? String, "bold")
         XCTAssertEqual(object["sceneDetailStyle"] as? String, "moreDetails")
+        XCTAssertEqual(object["duration_mode"] as? String, "fixed")
         XCTAssertEqual(object["targetDuration"] as? Double, 30)
+        XCTAssertEqual(object["remove_filler_and_pauses"] as? Bool, false)
         XCTAssertEqual(object["instruction"] as? String, "Focus on the people and keep the pacing gentle.")
+    }
+
+    func testCreateStoryRequestEncodesFullSourceDurationMode() throws {
+        let request = CreateStoryRequest(
+            context: .family,
+            assets: [],
+            analyses: [],
+            options: StoryGenerationOptions(
+                durationMode: .fullSource,
+                targetDuration: nil,
+                removeFillerAndPauses: true
+            )
+        )
+
+        let data = try FrameMioJSONCoding.apiEncoder().encode(request)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertEqual(object["duration_mode"] as? String, "full_source")
+        XCTAssertNil(object["targetDuration"])
+        XCTAssertEqual(object["remove_filler_and_pauses"] as? Bool, true)
     }
 
     func testStoryDecodesWithoutOptionalDescriptionOrMoments() throws {
@@ -366,5 +390,25 @@ final class StoryModelTests: XCTestCase {
         let replacements = try XCTUnwrap(object["replace"] as? [[String: Any]])
         XCTAssertEqual(replacements.first?["fromMomentId"] as? String, "moment-lake")
         XCTAssertEqual(replacements.first?["toMediaId"] as? String, "media-sunset")
+    }
+
+    func testStoryEditRequestEncodesFullSourceDurationMode() throws {
+        let request = StoryEditRequest(
+            removeMomentIDs: [],
+            removeMediaIDs: [],
+            addMediaIDs: [],
+            replace: [],
+            durationMode: .fullSource,
+            targetDuration: nil,
+            removeFillerAndPauses: true,
+            instruction: "Keep the full video but clean pauses."
+        )
+
+        let data = try FrameMioJSONCoding.apiEncoder().encode(request)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertEqual(object["duration_mode"] as? String, "full_source")
+        XCTAssertNil(object["targetDuration"])
+        XCTAssertEqual(object["remove_filler_and_pauses"] as? Bool, true)
     }
 }

@@ -213,7 +213,9 @@ function normalizeTemplateConfiguration(value?: VideoTemplateConfiguration): Vid
   }
   return {
     ...value,
-    duration_seconds: value.duration_seconds ? clamp(Math.round(value.duration_seconds), 5, 120) : undefined,
+    duration_seconds: value.duration_mode === 'full_source' ? undefined : (value.duration_seconds ? clamp(Math.round(value.duration_seconds), 5, 120) : undefined),
+    duration_mode: value.duration_mode === 'full_source' || value.duration_mode === 'fixed' || value.duration_mode === 'auto' ? value.duration_mode : undefined,
+    remove_filler_and_pauses: value.duration_mode === 'full_source' ? Boolean(value.remove_filler_and_pauses) : undefined,
     overlay_opacity: value.overlay_opacity === undefined ? undefined : clamp(value.overlay_opacity, 0.35, 1),
   };
 }

@@ -28,6 +28,7 @@ type StoryPlanHandler struct {
 }
 
 const flexibleStoryRevisionMaxDurationMS = 60000
+const defaultFullSourceMaxDurationMS = 10 * 60 * 1000
 
 func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJob) error {
 	handlerStarted := time.Now()
@@ -67,7 +68,7 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 	plannerProvider := storyPlannerName(planner)
 	plannerModel := storyPlannerModel(planner)
 	started := time.Now()
-	h.logger().Info("story_planner_started", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("story_plan_version", request.Version), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int("media_count", len(project.MediaIDs)), slog.Int("photo_analysis_count", len(photoAnalyses)), slog.Int("video_analysis_count", len(videoAnalyses)), slog.Int64("suggested_duration_ms", request.DesiredDuration.Milliseconds()), slog.Bool("target_duration_fixed", request.TargetDurationFixed), slog.Int("max_duration_ms", storyPlannerMaxDurationLogMS(request)))
+	h.logger().Info("story_planner_started", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("story_plan_version", request.Version), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int("media_count", len(project.MediaIDs)), slog.Int("photo_analysis_count", len(photoAnalyses)), slog.Int("video_analysis_count", len(videoAnalyses)), slog.String("duration_mode", string(request.DurationMode)), slog.Bool("remove_filler_and_pauses", request.RemoveFillerAndPauses), slog.Int64("suggested_duration_ms", request.DesiredDuration.Milliseconds()), slog.Bool("target_duration_fixed", request.TargetDurationFixed), slog.Int("max_duration_ms", storyPlannerMaxDurationLogMS(request)))
 	h.logger().Info("story planner request prepared",
 		slog.String("job_id", job.ID),
 		slog.String("project_id", project.ID),
@@ -89,6 +90,9 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		slog.String("template_id", valueOrUnset(request.TemplateID)),
 		slog.Int("template_version", request.TemplateVersion),
 		slog.Any("template_configuration", request.TemplateConfiguration),
+		slog.String("duration_mode", string(request.DurationMode)),
+		slog.Bool("remove_filler_and_pauses", request.RemoveFillerAndPauses),
+		slog.Int64("max_full_source_duration_ms", request.MaxFullSourceDuration.Milliseconds()),
 		slog.Int64("suggested_duration_ms", request.DesiredDuration.Milliseconds()),
 		slog.Bool("target_duration_fixed", request.TargetDurationFixed),
 		slog.Int("max_duration_ms", storyPlannerMaxDurationLogMS(request)),
@@ -253,13 +257,65 @@ func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configur
 	version, _ := strconv.Atoi(strings.TrimSpace(configuration["story_plan_version"]))
 	duration := defaultProjectDuration(project, mediaByID)
 	targetDurationFixed := false
-	if seconds, _ := strconv.Atoi(strings.TrimSpace(configuration["target_duration_seconds"])); seconds > 0 {
-		duration = time.Duration(seconds) * time.Second
-		targetDurationFixed = true
-	}
 	selectedMediaIDs := splitStoryPlanConfigList(configuration["selected_media_ids"])
 	if len(selectedMediaIDs) == 0 {
 		selectedMediaIDs = append([]string(nil), project.MediaIDs...)
+	}
+	durationMode := models.NormalizeDurationMode(models.DurationMode(strings.TrimSpace(configuration["duration_mode"])))
+	if durationMode == models.DurationModeAuto {
+		durationMode = project.Configuration.DurationMode
+	}
+	if durationMode == models.DurationModeAuto {
+		switch project.Type {
+		case models.ProjectTypePromo:
+			if project.Configuration.Promo != nil {
+				durationMode = project.Configuration.Promo.DurationMode
+			}
+		case models.ProjectTypeReel:
+			if project.Configuration.Reel != nil {
+				durationMode = project.Configuration.Reel.DurationMode
+			}
+		}
+	}
+	if durationMode == models.DurationModeAuto && project.Configuration.TemplateConfiguration.DurationMode != "" {
+		durationMode = project.Configuration.TemplateConfiguration.DurationMode
+	}
+	targetDurationSeconds, _ := strconv.Atoi(strings.TrimSpace(configuration["target_duration_seconds"]))
+	if targetDurationSeconds > 0 && strings.TrimSpace(configuration["duration_mode"]) == "" {
+		durationMode = models.DurationModeFixed
+	}
+	if durationMode == models.DurationModeFixed {
+		if targetDurationSeconds <= 0 && project.Configuration.TargetDurationSeconds > 0 {
+			targetDurationSeconds = project.Configuration.TargetDurationSeconds
+		}
+		if targetDurationSeconds <= 0 {
+			switch project.Type {
+			case models.ProjectTypePromo:
+				if project.Configuration.Promo != nil {
+					targetDurationSeconds = project.Configuration.Promo.DesiredDurationSecs
+				}
+			case models.ProjectTypeReel:
+				if project.Configuration.Reel != nil {
+					targetDurationSeconds = project.Configuration.Reel.TargetDurationSecs
+				}
+			}
+		}
+		if targetDurationSeconds > 0 {
+			duration = time.Duration(targetDurationSeconds) * time.Second
+			targetDurationFixed = true
+		}
+	} else if durationMode == models.DurationModeFullSource {
+		duration = h.fullSourceDuration(selectedMediaIDs, videoAnalyses)
+		if duration <= 0 {
+			duration = defaultProjectDuration(project, mediaByID)
+		}
+		maxDuration := fullSourceMaxDuration()
+		if duration > maxDuration {
+			duration = maxDuration
+		}
+		targetDurationFixed = false
+	} else {
+		durationMode = models.DurationModeAuto
 	}
 	instructions := strings.TrimSpace(configuration["user_instructions"])
 	if instructions == "" {
@@ -293,9 +349,20 @@ func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configur
 			brollPreference = "none"
 		}
 	}
-	if !targetDurationFixed && templateConfiguration.DurationSeconds > 0 {
+	if durationMode != models.DurationModeFullSource && !targetDurationFixed && templateConfiguration.DurationSeconds > 0 {
 		duration = time.Duration(templateConfiguration.DurationSeconds) * time.Second
 		targetDurationFixed = true
+	}
+	removeFiller := boolPointerFromConfig(configuration["remove_filler_and_pauses"])
+	removeFillerAndPauses := durationMode == models.DurationModeFullSource && removeFiller != nil && *removeFiller
+	if durationMode == models.DurationModeFullSource && removeFiller == nil {
+		removeFillerAndPauses = project.Configuration.RemoveFillerAndPauses
+		if project.Type == models.ProjectTypePromo && project.Configuration.Promo != nil {
+			removeFillerAndPauses = project.Configuration.Promo.RemoveFillerAndPauses
+		}
+		if project.Type == models.ProjectTypeReel && project.Configuration.Reel != nil {
+			removeFillerAndPauses = project.Configuration.Reel.RemoveFillerAndPauses
+		}
 	}
 	return ai.Request{
 		ProjectID:             project.ID,
@@ -317,6 +384,9 @@ func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configur
 		TemplateID:            project.Configuration.TemplateID,
 		TemplateVersion:       project.Configuration.TemplateVersion,
 		TemplateConfiguration: project.Configuration.TemplateConfiguration,
+		DurationMode:          durationMode,
+		RemoveFillerAndPauses: removeFillerAndPauses,
+		MaxFullSourceDuration: fullSourceMaxDuration(),
 		PhotoAnalyses:         photoAnalyses,
 		VideoAnalyses:         videoAnalyses,
 		MediaClusters:         clusters,
@@ -363,6 +433,13 @@ func storyPlannerModel(planner ai.StoryPlanner) string {
 }
 
 func storyPlannerMaxDurationLogMS(request ai.Request) int {
+	if request.DurationMode == models.DurationModeFullSource {
+		maxMS := int(request.MaxFullSourceDuration.Milliseconds())
+		if maxMS > 0 {
+			return maxMS
+		}
+		return defaultFullSourceMaxDurationMS
+	}
 	desiredMS := int(request.DesiredDuration.Milliseconds())
 	if desiredMS <= 0 {
 		desiredMS = 1
@@ -371,6 +448,40 @@ func storyPlannerMaxDurationLogMS(request ai.Request) int {
 		return desiredMS
 	}
 	return flexibleStoryRevisionMaxDurationMS
+}
+
+func (h StoryPlanHandler) fullSourceDuration(selectedMediaIDs []string, analyses []models.VideoAnalysis) time.Duration {
+	totalMicros := int64(0)
+	if len(selectedMediaIDs) > 0 {
+		analysisByID := make(map[string]models.VideoAnalysis, len(analyses))
+		for _, analysis := range analyses {
+			analysisByID[strings.TrimSpace(analysis.VideoID)] = analysis
+		}
+		for _, mediaID := range selectedMediaIDs {
+			analysis := analysisByID[strings.TrimSpace(mediaID)]
+			if analysis.DurationMicros > 0 {
+				totalMicros += analysis.DurationMicros
+			}
+		}
+	} else {
+		for _, analysis := range analyses {
+			if analysis.DurationMicros > 0 {
+				totalMicros += analysis.DurationMicros
+			}
+		}
+	}
+	if totalMicros <= 0 {
+		return 0
+	}
+	return time.Duration(totalMicros) * time.Microsecond
+}
+
+func fullSourceMaxDuration() time.Duration {
+	seconds, _ := strconv.Atoi(strings.TrimSpace(os.Getenv("FULL_SOURCE_MAX_DURATION_SECONDS")))
+	if seconds <= 0 {
+		return time.Duration(defaultFullSourceMaxDurationMS) * time.Millisecond
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 type namedStoryRevisionPlanner interface {

@@ -190,6 +190,8 @@ struct VideoProjectEditorConfiguration: Hashable, Sendable {
 }
 
 enum ProjectDurationOption: String, Codable, CaseIterable, Hashable, Sendable {
+    case fullSource
+    case fortyFive
     case fifteen
     case thirty
     case sixty
@@ -197,6 +199,8 @@ enum ProjectDurationOption: String, Codable, CaseIterable, Hashable, Sendable {
 
     var title: String {
         switch self {
+        case .fullSource: "Full length"
+        case .fortyFive: "45 sec"
         case .fifteen: "15 sec"
         case .thirty: "30 sec"
         case .sixty: "60 sec"
@@ -206,10 +210,36 @@ enum ProjectDurationOption: String, Codable, CaseIterable, Hashable, Sendable {
 
     var seconds: TimeInterval? {
         switch self {
+        case .fullSource, .automatic: nil
+        case .fortyFive: 45
         case .fifteen: 15
         case .thirty: 30
         case .sixty: 60
-        case .automatic: nil
+        }
+    }
+
+    var durationMode: VideoDurationMode {
+        switch self {
+        case .automatic:
+            return .auto
+        case .fullSource:
+            return .fullSource
+        case .fifteen, .thirty, .fortyFive, .sixty:
+            return .fixed
+        }
+    }
+}
+
+enum VideoDurationMode: String, Codable, CaseIterable, Hashable, Sendable {
+    case auto
+    case fixed
+    case fullSource = "full_source"
+
+    var title: String {
+        switch self {
+        case .auto: "Auto"
+        case .fixed: "Fixed"
+        case .fullSource: "Full length"
         }
     }
 }
@@ -325,18 +355,20 @@ struct PromoCreationConfiguration: Codable, Hashable, Sendable {
     var subject: PromoSubject
     var goal: PromoGoal
     var duration: ProjectDurationOption
+    var removeFillerAndPauses: Bool
     var prompt: String?
 
-    static let automatic = PromoCreationConfiguration(subject: .product, goal: .sell, duration: .automatic)
+    static let automatic = PromoCreationConfiguration(subject: .product, goal: .sell, duration: .automatic, removeFillerAndPauses: false)
 }
 
 struct ReelCreationConfiguration: Codable, Hashable, Sendable {
     var platform: ReelPlatform
     var duration: ProjectDurationOption
+    var removeFillerAndPauses: Bool
     var style: ReelStyle
     var prompt: String?
 
-    static let automatic = ReelCreationConfiguration(platform: .instagram, duration: .automatic, style: .automatic)
+    static let automatic = ReelCreationConfiguration(platform: .instagram, duration: .automatic, removeFillerAndPauses: false, style: .automatic)
 }
 
 struct VideoProjectDraft: Codable, Hashable, Sendable {
@@ -373,7 +405,9 @@ struct VideoProjectDraft: Codable, Hashable, Sendable {
             options.subtitlesEnabled = template.defaults.captionsEnabled
             options.subtitleStyle = template.defaults.captionStyle
             options.sceneDetailStyle = template.defaults.sceneDetail
+            options.durationMode = template.defaults.durationMode ?? (template.defaults.durationSeconds == nil ? .auto : .fixed)
             options.targetDuration = template.defaults.durationSeconds.map(TimeInterval.init)
+            options.removeFillerAndPauses = template.defaults.removeFillerAndPauses == true && options.durationMode == .fullSource
             draft.storyOptions = options
         case .promo:
             draft = .promo()
@@ -401,6 +435,8 @@ struct VideoProjectDraft: Codable, Hashable, Sendable {
 struct VideoTemplateConfiguration: Codable, Hashable, Sendable {
     var aspectRatio: String?
     var durationSeconds: Int?
+    var durationMode: VideoDurationMode?
+    var removeFillerAndPauses: Bool?
     var visualStyle: String?
     var captionsEnabled: Bool?
     var captionStyle: String?
@@ -415,6 +451,8 @@ struct VideoTemplateConfiguration: Codable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case aspectRatio = "aspect_ratio"
         case durationSeconds = "duration_seconds"
+        case durationMode = "duration_mode"
+        case removeFillerAndPauses = "remove_filler_and_pauses"
         case visualStyle = "visual_style"
         case captionsEnabled = "captions_enabled"
         case captionStyle = "caption_style"
@@ -512,12 +550,17 @@ struct VideoTemplate: Codable, Hashable, Identifiable, Sendable {
         self.rendererCapabilities = rendererCapabilities
     }
 
+    var supportsFullSourceDuration: Bool {
+        editableOptions.contains("duration_mode")
+            && rendererCapabilities.contains("duration_mode_full_source")
+    }
+
     private static func fallbackFullFrame(id: String, type: VideoProjectType, name: String, description: String, demo: String, duration: Int, style: String, captions: Bool, captionStyle: String, sceneDetail: String) -> VideoTemplate {
-        fallbackTemplate(id: id, type: type, name: name, description: description, demo: demo, duration: duration, style: style, captions: captions, captionStyle: captionStyle, sceneDetail: sceneDetail, layout: "full_frame", placement: "center", size: "large", frame: "none", animation: "fade", editableOptions: ["duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail"], rendererCapabilities: ["full_frame_media", "fade"])
+        fallbackTemplate(id: id, type: type, name: name, description: description, demo: demo, duration: duration, style: style, captions: captions, captionStyle: captionStyle, sceneDetail: sceneDetail, layout: "full_frame", placement: "center", size: "large", frame: "none", animation: "fade", editableOptions: ["duration_seconds", "duration_mode", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail"], rendererCapabilities: ["full_frame_media", "fade", "duration_mode_full_source"])
     }
 
     private static func fallbackPIP(id: String, type: VideoProjectType, name: String, description: String, demo: String, duration: Int, style: String, captions: Bool, captionStyle: String, sceneDetail: String, placement: String, size: String, animation: String) -> VideoTemplate {
-        fallbackTemplate(id: id, type: type, name: name, description: description, demo: demo, duration: duration, style: style, captions: captions, captionStyle: captionStyle, sceneDetail: sceneDetail, layout: "picture_in_picture", placement: placement, size: size, frame: "subtle", animation: animation, editableOptions: ["duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail", "overlay_placement", "overlay_size", "overlay_opacity", "overlay_frame", "overlay_animation"], rendererCapabilities: ["full_frame_media", "picture_in_picture", "placement", "bounded_size", "opacity", "frame", "fade", "subtle_scale"])
+        fallbackTemplate(id: id, type: type, name: name, description: description, demo: demo, duration: duration, style: style, captions: captions, captionStyle: captionStyle, sceneDetail: sceneDetail, layout: "picture_in_picture", placement: placement, size: size, frame: "subtle", animation: animation, editableOptions: ["duration_seconds", "duration_mode", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail", "overlay_placement", "overlay_size", "overlay_opacity", "overlay_frame", "overlay_animation"], rendererCapabilities: ["full_frame_media", "picture_in_picture", "placement", "bounded_size", "opacity", "frame", "fade", "subtle_scale", "duration_mode_full_source"])
     }
 
     private static func fallbackSplit(id: String, type: VideoProjectType, name: String, description: String, demo: String, duration: Int, style: String, captions: Bool, captionStyle: String, sceneDetail: String) -> VideoTemplate {
@@ -536,7 +579,7 @@ struct VideoTemplate: Codable, Hashable, Identifiable, Sendable {
             description: description,
             demoVideoPath: demo,
             supportedProjectTypes: [type],
-            defaults: VideoTemplateConfiguration(aspectRatio: "9:16", durationSeconds: duration, visualStyle: style, captionsEnabled: captions, captionStyle: captionStyle, sceneDetail: sceneDetail, layout: layout, overlayPlacement: placement, overlaySize: size, overlayOpacity: 1, overlayFrame: frame, overlayAnimation: animation),
+            defaults: VideoTemplateConfiguration(aspectRatio: "9:16", durationSeconds: duration, durationMode: .fixed, removeFillerAndPauses: false, visualStyle: style, captionsEnabled: captions, captionStyle: captionStyle, sceneDetail: sceneDetail, layout: layout, overlayPlacement: placement, overlaySize: size, overlayOpacity: 1, overlayFrame: frame, overlayAnimation: animation),
             editableOptions: editableOptions,
             mediaSlots: [],
             plannerGuidance: "",
@@ -794,15 +837,39 @@ struct StoryGenerationOptions: Codable, Hashable, Sendable {
     var subtitlesEnabled: Bool?
     var subtitleStyle: String?
     var sceneDetailStyle: String?
+    var durationMode: VideoDurationMode
     var targetDuration: TimeInterval?
+    var removeFillerAndPauses: Bool
     var instruction: String?
+
+    init(
+        style: String? = "cinematic",
+        subtitlesEnabled: Bool? = true,
+        subtitleStyle: String? = "cinematic",
+        sceneDetailStyle: String? = nil,
+        durationMode: VideoDurationMode = .auto,
+        targetDuration: TimeInterval? = nil,
+        removeFillerAndPauses: Bool = false,
+        instruction: String? = nil
+    ) {
+        self.style = style
+        self.subtitlesEnabled = subtitlesEnabled
+        self.subtitleStyle = subtitleStyle
+        self.sceneDetailStyle = sceneDetailStyle
+        self.durationMode = durationMode
+        self.targetDuration = targetDuration
+        self.removeFillerAndPauses = durationMode == .fullSource && removeFillerAndPauses
+        self.instruction = instruction
+    }
 
     static let automatic = StoryGenerationOptions(
         style: "cinematic",
         subtitlesEnabled: true,
         subtitleStyle: "cinematic",
         sceneDetailStyle: nil,
+        durationMode: .auto,
         targetDuration: nil,
+        removeFillerAndPauses: false,
         instruction: nil
     )
 }
@@ -830,7 +897,9 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
     let subtitlesEnabled: Bool?
     let subtitleStyle: String?
     let sceneDetailStyle: String?
+    let durationMode: VideoDurationMode?
     let targetDuration: TimeInterval?
+    let removeFillerAndPauses: Bool
     let instruction: String?
     let baseVersion: Int?
 
@@ -845,7 +914,9 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
         subtitlesEnabled: Bool? = nil,
         subtitleStyle: String? = nil,
         sceneDetailStyle: String? = nil,
+        durationMode: VideoDurationMode? = nil,
         targetDuration: TimeInterval? = nil,
+        removeFillerAndPauses: Bool = false,
         instruction: String? = nil,
         baseVersion: Int? = nil
     ) {
@@ -859,7 +930,9 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
         self.subtitlesEnabled = subtitlesEnabled
         self.subtitleStyle = subtitleStyle
         self.sceneDetailStyle = sceneDetailStyle
+        self.durationMode = durationMode
         self.targetDuration = targetDuration
+        self.removeFillerAndPauses = removeFillerAndPauses
         self.instruction = instruction
         self.baseVersion = baseVersion
     }
@@ -875,7 +948,9 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
         case subtitlesEnabled
         case subtitleStyle
         case sceneDetailStyle
+        case durationMode = "duration_mode"
         case targetDuration
+        case removeFillerAndPauses = "remove_filler_and_pauses"
         case instruction
         case baseVersion
     }
@@ -890,7 +965,9 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
             || subtitlesEnabled != nil
             || subtitleStyle != nil
             || sceneDetailStyle != nil
+            || durationMode != nil
             || targetDuration != nil
+            || removeFillerAndPauses
             || instruction?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 
@@ -906,7 +983,9 @@ struct StoryEditRequest: Codable, Hashable, Sendable {
             subtitlesEnabled: subtitlesEnabled,
             subtitleStyle: subtitleStyle,
             sceneDetailStyle: sceneDetailStyle,
+            durationMode: durationMode,
             targetDuration: targetDuration,
+            removeFillerAndPauses: removeFillerAndPauses,
             instruction: instruction,
             baseVersion: version ?? baseVersion
         )
@@ -921,7 +1000,9 @@ struct CreateStoryRequest: Codable, Hashable, Sendable {
     let subtitlesEnabled: Bool?
     let subtitleStyle: String?
     let sceneDetailStyle: String?
+    let durationMode: VideoDurationMode
     let targetDuration: TimeInterval?
+    let removeFillerAndPauses: Bool
     let instruction: String?
     let templateID: String?
     let templateVersion: Int?
@@ -935,7 +1016,9 @@ struct CreateStoryRequest: Codable, Hashable, Sendable {
         case subtitlesEnabled
         case subtitleStyle
         case sceneDetailStyle
+        case durationMode = "duration_mode"
         case targetDuration
+        case removeFillerAndPauses = "remove_filler_and_pauses"
         case instruction
         case templateID = "template_id"
         case templateVersion = "template_version"
@@ -958,7 +1041,9 @@ struct CreateStoryRequest: Codable, Hashable, Sendable {
         self.subtitlesEnabled = options.subtitlesEnabled
         self.subtitleStyle = options.subtitleStyle
         self.sceneDetailStyle = options.sceneDetailStyle
+        self.durationMode = options.durationMode
         self.targetDuration = options.targetDuration
+        self.removeFillerAndPauses = options.removeFillerAndPauses
         let trimmedInstruction = options.instruction?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.instruction = trimmedInstruction?.isEmpty == true ? nil : trimmedInstruction
         self.templateID = templateID

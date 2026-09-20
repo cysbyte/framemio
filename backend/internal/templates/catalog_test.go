@@ -90,6 +90,32 @@ func TestResolveAppliesDefaultsAndSupportedOverrides(t *testing.T) {
 	}
 }
 
+func TestResolveAllowsFullSourceOnlyForSupportedTemplates(t *testing.T) {
+	t.Parallel()
+	_, resolved, err := Resolve(models.ProjectTypeReel, "talking-head-reel", 1, models.VideoTemplateConfiguration{
+		DurationMode: models.DurationModeFullSource,
+		RemoveFiller: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.DurationMode != models.DurationModeFullSource || resolved.DurationSeconds != 0 || !resolved.RemoveFiller {
+		t.Fatalf("full-source settings were not preserved: %+v", resolved)
+	}
+	_, _, err = Resolve(models.ProjectTypeReel, "fast-montage", 1, models.VideoTemplateConfiguration{
+		DurationMode: models.DurationModeFullSource,
+	})
+	if err == nil || !strings.Contains(err.Error(), "full length") {
+		t.Fatalf("expected unsupported full length rejection, got %v", err)
+	}
+	_, _, err = Resolve(models.ProjectTypeStory, "photo-over-video", 1, models.VideoTemplateConfiguration{
+		RemoveFiller: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires full length") {
+		t.Fatalf("expected cleanup rejection outside full-source, got %v", err)
+	}
+}
+
 func TestResolveRejectsUnsupportedOverrides(t *testing.T) {
 	t.Parallel()
 	_, _, err := Resolve(models.ProjectTypePromo, "fast-social-ad", 1, models.VideoTemplateConfiguration{

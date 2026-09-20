@@ -30,11 +30,19 @@ func NormalizeProjectType(value ProjectType) (ProjectType, bool) {
 }
 
 func NormalizeVideoProjectConfiguration(projectType ProjectType, configuration VideoProjectConfiguration) VideoProjectConfiguration {
+	configuration.DurationMode = NormalizeDurationMode(configuration.DurationMode)
+	if configuration.DurationMode == DurationModeFixed && configuration.TargetDurationSeconds <= 0 {
+		configuration.DurationMode = DurationModeAuto
+	}
+	if configuration.DurationMode != DurationModeFullSource {
+		configuration.RemoveFillerAndPauses = false
+	}
 	switch projectType {
 	case ProjectTypeReel:
 		configuration.Reel = NormalizeReelProjectConfiguration(configuration.Reel)
 		configuration.Composition.AspectRatio = "9:16"
 	case ProjectTypePromo:
+		configuration.Promo = NormalizePromoProjectConfiguration(configuration.Promo)
 		if strings.TrimSpace(configuration.Composition.AspectRatio) == "" {
 			configuration.Composition.AspectRatio = "16:9"
 		}
@@ -46,6 +54,22 @@ func NormalizeVideoProjectConfiguration(projectType ProjectType, configuration V
 	return configuration
 }
 
+func NormalizePromoProjectConfiguration(configuration *PromoProjectConfiguration) *PromoProjectConfiguration {
+	if configuration == nil {
+		return nil
+	}
+	normalized := *configuration
+	normalized.DesiredDurationSecs = normalizeReelDuration(normalized.DesiredDurationSecs)
+	normalized.DurationMode = NormalizeDurationMode(normalized.DurationMode)
+	if normalized.DurationMode == DurationModeFixed && normalized.DesiredDurationSecs <= 0 {
+		normalized.DurationMode = DurationModeAuto
+	}
+	if normalized.DurationMode != DurationModeFullSource {
+		normalized.RemoveFillerAndPauses = false
+	}
+	return &normalized
+}
+
 func NormalizeReelProjectConfiguration(configuration *ReelProjectConfiguration) *ReelProjectConfiguration {
 	if configuration == nil {
 		configuration = &ReelProjectConfiguration{}
@@ -53,6 +77,13 @@ func NormalizeReelProjectConfiguration(configuration *ReelProjectConfiguration) 
 	normalized := *configuration
 	normalized.SocialPlatform = normalizeReelPlatform(normalized.SocialPlatform)
 	normalized.TargetDurationSecs = normalizeReelDuration(normalized.TargetDurationSecs)
+	normalized.DurationMode = NormalizeDurationMode(normalized.DurationMode)
+	if normalized.DurationMode == DurationModeFixed && normalized.TargetDurationSecs <= 0 {
+		normalized.DurationMode = DurationModeAuto
+	}
+	if normalized.DurationMode != DurationModeFullSource {
+		normalized.RemoveFillerAndPauses = false
+	}
 	normalized.Style = normalizeReelStyle(normalized.Style)
 	normalized.HookPreference = strings.TrimSpace(normalized.HookPreference)
 	normalized.CaptionStyle = normalizeReelCaptionStyle(normalized.CaptionStyle)
@@ -80,10 +111,21 @@ func normalizeReelPlatform(value string) string {
 
 func normalizeReelDuration(seconds int) int {
 	switch seconds {
-	case 15, 30, 60:
+	case 15, 30, 45, 60:
 		return seconds
 	default:
 		return 0
+	}
+}
+
+func NormalizeDurationMode(value DurationMode) DurationMode {
+	switch DurationMode(strings.ToLower(strings.TrimSpace(string(value)))) {
+	case DurationModeFixed:
+		return DurationModeFixed
+	case DurationModeFullSource:
+		return DurationModeFullSource
+	default:
+		return DurationModeAuto
 	}
 }
 
@@ -119,24 +161,28 @@ type StoryProjectConfiguration struct {
 }
 
 type PromoProjectConfiguration struct {
-	PromotionCategory   string             `json:"promotion_category,omitempty"`
-	PromotionGoal       string             `json:"promotion_goal,omitempty"`
-	ProductInformation  string             `json:"product_information,omitempty"`
-	CallToAction        string             `json:"call_to_action,omitempty"`
-	CTA                 *CTAConfiguration  `json:"cta,omitempty"`
-	Hook                string             `json:"hook,omitempty"`
-	TargetAudience      string             `json:"target_audience,omitempty"`
-	DesiredDurationSecs int                `json:"desired_duration_seconds,omitempty"`
-	Brand               BrandConfiguration `json:"brand,omitempty"`
+	PromotionCategory     string             `json:"promotion_category,omitempty"`
+	PromotionGoal         string             `json:"promotion_goal,omitempty"`
+	ProductInformation    string             `json:"product_information,omitempty"`
+	CallToAction          string             `json:"call_to_action,omitempty"`
+	CTA                   *CTAConfiguration  `json:"cta,omitempty"`
+	Hook                  string             `json:"hook,omitempty"`
+	TargetAudience        string             `json:"target_audience,omitempty"`
+	DesiredDurationSecs   int                `json:"desired_duration_seconds,omitempty"`
+	DurationMode          DurationMode       `json:"duration_mode,omitempty"`
+	RemoveFillerAndPauses bool               `json:"remove_filler_and_pauses,omitempty"`
+	Brand                 BrandConfiguration `json:"brand,omitempty"`
 }
 
 type ReelProjectConfiguration struct {
-	SocialPlatform     string `json:"social_platform,omitempty"`
-	TargetDurationSecs int    `json:"target_duration_seconds,omitempty"`
-	Style              string `json:"style,omitempty"`
-	HookPreference     string `json:"hook_preference,omitempty"`
-	CaptionStyle       string `json:"caption_style,omitempty"`
-	AspectRatio        string `json:"aspect_ratio,omitempty"`
+	SocialPlatform        string       `json:"social_platform,omitempty"`
+	TargetDurationSecs    int          `json:"target_duration_seconds,omitempty"`
+	DurationMode          DurationMode `json:"duration_mode,omitempty"`
+	RemoveFillerAndPauses bool         `json:"remove_filler_and_pauses,omitempty"`
+	Style                 string       `json:"style,omitempty"`
+	HookPreference        string       `json:"hook_preference,omitempty"`
+	CaptionStyle          string       `json:"caption_style,omitempty"`
+	AspectRatio           string       `json:"aspect_ratio,omitempty"`
 }
 
 type BrandConfiguration struct {
@@ -168,6 +214,9 @@ type RenderConfiguration struct {
 
 type VideoProjectConfiguration struct {
 	AIInstructions        string                     `json:"ai_instructions,omitempty"`
+	DurationMode          DurationMode               `json:"duration_mode,omitempty"`
+	TargetDurationSeconds int                        `json:"target_duration_seconds,omitempty"`
+	RemoveFillerAndPauses bool                       `json:"remove_filler_and_pauses,omitempty"`
 	Story                 *StoryProjectConfiguration `json:"story,omitempty"`
 	Promo                 *PromoProjectConfiguration `json:"promo,omitempty"`
 	Reel                  *ReelProjectConfiguration  `json:"reel,omitempty"`

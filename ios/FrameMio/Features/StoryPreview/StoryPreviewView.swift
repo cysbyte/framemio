@@ -1090,6 +1090,10 @@ private struct EditStorySheet: View {
         return max(0, Int(totalVideoSourceDuration.rounded(.down)))
     }
 
+    private var supportsFullLengthEdit: Bool {
+        totalVideoSourceDuration > 0 && !hasUnknownVideoLengthSource
+    }
+
     private var lengthSectionSubtitle: String {
         if hasPhotoLikeLengthSource {
             return "Photos can extend the \(configuration.terminology.projectName.lowercased()) up to 60s"
@@ -1639,33 +1643,70 @@ private struct EditStorySheet: View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
             SectionHeader(title: "Length", subtitle: lengthSectionSubtitle)
             LazyVGrid(columns: optionGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
+                optionChip(title: "Auto", isSelected: draft.durationMode == .auto) {
+                    draft.durationMode = .auto
+                    draft.targetDuration = nil
+                    draft.removeFillerAndPauses = false
+                }
                 ForEach(lengthOptions, id: \.self) { seconds in
                     let disabledReason = lengthDisabledLabel(for: seconds)
                     optionChip(
                         title: "\(seconds)s",
                         subtitle: disabledReason,
-                        isSelected: Int((draft.targetDuration ?? story.duration).rounded()) == seconds,
+                        isSelected: draft.durationMode == .fixed && Int((draft.targetDuration ?? 0).rounded()) == seconds,
                         isDisabled: disabledReason != nil
                     ) {
                         guard disabledReason == nil else {
                             storyPreviewUIDebugLog("edit sheet length option blocked seconds=\(seconds) max_selectable=\(maxSelectableLengthSeconds) video_source=\(Int(totalVideoSourceDuration.rounded())) has_photo_like=\(hasPhotoLikeLengthSource) unknown_video=\(hasUnknownVideoLengthSource)")
                             return
                         }
+                        draft.durationMode = .fixed
                         draft.targetDuration = TimeInterval(seconds)
+                        draft.removeFillerAndPauses = false
                         storyPreviewUIDebugLog("edit sheet length selected seconds=\(seconds) max_selectable=\(maxSelectableLengthSeconds) video_source=\(Int(totalVideoSourceDuration.rounded())) has_photo_like=\(hasPhotoLikeLengthSource) unknown_video=\(hasUnknownVideoLengthSource)")
                     }
                 }
+                optionChip(
+                    title: "Full length",
+                    subtitle: supportsFullLengthEdit ? nil : "Needs known video length",
+                    isSelected: draft.durationMode == .fullSource,
+                    isDisabled: !supportsFullLengthEdit
+                ) {
+                    draft.durationMode = .fullSource
+                    draft.targetDuration = nil
+                }
+            }
+            if draft.durationMode == .fullSource {
+                Toggle(isOn: $draft.removeFillerAndPauses) {
+                    Label("Remove filler words and pauses", systemImage: "scissors")
+                        .font(FrameMioTypography.body)
+                        .foregroundStyle(FrameMioColors.ink)
+                }
+                .tint(FrameMioColors.accent)
             }
         }
         .onAppear {
+            normalizeDurationMode()
             storyPreviewUIDebugLog("edit sheet length availability max_selectable=\(maxSelectableLengthSeconds) video_source=\(Int(totalVideoSourceDuration.rounded())) has_photo_like=\(hasPhotoLikeLengthSource) unknown_video=\(hasUnknownVideoLengthSource) options=\(lengthOptions.map(String.init).joined(separator: ","))")
         }
         .onChange(of: maxSelectableLengthSeconds) { _, value in
             storyPreviewUIDebugLog("edit sheet length availability changed max_selectable=\(value) video_source=\(Int(totalVideoSourceDuration.rounded())) has_photo_like=\(hasPhotoLikeLengthSource) unknown_video=\(hasUnknownVideoLengthSource)")
             if let target = draft.targetDuration, Int(target.rounded()) > value {
                 draft.targetDuration = nil
+                draft.durationMode = .auto
                 storyPreviewUIDebugLog("edit sheet length target cleared reason=above_available previous=\(Int(target.rounded())) max_selectable=\(value)")
             }
+            normalizeDurationMode()
+        }
+    }
+
+    private func normalizeDurationMode() {
+        if draft.durationMode == .fullSource && !supportsFullLengthEdit {
+            draft.durationMode = .auto
+            draft.targetDuration = nil
+        }
+        if draft.durationMode != .fullSource {
+            draft.removeFillerAndPauses = false
         }
     }
 
@@ -1917,7 +1958,9 @@ struct VideoProjectEditorDraft: Hashable {
     var subtitlesEnabled: Bool?
     var subtitleStyle: String?
     var sceneDetailStyle: String?
+    var durationMode: VideoDurationMode = .auto
     var targetDuration: TimeInterval?
+    var removeFillerAndPauses = false
     var instruction: String?
     var sceneTimingInstruction = ""
     var audioDirection = ""
@@ -1950,7 +1993,9 @@ struct VideoProjectEditorDraft: Hashable {
             subtitlesEnabled: subtitlesEnabled,
             subtitleStyle: subtitleStyle,
             sceneDetailStyle: sceneDetailStyle,
+            durationMode: durationMode,
             targetDuration: targetDuration,
+            removeFillerAndPauses: removeFillerAndPauses,
             instruction: composedInstruction(for: configuration)
         )
     }

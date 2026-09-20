@@ -14,6 +14,8 @@ export type VideoTemplateAnimation = 'none' | 'fade' | 'subtle_scale';
 export interface VideoTemplateConfiguration {
   aspect_ratio?: AspectRatio | string;
   duration_seconds?: number;
+  duration_mode?: 'auto' | 'fixed' | 'full_source';
+  remove_filler_and_pauses?: boolean;
   visual_style?: string;
   captions_enabled?: boolean;
   caption_style?: string;

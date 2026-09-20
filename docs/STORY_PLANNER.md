@@ -1,6 +1,6 @@
 # Story Planner
 
-The Story Planner combines `PhotoAnalysis`, `VideoAnalysis`, `MediaClusters`, timestamps, locations, user-selected media, desired duration, story type, visual style, and optional instructions into a renderer-independent `StoryPlan`.
+The Story Planner combines `PhotoAnalysis`, `VideoAnalysis`, `MediaClusters`, timestamps, locations, user-selected media, duration mode, desired duration, story type, visual style, and optional instructions into a renderer-independent `StoryPlan`.
 
 ## Contract
 
@@ -10,6 +10,8 @@ The Story Planner combines `PhotoAnalysis`, `VideoAnalysis`, `MediaClusters`, ti
 - It assigns title text, ending text, captions when useful, caption style, clip durations, transitions, and bounded B-roll overlays.
 - `broll_preference=more` broadens semantic matching for supporting cutaways, but it still uses the shared 35% B-roll duration cap. The local planner and validator use the same cap so short fixed-duration stories cannot fail because the fallback generated an over-budget plan.
 - It honors story edit subtitle preferences by clearing captions when subtitles are disabled and by selecting only approved caption style presets.
+- It honors `duration_mode=auto|fixed|full_source`. Auto and fixed retain the existing short-output behavior and 60-second cap. Full-source preserves the selected source video timeline up to the backend full-source max duration.
+- For full-source cleanup, `remove_filler_and_pauses=true` may only remove ranges proven by validated transcript/silence timing. If that timing is unavailable, planning keeps the full source timeline and logs the fallback.
 - It returns strict JSON-serializable `StoryPlan` data with valid media references.
 - External planners pass through a bounded sanitizer before validation. The sanitizer normalizes common renderer-safe aliases for transitions, crop intents, caption styles, caption timing, aspect ratio, and source-audio intent, coerces bounded `audio.original_audio` string booleans before typed decode, overwrites video moment and video b-roll `video_analysis_version` from the backend-owned `VideoAnalysis`, drops malformed caption rows, and backfills top-level timed captions from transcript cues or moment captions when the external plan omits valid `captions` and subtitles are not disabled. It does not repair invented media or identity fields.
 - CloudWatch traces the complete external response with `story_planner_external_response_received` before JSON parsing, caption repair with `story_planner_external_output_sanitized` at the provider boundary, and `story_planner_primary_output_sanitized` before fallback validation. Fallback events include `primary_timed_out` so a deadline fallback is distinguishable from a provider or validation error. Local fallback validation failures emit `story_planner_local_output_invalid` with B-roll count, used duration, duration limit, and preference. A repaired external plan should then emit `story_planner_primary_succeeded`, not `story_planner_primary_failed_falling_back`.
@@ -22,6 +24,8 @@ The planner validates:
 - selected video moments reference a valid media ID;
 - selected video moments include a valid `VideoAnalysis` version;
 - selected video moments use a positive, increasing source timestamp range;
+- full-source plans may exceed 60 seconds only when `duration_mode=full_source` and must stay within `max_full_source_duration_ms`;
+- cleanup cuts do not invent transcript, silence, media IDs, or timestamps;
 - captions reference real moments and caption style uses whitelisted renderer-safe values;
 - story type, visual style, and output metadata are supported values.
 - external planner output that references unknown or excluded media is rejected before persistence and should fall back to the local planner when fallback is configured.

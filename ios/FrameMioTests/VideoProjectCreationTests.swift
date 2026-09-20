@@ -19,6 +19,7 @@ final class VideoProjectCreationTests: XCTestCase {
                 subject: .app,
                 goal: .driveDownloads,
                 duration: .thirty,
+                removeFillerAndPauses: false,
                 prompt: "Create a premium 20-second advertisement for my app."
             )
         )
@@ -26,6 +27,7 @@ final class VideoProjectCreationTests: XCTestCase {
             configuration: ReelCreationConfiguration(
                 platform: .tiktok,
                 duration: .fifteen,
+                removeFillerAndPauses: false,
                 style: .dynamic,
                 prompt: "Make this fast and punchy."
             )
@@ -242,6 +244,7 @@ final class VideoProjectCreationTests: XCTestCase {
                         subject: .app,
                         goal: .driveDownloads,
                         duration: .thirty,
+                        removeFillerAndPauses: false,
                         prompt: "Create a premium 20-second advertisement for my app."
                     )
                 ),
@@ -263,6 +266,7 @@ final class VideoProjectCreationTests: XCTestCase {
         XCTAssertEqual(configuration["ai_instructions"] as? String, "Create a premium 20-second advertisement for my app.")
         XCTAssertEqual(promo["promotion_goal"] as? String, "Drive downloads")
         XCTAssertEqual(promo["desired_duration_seconds"] as? Int, 30)
+        XCTAssertEqual(promo["duration_mode"] as? String, "fixed")
     }
 
     func testReelCreationUsesGenericProjectAPIAndAnalysis() async throws {
@@ -278,6 +282,7 @@ final class VideoProjectCreationTests: XCTestCase {
                     configuration: ReelCreationConfiguration(
                         platform: .instagram,
                         duration: .fifteen,
+                        removeFillerAndPauses: false,
                         style: .dynamic,
                         prompt: "Make this fast and bright."
                     )

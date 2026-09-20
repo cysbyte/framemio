@@ -65,7 +65,9 @@ type iosCreateStoryRequest struct {
 	SubtitlesEnabled *bool                             `json:"subtitlesEnabled,omitempty"`
 	SubtitleStyle    string                            `json:"subtitleStyle,omitempty"`
 	SceneDetailStyle string                            `json:"sceneDetailStyle,omitempty"`
+	DurationMode     models.DurationMode               `json:"duration_mode,omitempty"`
 	TargetDuration   float64                           `json:"targetDuration,omitempty"`
+	RemoveFiller     bool                              `json:"remove_filler_and_pauses,omitempty"`
 	Instruction      string                            `json:"instruction,omitempty"`
 	TemplateID       string                            `json:"template_id,omitempty"`
 	TemplateVersion  int                               `json:"template_version,omitempty"`
@@ -83,7 +85,9 @@ type iosStoryEditRequest struct {
 	SubtitlesEnabled *bool                   `json:"subtitlesEnabled,omitempty"`
 	SubtitleStyle    string                  `json:"subtitleStyle,omitempty"`
 	SceneDetailStyle string                  `json:"sceneDetailStyle,omitempty"`
+	DurationMode     models.DurationMode     `json:"duration_mode,omitempty"`
 	TargetDuration   float64                 `json:"targetDuration,omitempty"`
+	RemoveFiller     bool                    `json:"remove_filler_and_pauses,omitempty"`
 	Instruction      string                  `json:"instruction,omitempty"`
 	BaseVersion      int                     `json:"baseVersion,omitempty"`
 }
@@ -911,11 +915,26 @@ func (s *Server) iosStoryEditConfiguration(request *http.Request, userID string,
 	if len(excludedMoments) > 0 {
 		config["excluded_moment_ids"] = strings.Join(sortedKeys(excludedMoments), ",")
 	}
-	if input.TargetDuration > 0 {
+	durationMode := models.NormalizeDurationMode(input.DurationMode)
+	if input.TargetDuration > 0 && input.DurationMode == "" {
+		durationMode = models.DurationModeFixed
+	}
+	config["duration_mode"] = string(durationMode)
+	if durationMode == models.DurationModeFixed {
+		if input.TargetDuration <= 0 {
+			return nil, store.ErrConflict
+		}
 		if input.TargetDuration < 5 || input.TargetDuration > 60 {
 			return nil, store.ErrConflict
 		}
 		config["target_duration_seconds"] = strconv.Itoa(int(input.TargetDuration + 0.5))
+	} else if durationMode == models.DurationModeFullSource {
+		if input.TargetDuration > 0 {
+			return nil, store.ErrConflict
+		}
+		config["remove_filler_and_pauses"] = strconv.FormatBool(input.RemoveFiller)
+	} else if input.RemoveFiller {
+		return nil, store.ErrConflict
 	}
 	if style := normalizeIOSStoryEditStyle(input.Style); style != "" {
 		config["visual_style"] = style
@@ -1199,14 +1218,32 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	instruction := strings.TrimSpace(sanitizeIOSStoryText(input.Instruction))
-	s.Logger.Info("creating iOS story", "user_id", user.ID, "context", input.Context, "asset_count", len(input.Assets), "analysis_count", len(input.Analyses), "visual_style", normalizeIOSStoryEditStyle(input.Style), "subtitles_enabled", boolPointerLogValue(input.SubtitlesEnabled), "caption_style_preset", normalizeIOSSubtitleStyle(input.SubtitleStyle), "scene_detail_style", normalizeIOSSceneDetailStyle(input.SceneDetailStyle), "target_duration_seconds", input.TargetDuration, "has_target_duration", input.TargetDuration > 0, "prompt_present", instruction != "", "prompt_length", len(instruction), "idempotency_key_present", strings.TrimSpace(request.Header.Get("Idempotency-Key")) != "")
+	durationMode := models.NormalizeDurationMode(input.DurationMode)
+	if input.TargetDuration > 0 && input.DurationMode == "" {
+		durationMode = models.DurationModeFixed
+	}
+	s.Logger.Info("creating iOS story", "user_id", user.ID, "context", input.Context, "asset_count", len(input.Assets), "analysis_count", len(input.Analyses), "visual_style", normalizeIOSStoryEditStyle(input.Style), "subtitles_enabled", boolPointerLogValue(input.SubtitlesEnabled), "caption_style_preset", normalizeIOSSubtitleStyle(input.SubtitleStyle), "scene_detail_style", normalizeIOSSceneDetailStyle(input.SceneDetailStyle), "duration_mode", durationMode, "target_duration_seconds", input.TargetDuration, "has_target_duration", input.TargetDuration > 0, "remove_filler_and_pauses", input.RemoveFiller, "prompt_present", instruction != "", "prompt_length", len(instruction), "idempotency_key_present", strings.TrimSpace(request.Header.Get("Idempotency-Key")) != "")
 	storyConfig := map[string]string{"pipeline_version": orchestration.PipelineVersion}
-	if input.TargetDuration > 0 {
+	storyConfig["duration_mode"] = string(durationMode)
+	if durationMode == models.DurationModeFixed {
+		if input.TargetDuration <= 0 {
+			s.writeError(response, http.StatusBadRequest, "invalid_story_duration", "fixed duration requires target duration")
+			return
+		}
 		if input.TargetDuration < 5 || input.TargetDuration > 60 {
 			s.writeError(response, http.StatusBadRequest, "invalid_story_duration", "target duration must be between 5 and 60 seconds")
 			return
 		}
 		storyConfig["target_duration_seconds"] = strconv.Itoa(int(input.TargetDuration + 0.5))
+	} else if durationMode == models.DurationModeFullSource {
+		if input.TargetDuration > 0 {
+			s.writeError(response, http.StatusBadRequest, "invalid_story_duration", "full length must not include target duration")
+			return
+		}
+		storyConfig["remove_filler_and_pauses"] = strconv.FormatBool(input.RemoveFiller)
+	} else if input.RemoveFiller {
+		s.writeError(response, http.StatusBadRequest, "invalid_story_duration", "remove filler words and pauses is only valid with full length")
+		return
 	}
 	if style := normalizeIOSStoryEditStyle(input.Style); style != "" {
 		storyConfig["visual_style"] = style

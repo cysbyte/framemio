@@ -31,14 +31,14 @@ var catalog = []models.VideoTemplate{
 }
 
 func fullFrameTemplate(id string, projectType models.ProjectType, name, description, demoPath string, duration int, style models.VisualStyle, captions bool, captionStyle, sceneDetail, guidance string) models.VideoTemplate {
-	return baseTemplate(id, projectType, name, description, demoPath, duration, style, captions, captionStyle, sceneDetail, models.VideoTemplateLayoutFullFrame, models.VideoTemplatePlacementCenter, models.VideoTemplateSizeLarge, models.VideoTemplateFrameNone, models.VideoTemplateAnimationFade, []string{"duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail"}, []models.VideoTemplateMediaSlot{{ID: "cutaways", Role: "supporting_cutaways", MediaTypes: []models.MediaType{models.MediaTypePhoto, models.MediaTypeVideo}, Required: false, Presentation: models.VideoTemplateLayoutFullFrame}}, guidance, []string{"full_frame_media", "fade"})
+	return baseTemplate(id, projectType, name, description, demoPath, duration, style, captions, captionStyle, sceneDetail, models.VideoTemplateLayoutFullFrame, models.VideoTemplatePlacementCenter, models.VideoTemplateSizeLarge, models.VideoTemplateFrameNone, models.VideoTemplateAnimationFade, []string{"duration_seconds", "duration_mode", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail"}, []models.VideoTemplateMediaSlot{{ID: "cutaways", Role: "supporting_cutaways", MediaTypes: []models.MediaType{models.MediaTypePhoto, models.MediaTypeVideo}, Required: false, Presentation: models.VideoTemplateLayoutFullFrame}}, guidance, []string{"full_frame_media", "fade", "duration_mode_full_source"})
 }
 
 func pipTemplate(id string, projectType models.ProjectType, name, description, demoPath string, duration int, style models.VisualStyle, captions bool, captionStyle, sceneDetail string, placement models.VideoTemplatePlacement, size models.VideoTemplateSize, animation models.VideoTemplateAnimation, guidance string) models.VideoTemplate {
-	return baseTemplate(id, projectType, name, description, demoPath, duration, style, captions, captionStyle, sceneDetail, models.VideoTemplateLayoutPictureInPicture, placement, size, models.VideoTemplateFrameSubtle, animation, []string{"duration_seconds", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail", "overlay_placement", "overlay_size", "overlay_opacity", "overlay_frame", "overlay_animation"}, []models.VideoTemplateMediaSlot{
+	return baseTemplate(id, projectType, name, description, demoPath, duration, style, captions, captionStyle, sceneDetail, models.VideoTemplateLayoutPictureInPicture, placement, size, models.VideoTemplateFrameSubtle, animation, []string{"duration_seconds", "duration_mode", "aspect_ratio", "visual_style", "captions_enabled", "caption_style", "scene_detail", "overlay_placement", "overlay_size", "overlay_opacity", "overlay_frame", "overlay_animation"}, []models.VideoTemplateMediaSlot{
 		{ID: "base_video", Role: "primary_video", MediaTypes: []models.MediaType{models.MediaTypeVideo}, Required: true, Presentation: models.VideoTemplateLayoutFullFrame},
 		{ID: "overlay_media", Role: "supporting_media", MediaTypes: []models.MediaType{models.MediaTypePhoto, models.MediaTypeLivePhoto, models.MediaTypeVideo}, Required: true, Presentation: models.VideoTemplateLayoutPictureInPicture, AllowedPlacements: []models.VideoTemplatePlacement{models.VideoTemplatePlacementTopLeft, models.VideoTemplatePlacementTopRight, models.VideoTemplatePlacementBottomLeft, models.VideoTemplatePlacementBottomRight, models.VideoTemplatePlacementCenter}, AllowedSizes: []models.VideoTemplateSize{models.VideoTemplateSizeSmall, models.VideoTemplateSizeMedium, models.VideoTemplateSizeLarge}},
-	}, guidance, []string{"full_frame_media", "picture_in_picture", "placement", "bounded_size", "opacity", "frame", "fade", "subtle_scale"})
+	}, guidance, []string{"full_frame_media", "picture_in_picture", "placement", "bounded_size", "opacity", "frame", "fade", "subtle_scale", "duration_mode_full_source"})
 }
 
 func splitTemplate(id string, projectType models.ProjectType, name, description, demoPath string, duration int, style models.VisualStyle, captions bool, captionStyle, sceneDetail, guidance string) models.VideoTemplate {
@@ -53,7 +53,7 @@ func baseTemplate(id string, projectType models.ProjectType, name, description, 
 	return models.VideoTemplate{
 		ID: id, Version: 1, Name: name, Description: description, DemoVideoPath: demoPath, SupportedProjectTypes: []models.ProjectType{projectType},
 		Defaults: models.VideoTemplateConfiguration{
-			AspectRatio: "9:16", DurationSeconds: duration, VisualStyle: style, CaptionsEnabled: boolPtr(captions), CaptionStyle: captionStyle, SceneDetail: sceneDetail,
+			AspectRatio: "9:16", DurationSeconds: duration, DurationMode: models.DurationModeFixed, VisualStyle: style, CaptionsEnabled: boolPtr(captions), CaptionStyle: captionStyle, SceneDetail: sceneDetail,
 			Layout: layout, OverlayPlacement: placement, OverlaySize: size, OverlayOpacity: 1, OverlayFrame: frame, OverlayAnimation: animation,
 		},
 		EditableOptions: editable, MediaSlots: slots, PlannerGuidance: guidance, RendererCapabilities: capabilities,
@@ -129,6 +129,12 @@ func ValidateSuppliedConfiguration(template models.VideoTemplate, config models.
 	if config.DurationSeconds > 0 && !contains(template.EditableOptions, "duration_seconds") && config.DurationSeconds != template.Defaults.DurationSeconds {
 		return fmt.Errorf("template does not support duration")
 	}
+	if config.DurationMode != "" && (!contains(template.EditableOptions, "duration_mode") || (config.DurationMode == models.DurationModeFullSource && !contains(template.RendererCapabilities, "duration_mode_full_source"))) && config.DurationMode != template.Defaults.DurationMode {
+		return fmt.Errorf("template does not support full length")
+	}
+	if config.RemoveFiller && config.DurationMode != models.DurationModeFullSource {
+		return fmt.Errorf("remove filler words and pauses requires full length")
+	}
 	if config.VisualStyle != "" && !contains(template.EditableOptions, "visual_style") && config.VisualStyle != template.Defaults.VisualStyle {
 		return fmt.Errorf("template does not support visual style")
 	}
@@ -163,8 +169,22 @@ func ValidateSuppliedConfiguration(template models.VideoTemplate, config models.
 }
 
 func ValidateConfiguration(template models.VideoTemplate, config models.VideoTemplateConfiguration) error {
-	if config.DurationSeconds < 5 || config.DurationSeconds > 120 {
+	config.DurationMode = models.NormalizeDurationMode(config.DurationMode)
+	if config.DurationMode == models.DurationModeFixed && (config.DurationSeconds < 5 || config.DurationSeconds > 120) {
 		return fmt.Errorf("template duration must be between 5 and 120 seconds")
+	}
+	if config.DurationMode == models.DurationModeAuto && config.DurationSeconds < 0 {
+		return fmt.Errorf("template duration is invalid")
+	}
+	if config.DurationMode == models.DurationModeFullSource {
+		if !contains(template.EditableOptions, "duration_mode") || !contains(template.RendererCapabilities, "duration_mode_full_source") {
+			return fmt.Errorf("template does not support full length")
+		}
+		if config.DurationSeconds != 0 {
+			return fmt.Errorf("full length must not set a fixed duration")
+		}
+	} else if config.RemoveFiller {
+		return fmt.Errorf("remove filler words and pauses requires full length")
 	}
 	if config.AspectRatio != "9:16" && config.AspectRatio != "16:9" && config.AspectRatio != "1:1" {
 		return fmt.Errorf("template aspect ratio %q is unsupported", config.AspectRatio)
@@ -319,6 +339,22 @@ func mergeSupported(template models.VideoTemplate, supplied models.VideoTemplate
 	}
 	if contains(template.EditableOptions, "duration_seconds") && supplied.DurationSeconds > 0 {
 		resolved.DurationSeconds = supplied.DurationSeconds
+		resolved.DurationMode = models.DurationModeFixed
+	}
+	if contains(template.EditableOptions, "duration_mode") && supplied.DurationMode != "" {
+		mode := models.NormalizeDurationMode(supplied.DurationMode)
+		if mode == models.DurationModeFullSource && contains(template.RendererCapabilities, "duration_mode_full_source") {
+			resolved.DurationMode = mode
+			resolved.DurationSeconds = 0
+			resolved.RemoveFiller = supplied.RemoveFiller
+		} else if mode == models.DurationModeAuto {
+			resolved.DurationMode = mode
+			resolved.DurationSeconds = 0
+			resolved.RemoveFiller = false
+		} else if mode == models.DurationModeFixed && resolved.DurationSeconds > 0 {
+			resolved.DurationMode = mode
+			resolved.RemoveFiller = false
+		}
 	}
 	if contains(template.EditableOptions, "visual_style") && supplied.VisualStyle != "" {
 		resolved.VisualStyle = supplied.VisualStyle

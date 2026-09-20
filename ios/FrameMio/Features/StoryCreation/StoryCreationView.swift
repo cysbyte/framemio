@@ -183,7 +183,7 @@ struct StoryCreationView: View {
                 systemImage: "sparkles",
                 action: {
                     let instruction = generationOptions.instruction?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    storyCreationViewDebugLog("create_tapped style=\(generationOptions.style ?? "automatic") scene_detail=\(generationOptions.sceneDetailStyle ?? "balanced") subtitles=\(generationOptions.subtitlesEnabled.map(String.init) ?? "automatic") target_duration=\(generationOptions.targetDuration.map { String(Int($0.rounded())) } ?? "auto") prompt_present=\(!instruction.isEmpty) prompt_length=\(instruction.count)")
+                    storyCreationViewDebugLog("create_tapped style=\(generationOptions.style ?? "automatic") scene_detail=\(generationOptions.sceneDetailStyle ?? "balanced") subtitles=\(generationOptions.subtitlesEnabled.map(String.init) ?? "automatic") duration_mode=\(generationOptions.durationMode.rawValue) target_duration=\(generationOptions.targetDuration.map { String(Int($0.rounded())) } ?? "auto") remove_filler_and_pauses=\(generationOptions.removeFillerAndPauses) prompt_present=\(!instruction.isEmpty) prompt_length=\(instruction.count)")
                     viewModel.requestCreateStory { onCreate(configuredDraft) }
                 },
                 isDisabled: viewModel.isCheckingCredits,
@@ -253,7 +253,15 @@ struct StoryCreationView: View {
             sceneDetail = "Balanced"
         }
         let subtitles = generationOptions.subtitlesEnabled == false ? "Subtitles off" : "Subtitles on"
-        let length = generationOptions.targetDuration.map { "\(Int($0.rounded()))s" } ?? "Auto length"
+        let length: String
+        switch generationOptions.durationMode {
+        case .fullSource:
+            length = generationOptions.removeFillerAndPauses ? "Full length, cleaned" : "Full length"
+        case .fixed:
+            length = generationOptions.targetDuration.map { "\(Int($0.rounded()))s" } ?? "Fixed length"
+        case .auto:
+            length = "Auto length"
+        }
         let overlay: String? = {
             guard let selectedTemplate,
                   selectedTemplate.editableOptions.contains("overlay_placement"),
@@ -324,6 +332,13 @@ struct StoryCreationView: View {
         if template.editableOptions.contains("duration_seconds") {
             resolved.durationSeconds = generationOptions.targetDuration.map { Int($0.rounded()) } ?? resolved.durationSeconds
         }
+        if template.editableOptions.contains("duration_mode") {
+            resolved.durationMode = generationOptions.durationMode
+            resolved.removeFillerAndPauses = generationOptions.durationMode == .fullSource && generationOptions.removeFillerAndPauses
+            if generationOptions.durationMode != .fixed {
+                resolved.durationSeconds = nil
+            }
+        }
         if template.editableOptions.contains("visual_style") {
             resolved.visualStyle = generationOptions.style
         }
@@ -367,6 +382,13 @@ struct StoryCreationView: View {
         var resolved = template.defaults
         guard let previous else { return resolved }
         if template.editableOptions.contains("duration_seconds") { resolved.durationSeconds = previous.durationSeconds }
+        if template.supportsFullSourceDuration && template.editableOptions.contains("duration_mode") {
+            resolved.durationMode = previous.durationMode
+            resolved.removeFillerAndPauses = previous.durationMode == .fullSource && previous.removeFillerAndPauses == true
+        } else {
+            resolved.durationMode = resolved.durationSeconds == nil ? .auto : .fixed
+            resolved.removeFillerAndPauses = false
+        }
         if template.editableOptions.contains("visual_style") { resolved.visualStyle = previous.visualStyle }
         if template.editableOptions.contains("captions_enabled") { resolved.captionsEnabled = previous.captionsEnabled }
         if template.editableOptions.contains("caption_style") { resolved.captionStyle = previous.captionStyle }
@@ -387,7 +409,9 @@ struct StoryCreationView: View {
         generationOptions.subtitlesEnabled = configuration.captionsEnabled
         generationOptions.subtitleStyle = configuration.captionStyle
         generationOptions.sceneDetailStyle = configuration.sceneDetail
-        generationOptions.targetDuration = configuration.durationSeconds.map(TimeInterval.init)
+        generationOptions.durationMode = configuration.durationMode ?? (configuration.durationSeconds == nil ? .auto : .fixed)
+        generationOptions.targetDuration = generationOptions.durationMode == .fixed ? configuration.durationSeconds.map(TimeInterval.init) : nil
+        generationOptions.removeFillerAndPauses = generationOptions.durationMode == .fullSource && configuration.removeFillerAndPauses == true
     }
 
     private func processingStartedCard(_ story: Story) -> some View {
@@ -790,6 +814,10 @@ private struct StoryGenerationOptionsSheet: View {
         template?.editableOptions.contains(option) ?? true
     }
 
+    private var supportsFullLength: Bool {
+        template?.supportsFullSourceDuration ?? true
+    }
+
     private func supportsAny(_ options: [String]) -> Bool {
         guard template != nil else { return false }
         return options.contains(where: supports)
@@ -959,21 +987,61 @@ private struct StoryGenerationOptionsSheet: View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
             SectionHeader(title: "Length", subtitle: "Auto fits your selected media")
             LazyVGrid(columns: optionGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
-                optionChip(title: "Auto", isSelected: options.targetDuration == nil) {
+                optionChip(title: "Auto", isSelected: options.durationMode == .auto) {
+                    options.durationMode = .auto
                     options.targetDuration = nil
+                    options.removeFillerAndPauses = false
                 }
                 ForEach(lengthOptions, id: \.self) { seconds in
                     let disabled = seconds > maxSelectableLengthSeconds
                     optionChip(
                         title: "\(seconds)s",
                         subtitle: disabled ? "Not enough source media" : nil,
-                        isSelected: Int((options.targetDuration ?? 0).rounded()) == seconds,
+                        isSelected: options.durationMode == .fixed && Int((options.targetDuration ?? 0).rounded()) == seconds,
                         isDisabled: disabled
                     ) {
+                        options.durationMode = .fixed
                         options.targetDuration = TimeInterval(seconds)
+                        options.removeFillerAndPauses = false
+                    }
+                }
+                if supportsFullLength {
+                    let disabled = totalVideoSourceDuration <= 0
+                    optionChip(
+                        title: "Full length",
+                        subtitle: disabled ? "Needs a video" : nil,
+                        isSelected: options.durationMode == .fullSource,
+                        isDisabled: disabled
+                    ) {
+                        options.durationMode = .fullSource
+                        options.targetDuration = nil
                     }
                 }
             }
+            if options.durationMode == .fullSource {
+                Toggle(isOn: $options.removeFillerAndPauses) {
+                    Label("Remove filler words and pauses", systemImage: "scissors")
+                        .font(FrameMioTypography.body)
+                        .foregroundStyle(FrameMioColors.ink)
+                }
+                .tint(FrameMioColors.accent)
+            }
+        }
+        .onAppear(perform: normalizeDurationSelection)
+        .onChange(of: template?.id) { _, _ in normalizeDurationSelection() }
+    }
+
+    private func normalizeDurationSelection() {
+        if options.durationMode == .fullSource && (!supportsFullLength || totalVideoSourceDuration <= 0) {
+            options.durationMode = .auto
+            options.targetDuration = nil
+            options.removeFillerAndPauses = false
+        }
+        if options.durationMode != .fullSource {
+            options.removeFillerAndPauses = false
+        }
+        if options.durationMode == .fixed && options.targetDuration == nil {
+            options.durationMode = .auto
         }
     }
 

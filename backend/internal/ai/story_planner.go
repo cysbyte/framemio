@@ -24,6 +24,9 @@ type Request struct {
 	TemplateID            string
 	TemplateVersion       int
 	TemplateConfiguration models.VideoTemplateConfiguration
+	DurationMode          models.DurationMode
+	RemoveFillerAndPauses bool
+	MaxFullSourceDuration time.Duration
 	DesiredDuration       time.Duration
 	TargetDurationFixed   bool
 	StoryType             models.StoryType
@@ -50,6 +53,7 @@ type Planner struct {
 }
 
 const maxVideoMomentDuration = 5 * time.Second
+const defaultMaxFullSourceDuration = 10 * time.Minute
 const maxStoryPlanCaptionLength = 220
 
 type candidate struct {
@@ -101,6 +105,15 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 	clusterByMedia := buildClusterIndex(request.MediaClusters)
 	candidates := filterExcludedCandidates(buildCandidates(request, selected, clusterByMedia), excludedMedia, excludedMoments)
 	applyInstructionPreferences(candidates, request.UserInstructions)
+	if request.DurationMode == models.DurationModeFullSource {
+		candidates = filterExcludedCandidates(buildFullSourceCandidates(request, selected, clusterByMedia), excludedMedia, excludedMoments)
+		if request.RemoveFillerAndPauses && p != nil && p.Logger != nil {
+			p.Logger.Info("story_planner_full_source_cleanup_fallback",
+				slog.String("project_id", request.ProjectID),
+				slog.String("reason", "validated filler/silence timing unavailable"),
+			)
+		}
+	}
 	if len(candidates) == 0 {
 		return models.StoryPlan{}, errors.New("story planner requires at least one usable analysis")
 	}
@@ -245,7 +258,7 @@ func applyReelSceneDefaults(request Request, moments []models.StoryMoment) {
 	for index := range moments {
 		moments[index].Order = index + 1
 		moments[index].CropIntent = "fill"
-		if moments[index].DurationMS > 4200 {
+		if request.DurationMode != models.DurationModeFullSource && moments[index].DurationMS > 4200 {
 			moments[index].DurationMS = 4200
 		}
 		if index == 0 && moments[index].Typography == nil {
@@ -914,6 +927,116 @@ func buildCandidates(request Request, selected map[string]struct{}, clusters map
 	return candidates
 }
 
+func buildFullSourceCandidates(request Request, selected map[string]struct{}, clusters map[string]models.MediaCluster) []candidate {
+	order := preferredFullSourceOrder(request)
+	orderIndex := make(map[string]int, len(order))
+	for index, mediaID := range order {
+		orderIndex[mediaID] = index
+	}
+	analyses := append([]models.VideoAnalysis(nil), request.VideoAnalyses...)
+	sort.SliceStable(analyses, func(left, right int) bool {
+		leftID := strings.TrimSpace(analyses[left].VideoID)
+		rightID := strings.TrimSpace(analyses[right].VideoID)
+		leftOrder, leftOK := orderIndex[leftID]
+		rightOrder, rightOK := orderIndex[rightID]
+		if leftOK && rightOK && leftOrder != rightOrder {
+			return leftOrder < rightOrder
+		}
+		if leftOK != rightOK {
+			return leftOK
+		}
+		return leftID < rightID
+	})
+	limitMicros := request.MaxFullSourceDuration.Microseconds()
+	if limitMicros <= 0 {
+		limitMicros = defaultMaxFullSourceDuration.Microseconds()
+	}
+	usedMicros := int64(0)
+	candidates := make([]candidate, 0, len(analyses))
+	for _, analysis := range analyses {
+		mediaID := strings.TrimSpace(analysis.VideoID)
+		if mediaID == "" || analysis.DurationMicros <= 0 {
+			continue
+		}
+		if len(selected) > 0 && !hasMedia(selected, mediaID) {
+			continue
+		}
+		if analysis.ProjectID != "" && analysis.ProjectID != request.ProjectID && !hasMedia(selected, mediaID) {
+			continue
+		}
+		remaining := limitMicros - usedMicros
+		if remaining <= 0 {
+			break
+		}
+		endMicros := minInt64(analysis.DurationMicros, remaining)
+		if endMicros <= 0 {
+			continue
+		}
+		clusterID := clusterForMedia(clusters, mediaID)
+		moment := models.StoryMoment{
+			AssetID: mediaID, MediaID: mediaID, MediaType: models.MediaTypeVideo,
+			VideoAnalysisVersion: analysis.AnalysisVersion,
+			StartMicros:          0,
+			EndMicros:            endMicros,
+			DurationMS:           int(endMicros / 1000),
+			Narrative:            fullSourceNarrative(analysis),
+			Caption:              fullSourceNarrative(analysis),
+			Reason:               "full source timeline",
+			Score:                1,
+			CropIntent:           "fill",
+			Transition:           "cut",
+		}
+		if moment.DurationMS <= 0 {
+			continue
+		}
+		candidates = append(candidates, candidate{
+			moment:        moment,
+			captionCues:   transcriptCaptionCues(analysis.Transcript, 0, endMicros),
+			sourceTime:    sourceTimelineMicros(mediaBaseTimeMicros(clusters, mediaID), endMicros/2),
+			score:         1,
+			repetition:    repetitionKey(mediaID, clusterID, 0, "full_source"),
+			mediaID:       mediaID,
+			clusterID:     clusterID,
+			semanticTerms: map[string]struct{}{},
+			isVideo:       true,
+			isSelected:    hasMedia(selected, mediaID),
+		})
+		usedMicros += endMicros
+	}
+	return candidates
+}
+
+func preferredFullSourceOrder(request Request) []string {
+	values := append([]string(nil), request.PreferredMediaOrder...)
+	values = append(values, request.SelectedMediaIDs...)
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func fullSourceNarrative(analysis models.VideoAnalysis) string {
+	for _, segment := range analysis.Transcript.Segments {
+		if text := strings.TrimSpace(segment.Text); text != "" {
+			return truncateText(text, maxStoryPlanCaptionLength)
+		}
+	}
+	if text := strings.TrimSpace(analysis.Transcript.Text); text != "" {
+		return truncateText(text, maxStoryPlanCaptionLength)
+	}
+	return "Full source video"
+}
+
 func mediaBaseTimeMicros(clusters map[string]models.MediaCluster, mediaID string) int64 {
 	cluster := clusterForMediaValue(clusters, mediaID)
 	if cluster.StartAt != nil {
@@ -1154,6 +1277,15 @@ func validateRequest(request Request) error {
 	if strings.TrimSpace(request.ProjectID) == "" || request.DesiredDuration <= 0 {
 		return errors.New("story planner requires a project and duration")
 	}
+	if request.DurationMode == models.DurationModeFixed && request.DesiredDuration <= 0 {
+		return errors.New("fixed duration requires a target duration")
+	}
+	if request.RemoveFillerAndPauses && request.DurationMode != models.DurationModeFullSource {
+		return errors.New("remove filler words and pauses requires full source duration mode")
+	}
+	if request.DurationMode == models.DurationModeFullSource && request.MaxFullSourceDuration <= 0 {
+		return errors.New("full source duration mode requires a max duration")
+	}
 	if _, valid := models.NormalizeProjectType(request.ProjectType); !valid {
 		return fmt.Errorf("unsupported project type %q", request.ProjectType)
 	}
@@ -1185,6 +1317,13 @@ func normalizeRequest(request Request) Request {
 	}
 	request.ProjectType = projectType
 	request.ProjectConfiguration = models.NormalizeVideoProjectConfiguration(projectType, request.ProjectConfiguration)
+	request.DurationMode = models.NormalizeDurationMode(request.DurationMode)
+	if request.DurationMode == models.DurationModeAuto && request.TargetDurationFixed {
+		request.DurationMode = models.DurationModeFixed
+	}
+	if request.DurationMode == models.DurationModeAuto && request.ProjectConfiguration.DurationMode != "" {
+		request.DurationMode = request.ProjectConfiguration.DurationMode
+	}
 	request.TemplateID = strings.TrimSpace(request.ProjectConfiguration.TemplateID)
 	request.TemplateVersion = request.ProjectConfiguration.TemplateVersion
 	request.TemplateConfiguration = request.ProjectConfiguration.TemplateConfiguration
@@ -1199,6 +1338,15 @@ func normalizeRequest(request Request) Request {
 				request.ProjectConfiguration.Composition.AspectRatio = "9:16"
 			}
 		}
+	}
+	if request.DurationMode == models.DurationModeAuto && request.TemplateConfiguration.DurationMode != "" {
+		request.DurationMode = request.TemplateConfiguration.DurationMode
+	}
+	if request.DurationMode != models.DurationModeFullSource {
+		request.RemoveFillerAndPauses = false
+	}
+	if request.MaxFullSourceDuration <= 0 {
+		request.MaxFullSourceDuration = defaultMaxFullSourceDuration
 	}
 	if request.StoryType == "" {
 		request.StoryType = models.StoryTypeCustom

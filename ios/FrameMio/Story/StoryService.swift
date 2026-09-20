@@ -428,6 +428,8 @@ private struct PromoConfigurationPayload: Encodable {
     let callToAction: String
     let targetAudience: String
     let desiredDurationSeconds: Int?
+    let durationMode: VideoDurationMode
+    let removeFillerAndPauses: Bool
 
     enum CodingKeys: String, CodingKey {
         case promotionGoal = "promotion_goal"
@@ -435,6 +437,8 @@ private struct PromoConfigurationPayload: Encodable {
         case callToAction = "call_to_action"
         case targetAudience = "target_audience"
         case desiredDurationSeconds = "desired_duration_seconds"
+        case durationMode = "duration_mode"
+        case removeFillerAndPauses = "remove_filler_and_pauses"
     }
 
     init(configuration: PromoCreationConfiguration) {
@@ -449,12 +453,16 @@ private struct PromoConfigurationPayload: Encodable {
         }
         targetAudience = "general audience"
         desiredDurationSeconds = configuration.duration.seconds.map(Int.init)
+        durationMode = configuration.duration.durationMode
+        removeFillerAndPauses = configuration.duration == .fullSource && configuration.removeFillerAndPauses
     }
 }
 
 private struct ReelConfigurationPayload: Encodable {
     let socialPlatform: String
     let targetDurationSeconds: Int?
+    let durationMode: VideoDurationMode
+    let removeFillerAndPauses: Bool
     let style: String
     let hookPreference: String
     let captionStyle: String
@@ -463,6 +471,8 @@ private struct ReelConfigurationPayload: Encodable {
     enum CodingKeys: String, CodingKey {
         case socialPlatform = "social_platform"
         case targetDurationSeconds = "target_duration_seconds"
+        case durationMode = "duration_mode"
+        case removeFillerAndPauses = "remove_filler_and_pauses"
         case style
         case hookPreference = "hook_preference"
         case captionStyle = "caption_style"
@@ -472,6 +482,8 @@ private struct ReelConfigurationPayload: Encodable {
     init(configuration: ReelCreationConfiguration) {
         socialPlatform = configuration.platform.apiValue
         targetDurationSeconds = configuration.duration.seconds.map(Int.init)
+        durationMode = configuration.duration.durationMode
+        removeFillerAndPauses = configuration.duration == .fullSource && configuration.removeFillerAndPauses
         style = configuration.style.apiValue
         hookPreference = configuration.style.hookPreference
         captionStyle = configuration.style.captionStylePreset

@@ -398,6 +398,47 @@ func TestOpenAICompatibleStoryPlannerRejectsFlexibleDurationAboveSixtySeconds(t 
 	}
 }
 
+func TestOpenAICompatibleStoryPlannerAllowsFullSourceAboveSixtySeconds(t *testing.T) {
+	t.Parallel()
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		var request struct {
+			Input []struct {
+				Content []struct {
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		prompt := request.Input[1].Content[0].Text
+		if !strings.Contains(prompt, `"durationMode":"full_source"`) || !strings.Contains(prompt, `"maxDurationMs":600000`) || !strings.Contains(prompt, `"removeFillerAndPauses":true`) {
+			t.Fatalf("expected full-source constraints in prompt, got %s", prompt)
+		}
+		planJSON := strings.Replace(storyPlannerProviderPlanJSON(), `"requested_duration_ms":4000`, `"requested_duration_ms":300000`, 1)
+		planJSON = strings.Replace(planJSON, `"duration_ms":4000`, `"duration_ms":300000`, 1)
+		planJSON = strings.Replace(planJSON, `"end_micros":4000000`, `"end_micros":300000000`, 1)
+		planJSON = strings.Replace(planJSON, `"end_ms":4000`, `"end_ms":300000`, 1)
+		planJSON = strings.Replace(planJSON, `"max_duration_seconds":4`, `"max_duration_seconds":600`, 1)
+		planJSON = strings.Replace(planJSON, `"total_duration_ms":4000`, `"total_duration_ms":300000`, 1)
+		return typographyHTTPResponse(http.StatusOK, responsesTypographyResponse(planJSON)), nil
+	})}
+	request := storyPlannerProviderRequest()
+	request.DurationMode = models.DurationModeFullSource
+	request.RemoveFillerAndPauses = true
+	request.MaxFullSourceDuration = 10 * time.Minute
+	request.DesiredDuration = 5 * time.Minute
+	request.VideoAnalyses[0].DurationMicros = 300_000_000
+	planner := OpenAICompatibleStoryPlanner{BaseURL: "https://planner.test", APIKey: "test-key", ModelName: "gpt-story", WireAPI: "responses", Client: client}
+	plan, err := planner.Plan(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.TotalDurationMS != 300000 {
+		t.Fatalf("expected full-source duration, got %+v", plan)
+	}
+}
+
 func TestOpenAICompatibleStoryPlannerKeepsExplicitTargetDurationFixed(t *testing.T) {
 	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
