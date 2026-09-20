@@ -460,8 +460,11 @@ func TestPlannerPreservesExplicitCinematicCaptionStyle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.CaptionStyle == nil || plan.CaptionStyle.Preset != "cinematic_subtitle" || plan.CaptionStyle.Presentation != "" {
-		t.Fatalf("explicit cinematic caption style was changed: %+v", plan.CaptionStyle)
+	if plan.CaptionStyle == nil ||
+		plan.CaptionStyle.Preset != "bold_social" ||
+		plan.CaptionStyle.Presentation != "word_by_word" ||
+		plan.CaptionStyle.FontSize != 72 {
+		t.Fatalf("story cinematic caption style was not normalized to social captions: %+v", plan.CaptionStyle)
 	}
 }
 

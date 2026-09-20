@@ -568,6 +568,12 @@ func captionStylePresetForProject(preset string, projectType models.ProjectType,
 			BackgroundEnabled: true, BackgroundColor: "#111111", BackgroundOpacity: 0.28, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 28,
 		}
 	case "cinematic_subtitle":
+		if projectType == models.ProjectTypeStory {
+			return &models.CaptionStyle{
+				Preset: "bold_social", Presentation: "word_by_word", FontFamily: "inter-bold", FontSize: 72, TextColor: "#FFD60A", HighlightColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 4,
+				BackgroundEnabled: true, BackgroundColor: "#000000", BackgroundOpacity: 0.24, Position: "bottom", BottomOffset: 170, MaxLines: 1, MaxCharactersPerLine: 18,
+			}
+		}
 		return &models.CaptionStyle{
 			Preset: "cinematic_subtitle", FontFamily: "inter-bold", FontSize: 48, TextColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 4,
 			BackgroundEnabled: true, BackgroundColor: "#000000", BackgroundOpacity: 0.32, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 32,

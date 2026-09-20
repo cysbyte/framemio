@@ -164,6 +164,28 @@ func TestSanitizeExternalStoryPlannerOutputCompletesBoldSocialCaptionStyle(t *te
 	}
 }
 
+func TestSanitizeExternalStoryPlannerOutputMigratesLegacyStoryCinematicCaptions(t *testing.T) {
+	t.Parallel()
+	plan := models.StoryPlan{
+		ProjectType: models.ProjectTypeStory,
+		StoryType:   models.StoryTypeCustom,
+		VisualStyle: models.VisualStyleCinematic,
+		CaptionStyle: &models.CaptionStyle{
+			Preset:   "cinematic_subtitle",
+			FontSize: 48,
+			MaxLines: 2,
+		},
+	}
+
+	SanitizeExternalStoryPlannerOutput(&plan)
+
+	if plan.CaptionStyle == nil ||
+		plan.CaptionStyle.Preset != "bold_social" ||
+		plan.CaptionStyle.Presentation != "word_by_word" {
+		t.Fatalf("legacy story captions were not migrated: %+v", plan.CaptionStyle)
+	}
+}
+
 func TestOpenAICompatibleStoryPlannerSanitizesUnsupportedTransitions(t *testing.T) {
 	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {

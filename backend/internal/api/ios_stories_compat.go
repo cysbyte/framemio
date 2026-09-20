@@ -1121,7 +1121,9 @@ func normalizeIOSSubtitleStyle(value string) string {
 	case "bold", "bold_social":
 		return "bold_social"
 	case "cinematic", "cinematic_subtitle":
-		return "cinematic_subtitle"
+		// Older iOS builds used cinematic_subtitle as the default. Keep those
+		// clients on the current social caption behavior.
+		return "bold_social"
 	case "minimal", "clean_minimal":
 		return "clean_minimal"
 	case "playful", "playful_pop":

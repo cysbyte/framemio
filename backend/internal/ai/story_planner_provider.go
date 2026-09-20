@@ -999,10 +999,15 @@ func sanitizeStoryPlannerCaptionStyle(plan *models.StoryPlan) {
 	}
 	style := plan.CaptionStyle
 	style.Preset = sanitizeStoryPlannerCaptionPreset(style.Preset, base.Preset)
+	if plan.ProjectType == models.ProjectTypeStory && style.Preset == "cinematic_subtitle" {
+		// Legacy story clients used this preset as their default. Normalize it
+		// to the current social caption treatment before validation/rendering.
+		style.Preset = "bold_social"
+		style.Presentation = "word_by_word"
+	}
 	if style.Preset == "bold_social" {
-		// The social preset is intentionally word-by-word. Preserve an explicit
-		// presentation for other presets, but do not let external output drop
-		// this required renderer behavior.
+		// The social preset is intentionally word-by-word. Do not let external
+		// output drop this required renderer behavior.
 		style.Presentation = "word_by_word"
 	}
 	style.FontFamily = sanitizeStoryPlannerCaptionFont(style.FontFamily, base.FontFamily)
