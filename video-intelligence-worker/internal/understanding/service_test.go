@@ -178,6 +178,24 @@ func TestServiceRetriesInvalidResponseAndDoesNotStoreIt(t *testing.T) {
 	}
 }
 
+func TestServicePresignsSourceForSourceAwareProvider(t *testing.T) {
+	t.Parallel()
+	repository := newMemoryRepository()
+	artifacts := &memoryArtifacts{}
+	provider := &sourceAwareFakeProvider{name: "gemini-agentic", model: "gemini-3.8-flash"}
+	service := newService(provider, repository, artifacts)
+
+	if _, err := service.Analyze(context.Background(), testRequest()); err != nil {
+		t.Fatal(err)
+	}
+	if provider.videoURL != "https://evidence.example.test/users/user-1/media/media-1/source.mov" {
+		t.Fatalf("source-aware provider URL = %q", provider.videoURL)
+	}
+	if artifacts.calls != len(testRequest().Evidence.Frames)+1 {
+		t.Fatalf("presign calls = %d, want %d", artifacts.calls, len(testRequest().Evidence.Frames)+1)
+	}
+}
+
 func newService(provider VideoUnderstandingProvider, repository Repository, artifacts ArtifactStore) *Service {
 	return &Service{
 		Provider: provider, Repository: repository, Artifacts: artifacts,
@@ -343,3 +361,21 @@ func (p *fakeProvider) Understand(_ context.Context, input domain.VideoUnderstan
 
 func (p *fakeProvider) Name() string  { return p.name }
 func (p *fakeProvider) Model() string { return p.model }
+
+type sourceAwareFakeProvider struct {
+	name     string
+	model    string
+	videoURL string
+}
+
+func (p *sourceAwareFakeProvider) Understand(_ context.Context, _ domain.VideoUnderstandingInputV1) (domain.VideoUnderstandingResponseV1, error) {
+	return domain.VideoUnderstandingResponseV1{}, errors.New("source-aware path was not used")
+}
+
+func (p *sourceAwareFakeProvider) UnderstandVideo(_ context.Context, input domain.VideoUnderstandingInputV1, videoURL string) (domain.VideoUnderstandingResponseV1, error) {
+	p.videoURL = videoURL
+	return validResponse(input, "source-aware"), nil
+}
+
+func (p *sourceAwareFakeProvider) Name() string  { return p.name }
+func (p *sourceAwareFakeProvider) Model() string { return p.model }

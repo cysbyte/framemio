@@ -45,6 +45,12 @@ type VideoUnderstandingProvider interface {
 	Model() string
 }
 
+// VideoFileUnderstandingProvider is implemented by providers that need the
+// original video in addition to the deterministic evidence envelope.
+type VideoFileUnderstandingProvider interface {
+	UnderstandVideo(ctx context.Context, input domain.VideoUnderstandingInputV1, videoURL string) (domain.VideoUnderstandingResponseV1, error)
+}
+
 type VideoSceneDetectionProvider interface {
 	DetectScenes(ctx context.Context, input domain.VideoUnderstandingInputV1) (domain.VideoSceneDetectionResponseV1, error)
 	Name() string
@@ -357,10 +363,25 @@ func (s *Service) Analyze(ctx context.Context, request Request) (Result, error) 
 			return Result{}, wrapped
 		}
 	}
+	var sourceAwareProvider VideoFileUnderstandingProvider
+	if candidate, ok := s.Provider.(VideoFileUnderstandingProvider); ok {
+		sourceAwareProvider = candidate
+	}
+	var sourceVideoURL string
+	if sourceAwareProvider != nil {
+		sourceVideoURL, err = s.Artifacts.PresignGet(ctx, request.Evidence.SourceS3Key, s.frameURLExpiry())
+		if err != nil {
+			return Result{}, fmt.Errorf("presign understanding source video: %w", err)
+		}
+	}
 	var response domain.VideoUnderstandingResponseV1
 	if err := s.retry(ctx, request, input, func() error {
 		var providerErr error
-		response, providerErr = s.Provider.Understand(ctx, input)
+		if sourceAwareProvider != nil {
+			response, providerErr = sourceAwareProvider.UnderstandVideo(ctx, input, sourceVideoURL)
+		} else {
+			response, providerErr = s.Provider.Understand(ctx, input)
+		}
 		if providerErr != nil {
 			return providerErr
 		}

@@ -27,6 +27,8 @@ type Config struct {
 	UnderstandingTimeout              time.Duration
 	UnderstandingDirect               bool
 	UnderstandingUpstreamBaseURL      string
+	UnderstandingGeminiBaseURL        string
+	UnderstandingGeminiAPIKey         string
 	UnderstandingWireAPI              string
 	UnderstandingImageDetail          string
 	UnderstandingMaxOutputTokens      int
@@ -86,6 +88,8 @@ func Load() (Config, error) {
 		UnderstandingTimeout:              environmentDurationFirst([]string{"VIDEO_UNDERSTANDING_PROVIDER_TIMEOUT", "PROVIDER_TIMEOUT", "OPENAI_REQUEST_TIMEOUT_MS"}, 2*time.Minute),
 		UnderstandingDirect:               environmentBool("VIDEO_UNDERSTANDING_DIRECT", false),
 		UnderstandingUpstreamBaseURL:      environmentFirst([]string{"VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL", "AI_GATEWAY_BASE_URL", "OPENAI_BASE_URL", "GATEWAY_UPSTREAM_BASE_URL"}, ""),
+		UnderstandingGeminiBaseURL:        environmentFirst([]string{"VIDEO_UNDERSTANDING_GEMINI_BASE_URL", "GEMINI_BASE_URL"}, "https://generativelanguage.googleapis.com"),
+		UnderstandingGeminiAPIKey:         environmentFirst([]string{"VIDEO_UNDERSTANDING_GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"}, ""),
 		UnderstandingWireAPI:              environmentFirst([]string{"VIDEO_UNDERSTANDING_WIRE_API", "AI_GATEWAY_WIRE_API", "GATEWAY_UPSTREAM_WIRE_API"}, "chat_completions"),
 		UnderstandingImageDetail:          environment("VIDEO_UNDERSTANDING_IMAGE_DETAIL", "low"),
 		UnderstandingMaxOutputTokens:      environmentInt("VIDEO_UNDERSTANDING_MAX_OUTPUT_TOKENS", 5000),
@@ -124,10 +128,20 @@ func Load() (Config, error) {
 		BackendURL:                        environmentFirst([]string{"BACKEND_INTERNAL_API_URL", "BACKEND_URL", "API_BASE_URL"}, ""),
 		InternalToken:                     os.Getenv("INTERNAL_API_TOKEN"),
 	}
+	if configuration.UsesGeminiUnderstanding() && configuration.UnderstandingModel == "configured-model" {
+		configuration.UnderstandingModel = "gemini-3.8-flash"
+	}
+	if configuration.UsesGeminiUnderstanding() && os.Getenv("VIDEO_UNDERSTANDING_PROVIDER_TIMEOUT") == "" &&
+		os.Getenv("PROVIDER_TIMEOUT") == "" && os.Getenv("OPENAI_REQUEST_TIMEOUT_MS") == "" {
+		configuration.UnderstandingTimeout = 15 * time.Minute
+	}
+	if configuration.UsesGeminiUnderstanding() && os.Getenv("VIDEO_UNDERSTANDING_RETRIES") == "" {
+		configuration.UnderstandingRetries = 1
+	}
 	if configuration.DatabaseURL == "" || configuration.S3Bucket == "" || configuration.QueueURL == "" {
 		return Config{}, errors.New("DATABASE_URL, S3_MEDIA_BUCKET, and SQS_VIDEO_QUEUE_URL or SQS_PROCESSING_QUEUE_URL are required")
 	}
-	if !configuration.UsesLocalUnderstanding() && !configuration.UsesDirectUnderstanding() && configuration.UnderstandingURL == "" {
+	if !configuration.UsesLocalUnderstanding() && !configuration.UsesDirectUnderstanding() && !configuration.UsesGeminiUnderstanding() && configuration.UnderstandingURL == "" {
 		return Config{}, errors.New("VIDEO_UNDERSTANDING_API_URL is required")
 	}
 	if configuration.UsesDirectUnderstanding() && configuration.UnderstandingUpstreamBaseURL == "" {
@@ -135,6 +149,9 @@ func Load() (Config, error) {
 	}
 	if configuration.UsesDirectUnderstanding() && configuration.UnderstandingAPIKey == "" {
 		return Config{}, errors.New("VIDEO_UNDERSTANDING_API_KEY is required when direct video understanding is enabled")
+	}
+	if configuration.UsesGeminiUnderstanding() && configuration.UnderstandingGeminiAPIKey == "" {
+		return Config{}, errors.New("VIDEO_UNDERSTANDING_GEMINI_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY is required for Gemini video understanding")
 	}
 	if configuration.UsesDeepgramTranscription() {
 		if configuration.TranscriptionModel == "configured-model" {
@@ -184,11 +201,23 @@ func (c Config) UsesLocalUnderstanding() bool {
 }
 
 func (c Config) UsesDirectUnderstanding() bool {
+	if c.UsesGeminiUnderstanding() {
+		return false
+	}
 	if c.UnderstandingDirect {
 		return true
 	}
 	switch strings.ToLower(strings.TrimSpace(c.UnderstandingProvider)) {
 	case "openai-direct", "gpt-direct":
+		return true
+	default:
+		return false
+	}
+}
+
+func (c Config) UsesGeminiUnderstanding() bool {
+	switch strings.ToLower(strings.TrimSpace(c.UnderstandingProvider)) {
+	case "gemini", "gemini-agentic", "gemini_agentic", "gemini-video", "gemini-video-agentic":
 		return true
 	default:
 		return false

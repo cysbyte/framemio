@@ -169,6 +169,8 @@ AWS credentials use the default AWS SDK credential chain. API keys stay in worke
 
 Production deployments can either point `VIDEO_UNDERSTANDING_API_URL` at a FrameMio-compatible adapter or enable direct OpenAI-compatible video understanding with `VIDEO_UNDERSTANDING_DIRECT=true`, `VIDEO_UNDERSTANDING_PROVIDER=openai-direct`, `VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL=https://api2.65535.space`, `VIDEO_UNDERSTANDING_WIRE_API=chat_completions`, and `VIDEO_UNDERSTANDING_MODEL=gpt-5.6-luna`. Transcription can use the provider adapter, Deepgram prerecorded STT with `TRANSCRIPTION_PROVIDER=deepgram`, `TRANSCRIPTION_MODEL=nova-3`, `DEEPGRAM_API_KEY=...`, and `ENABLE_TRANSCRIPTION=true`, or direct OpenAI-compatible multipart audio upload with `TRANSCRIPTION_DIRECT=true`, `TRANSCRIPTION_PROVIDER=openai-direct`, `TRANSCRIPTION_UPSTREAM_BASE_URL=https://api2.65535.space`, and an authorized transcription model.
 
+Native Gemini Agentic video understanding is available with `VIDEO_UNDERSTANDING_PROVIDER=gemini-agentic`, `VIDEO_UNDERSTANDING_MODEL=gemini-3.8-flash`, and `VIDEO_UNDERSTANDING_GEMINI_API_KEY` (or `GEMINI_API_KEY` / `GOOGLE_API_KEY`). The provider uploads the original source video to Gemini Files API, waits for cloud processing, calls the Interactions API with `processing=agentic`, and reuses FrameMio's strict schema and grounding validation. Use `VIDEO_UNDERSTANDING_PROVIDER_TIMEOUT=900s` or longer for long videos.
+
 Optional tuning:
 
 - `AWS_REGION`

@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestLoadAllowsDirectUnderstandingWithoutAdapterURL(t *testing.T) {
 	setRequiredEnvironment(t)
@@ -22,6 +25,39 @@ func TestLoadAllowsDirectUnderstandingWithoutAdapterURL(t *testing.T) {
 	}
 	if configuration.UnderstandingUpstreamBaseURL != "https://api2.65535.space" || configuration.UnderstandingMaxOutputTokens != 6000 {
 		t.Fatalf("direct understanding settings were not loaded: %+v", configuration)
+	}
+}
+
+func TestLoadAllowsGeminiAgenticUnderstandingWithoutAdapterURL(t *testing.T) {
+	setRequiredEnvironment(t)
+	t.Setenv("VIDEO_UNDERSTANDING_PROVIDER", "gemini-agentic")
+	t.Setenv("VIDEO_UNDERSTANDING_API_URL", "")
+	t.Setenv("VIDEO_UNDERSTANDING_GEMINI_API_KEY", "gemini-secret")
+	t.Setenv("VIDEO_UNDERSTANDING_MODEL", "")
+
+	configuration, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !configuration.UsesGeminiUnderstanding() || configuration.UsesDirectUnderstanding() {
+		t.Fatalf("unexpected Gemini mode: %+v", configuration)
+	}
+	if configuration.UnderstandingModel != "gemini-3.8-flash" || configuration.UnderstandingTimeout != 15*time.Minute || configuration.UnderstandingRetries != 1 {
+		t.Fatalf("unexpected Gemini defaults: %+v", configuration)
+	}
+}
+
+func TestLoadRequiresGeminiAPIKey(t *testing.T) {
+	setRequiredEnvironment(t)
+	t.Setenv("VIDEO_UNDERSTANDING_PROVIDER", "gemini")
+	t.Setenv("VIDEO_UNDERSTANDING_API_URL", "")
+	t.Setenv("VIDEO_UNDERSTANDING_GEMINI_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "")
+	t.Setenv("VIDEO_UNDERSTANDING_API_KEY", "")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected missing Gemini API key error")
 	}
 }
 

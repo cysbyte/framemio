@@ -326,6 +326,142 @@ func TestOpenAICompatibleVideoUnderstandingProviderSupportsResponsesWireAPI(t *t
 	}
 }
 
+func TestGeminiAgenticVideoUnderstandingProviderUploadsPollsAndStreams(t *testing.T) {
+	t.Parallel()
+	responseBody, err := json.Marshal(providerUnderstandingResponse())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var uploadBytes []byte
+	pollCount := 0
+	deleted := false
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Host != "source.example.test" && request.Header.Get("x-goog-api-key") != "gemini-secret" {
+			t.Fatalf("missing Gemini API key header on %s %s", request.Method, request.URL)
+		}
+		switch {
+		case request.Method == http.MethodGet && request.URL.String() == "https://source.example.test/video.mp4":
+			return &http.Response{
+				StatusCode:    http.StatusOK,
+				Header:        http.Header{"Content-Type": []string{"video/mp4"}},
+				Body:          io.NopCloser(strings.NewReader("video-bytes")),
+				ContentLength: int64(len("video-bytes")),
+			}, nil
+		case request.Method == http.MethodPost && request.URL.Path == "/upload/v1beta/files":
+			if request.Header.Get("X-Goog-Upload-Protocol") != "resumable" || request.Header.Get("X-Goog-Upload-Command") != "start" {
+				t.Fatalf("unexpected Gemini upload start headers: %v", request.Header)
+			}
+			var body struct {
+				File map[string]string `json:"file"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.File["displayName"] != "framemio-source-video" || body.File["mimeType"] != "video/mp4" {
+				t.Fatalf("unexpected upload metadata: %+v", body.File)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"X-Goog-Upload-Url": []string{"https://gemini.example.test/upload-session"}},
+				Body:       io.NopCloser(strings.NewReader("")),
+			}, nil
+		case request.Method == http.MethodPost && request.URL.String() == "https://gemini.example.test/upload-session":
+			if request.Header.Get("X-Goog-Upload-Command") != "upload, finalize" || request.Header.Get("X-Goog-Upload-Offset") != "0" {
+				t.Fatalf("unexpected Gemini upload finalize headers: %v", request.Header)
+			}
+			uploadBytes, err = io.ReadAll(request.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return jsonResponse(`{"file":{"name":"files/frame-video","uri":"https://generativelanguage.googleapis.com/v1beta/files/frame-video","state":"PROCESSING"}}`), nil
+		case request.Method == http.MethodGet && request.URL.Path == "/v1beta/files/frame-video":
+			pollCount++
+			if pollCount == 1 {
+				return jsonResponse(`{"name":"files/frame-video","uri":"https://generativelanguage.googleapis.com/v1beta/files/frame-video","state":"PROCESSING"}`), nil
+			}
+			return jsonResponse(`{"name":"files/frame-video","uri":"https://generativelanguage.googleapis.com/v1beta/files/frame-video","state":"ACTIVE"}`), nil
+		case request.Method == http.MethodPost && request.URL.Path == "/v1beta/interactions":
+			var body struct {
+				Model  string `json:"model"`
+				Stream bool   `json:"stream"`
+				Input  []struct {
+					Type       string `json:"type"`
+					URI        string `json:"uri"`
+					Processing string `json:"processing"`
+					Text       string `json:"text"`
+				} `json:"input"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Model != "gemini-3.8-flash" || !body.Stream || len(body.Input) != 2 ||
+				body.Input[0].Type != "video" || body.Input[0].URI == "" || body.Input[0].Processing != "agentic" ||
+				body.Input[1].Type != "text" || !strings.Contains(body.Input[1].Text, "video-analysis.v1") ||
+				strings.Contains(body.Input[1].Text, "https://evidence.example.test/frame.jpg") {
+				t.Fatalf("unexpected Gemini interaction request: %+v", body)
+			}
+			streamBody := `data: {"type":"interaction.completed","output_text":"` + strings.ReplaceAll(string(responseBody), `"`, `\"`) + `"}` + "\n\n"
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader(streamBody)),
+			}, nil
+		case request.Method == http.MethodDelete && request.URL.Path == "/v1beta/files/frame-video":
+			deleted = true
+			return jsonResponse(`{}`), nil
+		default:
+			t.Fatalf("unexpected Gemini request: %s %s", request.Method, request.URL.String())
+			return nil, nil
+		}
+	})}
+	provider := GeminiAgenticVideoUnderstandingProvider{
+		BaseURL: "https://gemini.example.test", APIKey: "gemini-secret", ProviderName: "gemini-agentic",
+		ModelName: "gemini-3.8-flash", Client: client, PollInterval: time.Nanosecond, FileWaitTimeout: time.Second,
+	}
+	response, err := provider.UnderstandVideo(context.Background(), providerUnderstandingInput(), "https://source.example.test/video.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(uploadBytes) != "video-bytes" || pollCount != 2 || !deleted {
+		t.Fatalf("upload/poll/delete lifecycle incomplete: bytes=%q polls=%d deleted=%v", uploadBytes, pollCount, deleted)
+	}
+	if response.SchemaVersion != domain.VideoAnalysisSchemaV1 || len(response.Candidates) != 1 {
+		t.Fatalf("unexpected Gemini response: %+v", response)
+	}
+}
+
+func TestGeminiAgenticVideoUnderstandingProviderRejectsFailedFile(t *testing.T) {
+	t.Parallel()
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		switch {
+		case request.Method == http.MethodGet && request.URL.String() == "https://source.example.test/video.mp4":
+			return &http.Response{
+				StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"video/mp4"}},
+				Body: io.NopCloser(strings.NewReader("video-bytes")), ContentLength: int64(len("video-bytes")),
+			}, nil
+		case request.Method == http.MethodPost && request.URL.Path == "/upload/v1beta/files":
+			return &http.Response{
+				StatusCode: http.StatusOK, Header: http.Header{"X-Goog-Upload-URL": []string{"https://gemini.example.test/upload-session"}},
+				Body: io.NopCloser(strings.NewReader("")),
+			}, nil
+		case request.Method == http.MethodPost && request.URL.String() == "https://gemini.example.test/upload-session":
+			return jsonResponse(`{"file":{"name":"files/failed-video","uri":"https://example.test/files/failed-video","state":"FAILED","error":{"message":"unsupported codec"}}}`), nil
+		case request.Method == http.MethodDelete:
+			return jsonResponse(`{}`), nil
+		default:
+			t.Fatalf("unexpected Gemini request: %s %s", request.Method, request.URL.String())
+			return nil, nil
+		}
+	})}
+	provider := GeminiAgenticVideoUnderstandingProvider{
+		BaseURL: "https://gemini.example.test", APIKey: "gemini-secret", ModelName: "gemini-3.8-flash",
+		Client: client, PollInterval: time.Nanosecond, FileWaitTimeout: time.Second,
+	}
+	if _, err := provider.UnderstandVideo(context.Background(), providerUnderstandingInput(), "https://source.example.test/video.mp4"); err == nil {
+		t.Fatal("expected failed Gemini file processing error")
+	}
+}
+
 func providerUnderstandingInput() domain.VideoUnderstandingInputV1 {
 	return domain.VideoUnderstandingInputV1{
 		SchemaVersion: domain.VideoUnderstandingInputSchemaV1, InputVersion: "video-evidence-v1",

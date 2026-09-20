@@ -92,7 +92,13 @@ func main() {
 		ProviderName: configuration.UnderstandingProvider, ModelName: configuration.UnderstandingModel,
 		Client: understandingClient,
 	})
-	if configuration.UsesDirectUnderstanding() {
+	if configuration.UsesGeminiUnderstanding() {
+		understandingProvider = providers.GeminiAgenticVideoUnderstandingProvider{
+			BaseURL: configuration.UnderstandingGeminiBaseURL, APIKey: configuration.UnderstandingGeminiAPIKey,
+			ProviderName: configuration.UnderstandingProvider, ModelName: configuration.UnderstandingModel,
+			Client: understandingClient,
+		}
+	} else if configuration.UsesDirectUnderstanding() {
 		understandingProvider = providers.OpenAICompatibleVideoUnderstandingProvider{
 			BaseURL: configuration.UnderstandingUpstreamBaseURL, APIKey: configuration.UnderstandingAPIKey,
 			ProviderName: configuration.UnderstandingProvider, ModelName: configuration.UnderstandingModel,
