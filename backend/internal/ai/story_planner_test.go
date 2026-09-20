@@ -418,6 +418,53 @@ func TestPlannerSelectsCaptionStyleFromStoryContext(t *testing.T) {
 	}
 }
 
+func TestPlannerDefaultsCinematicStoriesToWordByWordCaptions(t *testing.T) {
+	t.Parallel()
+	plan, err := (&Planner{}).Plan(context.Background(), Request{
+		ProjectID:       "project-social-captions",
+		DesiredDuration: 5 * time.Second,
+		StoryType:       models.StoryTypeCustom,
+		VisualStyle:     models.VisualStyleCinematic,
+		PhotoAnalyses: []models.PhotoAnalysis{{
+			ID: "photo-analysis-social", PhotoID: "photo-social", ProjectID: "project-social-captions",
+			AnalysisVersion: "photo-v1", Caption: "Ducks by the water", Selected: true,
+			MemoryValue: 0.9, EmotionalValue: 0.8, VisualQuality: 0.9, StoryRelevance: 0.9,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.CaptionStyle == nil ||
+		plan.CaptionStyle.Preset != "bold_social" ||
+		plan.CaptionStyle.Presentation != "word_by_word" ||
+		plan.CaptionStyle.FontSize != 72 ||
+		plan.CaptionStyle.MaxLines != 1 {
+		t.Fatalf("expected TikTok-style default captions, got %+v", plan.CaptionStyle)
+	}
+}
+
+func TestPlannerPreservesExplicitCinematicCaptionStyle(t *testing.T) {
+	t.Parallel()
+	plan, err := (&Planner{}).Plan(context.Background(), Request{
+		ProjectID:          "project-explicit-cinematic-captions",
+		DesiredDuration:    5 * time.Second,
+		StoryType:          models.StoryTypeCustom,
+		VisualStyle:        models.VisualStyleCinematic,
+		CaptionStylePreset: "cinematic_subtitle",
+		PhotoAnalyses: []models.PhotoAnalysis{{
+			ID: "photo-analysis-cinematic", PhotoID: "photo-cinematic", ProjectID: "project-explicit-cinematic-captions",
+			AnalysisVersion: "photo-v1", Caption: "A cinematic memory", Selected: true,
+			MemoryValue: 0.9, EmotionalValue: 0.8, VisualQuality: 0.9, StoryRelevance: 0.9,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.CaptionStyle == nil || plan.CaptionStyle.Preset != "cinematic_subtitle" || plan.CaptionStyle.Presentation != "" {
+		t.Fatalf("explicit cinematic caption style was changed: %+v", plan.CaptionStyle)
+	}
+}
+
 func TestPlannerOrdersPhotosAndVideosByAbsoluteCaptureTime(t *testing.T) {
 	t.Parallel()
 	photoTime := time.Date(2026, time.August, 25, 10, 0, 0, 0, time.UTC)

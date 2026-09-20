@@ -999,6 +999,12 @@ func sanitizeStoryPlannerCaptionStyle(plan *models.StoryPlan) {
 	}
 	style := plan.CaptionStyle
 	style.Preset = sanitizeStoryPlannerCaptionPreset(style.Preset, base.Preset)
+	if style.Preset == "bold_social" {
+		// The social preset is intentionally word-by-word. Preserve an explicit
+		// presentation for other presets, but do not let external output drop
+		// this required renderer behavior.
+		style.Presentation = "word_by_word"
+	}
 	style.FontFamily = sanitizeStoryPlannerCaptionFont(style.FontFamily, base.FontFamily)
 	style.TextColor = sanitizeStoryPlannerColor(style.TextColor, base.TextColor)
 	style.StrokeColor = sanitizeStoryPlannerColor(style.StrokeColor, base.StrokeColor)

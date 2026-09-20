@@ -88,6 +88,9 @@ func TestResolveAppliesDefaultsAndSupportedOverrides(t *testing.T) {
 	if resolved.Layout != models.VideoTemplateLayoutPictureInPicture || resolved.AspectRatio != "9:16" {
 		t.Fatalf("defaults were not applied: %+v", resolved)
 	}
+	if resolved.CaptionStyle != "bold_social" {
+		t.Fatalf("story template should default to social captions, got %q", resolved.CaptionStyle)
+	}
 }
 
 func TestResolveAllowsFullSourceOnlyForSupportedTemplates(t *testing.T) {

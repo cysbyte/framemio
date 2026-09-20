@@ -504,8 +504,8 @@ struct VideoTemplate: Codable, Hashable, Identifiable, Sendable {
     }
 
     static let localFallbackCatalog: [VideoTemplate] = [
-        .fallbackFullFrame(id: "full-screen-cinematic-cutaways", type: .story, name: "Cinematic cutaways", description: "Let each supporting moment take the full frame.", demo: "/videos/templates/full-screen-cinematic-cutaways.mp4", duration: 30, style: "cinematic", captions: true, captionStyle: "cinematic_subtitle", sceneDetail: "balanced"),
-        .fallbackPIP(id: "photo-over-video", type: .story, name: "Photo over video", description: "Keep the video moving while a supporting photo appears above it.", demo: "/videos/templates/photo-over-video.mp4", duration: 30, style: "cinematic", captions: true, captionStyle: "cinematic_subtitle", sceneDetail: "balanced", placement: "bottom_right", size: "medium", animation: "fade"),
+        .fallbackFullFrame(id: "full-screen-cinematic-cutaways", type: .story, name: "Cinematic cutaways", description: "Let each supporting moment take the full frame.", demo: "/videos/templates/full-screen-cinematic-cutaways.mp4", duration: 30, style: "cinematic", captions: true, captionStyle: "bold_social", sceneDetail: "balanced"),
+        .fallbackPIP(id: "photo-over-video", type: .story, name: "Photo over video", description: "Keep the video moving while a supporting photo appears above it.", demo: "/videos/templates/photo-over-video.mp4", duration: 30, style: "cinematic", captions: true, captionStyle: "bold_social", sceneDetail: "balanced", placement: "bottom_right", size: "medium", animation: "fade"),
         .fallbackPIP(id: "picture-in-picture", type: .story, name: "Picture in picture", description: "Layer a secondary moment over the main video like a small memory window.", demo: "/videos/templates/picture-in-picture.mp4", duration: 30, style: "warm", captions: true, captionStyle: "clean_minimal", sceneDetail: "more", placement: "top_right", size: "small", animation: "subtle_scale"),
         .fallbackFullFrame(id: "warm-memory-recap", type: .story, name: "Warm memory recap", description: "A gentle story with soft pacing and warm full-frame moments.", demo: "/videos/templates/warm-memory-recap.mp4", duration: 30, style: "warm", captions: true, captionStyle: "clean_minimal", sceneDetail: "balanced"),
         .fallbackPIP(id: "caption-led-memory", type: .story, name: "Caption-led memory", description: "A readable story where captions carry the emotional thread.", demo: "/videos/templates/caption-led-memory.mp4", duration: 30, style: "minimal", captions: true, captionStyle: "bold_social", sceneDetail: "more", placement: "bottom_left", size: "medium", animation: "fade"),
@@ -845,7 +845,7 @@ struct StoryGenerationOptions: Codable, Hashable, Sendable {
     init(
         style: String? = "cinematic",
         subtitlesEnabled: Bool? = true,
-        subtitleStyle: String? = "cinematic",
+        subtitleStyle: String? = "bold_social",
         sceneDetailStyle: String? = nil,
         durationMode: VideoDurationMode = .auto,
         targetDuration: TimeInterval? = nil,
@@ -865,7 +865,7 @@ struct StoryGenerationOptions: Codable, Hashable, Sendable {
     static let automatic = StoryGenerationOptions(
         style: "cinematic",
         subtitlesEnabled: true,
-        subtitleStyle: "cinematic",
+        subtitleStyle: "bold_social",
         sceneDetailStyle: nil,
         durationMode: .auto,
         targetDuration: nil,
