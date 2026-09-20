@@ -299,7 +299,7 @@ struct StoryCreationView: View {
                                 isSelected: selectedTemplateID == template.id,
                                 cardWidth: 184,
                                 previewHeight: 122,
-                                minHeight: 252
+                                minHeight: 268
                             ) {
                                 select(template)
                             }

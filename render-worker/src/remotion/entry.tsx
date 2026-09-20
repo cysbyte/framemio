@@ -252,7 +252,7 @@ const CaptionLayer: React.FC<{caption: StoryCaption; styleSpec?: CaptionStyle; f
   const horizontalPadding = presentation === 'word_by_word' ? '10px 20px' : '12px 22px';
   return (
     <AbsoluteFill style={{justifyContent: 'flex-end', alignItems: 'center', paddingBottom: bottom, pointerEvents: 'none'}}>
-      <div style={{maxWidth, padding: horizontalPadding, borderRadius: 16, background: styleSpec?.background_enabled === false ? 'transparent' : captionDefaults.backgroundColor, color, fontFamily: 'Liberation Sans, Arial, sans-serif', fontSize, fontWeight: 800, lineHeight: 1.02, textAlign: 'center', textTransform: presentation === 'word_by_word' ? 'uppercase' : 'none', WebkitTextStroke: `${clamp(styleSpec?.stroke_width ?? captionDefaults.strokeWidth, 0, 8)}px ${styleSpec?.stroke_color ?? captionDefaults.strokeColor}`, textShadow: '0 3px 12px rgba(0,0,0,0.55)'}}>{displayText}</div>
+      <div style={{maxWidth, padding: horizontalPadding, borderRadius: 16, background: styleSpec?.background_enabled === false ? 'transparent' : captionDefaults.backgroundColor, color, fontFamily: 'Liberation Sans, Arial, sans-serif', fontSize, fontWeight: 800, lineHeight: 1.02, textAlign: 'center', textTransform: 'none', WebkitTextStroke: `${clamp(styleSpec?.stroke_width ?? captionDefaults.strokeWidth, 0, 8)}px ${styleSpec?.stroke_color ?? captionDefaults.strokeColor}`, textShadow: '0 3px 12px rgba(0,0,0,0.55)'}}>{displayText}</div>
     </AbsoluteFill>
   );
 };

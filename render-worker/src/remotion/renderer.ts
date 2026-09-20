@@ -719,7 +719,7 @@ function expandCaptionTextAndTiming(text: string, timing: {startSeconds: string;
   const duration = Math.max(0.25, end - start);
   const step = duration / words.length;
   return words.map((word, index) => ({
-    text: word.toUpperCase(),
+    text: word,
     startSeconds: (start + (step * index)).toFixed(3),
     endSeconds: (index === words.length - 1 ? end : start + (step * (index + 1))).toFixed(3),
   }));

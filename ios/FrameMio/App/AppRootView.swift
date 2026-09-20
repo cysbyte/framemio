@@ -774,7 +774,7 @@ struct ProjectConfigurationView: View {
                                 isSelected: selectedTemplateID == template.id,
                                 cardWidth: 184,
                                 previewHeight: 122,
-                                minHeight: 252
+                                minHeight: 268
                             ) {
                                 select(template)
                             }
@@ -1511,7 +1511,7 @@ struct TemplateCard: View {
         .padding(FrameMioSpacing.md)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .frame(width: cardWidth, alignment: .topLeading)
-        .frame(minHeight: minHeight, alignment: .topLeading)
+        .frame(height: minHeight, alignment: .topLeading)
         .background(isSelected ? FrameMioColors.accentMuted : FrameMioColors.elevatedSurface, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
