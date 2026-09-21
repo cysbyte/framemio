@@ -226,66 +226,65 @@ func (p OpenAICompatibleStoryPlanner) Plan(ctx context.Context, request Request)
 		}
 		return models.StoryPlan{}, err
 	}
-	responseJSON, err := extractTypographyJSONObject([]byte(text))
+	plan, decodeMetrics, err := decodeStoryPlannerTextWithMetrics(text, request)
 	if err != nil {
-		return models.StoryPlan{}, fmt.Errorf("extract story plan JSON: %w", err)
-	}
-	responseJSON, jsonSanitization, err := sanitizeStoryPlannerResponseJSON(responseJSON)
-	if err != nil {
-		return models.StoryPlan{}, fmt.Errorf("sanitize story plan JSON: %w", err)
-	}
-	if p.Logger != nil && jsonSanitization.changed() {
-		p.Logger.Info("story_planner_external_json_sanitized",
-			slog.String("provider", p.Name()),
-			slog.String("model", p.Model()),
-			slog.Int64("latency_ms", time.Since(started).Milliseconds()),
-			slog.Bool("audio_original_audio_coerced", jsonSanitization.AudioOriginalAudioCoerced),
-			slog.Bool("audio_original_audio_dropped", jsonSanitization.AudioOriginalAudioDropped),
-		)
-	}
-	var plan models.StoryPlan
-	if err := json.Unmarshal(responseJSON, &plan); err != nil {
-		return models.StoryPlan{}, fmt.Errorf("decode story plan JSON: %w", err)
-	}
-	rawCaptionCount := len(plan.Captions)
-	rawInvalidCaptionCount := invalidStoryPlannerCaptionCount(plan)
-	rawOverlappingCaptionCount := overlappingStoryPlannerCaptionCount(plan)
-	rawInvalidVideoAnalysisVersionCount := invalidStoryPlannerVideoAnalysisVersionCount(plan, request)
-	rawTemplateID := plan.TemplateID
-	rawTemplateVersion := plan.TemplateVersion
-	rawBRollMissingIDCount, rawBRollMissingScoreCount := storyPlannerBRollMetadataGaps(plan)
-	if err := normalizeStoryPlannerOutput(&plan, request); err != nil {
 		if p.Logger != nil {
 			p.Logger.Warn("story_planner_external_output_invalid", slog.String("provider", p.Name()), slog.String("model", p.Model()), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Any("error", err))
 		}
 		return models.StoryPlan{}, err
 	}
 	if p.Logger != nil {
-		finalBRollWithIDCount, finalBRollWithScoreCount := storyPlannerBRollMetadataCounts(plan)
-		finalOverlappingCaptionCount := overlappingStoryPlannerCaptionCount(plan)
-		if rawCaptionCount != len(plan.Captions) || rawInvalidCaptionCount > 0 || rawOverlappingCaptionCount > 0 || finalOverlappingCaptionCount > 0 || rawInvalidVideoAnalysisVersionCount > 0 || rawBRollMissingIDCount > 0 || rawBRollMissingScoreCount > 0 || rawTemplateID != request.TemplateID || rawTemplateVersion != request.TemplateVersion {
+		if decodeMetrics.JSONSanitization.changed() {
+			p.Logger.Info("story_planner_external_json_sanitized",
+				slog.String("provider", p.Name()),
+				slog.String("model", p.Model()),
+				slog.Int64("latency_ms", time.Since(started).Milliseconds()),
+				slog.Bool("audio_original_audio_coerced", decodeMetrics.JSONSanitization.AudioOriginalAudioCoerced),
+				slog.Bool("audio_original_audio_dropped", decodeMetrics.JSONSanitization.AudioOriginalAudioDropped),
+			)
+		}
+		if decodeMetrics.RawCaptionCount != len(plan.Captions) ||
+			decodeMetrics.RawInvalidCaptionCount > 0 ||
+			decodeMetrics.RawOverlappingCaptionCount > 0 ||
+			decodeMetrics.FinalOverlappingCaptionCount > 0 ||
+			decodeMetrics.RawInvalidVideoAnalysisVersions > 0 ||
+			decodeMetrics.RawBRollMissingIDCount > 0 ||
+			decodeMetrics.RawBRollMissingScoreCount > 0 ||
+			decodeMetrics.RawTemplateID != request.TemplateID ||
+			decodeMetrics.RawTemplateVersion != request.TemplateVersion {
 			p.Logger.Info("story_planner_external_output_sanitized",
 				slog.String("provider", p.Name()),
 				slog.String("model", p.Model()),
 				slog.Int64("latency_ms", time.Since(started).Milliseconds()),
-				slog.Int("raw_caption_count", rawCaptionCount),
-				slog.Int("raw_invalid_caption_count", rawInvalidCaptionCount),
-				slog.Int("raw_overlapping_caption_count", rawOverlappingCaptionCount),
-				slog.Int("raw_invalid_video_analysis_version_count", rawInvalidVideoAnalysisVersionCount),
-				slog.Int("raw_broll_missing_id_count", rawBRollMissingIDCount),
-				slog.Int("raw_broll_missing_score_count", rawBRollMissingScoreCount),
-				slog.String("raw_template_id", rawTemplateID),
-				slog.Int("raw_template_version", rawTemplateVersion),
+				slog.Int("raw_caption_count", decodeMetrics.RawCaptionCount),
+				slog.Int("raw_invalid_caption_count", decodeMetrics.RawInvalidCaptionCount),
+				slog.Int("raw_overlapping_caption_count", decodeMetrics.RawOverlappingCaptionCount),
+				slog.Int("raw_invalid_video_analysis_version_count", decodeMetrics.RawInvalidVideoAnalysisVersions),
+				slog.Int("raw_broll_missing_id_count", decodeMetrics.RawBRollMissingIDCount),
+				slog.Int("raw_broll_missing_score_count", decodeMetrics.RawBRollMissingScoreCount),
+				slog.String("raw_template_id", decodeMetrics.RawTemplateID),
+				slog.Int("raw_template_version", decodeMetrics.RawTemplateVersion),
 				slog.String("final_template_id", plan.TemplateID),
 				slog.Int("final_template_version", plan.TemplateVersion),
 				slog.Int("final_caption_count", len(plan.Captions)),
-				slog.Int("final_overlapping_caption_count", finalOverlappingCaptionCount),
+				slog.Int("final_overlapping_caption_count", decodeMetrics.FinalOverlappingCaptionCount),
 				slog.Int("final_broll_count", len(plan.BRoll)),
-				slog.Int("final_broll_with_id_count", finalBRollWithIDCount),
-				slog.Int("final_broll_with_score_count", finalBRollWithScoreCount),
+				slog.Int("final_broll_with_id_count", decodeMetrics.FinalBRollWithIDCount),
+				slog.Int("final_broll_with_score_count", decodeMetrics.FinalBRollWithScoreCount),
 			)
 		}
-		p.Logger.Info("story_planner_external_output_valid", slog.String("provider", p.Name()), slog.String("model", p.Model()), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.String("schema_version", plan.SchemaVersion), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("broll_with_score_count", finalBRollWithScoreCount), slog.Int("caption_count", len(plan.Captions)), slog.String("template_id", plan.TemplateID), slog.Int("template_version", plan.TemplateVersion))
+		p.Logger.Info("story_planner_external_output_valid",
+			slog.String("provider", p.Name()),
+			slog.String("model", p.Model()),
+			slog.Int64("latency_ms", time.Since(started).Milliseconds()),
+			slog.String("schema_version", plan.SchemaVersion),
+			slog.Int("moment_count", len(plan.Moments)),
+			slog.Int("broll_count", len(plan.BRoll)),
+			slog.Int("broll_with_score_count", decodeMetrics.FinalBRollWithScoreCount),
+			slog.Int("caption_count", len(plan.Captions)),
+			slog.String("template_id", plan.TemplateID),
+			slog.Int("template_version", plan.TemplateVersion),
+		)
 	}
 	return plan, nil
 }

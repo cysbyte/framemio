@@ -1725,7 +1725,12 @@ A stronger narrative may justify a different order.
 Initial StoryPlan generation is selected by backend configuration only. iOS never chooses provider names, model names, base URLs, API keys, or wire protocols.
 
 ```text
-STORY_PLANNER_PROVIDER=local|openai|openai-compatible|ai-gateway
+STORY_PLANNER_PROVIDER=local|gemini|openai|openai-compatible|ai-gateway
+STORY_PLANNER_GEMINI_MODEL=gemini-3.8-flash
+STORY_PLANNER_GEMINI_BASE_URL=https://generativelanguage.googleapis.com
+STORY_PLANNER_GEMINI_API_KEY=
+STORY_PLANNER_GEMINI_TIMEOUT=90s
+STORY_PLANNER_GEMINI_FALLBACK_TIMEOUT=80s
 STORY_PLANNER_MODEL=gpt-5.6-luna
 STORY_PLANNER_BASE_URL=
 STORY_PLANNER_API_KEY=
@@ -1739,9 +1744,16 @@ STORY_REVISION_FALLBACK_TIMEOUT=45s
 Rules:
 
 - `local` is the default and preserves the existing heuristic planner behavior.
+- `gemini` uses the native Gemini Interactions API as the primary planner. Its
+  fallback is the configured GPT/OpenAI-compatible planner, followed by the
+  deterministic local planner: `Gemini -> GPT -> local`.
 - `ENABLE_GPT_STORY_PLANNER=true` is a compatibility alias for `openai-compatible` only when `STORY_PLANNER_PROVIDER` is unset.
 - `STORY_PLANNER_BASE_URL` falls back to `OPENAI_BASE_URL`; `STORY_PLANNER_API_KEY` falls back to `OPENAI_API_KEY`.
-- External providers require both an API key and `STORY_PLANNER_MODEL`; startup must fail clearly when either is missing.
+- Gemini credentials fall back from `STORY_PLANNER_GEMINI_API_KEY` to
+  `GEMINI_API_KEY` and `GOOGLE_API_KEY`. Gemini requires its own API key and
+  model, and the GPT fallback requires `STORY_PLANNER_API_KEY` and
+  `STORY_PLANNER_MODEL`; startup must fail clearly when any required value is
+  missing.
 - GPT receives bounded structured `PhotoAnalysis`, `VideoAnalysis`, transcript segments, media clusters, selected/excluded IDs, desired duration, style, and constraints; it does not receive original full-resolution media or provider secrets.
 - For user editing prompts, GPT receives a bounded structured request containing:
 

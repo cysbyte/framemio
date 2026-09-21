@@ -122,45 +122,50 @@ func main() {
 }
 
 type configuration struct {
-	Port                         string
-	DatabaseURL                  string
-	S3Bucket                     string
-	MediaDownloadBaseURL         string
-	SQSQueueURL                  string
-	SQSQueueURLs                 queue.QueueURLs
-	AuthHMACSecret               string
-	InternalAPIToken             string
-	PartSizeBytes                int64
-	MultipartThresholdBytes      int64
-	DeadLetterQueueURL           string
-	TypographyEnabled            bool
-	TypographyProvider           string
-	TypographyBaseURL            string
-	TypographyAPIKey             string
-	TypographyModel              string
-	TypographyWireAPI            string
-	TypographyMaxTokens          int
-	TypographyTimeout            time.Duration
-	StoryPlannerProvider         string
-	StoryPlannerBaseURL          string
-	StoryPlannerAPIKey           string
-	StoryPlannerModel            string
-	StoryPlannerWireAPI          string
-	StoryPlannerMaxTokens        int
-	StoryPlannerTimeout          time.Duration
-	StoryPlannerFallbackTimeout  time.Duration
-	StoryRevisionProvider        string
-	StoryRevisionBaseURL         string
-	StoryRevisionAPIKey          string
-	StoryRevisionModel           string
-	StoryRevisionWireAPI         string
-	StoryRevisionMaxTokens       int
-	StoryRevisionTimeout         time.Duration
-	StoryRevisionFallbackTimeout time.Duration
-	WorkerRunOnce                bool
-	WorkerJobID                  string
-	WorkerWaitTimeout            time.Duration
-	WorkerVisibilityTimeout      time.Duration
+	Port                              string
+	DatabaseURL                       string
+	S3Bucket                          string
+	MediaDownloadBaseURL              string
+	SQSQueueURL                       string
+	SQSQueueURLs                      queue.QueueURLs
+	AuthHMACSecret                    string
+	InternalAPIToken                  string
+	PartSizeBytes                     int64
+	MultipartThresholdBytes           int64
+	DeadLetterQueueURL                string
+	TypographyEnabled                 bool
+	TypographyProvider                string
+	TypographyBaseURL                 string
+	TypographyAPIKey                  string
+	TypographyModel                   string
+	TypographyWireAPI                 string
+	TypographyMaxTokens               int
+	TypographyTimeout                 time.Duration
+	StoryPlannerProvider              string
+	StoryPlannerBaseURL               string
+	StoryPlannerAPIKey                string
+	StoryPlannerModel                 string
+	StoryPlannerWireAPI               string
+	StoryPlannerMaxTokens             int
+	StoryPlannerTimeout               time.Duration
+	StoryPlannerFallbackTimeout       time.Duration
+	StoryPlannerGeminiBaseURL         string
+	StoryPlannerGeminiAPIKey          string
+	StoryPlannerGeminiModel           string
+	StoryPlannerGeminiTimeout         time.Duration
+	StoryPlannerGeminiFallbackTimeout time.Duration
+	StoryRevisionProvider             string
+	StoryRevisionBaseURL              string
+	StoryRevisionAPIKey               string
+	StoryRevisionModel                string
+	StoryRevisionWireAPI              string
+	StoryRevisionMaxTokens            int
+	StoryRevisionTimeout              time.Duration
+	StoryRevisionFallbackTimeout      time.Duration
+	WorkerRunOnce                     bool
+	WorkerJobID                       string
+	WorkerWaitTimeout                 time.Duration
+	WorkerVisibilityTimeout           time.Duration
 }
 
 func loadConfiguration() (configuration, error) {
@@ -176,39 +181,44 @@ func loadConfiguration() (configuration, error) {
 			Video:      os.Getenv("SQS_VIDEO_QUEUE_URL"),
 			Render:     os.Getenv("SQS_RENDER_QUEUE_URL"),
 		},
-		AuthHMACSecret:               os.Getenv("AUTH_HMAC_SECRET"),
-		InternalAPIToken:             os.Getenv("INTERNAL_API_TOKEN"),
-		PartSizeBytes:                environmentInt64("UPLOAD_PART_SIZE_BYTES", 8*1024*1024),
-		MultipartThresholdBytes:      environmentInt64("UPLOAD_MULTIPART_THRESHOLD_BYTES", 16*1024*1024),
-		DeadLetterQueueURL:           os.Getenv("SQS_DEAD_LETTER_QUEUE_URL"),
-		TypographyEnabled:            environmentBool("TYPOGRAPHY_ENABLED", true),
-		TypographyProvider:           environment("TYPOGRAPHY_PROVIDER", "local"),
-		TypographyBaseURL:            environment("TYPOGRAPHY_BASE_URL", os.Getenv("OPENAI_BASE_URL")),
-		TypographyAPIKey:             environment("TYPOGRAPHY_API_KEY", os.Getenv("OPENAI_API_KEY")),
-		TypographyModel:              os.Getenv("TYPOGRAPHY_MODEL"),
-		TypographyWireAPI:            environment("TYPOGRAPHY_WIRE_API", "responses"),
-		TypographyMaxTokens:          environmentInt("TYPOGRAPHY_MAX_OUTPUT_TOKENS", 1400),
-		TypographyTimeout:            environmentDuration("TYPOGRAPHY_TIMEOUT", 12*time.Second),
-		StoryPlannerProvider:         storyPlannerProviderFromEnv(),
-		StoryPlannerBaseURL:          environment("STORY_PLANNER_BASE_URL", os.Getenv("OPENAI_BASE_URL")),
-		StoryPlannerAPIKey:           environment("STORY_PLANNER_API_KEY", os.Getenv("OPENAI_API_KEY")),
-		StoryPlannerModel:            os.Getenv("STORY_PLANNER_MODEL"),
-		StoryPlannerWireAPI:          environment("STORY_PLANNER_WIRE_API", "responses"),
-		StoryPlannerMaxTokens:        environmentInt("STORY_PLANNER_MAX_OUTPUT_TOKENS", 6000),
-		StoryPlannerTimeout:          environmentDuration("STORY_PLANNER_TIMEOUT", 90*time.Second),
-		StoryPlannerFallbackTimeout:  environmentDuration("STORY_PLANNER_FALLBACK_TIMEOUT", 80*time.Second),
-		StoryRevisionProvider:        environment("STORY_REVISION_PROVIDER", "local"),
-		StoryRevisionBaseURL:         environment("STORY_REVISION_BASE_URL", os.Getenv("OPENAI_BASE_URL")),
-		StoryRevisionAPIKey:          environment("STORY_REVISION_API_KEY", os.Getenv("OPENAI_API_KEY")),
-		StoryRevisionModel:           os.Getenv("STORY_REVISION_MODEL"),
-		StoryRevisionWireAPI:         environment("STORY_REVISION_WIRE_API", "responses"),
-		StoryRevisionMaxTokens:       environmentInt("STORY_REVISION_MAX_OUTPUT_TOKENS", 6000),
-		StoryRevisionTimeout:         environmentDuration("STORY_REVISION_TIMEOUT", 90*time.Second),
-		StoryRevisionFallbackTimeout: environmentDuration("STORY_REVISION_FALLBACK_TIMEOUT", 45*time.Second),
-		WorkerRunOnce:                environmentBool("WORKER_RUN_ONCE", false),
-		WorkerJobID:                  os.Getenv("JOB_ID"),
-		WorkerWaitTimeout:            environmentDuration("WORKER_RUN_ONCE_WAIT_TIMEOUT", 6*time.Minute),
-		WorkerVisibilityTimeout:      environmentDuration("SQS_VISIBILITY_TIMEOUT", 5*time.Minute),
+		AuthHMACSecret:                    os.Getenv("AUTH_HMAC_SECRET"),
+		InternalAPIToken:                  os.Getenv("INTERNAL_API_TOKEN"),
+		PartSizeBytes:                     environmentInt64("UPLOAD_PART_SIZE_BYTES", 8*1024*1024),
+		MultipartThresholdBytes:           environmentInt64("UPLOAD_MULTIPART_THRESHOLD_BYTES", 16*1024*1024),
+		DeadLetterQueueURL:                os.Getenv("SQS_DEAD_LETTER_QUEUE_URL"),
+		TypographyEnabled:                 environmentBool("TYPOGRAPHY_ENABLED", true),
+		TypographyProvider:                environment("TYPOGRAPHY_PROVIDER", "local"),
+		TypographyBaseURL:                 environment("TYPOGRAPHY_BASE_URL", os.Getenv("OPENAI_BASE_URL")),
+		TypographyAPIKey:                  environment("TYPOGRAPHY_API_KEY", os.Getenv("OPENAI_API_KEY")),
+		TypographyModel:                   os.Getenv("TYPOGRAPHY_MODEL"),
+		TypographyWireAPI:                 environment("TYPOGRAPHY_WIRE_API", "responses"),
+		TypographyMaxTokens:               environmentInt("TYPOGRAPHY_MAX_OUTPUT_TOKENS", 1400),
+		TypographyTimeout:                 environmentDuration("TYPOGRAPHY_TIMEOUT", 12*time.Second),
+		StoryPlannerProvider:              storyPlannerProviderFromEnv(),
+		StoryPlannerBaseURL:               environment("STORY_PLANNER_BASE_URL", os.Getenv("OPENAI_BASE_URL")),
+		StoryPlannerAPIKey:                environment("STORY_PLANNER_API_KEY", os.Getenv("OPENAI_API_KEY")),
+		StoryPlannerModel:                 os.Getenv("STORY_PLANNER_MODEL"),
+		StoryPlannerWireAPI:               environment("STORY_PLANNER_WIRE_API", "responses"),
+		StoryPlannerMaxTokens:             environmentInt("STORY_PLANNER_MAX_OUTPUT_TOKENS", 6000),
+		StoryPlannerTimeout:               environmentDuration("STORY_PLANNER_TIMEOUT", 90*time.Second),
+		StoryPlannerFallbackTimeout:       environmentDuration("STORY_PLANNER_FALLBACK_TIMEOUT", 80*time.Second),
+		StoryPlannerGeminiBaseURL:         environment("STORY_PLANNER_GEMINI_BASE_URL", environment("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")),
+		StoryPlannerGeminiAPIKey:          environmentFirst([]string{"STORY_PLANNER_GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"}),
+		StoryPlannerGeminiModel:           environment("STORY_PLANNER_GEMINI_MODEL", "gemini-3.8-flash"),
+		StoryPlannerGeminiTimeout:         environmentDuration("STORY_PLANNER_GEMINI_TIMEOUT", 90*time.Second),
+		StoryPlannerGeminiFallbackTimeout: environmentDuration("STORY_PLANNER_GEMINI_FALLBACK_TIMEOUT", 80*time.Second),
+		StoryRevisionProvider:             environment("STORY_REVISION_PROVIDER", "local"),
+		StoryRevisionBaseURL:              environment("STORY_REVISION_BASE_URL", os.Getenv("OPENAI_BASE_URL")),
+		StoryRevisionAPIKey:               environment("STORY_REVISION_API_KEY", os.Getenv("OPENAI_API_KEY")),
+		StoryRevisionModel:                os.Getenv("STORY_REVISION_MODEL"),
+		StoryRevisionWireAPI:              environment("STORY_REVISION_WIRE_API", "responses"),
+		StoryRevisionMaxTokens:            environmentInt("STORY_REVISION_MAX_OUTPUT_TOKENS", 6000),
+		StoryRevisionTimeout:              environmentDuration("STORY_REVISION_TIMEOUT", 90*time.Second),
+		StoryRevisionFallbackTimeout:      environmentDuration("STORY_REVISION_FALLBACK_TIMEOUT", 45*time.Second),
+		WorkerRunOnce:                     environmentBool("WORKER_RUN_ONCE", false),
+		WorkerJobID:                       os.Getenv("JOB_ID"),
+		WorkerWaitTimeout:                 environmentDuration("WORKER_RUN_ONCE_WAIT_TIMEOUT", 6*time.Minute),
+		WorkerVisibilityTimeout:           environmentDuration("SQS_VISIBILITY_TIMEOUT", 5*time.Minute),
 	}
 	if result.DatabaseURL == "" || result.S3Bucket == "" {
 		return configuration{}, errors.New("DATABASE_URL and S3_MEDIA_BUCKET are required")
@@ -222,7 +232,20 @@ func loadConfiguration() (configuration, error) {
 	if len(result.InternalAPIToken) < 32 {
 		return configuration{}, errors.New("INTERNAL_API_TOKEN must contain at least 32 characters")
 	}
-	if isExternalStoryPlannerProvider(result.StoryPlannerProvider) {
+	if isGeminiStoryPlannerProvider(result.StoryPlannerProvider) {
+		if strings.TrimSpace(result.StoryPlannerGeminiAPIKey) == "" {
+			return configuration{}, errors.New("STORY_PLANNER_GEMINI_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY is required when STORY_PLANNER_PROVIDER uses Gemini")
+		}
+		if strings.TrimSpace(result.StoryPlannerGeminiModel) == "" {
+			return configuration{}, errors.New("STORY_PLANNER_GEMINI_MODEL is required when STORY_PLANNER_PROVIDER uses Gemini")
+		}
+		if strings.TrimSpace(result.StoryPlannerAPIKey) == "" {
+			return configuration{}, errors.New("STORY_PLANNER_API_KEY or OPENAI_API_KEY is required for the GPT story planner fallback")
+		}
+		if strings.TrimSpace(result.StoryPlannerModel) == "" {
+			return configuration{}, errors.New("STORY_PLANNER_MODEL is required for the GPT story planner fallback")
+		}
+	} else if isExternalStoryPlannerProvider(result.StoryPlannerProvider) {
 		if strings.TrimSpace(result.StoryPlannerAPIKey) == "" {
 			return configuration{}, errors.New("STORY_PLANNER_API_KEY or OPENAI_API_KEY is required when STORY_PLANNER_PROVIDER uses an external AI provider")
 		}
@@ -246,11 +269,29 @@ func storyPlannerProviderFromEnv() string {
 
 func isExternalStoryPlannerProvider(provider string) bool {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "openai", "openai-compatible", "ai-gateway", "ai_gateway":
+	case "openai", "openai-compatible", "ai-gateway", "ai_gateway", "gemini", "gemini-agentic", "gemini_agentic", "gemini-interactions", "gemini_interactions":
 		return true
 	default:
 		return false
 	}
+}
+
+func isGeminiStoryPlannerProvider(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "gemini", "gemini-agentic", "gemini_agentic", "gemini-interactions", "gemini_interactions":
+		return true
+	default:
+		return false
+	}
+}
+
+func environmentFirst(names []string) string {
+	for _, name := range names {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func environment(name, fallback string) string {
@@ -340,6 +381,57 @@ func configuredStoryPlanner(configuration configuration, logger *slog.Logger) (a
 			Fallback:       &ai.Planner{TypographyPlanner: typographyPlanner, Logger: logger},
 			Logger:         logger,
 			PrimaryTimeout: configuration.StoryPlannerFallbackTimeout,
+		}, nil
+	case "gemini", "gemini-agentic", "gemini_agentic", "gemini-interactions", "gemini_interactions":
+		if strings.TrimSpace(configuration.StoryPlannerGeminiAPIKey) == "" {
+			return nil, errors.New("STORY_PLANNER_GEMINI_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY is required when STORY_PLANNER_PROVIDER uses Gemini")
+		}
+		if strings.TrimSpace(configuration.StoryPlannerGeminiModel) == "" {
+			return nil, errors.New("STORY_PLANNER_GEMINI_MODEL is required when STORY_PLANNER_PROVIDER uses Gemini")
+		}
+		if strings.TrimSpace(configuration.StoryPlannerAPIKey) == "" {
+			return nil, errors.New("STORY_PLANNER_API_KEY or OPENAI_API_KEY is required for the GPT story planner fallback")
+		}
+		if strings.TrimSpace(configuration.StoryPlannerModel) == "" {
+			return nil, errors.New("STORY_PLANNER_MODEL is required for the GPT story planner fallback")
+		}
+		if configuration.StoryPlannerFallbackTimeout >= configuration.StoryPlannerTimeout {
+			return nil, fmt.Errorf("STORY_PLANNER_FALLBACK_TIMEOUT (%s) must be less than STORY_PLANNER_TIMEOUT (%s)", configuration.StoryPlannerFallbackTimeout, configuration.StoryPlannerTimeout)
+		}
+		if configuration.StoryPlannerGeminiFallbackTimeout >= configuration.StoryPlannerGeminiTimeout {
+			return nil, fmt.Errorf("STORY_PLANNER_GEMINI_FALLBACK_TIMEOUT (%s) must be less than STORY_PLANNER_GEMINI_TIMEOUT (%s)", configuration.StoryPlannerGeminiFallbackTimeout, configuration.StoryPlannerGeminiTimeout)
+		}
+		local := &ai.Planner{TypographyPlanner: typographyPlanner, Logger: logger}
+		gpt := ai.OpenAICompatibleStoryPlanner{
+			BaseURL:         configuration.StoryPlannerBaseURL,
+			APIKey:          configuration.StoryPlannerAPIKey,
+			ProviderName:    "openai-compatible-fallback",
+			ModelName:       configuration.StoryPlannerModel,
+			WireAPI:         configuration.StoryPlannerWireAPI,
+			MaxOutputTokens: configuration.StoryPlannerMaxTokens,
+			Client:          &http.Client{Timeout: configuration.StoryPlannerTimeout},
+			Logger:          logger,
+		}
+		gptWithLocalFallback := ai.FallbackStoryPlanner{
+			Primary:        gpt,
+			Fallback:       local,
+			Logger:         logger,
+			PrimaryTimeout: configuration.StoryPlannerFallbackTimeout,
+		}
+		gemini := ai.GeminiStoryPlanner{
+			BaseURL:         configuration.StoryPlannerGeminiBaseURL,
+			APIKey:          configuration.StoryPlannerGeminiAPIKey,
+			ProviderName:    configuration.StoryPlannerProvider,
+			ModelName:       configuration.StoryPlannerGeminiModel,
+			MaxOutputTokens: configuration.StoryPlannerMaxTokens,
+			Client:          &http.Client{Timeout: configuration.StoryPlannerGeminiTimeout},
+			Logger:          logger,
+		}
+		return ai.FallbackStoryPlanner{
+			Primary:        gemini,
+			Fallback:       gptWithLocalFallback,
+			Logger:         logger,
+			PrimaryTimeout: configuration.StoryPlannerGeminiFallbackTimeout,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported STORY_PLANNER_PROVIDER %q", configuration.StoryPlannerProvider)

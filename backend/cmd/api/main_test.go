@@ -62,6 +62,78 @@ func TestConfiguredStoryPlannerUsesOpenAICompatibleProvider(t *testing.T) {
 	}
 }
 
+func TestConfiguredStoryPlannerUsesGeminiWithGPTAndLocalFallbacks(t *testing.T) {
+	t.Parallel()
+	planner, err := configuredStoryPlanner(configuration{
+		TypographyEnabled:                 true,
+		TypographyProvider:                "local",
+		StoryPlannerProvider:              "gemini",
+		StoryPlannerGeminiBaseURL:         "https://gemini.test",
+		StoryPlannerGeminiAPIKey:          "gemini-key",
+		StoryPlannerGeminiModel:           "gemini-story",
+		StoryPlannerGeminiTimeout:         30 * time.Second,
+		StoryPlannerGeminiFallbackTimeout: 15 * time.Second,
+		StoryPlannerBaseURL:               "https://planner.test/v1",
+		StoryPlannerAPIKey:                "gpt-key",
+		StoryPlannerModel:                 "gpt-story",
+		StoryPlannerWireAPI:               "chat_completions",
+		StoryPlannerTimeout:               25 * time.Second,
+		StoryPlannerFallbackTimeout:       12 * time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outer, ok := planner.(ai.FallbackStoryPlanner)
+	if !ok {
+		t.Fatalf("expected Gemini fallback wrapper, got %T", planner)
+	}
+	gemini, ok := outer.Primary.(ai.GeminiStoryPlanner)
+	if !ok {
+		t.Fatalf("expected Gemini primary, got %T", outer.Primary)
+	}
+	inner, ok := outer.Fallback.(ai.FallbackStoryPlanner)
+	if !ok {
+		t.Fatalf("expected nested GPT fallback, got %T", outer.Fallback)
+	}
+	gpt, ok := inner.Primary.(ai.OpenAICompatibleStoryPlanner)
+	if !ok {
+		t.Fatalf("expected GPT fallback primary, got %T", inner.Primary)
+	}
+	if _, ok := inner.Fallback.(*ai.Planner); !ok {
+		t.Fatalf("expected local planner as final fallback, got %T", inner.Fallback)
+	}
+	if gemini.ModelName != "gemini-story" || gemini.BaseURL != "https://gemini.test" ||
+		gemini.Client.Timeout != 30*time.Second || outer.PrimaryTimeout != 15*time.Second {
+		t.Fatalf("unexpected Gemini configuration: %+v", gemini)
+	}
+	if gpt.ModelName != "gpt-story" || gpt.BaseURL != "https://planner.test/v1" ||
+		gpt.Client.Timeout != 25*time.Second || inner.PrimaryTimeout != 12*time.Second {
+		t.Fatalf("unexpected GPT fallback configuration: %+v", gpt)
+	}
+}
+
+func TestConfiguredStoryPlannerRequiresGeminiAndGPTFallbackConfig(t *testing.T) {
+	t.Parallel()
+	base := configuration{
+		TypographyEnabled:                 true,
+		TypographyProvider:                "local",
+		StoryPlannerProvider:              "gemini",
+		StoryPlannerGeminiModel:           "gemini-story",
+		StoryPlannerGeminiTimeout:         30 * time.Second,
+		StoryPlannerGeminiFallbackTimeout: 15 * time.Second,
+		StoryPlannerModel:                 "gpt-story",
+		StoryPlannerTimeout:               25 * time.Second,
+		StoryPlannerFallbackTimeout:       12 * time.Second,
+	}
+	if _, err := configuredStoryPlanner(base, nil); err == nil {
+		t.Fatal("expected missing Gemini API key to fail")
+	}
+	base.StoryPlannerGeminiAPIKey = "gemini-key"
+	if _, err := configuredStoryPlanner(base, nil); err == nil {
+		t.Fatal("expected missing GPT API key to fail")
+	}
+}
+
 func TestConfiguredStoryPlannerRequiresFallbackTimeoutBelowHTTPTimeout(t *testing.T) {
 	t.Parallel()
 	_, err := configuredStoryPlanner(configuration{
@@ -153,6 +225,31 @@ func TestLoadConfigurationRejectsIncompleteExternalStoryPlanner(t *testing.T) {
 	t.Setenv("STORY_PLANNER_MODEL", "")
 	if _, err := loadConfiguration(); err == nil {
 		t.Fatal("expected missing story planner model to fail startup config")
+	}
+}
+
+func TestLoadConfigurationLoadsGeminiStoryPlannerSettings(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("S3_MEDIA_BUCKET", "bucket")
+	t.Setenv("SQS_PROCESSING_QUEUE_URL", "queue")
+	t.Setenv("AUTH_HMAC_SECRET", "12345678901234567890123456789012")
+	t.Setenv("INTERNAL_API_TOKEN", "12345678901234567890123456789012")
+	t.Setenv("STORY_PLANNER_PROVIDER", "gemini-agentic")
+	t.Setenv("STORY_PLANNER_GEMINI_API_KEY", "gemini-key")
+	t.Setenv("STORY_PLANNER_GEMINI_MODEL", "gemini-story")
+	t.Setenv("STORY_PLANNER_GEMINI_BASE_URL", "https://gemini.test")
+	t.Setenv("STORY_PLANNER_API_KEY", "gpt-key")
+	t.Setenv("STORY_PLANNER_MODEL", "gpt-story")
+
+	config, err := loadConfiguration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.StoryPlannerProvider != "gemini-agentic" ||
+		config.StoryPlannerGeminiAPIKey != "gemini-key" ||
+		config.StoryPlannerGeminiModel != "gemini-story" ||
+		config.StoryPlannerGeminiBaseURL != "https://gemini.test" {
+		t.Fatalf("unexpected Gemini story planner config: %+v", config)
 	}
 }
 
