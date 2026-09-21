@@ -1645,10 +1645,11 @@ Inputs can include:
 - visual style
 - optional user instruction
 
-The planner can run as either the default deterministic local heuristic
-planner or a configured GPT/OpenAI-compatible planner. Both implementations
-must produce the same canonical `StoryPlan` model and must feed the same
-validation and render pipeline.
+The planner can run as the default deterministic local heuristic planner, a
+Gemini model through the OpenAI-compatible gateway, or a
+GPT/OpenAI-compatible planner.
+All providers must produce the same canonical `StoryPlan` model and must feed
+the same validation and render pipeline.
 
 Its job is:
 
@@ -1725,9 +1726,9 @@ A stronger narrative may justify a different order.
 Initial StoryPlan generation is selected by backend configuration only. iOS never chooses provider names, model names, base URLs, API keys, or wire protocols.
 
 ```text
-STORY_PLANNER_PROVIDER=local|gemini|openai|openai-compatible|ai-gateway
+STORY_PLANNER_PROVIDER=local|gemini|gemini-agentic|gemini_agentic|gemini-interactions|gemini_interactions|openai|openai-compatible|ai-gateway
 STORY_PLANNER_GEMINI_MODEL=gemini-3.8-flash
-STORY_PLANNER_GEMINI_BASE_URL=https://generativelanguage.googleapis.com
+STORY_PLANNER_GEMINI_BASE_URL=https://api2.65535.space
 STORY_PLANNER_GEMINI_API_KEY=
 STORY_PLANNER_GEMINI_TIMEOUT=90s
 STORY_PLANNER_GEMINI_FALLBACK_TIMEOUT=80s
@@ -1743,17 +1744,39 @@ STORY_REVISION_FALLBACK_TIMEOUT=45s
 
 Rules:
 
-- `local` is the default and preserves the existing heuristic planner behavior.
-- `gemini` uses the native Gemini Interactions API as the primary planner. Its
-  fallback is the configured GPT/OpenAI-compatible planner, followed by the
-  deterministic local planner: `Gemini -> GPT -> local`.
+- `local` is the backend code default and preserves the existing heuristic
+  planner behavior. The production backend GitHub Actions workflow defaults
+  `STORY_PLANNER_PROVIDER` to `gemini`.
+- `gemini`, `gemini-agentic`, `gemini_agentic`, `gemini-interactions`, and
+  `gemini_interactions` select the Gemini story-planning model through the
+  OpenAI-compatible gateway protocol. The configured fallback chain is:
+
+  ```text
+  Gemini -> GPT/OpenAI-compatible -> deterministic local planner
+  ```
+
+- Gemini sends the bounded structured planner prompt to
+  `POST <base-url>/v1/chat/completions`, authenticates with
+  `Authorization: Bearer <key>`, requests JSON output, and uses the same
+  gateway wire format as the working video-understanding worker.
+- `STORY_PLANNER_GEMINI_BASE_URL` falls back to
+  `VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL`, then `OPENAI_BASE_URL`, then
+  `https://api2.65535.space`.
+- `STORY_PLANNER_GEMINI_MODEL` defaults to `gemini-3.8-flash`.
+- `STORY_PLANNER_GEMINI_API_KEY` falls back to `GEMINI_API_KEY` and then
+  `GOOGLE_API_KEY`.
+- When a Gemini provider is selected, startup requires the Gemini API key and
+  model as well as the GPT fallback key and model. This prevents a failed
+  Gemini request from leaving story planning without a second external
+  provider.
 - `ENABLE_GPT_STORY_PLANNER=true` is a compatibility alias for `openai-compatible` only when `STORY_PLANNER_PROVIDER` is unset.
 - `STORY_PLANNER_BASE_URL` falls back to `OPENAI_BASE_URL`; `STORY_PLANNER_API_KEY` falls back to `OPENAI_API_KEY`.
-- Gemini credentials fall back from `STORY_PLANNER_GEMINI_API_KEY` to
-  `GEMINI_API_KEY` and `GOOGLE_API_KEY`. Gemini requires its own API key and
-  model, and the GPT fallback requires `STORY_PLANNER_API_KEY` and
-  `STORY_PLANNER_MODEL`; startup must fail clearly when any required value is
-  missing.
+- `STORY_PLANNER_TIMEOUT` is the GPT/OpenAI-compatible HTTP client timeout,
+  while `STORY_PLANNER_FALLBACK_TIMEOUT` bounds GPT fallback latency.
+  `STORY_PLANNER_GEMINI_TIMEOUT` is the Gemini HTTP client timeout, while
+  `STORY_PLANNER_GEMINI_FALLBACK_TIMEOUT` bounds Gemini primary latency before
+  the GPT fallback starts. Each fallback timeout must be lower than its
+  corresponding HTTP timeout.
 - GPT receives bounded structured `PhotoAnalysis`, `VideoAnalysis`, transcript segments, media clusters, selected/excluded IDs, desired duration, style, and constraints; it does not receive original full-resolution media or provider secrets.
 - For user editing prompts, GPT receives a bounded structured request containing:
 
@@ -1781,10 +1804,10 @@ Rules:
   primarily modify the CTA-related scene and plan fields. The provider must
   preserve unrelated scenes and media references whenever possible.
 - GPT must return the existing `models.StoryPlan` JSON shape only, with `schema_version` exactly `story_plan_v1`; it must never return Remotion code, FFmpeg commands, shell commands, SQL, JavaScript, or executable instructions. Current production deployment defaults use `chat_completions` for OpenAI-compatible gateway compatibility; `responses` remains supported when the upstream supports it. `STORY_PLANNER_FALLBACK_TIMEOUT` defaults to 80 seconds and bounds initial GPT planning latency before falling back to the deterministic local planner, while `STORY_PLANNER_TIMEOUT` remains the 90-second HTTP hard timeout; startup rejects a fallback timeout that is not below the HTTP timeout. The provider returns immediately when the complete upstream response body arrives; `story_planner_external_response_received` records that boundary so response latency can be distinguished from parsing and validation time.
-- The provider boundary canonicalizes narrow v1 schema aliases such as `1.0` to `story_plan_v1`, repairs bounded media-reference omissions from existing analysis data, sanitizes common renderer-facing aliases for transitions, crop intents, caption styles, caption timing, aspect ratio, and source-audio intent, coerces bounded `audio.original_audio` string booleans before typed decode, overwrites video moment and video b-roll `video_analysis_version` from the backend-owned `VideoAnalysis`, derives a deterministic local `broll_id` when an external B-roll row omits one, drops malformed caption rows, removes broad full-moment captions when more granular timed captions exist for the same moment, serializes the final caption timeline so only one subtitle is active at any timestamp, backfills top-level timed captions from transcript cues or moment captions when an external plan omits valid `captions` and subtitles are not disabled, then runs lightweight structural validation; structurally invalid GPT plans fall back to the local planner before persistence. JSON-level repair is traceable via `story_planner_external_json_sanitized`; caption/media-reference/B-roll metadata repair is traceable via `story_planner_external_output_sanitized` and `story_planner_primary_output_sanitized`; repaired primary plans should emit `story_planner_primary_succeeded` instead of falling back.
+- The provider boundary canonicalizes narrow v1 schema aliases such as `1.0` to `story_plan_v1`, repairs bounded media-reference omissions from existing analysis data, sanitizes common renderer-facing aliases for transitions, crop intents, caption styles, caption timing, aspect ratio, and source-audio intent, coerces bounded `audio.original_audio` string booleans before typed decode, overwrites video moment and video b-roll `video_analysis_version` from the backend-owned `VideoAnalysis`, derives a deterministic local `broll_id` when an external B-roll row omits one, drops malformed caption rows, removes broad full-moment captions when more granular timed captions exist for the same moment, serializes the final caption timeline so only one subtitle is active at any timestamp, backfills top-level timed captions from transcript cues or moment captions when an external plan omits valid `captions` and subtitles are not disabled, then runs lightweight structural validation. Structurally invalid Gemini or GPT plans fall back to the next configured planner; if all external planners fail, the deterministic local planner is used before persistence. JSON-level repair is traceable via `story_planner_external_json_sanitized`; caption/media-reference/B-roll metadata repair is traceable via `story_planner_external_output_sanitized` and `story_planner_primary_output_sanitized`; repaired primary plans should emit `story_planner_primary_succeeded` instead of falling back.
 - Provider sanitization must stay bounded. It may normalize aliases such as `contain` to `fit`, `center crop` to `fill`, `cinematic` to `cinematic_subtitle`, `Inter Bold` to `inter-bold`, named colors to `#RRGGBB`, and malformed caption timing to the owning moment range. It must not repair invented project identity, invented media, excluded media, excluded moments, unsupported media types, over-duration plans, or executable/renderer-specific instructions. Those outputs are invalid and must fall back locally.
 - Scene-detail preference is a bounded planner control, not a renderer command. `more` lowers the local planner's matching threshold to admit additional relevant cutaways while retaining the shared 35% B-roll duration cap; `none` removes B-roll after both local and external planning; an unset preference preserves the normal balanced behavior. The local planner and validator use the same cap so short fixed-duration fallback plans remain valid. The external prompt asks for B-roll identity, timing, reason, confidence, and score, but missing scores are not fabricated.
-- Story-plan observability is emitted at each boundary. `story_planner_request_ready` records the selected style, subtitle controls, scene-detail/B-roll preference, and duration constraint; `story_planner_external_response_received` records when the complete external response body arrives and its bounded byte count; `story_planner_external_output_sanitized` records missing B-roll IDs/scores, raw/final caption counts, and raw/final overlapping caption counts; `story_planner_primary_failed_falling_back` records `primary_timed_out` alongside the configured deadline; `story_planner_local_output_invalid` records local fallback B-roll count, used duration, duration limit, preference, and validation errors; `story planner output ready` records B-roll counts, score/confidence coverage, and a bounded `broll_scores` trace formatted as `broll_id:asset_id:start=...:duration=...:score=...:confidence=...`; backend `render input prepared`, render-worker `render input received`, and `render composition built` repeat the B-roll trace so a missing or dropped cutaway can be located between planning and rendering.
+- Story-plan observability is emitted at each boundary. `story_planner_request_ready` records the selected style, subtitle controls, scene-detail/B-roll preference, and duration constraint; `story_planner_external_response_received` records when the complete Gemini or GPT response body/stream is received and its bounded byte count; `story_planner_external_output_sanitized` records missing B-roll IDs/scores, raw/final caption counts, and raw/final overlapping caption counts; `story_planner_primary_failed_falling_back` records the failed provider, next fallback provider, `primary_timed_out`, and configured deadline; `story_planner_local_output_invalid` records local fallback B-roll count, used duration, duration limit, preference, and validation errors; `story planner output ready` records B-roll counts, score/confidence coverage, and a bounded `broll_scores` trace formatted as `broll_id:asset_id:start=...:duration=...:score=...:confidence=...`; backend `render input prepared`, render-worker `render input received`, and `render composition built` repeat the B-roll trace so a missing or dropped cutaway can be located between planning and rendering.
 - For Story projects, initial external StoryPlan generation must strip
   `moments[].typography` during first-release stabilization, even if the model
   emits a valid-looking `TextOverlay`; Story photo typography remains deferred.
@@ -2424,6 +2447,64 @@ aws ecs update-service \
 
 Use the repository's configured cluster/service names and verify the result
 with `aws ecs describe-services`. Worker service scaling remains independent.
+
+## 20.3 Backend story-planner deployment configuration
+
+The production backend workflow is
+`.github/workflows/build-backend-and-push-ecr.yml`. It builds the backend
+image, updates the `framemio-backend` ECS task definition, and deploys the
+service. The workflow currently defaults initial StoryPlan generation to
+Gemini:
+
+```text
+STORY_PLANNER_PROVIDER=gemini
+STORY_PLANNER_GEMINI_MODEL=gemini-3.8-flash
+STORY_PLANNER_GEMINI_BASE_URL=https://api2.65535.space
+STORY_PLANNER_GEMINI_TIMEOUT=90s
+STORY_PLANNER_GEMINI_FALLBACK_TIMEOUT=80s
+
+STORY_PLANNER_MODEL=gpt-5.6-luna
+STORY_PLANNER_BASE_URL=https://api2.65535.space
+STORY_PLANNER_WIRE_API=chat_completions
+STORY_PLANNER_TIMEOUT=90s
+STORY_PLANNER_FALLBACK_TIMEOUT=80s
+```
+
+The workflow reads non-secret settings from GitHub Actions repository
+variables and API keys from repository secrets. Supported secret names are:
+
+```text
+STORY_PLANNER_GEMINI_API_KEY
+GEMINI_API_KEY
+GOOGLE_API_KEY
+STORY_PLANNER_API_KEY
+OPENAI_API_KEY
+```
+
+For ECS Secrets Manager injection, the preferred repository variables are:
+
+```text
+STORY_PLANNER_GEMINI_API_KEY_SECRET_ARN
+STORY_PLANNER_API_KEY_SECRET_ARN
+```
+
+`GEMINI_API_KEY_SECRET_ARN` and `GOOGLE_API_KEY_SECRET_ARN` are accepted
+aliases for the Gemini secret ARN. When a secret ARN is configured, the
+workflow places the corresponding key in the ECS container `secrets` list.
+Without an ARN, the Gemini key is passed as an optional environment variable;
+deployment validation still requires it whenever the selected provider is
+Gemini. The GPT fallback key remains required for the Gemini provider because
+the configured runtime chain is `Gemini -> GPT -> local`.
+
+The workflow validates Gemini base URL, model, credentials, and timeout values
+when `STORY_PLANNER_PROVIDER` is a Gemini alias. It always validates the GPT
+fallback model, base URL, credentials, wire API, output-token limit, and
+timeouts. Deployment therefore fails before ECS registration when the
+fallback chain is incomplete.
+
+Changing the workflow or backend provider configuration requires a new backend
+workflow run and ECS task deployment. Video-intelligence and render-worker
+deployments are not required for StoryPlan provider changes.
 
 ---
 

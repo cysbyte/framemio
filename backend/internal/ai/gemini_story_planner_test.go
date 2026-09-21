@@ -10,41 +10,39 @@ import (
 	"github.com/framemio/backend/internal/models"
 )
 
-func TestGeminiStoryPlannerUsesInteractionsAPIAndStreamsOutput(t *testing.T) {
+func TestGeminiStoryPlannerUsesOpenAICompatibleGateway(t *testing.T) {
 	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if request.URL.Path != "/v1beta/interactions" {
+		if request.URL.Path != "/v1/chat/completions" {
 			t.Fatalf("unexpected path %s", request.URL.Path)
 		}
-		if got := request.Header.Get("x-goog-api-key"); got != "gemini-key" {
-			t.Fatalf("unexpected Gemini API key %q", got)
+		if got := request.Header.Get("Authorization"); got != "Bearer gemini-key" {
+			t.Fatalf("unexpected gateway authorization %q", got)
 		}
 		var payload struct {
-			Model  string `json:"model"`
-			Stream bool   `json:"stream"`
-			Input  []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"input"`
+			Model    string `json:"model"`
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
 		}
 		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
 			t.Fatal(err)
 		}
-		if payload.Model != "gemini-story" || !payload.Stream || len(payload.Input) != 2 ||
-			payload.Input[0].Type != "text" || payload.Input[0].Text == "" ||
-			payload.Input[1].Type != "text" || !strings.Contains(payload.Input[1].Text, "generate_story_plan") {
+		if payload.Model != "gemini-story" || len(payload.Messages) != 2 ||
+			payload.Messages[0].Role != "system" || payload.Messages[0].Content == "" ||
+			payload.Messages[1].Role != "user" || !strings.Contains(payload.Messages[1].Content, "generate_story_plan") {
 			t.Fatalf("unexpected Gemini planner request: %+v", payload)
 		}
-		body := `data: {"delta":"` + strings.ReplaceAll(storyPlannerProviderPlanJSON(), `"`, `\"`) + `"}` + "\n\n"
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-			Body:       ioNopCloser(body),
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       ioNopCloser(string(chatTypographyResponse(storyPlannerProviderPlanJSON()))),
 		}, nil
 	})}
 
 	planner := GeminiStoryPlanner{
-		BaseURL:   "https://generativelanguage.googleapis.com",
+		BaseURL:   "https://api2.65535.space",
 		APIKey:    "gemini-key",
 		ModelName: "gemini-story",
 		Client:    client,
@@ -58,23 +56,13 @@ func TestGeminiStoryPlannerUsesInteractionsAPIAndStreamsOutput(t *testing.T) {
 	}
 }
 
-func TestExtractGeminiInteractionTextSupportsOutputTextAndNestedOutput(t *testing.T) {
-	t.Parallel()
-	if got, err := extractGeminiInteractionText([]byte(`{"output_text":"{\"ok\":true}"}`)); err != nil || got != `{"ok":true}` {
-		t.Fatalf("output_text extraction = %q, %v", got, err)
-	}
-	if got, err := extractGeminiInteractionText([]byte(`{"output":[{"content":[{"text":"{\"ok\":true}"}]}]}`)); err != nil || got != `{"ok":true}` {
-		t.Fatalf("nested output extraction = %q, %v", got, err)
-	}
-}
-
 func TestGeminiStoryPlannerRejectsInvalidJSONForFallback(t *testing.T) {
 	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       ioNopCloser(`{"output_text":"not json"}`),
+			Body:       ioNopCloser(string(chatTypographyResponse("not json"))),
 		}, nil
 	})}
 	planner := GeminiStoryPlanner{
