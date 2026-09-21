@@ -69,6 +69,25 @@ func TestPlannerBuildsChronologicalCoherentStoryPlan(t *testing.T) {
 	}
 }
 
+func TestPlannerResolvesAutomaticBRollAnimation(t *testing.T) {
+	t.Parallel()
+
+	plan := models.StoryPlan{
+		TemplateConfiguration: models.VideoTemplateConfiguration{
+			OverlayAnimation: models.VideoTemplateAnimationAuto,
+		},
+		BRoll: []models.StoryBRoll{{
+			AssetID:    "photo-1",
+			MediaType:  models.MediaTypePhoto,
+			DurationMS: 1200,
+		}},
+	}
+	resolveAutoBRollAnimations(&plan)
+	if plan.BRoll[0].Animation != models.VideoTemplateAnimationScale {
+		t.Fatalf("short automatic overlay should resolve to scale: %+v", plan.BRoll[0])
+	}
+}
+
 func TestPlannerAppliesSubtitleColorInstruction(t *testing.T) {
 	t.Parallel()
 	planner := &Planner{Now: func() time.Time { return time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC) }}

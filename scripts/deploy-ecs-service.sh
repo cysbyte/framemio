@@ -29,12 +29,18 @@ require_var IMAGE
 : "${ECS_SQS_SCALE_IN_COOLDOWN:=60}"
 : "${ECS_SQS_SCALE_OUT_EVALUATION_PERIODS:=1}"
 : "${ECS_SQS_SCALE_IN_EVALUATION_PERIODS:=3}"
+: "${ECS_ENABLE_REQUEST_AUTOSCALING:=false}"
+: "${ECS_REQUEST_SCALE_OUT_CAPACITY:=1}"
+: "${ECS_REQUEST_SCALE_OUT_COOLDOWN:=60}"
+: "${ECS_REQUEST_SCALE_IN_COOLDOWN:=300}"
+: "${ECS_REQUEST_SCALE_OUT_EVALUATION_PERIODS:=1}"
+: "${ECS_REQUEST_SCALE_IN_EVALUATION_PERIODS:=5}"
 : "${ECS_CONTAINER_STOP_TIMEOUT:=}"
 : "${RDS_AUTO_START_ENABLED:=false}"
 : "${RDS_CLUSTER_IDENTIFIER:=}"
 : "${DATABASE_PROVIDER:=rds}"
 
-for numeric_var in ECS_SERVICE_DESIRED_COUNT ECS_MIN_CAPACITY ECS_MAX_CAPACITY ECS_SQS_SCALE_OUT_CAPACITY ECS_SQS_SCALE_OUT_COOLDOWN ECS_SQS_SCALE_IN_COOLDOWN ECS_SQS_SCALE_OUT_EVALUATION_PERIODS ECS_SQS_SCALE_IN_EVALUATION_PERIODS ECS_CONTAINER_STOP_TIMEOUT; do
+for numeric_var in ECS_SERVICE_DESIRED_COUNT ECS_MIN_CAPACITY ECS_MAX_CAPACITY ECS_SQS_SCALE_OUT_CAPACITY ECS_SQS_SCALE_OUT_COOLDOWN ECS_SQS_SCALE_IN_COOLDOWN ECS_SQS_SCALE_OUT_EVALUATION_PERIODS ECS_SQS_SCALE_IN_EVALUATION_PERIODS ECS_REQUEST_SCALE_OUT_CAPACITY ECS_REQUEST_SCALE_OUT_COOLDOWN ECS_REQUEST_SCALE_IN_COOLDOWN ECS_REQUEST_SCALE_OUT_EVALUATION_PERIODS ECS_REQUEST_SCALE_IN_EVALUATION_PERIODS ECS_CONTAINER_STOP_TIMEOUT; do
   value="${!numeric_var}"
   if [[ -z "$value" || "$value" =~ ^[0-9]+$ ]]; then
     :
@@ -215,6 +221,96 @@ configure_sqs_autoscaling() {
     LessThanOrEqualToThreshold \
     "$ECS_SQS_SCALE_IN_EVALUATION_PERIODS" \
     "$scale_in_policy_arn"
+}
+
+configure_request_autoscaling() {
+  if [[ "$ECS_ENABLE_REQUEST_AUTOSCALING" != "true" ]]; then
+    return 0
+  fi
+
+  local resource_id target_group_arn load_balancer_arn target_group_dimension load_balancer_dimension
+  local scale_out_policy_arn scale_in_policy_arn
+  resource_id="service/$ECS_CLUSTER/$ECS_SERVICE"
+
+  target_group_arn="$(aws ecs describe-services \
+    --region "$AWS_REGION" \
+    --cluster "$ECS_CLUSTER" \
+    --services "$ECS_SERVICE" \
+    --query 'services[0].loadBalancers[0].targetGroupArn' \
+    --output text)"
+  if [[ -z "$target_group_arn" || "$target_group_arn" == "None" ]]; then
+    echo "Cannot configure request autoscaling for $ECS_SERVICE: no target group is attached" >&2
+    exit 1
+  fi
+
+  load_balancer_arn="$(aws elbv2 describe-target-groups \
+    --region "$AWS_REGION" \
+    --target-group-arns "$target_group_arn" \
+    --query 'TargetGroups[0].LoadBalancerArns[0]' \
+    --output text)"
+  if [[ -z "$load_balancer_arn" || "$load_balancer_arn" == "None" ]]; then
+    echo "Cannot configure request autoscaling for $ECS_SERVICE: target group has no load balancer" >&2
+    exit 1
+  fi
+
+  target_group_dimension="${target_group_arn##*targetgroup/}"
+  load_balancer_dimension="${load_balancer_arn##*loadbalancer/}"
+
+  echo "Configuring request autoscaling for $ECS_SERVICE using load balancer $load_balancer_dimension"
+
+  scale_out_policy_arn="$(aws application-autoscaling put-scaling-policy \
+    --region "$AWS_REGION" \
+    --service-namespace ecs \
+    --scalable-dimension ecs:service:DesiredCount \
+    --resource-id "$resource_id" \
+    --policy-name "$ECS_SERVICE-request-scale-out" \
+    --policy-type StepScaling \
+    --step-scaling-policy-configuration "{\"AdjustmentType\":\"ExactCapacity\",\"Cooldown\":$ECS_REQUEST_SCALE_OUT_COOLDOWN,\"MetricAggregationType\":\"Maximum\",\"StepAdjustments\":[{\"MetricIntervalLowerBound\":0,\"ScalingAdjustment\":$ECS_REQUEST_SCALE_OUT_CAPACITY}]}" \
+    --query PolicyARN \
+    --output text)"
+
+  scale_in_policy_arn="$(aws application-autoscaling put-scaling-policy \
+    --region "$AWS_REGION" \
+    --service-namespace ecs \
+    --scalable-dimension ecs:service:DesiredCount \
+    --resource-id "$resource_id" \
+    --policy-name "$ECS_SERVICE-request-scale-in" \
+    --policy-type StepScaling \
+    --step-scaling-policy-configuration "{\"AdjustmentType\":\"ExactCapacity\",\"Cooldown\":$ECS_REQUEST_SCALE_IN_COOLDOWN,\"MetricAggregationType\":\"Maximum\",\"StepAdjustments\":[{\"MetricIntervalUpperBound\":0,\"ScalingAdjustment\":0}]}" \
+    --query PolicyARN \
+    --output text)"
+
+  aws cloudwatch put-metric-alarm \
+    --region "$AWS_REGION" \
+    --alarm-name "$ECS_SERVICE-request-scale-out" \
+    --alarm-description "Scale $ECS_SERVICE to $ECS_REQUEST_SCALE_OUT_CAPACITY when the backend load balancer receives a request." \
+    --namespace AWS/ApplicationELB \
+    --metric-name RequestCount \
+    --dimensions "Name=LoadBalancer,Value=$load_balancer_dimension" \
+    --statistic Sum \
+    --period 60 \
+    --evaluation-periods "$ECS_REQUEST_SCALE_OUT_EVALUATION_PERIODS" \
+    --datapoints-to-alarm "$ECS_REQUEST_SCALE_OUT_EVALUATION_PERIODS" \
+    --comparison-operator GreaterThanThreshold \
+    --threshold 0 \
+    --treat-missing-data notBreaching \
+    --alarm-actions "$scale_out_policy_arn" >/dev/null
+
+  aws cloudwatch put-metric-alarm \
+    --region "$AWS_REGION" \
+    --alarm-name "$ECS_SERVICE-request-scale-in" \
+    --alarm-description "Scale $ECS_SERVICE to 0 after the backend load balancer has been idle for five minutes." \
+    --namespace AWS/ApplicationELB \
+    --metric-name RequestCount \
+    --dimensions "Name=LoadBalancer,Value=$load_balancer_dimension" \
+    --statistic Sum \
+    --period 60 \
+    --evaluation-periods "$ECS_REQUEST_SCALE_IN_EVALUATION_PERIODS" \
+    --datapoints-to-alarm "$ECS_REQUEST_SCALE_IN_EVALUATION_PERIODS" \
+    --comparison-operator LessThanOrEqualToThreshold \
+    --threshold 0 \
+    --treat-missing-data breaching \
+    --alarm-actions "$scale_in_policy_arn" >/dev/null
 }
 
 echo "Fetching task definition $ECS_TASK_DEFINITION"
@@ -414,6 +510,7 @@ if [[ "$ECS_REGISTER_SCALABLE_TARGET" == "true" ]]; then
 fi
 
 configure_sqs_autoscaling
+configure_request_autoscaling
 
 aws ecs wait services-stable \
   --region "$AWS_REGION" \

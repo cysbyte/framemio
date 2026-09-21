@@ -201,6 +201,7 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 		CreatedAt:       now,
 	}
 	strategy.ApplyPlanDefaults(&plan, request)
+	resolveAutoBRollAnimations(&plan)
 	templates.ApplyPlanDefaults(&plan, request.TemplateConfiguration)
 	EnforceSceneTransitions(&plan, request.VideoAnalyses, visualStyle)
 	applyCaptionColorInstruction(&plan, request.UserInstructions)
@@ -224,6 +225,33 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 		return models.StoryPlan{}, err
 	}
 	return plan, nil
+}
+
+func resolveAutoBRollAnimations(plan *models.StoryPlan) {
+	if plan == nil || plan.TemplateConfiguration.OverlayAnimation != models.VideoTemplateAnimationAuto {
+		return
+	}
+	for index := range plan.BRoll {
+		overlay := &plan.BRoll[index]
+		if overlay.Animation != "" && overlay.Animation != models.VideoTemplateAnimationAuto {
+			continue
+		}
+		overlay.Animation = fallbackBRollAnimation(*overlay)
+	}
+}
+
+func fallbackBRollAnimation(overlay models.StoryBRoll) models.VideoTemplateAnimation {
+	reason := strings.ToLower(strings.TrimSpace(overlay.Reason))
+	if strings.Contains(reason, "action") || strings.Contains(reason, "movement") || strings.Contains(reason, "energy") {
+		return models.VideoTemplateAnimationMove
+	}
+	if overlay.DurationMS > 0 && overlay.DurationMS <= 1400 {
+		return models.VideoTemplateAnimationScale
+	}
+	if overlay.MediaType == models.MediaTypePhoto || overlay.MediaType == models.MediaTypeLivePhoto {
+		return models.VideoTemplateAnimationSubtleScale
+	}
+	return models.VideoTemplateAnimationFade
 }
 
 func storyMomentsDuration(moments []models.StoryMoment) int {

@@ -279,7 +279,7 @@ function validateInput(input: RenderInput, rendererVersion: string): void {
     if (overlay.frame && !['none', 'subtle', 'bold'].includes(overlay.frame)) {
       throw new RenderInputError(`unsupported b-roll frame at index ${index}`);
     }
-    if (overlay.animation && !['none', 'fade', 'subtle_scale'].includes(overlay.animation)) {
+    if (overlay.animation && !['none', 'fade', 'subtle_scale', 'scale', 'move'].includes(overlay.animation)) {
       throw new RenderInputError(`unsupported b-roll animation at index ${index}`);
     }
   }

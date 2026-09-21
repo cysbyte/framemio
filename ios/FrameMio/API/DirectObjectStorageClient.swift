@@ -11,8 +11,9 @@ final class URLSessionDirectObjectStorageClient: DirectObjectStorageClient, @unc
     private let backgroundDelegate: DirectUploadSessionDelegate
     private let foregroundSession: URLSession
     private let backgroundSession: URLSession
+    private let maximumUploadRetries: Int
 
-    init(backgroundIdentifier: String = "com.framemio.direct-uploads") {
+    init(backgroundIdentifier: String = "com.framemio.direct-uploads", maximumUploadRetries: Int = 2) {
         let foregroundDelegate = DirectUploadSessionDelegate()
         let backgroundDelegate = DirectUploadSessionDelegate()
         let foregroundConfiguration = URLSessionConfiguration.default
@@ -38,11 +39,43 @@ final class URLSessionDirectObjectStorageClient: DirectObjectStorageClient, @unc
             delegate: backgroundDelegate,
             delegateQueue: OperationQueue()
         )
+        self.maximumUploadRetries = max(0, maximumUploadRetries)
     }
 
     func upload(
         fileURL: URL,
         to presignedURL: URL,
+        headers: [String: String],
+        usesBackgroundSession: Bool,
+        progress: @escaping @Sendable (Int64, Int64) -> Void
+    ) async throws -> DirectObjectUploadResult {
+        var attempt = 0
+        while true {
+            do {
+                let result = try await uploadOnce(
+                    fileURL: fileURL,
+                    presignedURL: presignedURL,
+                    headers: headers,
+                    usesBackgroundSession: usesBackgroundSession,
+                    progress: progress
+                )
+                return result
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                guard attempt < maximumUploadRetries, isRetryableUploadError(error) else {
+                    throw error
+                }
+                attempt += 1
+                directUploadDebugLog("retrying upload host=\(presignedURL.host ?? "nil") attempt=\(attempt) error=\(error.localizedDescription)")
+                try await Task.sleep(for: .milliseconds(500 * (1 << min(attempt - 1, 3))))
+            }
+        }
+    }
+
+    private func uploadOnce(
+        fileURL: URL,
+        presignedURL: URL,
         headers: [String: String],
         usesBackgroundSession: Bool,
         progress: @escaping @Sendable (Int64, Int64) -> Void
@@ -72,6 +105,21 @@ final class URLSessionDirectObjectStorageClient: DirectObjectStorageClient, @unc
         } onCancel: {
             task.cancel()
         }
+    }
+
+    private func isRetryableUploadError(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .networkConnectionLost, .timedOut, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .notConnectedToInternet:
+                return true
+            default:
+                return false
+            }
+        }
+        if case let AppError.server(statusCode) = error {
+            return statusCode == 408 || statusCode == 425 || statusCode == 429 || statusCode == 500 || statusCode == 502 || statusCode == 503 || statusCode == 504
+        }
+        return false
     }
 }
 

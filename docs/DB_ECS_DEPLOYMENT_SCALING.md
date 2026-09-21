@@ -127,7 +127,8 @@ Three workflows build Docker images, push them to ECR, register a new task defin
 4. The workflow pushes both `sha-<12-char-sha>` and `latest` tags to ECR.
 5. `scripts/deploy-ecs-service.sh` reads the existing task definition, updates the image and selected environment variables, and registers a new revision.
 6. The script updates the ECS service, or creates it if it does not exist.
-7. Worker workflows keep service desired count at `0` and register scalable targets `min=0`, `max=1`.
+7. The backend workflow registers a scalable target with `min=0`, `max=1` and configures request-based scale-to-zero.
+8. Worker workflows keep service desired count at `0` and register scalable targets `min=0`, `max=1`.
 
 ### Trigger Rules
 
@@ -186,9 +187,10 @@ The GitHub Actions role needs permissions to:
 - Describe, register, create, update, and wait for ECS services/task definitions.
 - Pass `arn:aws:iam::450876624497:role/ecsTaskExecutionRole` and `arn:aws:iam::450876624497:role/FramemioECSTaskRole` to ECS.
 - Register ECS Application Auto Scaling scalable targets for worker services and keep worker services at `desiredCount=0` after deploys.
+- Read ECS target-group wiring and create/update CloudWatch request alarms for backend autoscaling.
 - For RDS/Aurora deployments with auto-start enabled, describe and start the configured DB cluster.
 
-The scalable-target permission is required because worker workflows run this on every worker deploy, while also setting the worker ECS service desired count to `0`. Neon deployments also require the ECS task execution role to read the secret or parameter referenced by `DATABASE_URL_SECRET_ARN`.
+The autoscaling permissions are required because worker workflows register scalable targets, while the backend workflow also inspects its ALB target group and creates request alarms. Neon deployments also require the ECS task execution role to read the secret or parameter referenced by `DATABASE_URL_SECRET_ARN`.
 
 
 ```bash
@@ -207,7 +209,7 @@ Last verified after workflow runs `32583031900`, `32583031868`, and `32583031887
 
 | Service | Desired | Running | Task Definition |
 | --- | ---: | ---: | --- |
-| `framemio-backend-service-bvglq3iy` | `1` | `1` | `framemio-backend:8` |
+| `framemio-backend-service-bvglq3iy` | `0` when idle | `0` when idle | `framemio-backend:170` |
 | `framemio-video-intelligence-worker-service-xuttbpns` | `0` | `0` | `framemio-video-intelligence-worker:9` |
 | `framemio-render-worker-service-chw8cyt4` | `0` | `0` | `framemio-render-worker:6` |
 
@@ -231,10 +233,13 @@ FrameMio uses zero-idle one-off ECS tasks for workers, matching the `product-vid
 
 ### Backend API
 
-- ECS service desired count: `1`
-- Running count target: `1`
+- ECS service desired count: `1` during deployment and while serving traffic.
+- Application Auto Scaling target: `min=0`, `max=1`.
+- A load-balancer request alarm scales the service to `1` after a request is observed.
+- An idle request alarm scales the service to `0` after five consecutive one-minute periods without requests.
+- Because ECS starts from zero tasks, the first request during a cold start can receive an ALB `503` while the task launches and passes health checks.
 - Exposed through its service/load-balancer configuration.
-- It remains online to handle iOS/API requests and to enqueue work.
+- It handles iOS/API requests and enqueues work whenever the task is running.
 
 ### Video Intelligence Worker
 

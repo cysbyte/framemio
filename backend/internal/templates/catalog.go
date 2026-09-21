@@ -9,7 +9,7 @@ import (
 
 var catalog = []models.VideoTemplate{
 	fullFrameTemplate("full-screen-cinematic-cutaways", models.ProjectTypeStory, "Cinematic cutaways", "Let each supporting moment take the full frame.", "/videos/templates/full-screen-cinematic-cutaways.mp4", 30, models.VisualStyleCinematic, true, "bold_social", "balanced", "Use relevant supporting media as full-frame cutaways while preserving the primary story audio."),
-	pipTemplate("photo-over-video", models.ProjectTypeStory, "Photo over video", "Keep the video moving while a supporting photo appears above it.", "/videos/templates/photo-over-video.mp4", 30, models.VisualStyleCinematic, true, "bold_social", "balanced", models.VideoTemplatePlacementBottomRight, models.VideoTemplateSizeMedium, models.VideoTemplateAnimationFade, "Prefer one strong base video and one semantically related supporting photo. The base video must continue playing underneath the photo."),
+	photoOverVideoTemplate(),
 	pipTemplate("picture-in-picture", models.ProjectTypeStory, "Picture in picture", "Layer a secondary moment over the main video like a small memory window.", "/videos/templates/picture-in-picture.mp4", 30, models.VisualStyleWarm, true, "clean_minimal", "more", models.VideoTemplatePlacementTopRight, models.VideoTemplateSizeSmall, models.VideoTemplateAnimationSubtleScale, "Use a visually distinct supporting moment in a small secondary window over the strongest base scene."),
 	fullFrameTemplate("warm-memory-recap", models.ProjectTypeStory, "Warm memory recap", "A gentle story with soft pacing and warm full-frame moments.", "/videos/templates/warm-memory-recap.mp4", 30, models.VisualStyleWarm, true, "clean_minimal", "balanced", "Favor emotionally connected moments, warm crops, and gentle full-frame cutaways."),
 	pipTemplate("caption-led-memory", models.ProjectTypeStory, "Caption-led memory", "A readable story where captions carry the emotional thread.", "/videos/templates/caption-led-memory.mp4", 30, models.VisualStyleMinimal, true, "bold_social", "more", models.VideoTemplatePlacementBottomLeft, models.VideoTemplateSizeMedium, models.VideoTemplateAnimationFade, "Use overlays sparingly and keep captions readable while selecting supporting images that reinforce the narration."),
@@ -39,6 +39,27 @@ func pipTemplate(id string, projectType models.ProjectType, name, description, d
 		{ID: "base_video", Role: "primary_video", MediaTypes: []models.MediaType{models.MediaTypeVideo}, Required: true, Presentation: models.VideoTemplateLayoutFullFrame},
 		{ID: "overlay_media", Role: "supporting_media", MediaTypes: []models.MediaType{models.MediaTypePhoto, models.MediaTypeLivePhoto, models.MediaTypeVideo}, Required: true, Presentation: models.VideoTemplateLayoutPictureInPicture, AllowedPlacements: []models.VideoTemplatePlacement{models.VideoTemplatePlacementTopLeft, models.VideoTemplatePlacementTopRight, models.VideoTemplatePlacementBottomLeft, models.VideoTemplatePlacementBottomRight, models.VideoTemplatePlacementCenter}, AllowedSizes: []models.VideoTemplateSize{models.VideoTemplateSizeSmall, models.VideoTemplateSizeMedium, models.VideoTemplateSizeLarge}},
 	}, guidance, []string{"full_frame_media", "picture_in_picture", "placement", "bounded_size", "opacity", "frame", "fade", "subtle_scale", "duration_mode_full_source"})
+}
+
+func photoOverVideoTemplate() models.VideoTemplate {
+	template := pipTemplate(
+		"photo-over-video",
+		models.ProjectTypeStory,
+		"Photo over video",
+		"Keep the video moving while a supporting photo appears above it.",
+		"/videos/templates/photo-over-video.mp4",
+		30,
+		models.VisualStyleCinematic,
+		true,
+		"bold_social",
+		"balanced",
+		models.VideoTemplatePlacementBottomRight,
+		models.VideoTemplateSizeMedium,
+		models.VideoTemplateAnimationAuto,
+		"Prefer one strong base video and one semantically related supporting photo. The base video must continue playing underneath the photo. Choose the supporting photo animation per overlay based on the image's narrative role and pacing.",
+	)
+	template.RendererCapabilities = append(template.RendererCapabilities, "scale", "move")
+	return template
 }
 
 func splitTemplate(id string, projectType models.ProjectType, name, description, demoPath string, duration int, style models.VisualStyle, captions bool, captionStyle, sceneDetail, guidance string) models.VideoTemplate {
@@ -213,8 +234,11 @@ func ValidateConfiguration(template models.VideoTemplate, config models.VideoTem
 	if config.OverlayPlacement == "" || config.OverlaySize == "" || config.OverlayFrame == "" || config.OverlayAnimation == "" {
 		return fmt.Errorf("template overlay configuration is incomplete")
 	}
-	if !validPlacement(config.OverlayPlacement) || !validSize(config.OverlaySize) || !validFrame(config.OverlayFrame) || !validAnimation(config.OverlayAnimation) {
+	if !validPlacement(config.OverlayPlacement) || !validSize(config.OverlaySize) || !validFrame(config.OverlayFrame) || !validConfigurationAnimation(template, config.OverlayAnimation) {
 		return fmt.Errorf("template overlay configuration contains an unsupported value")
+	}
+	if (config.OverlayAnimation == models.VideoTemplateAnimationScale || config.OverlayAnimation == models.VideoTemplateAnimationMove) && !contains(template.RendererCapabilities, string(config.OverlayAnimation)) {
+		return fmt.Errorf("template does not support overlay animation %q", config.OverlayAnimation)
 	}
 	if len(template.MediaSlots) == 0 {
 		return fmt.Errorf("template must define at least one media slot")
@@ -249,7 +273,11 @@ func ApplyPlanDefaults(plan *models.StoryPlan, config models.VideoTemplateConfig
 			overlay.Frame = config.OverlayFrame
 		}
 		if overlay.Animation == "" {
-			overlay.Animation = config.OverlayAnimation
+			if config.OverlayAnimation == models.VideoTemplateAnimationAuto {
+				overlay.Animation = models.VideoTemplateAnimationFade
+			} else {
+				overlay.Animation = config.OverlayAnimation
+			}
 		}
 	}
 }
@@ -299,6 +327,9 @@ func ValidatePlan(plan models.StoryPlan) error {
 		}
 		if overlay.Animation != "" && !validAnimation(overlay.Animation) {
 			return fmt.Errorf("b-roll %d animation %q is unsupported", index, overlay.Animation)
+		}
+		if overlay.Animation != "" && !contains(template.RendererCapabilities, string(overlay.Animation)) {
+			return fmt.Errorf("b-roll %d animation %q is not supported by template %q", index, overlay.Animation, template.ID)
 		}
 	}
 	return nil
@@ -433,11 +464,18 @@ func validFrame(value models.VideoTemplateFrame) bool {
 
 func validAnimation(value models.VideoTemplateAnimation) bool {
 	switch value {
-	case models.VideoTemplateAnimationNone, models.VideoTemplateAnimationFade, models.VideoTemplateAnimationSubtleScale:
+	case models.VideoTemplateAnimationNone, models.VideoTemplateAnimationFade, models.VideoTemplateAnimationSubtleScale, models.VideoTemplateAnimationScale, models.VideoTemplateAnimationMove:
 		return true
 	default:
 		return false
 	}
+}
+
+func validConfigurationAnimation(template models.VideoTemplate, value models.VideoTemplateAnimation) bool {
+	if value == models.VideoTemplateAnimationAuto {
+		return template.ID == "photo-over-video"
+	}
+	return validAnimation(value)
 }
 
 func templateSupportsPresentation(template models.VideoTemplate, presentation models.VideoTemplateLayout) bool {

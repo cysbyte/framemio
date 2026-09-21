@@ -43,9 +43,12 @@ const (
 type VideoTemplateAnimation string
 
 const (
+	VideoTemplateAnimationAuto        VideoTemplateAnimation = "auto"
 	VideoTemplateAnimationNone        VideoTemplateAnimation = "none"
 	VideoTemplateAnimationFade        VideoTemplateAnimation = "fade"
 	VideoTemplateAnimationSubtleScale VideoTemplateAnimation = "subtle_scale"
+	VideoTemplateAnimationScale       VideoTemplateAnimation = "scale"
+	VideoTemplateAnimationMove        VideoTemplateAnimation = "move"
 )
 
 type DurationMode string

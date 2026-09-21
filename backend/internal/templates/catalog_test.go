@@ -93,6 +93,50 @@ func TestResolveAppliesDefaultsAndSupportedOverrides(t *testing.T) {
 	}
 }
 
+func TestPhotoOverVideoAllowsAutomaticAndExplicitOverlayAnimations(t *testing.T) {
+	t.Parallel()
+
+	_, automatic, err := Resolve(models.ProjectTypeStory, "photo-over-video", 1, models.VideoTemplateConfiguration{
+		OverlayAnimation: models.VideoTemplateAnimationAuto,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if automatic.OverlayAnimation != models.VideoTemplateAnimationAuto {
+		t.Fatalf("automatic animation was not preserved: %+v", automatic)
+	}
+
+	_, explicit, err := Resolve(models.ProjectTypeStory, "photo-over-video", 1, models.VideoTemplateConfiguration{
+		OverlayAnimation: models.VideoTemplateAnimationMove,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explicit.OverlayAnimation != models.VideoTemplateAnimationMove {
+		t.Fatalf("explicit animation was not preserved: %+v", explicit)
+	}
+}
+
+func TestApplyPlanDefaultsFallsBackWhenAutomaticAnimationIsUnresolved(t *testing.T) {
+	t.Parallel()
+
+	_, configuration, err := Resolve(models.ProjectTypeStory, "photo-over-video", 1, models.VideoTemplateConfiguration{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	configuration.OverlayAnimation = models.VideoTemplateAnimationAuto
+	plan := models.StoryPlan{
+		TemplateID:            "photo-over-video",
+		TemplateVersion:       1,
+		TemplateConfiguration: configuration,
+		BRoll:                 []models.StoryBRoll{{AssetID: "photo-1"}},
+	}
+	ApplyPlanDefaults(&plan, configuration)
+	if plan.BRoll[0].Animation != models.VideoTemplateAnimationFade {
+		t.Fatalf("unresolved automatic animation should fall back to fade: %+v", plan.BRoll[0])
+	}
+}
+
 func TestResolveAllowsFullSourceOnlyForSupportedTemplates(t *testing.T) {
 	t.Parallel()
 	_, resolved, err := Resolve(models.ProjectTypeReel, "talking-head-reel", 1, models.VideoTemplateConfiguration{

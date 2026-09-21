@@ -36,7 +36,7 @@ struct ProfileView: View {
             viewModel.refreshEntitlements()
         }
         .refreshable {
-            creditStore.refresh()
+            creditStore.refresh(force: true)
             viewModel.refreshEntitlements()
         }
     }

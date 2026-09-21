@@ -161,23 +161,41 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
                 idempotencyKey: upload.effectiveAuthorizationIdempotencyKey
             )
             let previousMediaID = upload.mediaID
-            upload.session = session
-            upload.mediaID = session.mediaID
-            upload.updatedAt = Date()
+            let validatedSession: UploadSession
+            if session.isAlreadyUploaded,
+               let previousSession = upload.session,
+               previousSession.uploadID == session.uploadID,
+               previousSession.mediaID == session.mediaID,
+               previousSession.s3Key == session.s3Key {
+                validatedSession = mergeCompletedParts(from: previousSession, into: session)
+            } else {
+                validatedSession = session
+            }
 
-            if session.isAlreadyUploaded {
+            let changed = upload.session != validatedSession
+                || upload.mediaID != validatedSession.mediaID
+                || upload.status != .completed
+                || upload.uploadedBytes != upload.fileSizeBytes
+            upload.session = validatedSession
+            upload.mediaID = validatedSession.mediaID
+
+            if validatedSession.isAlreadyUploaded {
                 upload.status = .completed
                 upload.uploadedBytes = upload.fileSizeBytes
-                try await store.save(upload)
-                mediaUploadDebugLog("validated completed upload cache upload=\(upload.id) asset=\(asset.id) media=\(session.mediaID) session=\(session.uploadID)")
+                if changed {
+                    upload.updatedAt = Date()
+                    try await store.save(upload)
+                }
+                mediaUploadDebugLog("validated completed upload cache upload=\(upload.id) asset=\(asset.id) media=\(validatedSession.mediaID) session=\(validatedSession.uploadID)")
                 uploads.append(upload)
                 continue
             }
 
-            mediaUploadDebugLog("completed upload cache stale upload=\(upload.id) asset=\(asset.id) old_media=\(previousMediaID ?? "nil") new_media=\(session.mediaID) session=\(session.uploadID)")
+            mediaUploadDebugLog("completed upload cache stale upload=\(upload.id) asset=\(asset.id) old_media=\(previousMediaID ?? "nil") new_media=\(validatedSession.mediaID) session=\(validatedSession.uploadID)")
             upload.status = .queued
             upload.uploadedBytes = 0
             upload.lastError = nil
+            upload.updatedAt = Date()
             try await store.save(upload)
             return nil
         }
@@ -418,6 +436,8 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
             )
 
             mediaUploadDebugLog("notify completion done upload=\(record.id) session=\(session.uploadID) media=\(session.mediaID)")
+            session.completed = true
+            record.session = session
             record.status = .completed
             record.uploadedBytes = record.fileSizeBytes
             record.stagedFileURL = nil

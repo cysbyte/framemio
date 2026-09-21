@@ -200,7 +200,7 @@ function normalizeFrame(value?: VideoTemplateFrame): VideoTemplateFrame {
 }
 
 function normalizeAnimation(value?: VideoTemplateAnimation): VideoTemplateAnimation {
-  return value === 'fade' || value === 'subtle_scale' || value === 'none' ? value : 'none';
+  return value === 'fade' || value === 'subtle_scale' || value === 'scale' || value === 'move' || value === 'none' ? value : 'none';
 }
 
 function normalizeZIndex(value?: number): number {

@@ -61,7 +61,7 @@ struct SettingsView: View {
             ) {
                 FrameMioHaptics.secondaryAction()
                 viewModel.restorePurchases {
-                    creditStore.refresh()
+                    creditStore.refresh(force: true)
                 }
             }
             .disabled(viewModel.isRestoringPurchases)

@@ -74,7 +74,10 @@ struct HomeView: View {
             viewModel.load()
             creditStore.refresh()
         }
-        .refreshable { viewModel.load() }
+        .refreshable {
+            viewModel.load()
+            creditStore.refresh(force: true)
+        }
         .animation(FrameMioAnimation.gentle(reduceMotion: reduceMotion), value: viewModel.isLoading)
         .animation(FrameMioAnimation.gentle(reduceMotion: reduceMotion), value: viewModel.stories)
         .alert("Couldn’t load stories", isPresented: errorBinding) {

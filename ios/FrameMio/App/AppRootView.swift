@@ -229,12 +229,12 @@ struct AppRootView: View {
     }
 
     private func refreshCredits() {
-        creditStore.refresh()
+        creditStore.refresh(force: true)
     }
 
     private func completePurchaseFlow() {
+        purchaseRoutingDebugLog("purchase_completed current_tab=\(String(describing: selectedTab))")
         refreshCredits()
-        selectedTab = .profile
         purchaseDestination = nil
     }
 
@@ -1014,7 +1014,11 @@ struct ProjectConfigurationView: View {
         if template.editableOptions.contains("overlay_size") { resolved.overlaySize = previous.overlaySize }
         if template.editableOptions.contains("overlay_opacity") { resolved.overlayOpacity = previous.overlayOpacity }
         if template.editableOptions.contains("overlay_frame") { resolved.overlayFrame = previous.overlayFrame }
-        if template.editableOptions.contains("overlay_animation") { resolved.overlayAnimation = previous.overlayAnimation }
+        if template.editableOptions.contains("overlay_animation"),
+           let previousAnimation = previous.overlayAnimation,
+           previousAnimation == "auto" ? template.id == "photo-over-video" : template.rendererCapabilities.contains(previousAnimation) {
+            resolved.overlayAnimation = previousAnimation
+        }
         return resolved
     }
 }
@@ -1286,7 +1290,9 @@ private struct ProjectTemplateSettingsSheet: View {
                 TemplateOptionMenu(
                     title: "Motion",
                     selection: configuration.overlayAnimation ?? "fade",
-                    options: ["none", "fade", "subtle_scale"]
+                    options: template.id == "photo-over-video"
+                        ? ["auto", "none", "fade", "scale", "move"]
+                        : ["none", "fade", "subtle_scale"]
                 ) {
                     configuration.overlayAnimation = $0
                 }

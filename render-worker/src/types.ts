@@ -9,7 +9,7 @@ export type VideoTemplateLayout = 'full_frame' | 'picture_in_picture' | 'split_s
 export type VideoTemplatePlacement = 'top_left' | 'top_right' | 'bottom_left' | 'bottom_right' | 'center' | 'left' | 'right';
 export type VideoTemplateSize = 'small' | 'medium' | 'large' | 'half';
 export type VideoTemplateFrame = 'none' | 'subtle' | 'bold';
-export type VideoTemplateAnimation = 'none' | 'fade' | 'subtle_scale';
+export type VideoTemplateAnimation = 'auto' | 'none' | 'fade' | 'subtle_scale' | 'scale' | 'move';
 
 export interface VideoTemplateConfiguration {
   aspect_ratio?: AspectRatio | string;

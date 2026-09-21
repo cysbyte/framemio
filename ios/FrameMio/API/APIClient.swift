@@ -16,17 +16,23 @@ final class URLSessionAPIClient: APIClient, @unchecked Sendable {
     private let session: URLSession
     private let tokenProvider: AuthTokenProvider
     private let maxNetworkRetries: Int
+    private let maxTransientStatusRetries: Int
+    private let retryBaseDelayNanoseconds: UInt64
 
     init(
         baseURL: URL,
         session: URLSession = .shared,
         tokenProvider: AuthTokenProvider,
-        maxNetworkRetries: Int = 1
+        maxNetworkRetries: Int = 2,
+        maxTransientStatusRetries: Int = 5,
+        retryBaseDelayNanoseconds: UInt64 = 1_000_000_000
     ) {
         self.baseURL = baseURL
         self.session = session
         self.tokenProvider = tokenProvider
         self.maxNetworkRetries = max(0, maxNetworkRetries)
+        self.maxTransientStatusRetries = max(0, maxTransientStatusRetries)
+        self.retryBaseDelayNanoseconds = retryBaseDelayNanoseconds
     }
 
     func data(for request: APIRequest) async throws -> Data {
@@ -50,12 +56,12 @@ final class URLSessionAPIClient: APIClient, @unchecked Sendable {
         }
 
         apiClientDebugLog("request start method=\(request.method.rawValue) path=\(request.path) host=\(url.host ?? "nil")")
-        let (data, httpResponse) = try await dataWithTransientRetry(for: urlRequest)
+        let (data, httpResponse) = try await dataWithTransientRetry(for: urlRequest, apiRequest: request)
         apiClientDebugLog("request response method=\(request.method.rawValue) path=\(request.path) status=\(httpResponse.statusCode)")
 
         if httpResponse.statusCode == 401,
            urlRequest.value(forHTTPHeaderField: "Authorization") != nil,
-           let retryData = try await retryWithFreshToken(urlRequest) {
+           let retryData = try await retryWithFreshToken(urlRequest, apiRequest: request) {
             return retryData
         }
 
@@ -90,8 +96,9 @@ final class URLSessionAPIClient: APIClient, @unchecked Sendable {
         return url
     }
 
-    private func dataWithTransientRetry(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        var attempts = 0
+    private func dataWithTransientRetry(for request: URLRequest, apiRequest: APIRequest) async throws -> (Data, HTTPURLResponse) {
+        var networkRetries = 0
+        var statusRetries = 0
         while true {
             do {
                 let (data, response) = try await session.data(for: request)
@@ -99,16 +106,36 @@ final class URLSessionAPIClient: APIClient, @unchecked Sendable {
                 guard let httpResponse = response as? HTTPURLResponse else {
                     throw APIClientError.invalidResponse
                 }
+                if canRetry(apiRequest),
+                   isRetryableHTTPStatus(httpResponse.statusCode),
+                   statusRetries < maxTransientStatusRetries {
+                    statusRetries += 1
+                    apiClientDebugLog("request retry status method=\(apiRequest.method.rawValue) path=\(apiRequest.path) status=\(httpResponse.statusCode) attempt=\(statusRetries)")
+                    try await sleepBeforeRetry(attempts: statusRetries, response: httpResponse)
+                    continue
+                }
                 return (data, httpResponse)
             } catch {
                 try Task.checkCancellation()
-                guard attempts < maxNetworkRetries, isTransientNetworkFailure(error) else {
-                    apiClientDebugLog("request failed url=\(request.url?.absoluteString ?? "nil") attempts=\(attempts + 1) error=\(error.localizedDescription)")
+                guard canRetry(apiRequest),
+                      networkRetries < maxNetworkRetries,
+                      isTransientNetworkFailure(error) else {
+                    apiClientDebugLog("request failed url=\(request.url?.absoluteString ?? "nil") attempts=\(networkRetries + 1) error=\(error.localizedDescription)")
                     throw error
                 }
-                attempts += 1
-                apiClientDebugLog("request retry url=\(request.url?.absoluteString ?? "nil") attempt=\(attempts) error=\(error.localizedDescription)")
+                networkRetries += 1
+                apiClientDebugLog("request retry url=\(request.url?.absoluteString ?? "nil") attempt=\(networkRetries) error=\(error.localizedDescription)")
+                try await sleepBeforeRetry(attempts: networkRetries, response: nil)
             }
+        }
+    }
+
+    private func canRetry(_ request: APIRequest) -> Bool {
+        switch request.method {
+        case .get, .delete:
+            return true
+        case .post, .patch:
+            return request.headers["Idempotency-Key"] != nil
         }
     }
 
@@ -124,14 +151,38 @@ final class URLSessionAPIClient: APIClient, @unchecked Sendable {
         }
     }
 
-    private func retryWithFreshToken(_ originalRequest: URLRequest) async throws -> Data? {
+    private func isRetryableHTTPStatus(_ statusCode: Int) -> Bool {
+        statusCode == 408 || statusCode == 425 || statusCode == 429 || statusCode == 500 || statusCode == 502 || statusCode == 503 || statusCode == 504
+    }
+
+    private func sleepBeforeRetry(attempts: Int, response: HTTPURLResponse?) async throws {
+        let retryAfterDelay = response.flatMap(retryAfterDelayNanoseconds)
+        let backoffDelay = retryBaseDelayNanoseconds * UInt64(1 << min(attempts - 1, 3))
+        let delay = min(retryAfterDelay ?? backoffDelay, 8_000_000_000)
+        if delay > 0 {
+            try await Task.sleep(nanoseconds: delay)
+        }
+    }
+
+    private func retryAfterDelayNanoseconds(from response: HTTPURLResponse) -> UInt64? {
+        guard let retryAfter = response.value(forHTTPHeaderField: "Retry-After")?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !retryAfter.isEmpty else {
+            return nil
+        }
+        if let seconds = Double(retryAfter), seconds >= 0 {
+            return UInt64(seconds * 1_000_000_000)
+        }
+        return nil
+    }
+
+    private func retryWithFreshToken(_ originalRequest: URLRequest, apiRequest: APIRequest) async throws -> Data? {
         await tokenProvider.invalidateAccessToken()
         guard let token = await tokenProvider.accessToken() else {
             return nil
         }
         var request = originalRequest
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, httpResponse) = try await dataWithTransientRetry(for: request)
+        let (data, httpResponse) = try await dataWithTransientRetry(for: request, apiRequest: apiRequest)
         guard (200..<300).contains(httpResponse.statusCode) else {
             throw APIClientError.server(statusCode: httpResponse.statusCode, payload: data)
         }
@@ -354,7 +405,7 @@ final class RemoteCreditService: CreditService, @unchecked Sendable {
     private let apiClient: APIClient
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
-    private let balanceCache = RemoteCreditBalanceCache(ttlSeconds: 2)
+    private let balanceCache = RemoteCreditBalanceCache(ttlSeconds: 30)
 
     init(apiClient: APIClient) {
         self.apiClient = apiClient

@@ -228,6 +228,7 @@ final class VideoProjectCreationTests: XCTestCase {
         XCTAssertEqual(story.projectType, VideoProjectType.story)
         XCTAssertEqual(requests.map { $0.path }, ["/v1/stories"])
         XCTAssertEqual(requests.first?.method, APIRequest.Method.post)
+        XCTAssertNotNil(requests.first?.headers["Idempotency-Key"])
     }
 
     func testPromoCreationUsesGenericProjectAPIAndAnalysis() async throws {
@@ -267,6 +268,8 @@ final class VideoProjectCreationTests: XCTestCase {
         XCTAssertEqual(promo["promotion_goal"] as? String, "Drive downloads")
         XCTAssertEqual(promo["desired_duration_seconds"] as? Int, 30)
         XCTAssertEqual(promo["duration_mode"] as? String, "fixed")
+        XCTAssertNotNil(requests[0].headers["Idempotency-Key"])
+        XCTAssertNotNil(requests[1].headers["Idempotency-Key"])
     }
 
     func testReelCreationUsesGenericProjectAPIAndAnalysis() async throws {
@@ -308,6 +311,8 @@ final class VideoProjectCreationTests: XCTestCase {
         XCTAssertEqual(reel["hook_preference"] as? String, "strong opening hook")
         XCTAssertEqual(reel["caption_style"] as? String, "bold_social")
         XCTAssertEqual(reel["aspect_ratio"] as? String, "9:16")
+        XCTAssertNotNil(requests[0].headers["Idempotency-Key"])
+        XCTAssertNotNil(requests[1].headers["Idempotency-Key"])
     }
 
     private static func asset(id: String) -> MediaAsset {
@@ -378,6 +383,7 @@ private actor RecordingAPIClient: APIClient {
         let method: APIRequest.Method
         let path: String
         let body: Data?
+        let headers: [String: String]
 
         var jsonBody: [String: Any]? {
             guard let body else { return nil }
@@ -393,7 +399,7 @@ private actor RecordingAPIClient: APIClient {
     }
 
     func data(for request: APIRequest) async throws -> Data {
-        requests.append(RecordedRequest(method: request.method, path: request.path, body: request.body))
+        requests.append(RecordedRequest(method: request.method, path: request.path, body: request.body, headers: request.headers))
         guard !responses.isEmpty else {
             return Data()
         }

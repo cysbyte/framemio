@@ -55,7 +55,7 @@ final class MediaUploadTests: XCTestCase {
         XCTAssertEqual(resumed.first?.status, .completed)
         XCTAssertEqual(materializationCount, 1)
         XCTAssertEqual(requestCount, 4)
-        XCTAssertEqual(createSessionCallCount, 1)
+        XCTAssertEqual(createSessionCallCount, 2)
     }
 
     func testFailedPartRetriesWithoutRestartingCompletedParts() async throws {
@@ -183,7 +183,7 @@ final class MediaUploadTests: XCTestCase {
         XCTAssertEqual(first, second)
         XCTAssertEqual(materializationCount, 1)
         XCTAssertEqual(requestCount, 1)
-        XCTAssertEqual(createSessionCallCount, 1)
+        XCTAssertEqual(createSessionCallCount, 2)
         XCTAssertEqual(notificationCount, 1)
     }
 
@@ -192,7 +192,7 @@ final class MediaUploadTests: XCTestCase {
         let newAsset = makeAsset(id: "new-photo", kind: .image)
         let completedUpload = makeUploadRecord(asset: completedAsset, status: .completed)
         let source = makeSource(asset: newAsset, byteCount: 512)
-        let authorizer = MockMediaUploadAuthorizer()
+        let authorizer = MockMediaUploadAuthorizer(completedAssetIDs: [completedAsset.id])
         let storage = MockDirectObjectStorageClient()
         let store = MockMediaUploadStore(uploads: [completedUpload])
         let service = makeService(source: source, authorizer: authorizer, storage: storage, store: store)
@@ -439,6 +439,57 @@ final class MediaUploadTests: XCTestCase {
         XCTAssertEqual(backgroundFlags, [false])
     }
 
+    func testRemoteUploadAuthorizerUsesStableIdempotencyHeaders() async throws {
+        let apiClient = UploadRecordingAPIClient(responses: [
+            Self.uploadSessionResponse(),
+            Data(),
+            Data()
+        ])
+        let authorizer = RemoteMediaUploadAuthorizer(apiClient: apiClient)
+        let metadata = MediaUploadMetadata(
+            assetID: "asset-1",
+            sourceAssetID: "local-asset-1",
+            mediaType: .video,
+            contentType: "video/quicktime",
+            fileName: "asset-1.mov",
+            fileSizeBytes: 4,
+            duration: 2,
+            creationDate: nil,
+            pixelWidth: 1920,
+            pixelHeight: 1080,
+            orientation: .landscape,
+            optimization: .original,
+            preferredPartSizeBytes: 5 * 1_024 * 1_024
+        )
+        let session = try await authorizer.createUploadSession(
+            metadata: metadata,
+            idempotencyKey: "upload-key-1"
+        )
+        try await authorizer.completeMultipartUpload(
+            session: session,
+            parts: [MultipartPartCompletion(partNumber: 1, eTag: "etag-1")]
+        )
+        try await authorizer.notifyUploadCompleted(
+            UploadCompletionNotification(
+                mediaId: session.mediaID,
+                uploadId: session.uploadID,
+                s3Key: session.s3Key,
+                mediaType: .video,
+                duration: 2
+            )
+        )
+
+        let requests = await apiClient.requests
+        XCTAssertEqual(requests.map(\.path), [
+            "/v1/media/upload-sessions",
+            "/v1/media/upload-sessions/upload-1/complete",
+            "/v1/media/uploads/complete"
+        ])
+        XCTAssertEqual(requests[0].headers["Idempotency-Key"], "upload-key-1")
+        XCTAssertEqual(requests[1].headers["Idempotency-Key"], "ios-upload-complete-upload-1")
+        XCTAssertEqual(requests[2].headers["Idempotency-Key"], "ios-upload-notify-upload-1")
+    }
+
     private func makeService(
         source: MockOriginalMediaSource,
         authorizer: MockMediaUploadAuthorizer,
@@ -550,5 +601,58 @@ final class MediaUploadTests: XCTestCase {
             partSizeBytes: Int64(partSizeBytes),
             maximumTotalUploadBytes: maximumTotalUploadBytes
         )
+    }
+
+    private static func uploadSessionResponse() -> Data {
+        Data("""
+        {
+          "uploadID": "upload-1",
+          "mediaID": "media-1",
+          "s3Key": "media/asset-1",
+          "strategy": "single",
+          "partSizeBytes": 5242880,
+          "s3MultipartUploadID": null,
+          "expiresAt": "2099-01-01T00:00:00Z",
+          "completed": false,
+          "parts": [
+            {
+              "partNumber": 1,
+              "offsetBytes": 0,
+              "lengthBytes": 4,
+              "presignedURL": "https://s3.example.test/upload-1",
+              "status": "pending",
+              "attempts": 0,
+              "eTag": null,
+              "lastError": null
+            }
+          ]
+        }
+        """.utf8)
+    }
+}
+
+private actor UploadRecordingAPIClient: APIClient {
+    struct RecordedRequest: Sendable {
+        let method: APIRequest.Method
+        let path: String
+        let headers: [String: String]
+    }
+
+    private(set) var requests: [RecordedRequest] = []
+    private var responses: [Data]
+
+    init(responses: [Data]) {
+        self.responses = responses
+    }
+
+    func data(for request: APIRequest) async throws -> Data {
+        requests.append(
+            RecordedRequest(
+                method: request.method,
+                path: request.path,
+                headers: request.headers
+            )
+        )
+        return responses.isEmpty ? Data() : responses.removeFirst()
     }
 }

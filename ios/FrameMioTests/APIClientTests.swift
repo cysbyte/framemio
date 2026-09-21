@@ -24,7 +24,12 @@ final class APIClientTests: XCTestCase {
         )
 
         let data = try await client.data(
-            for: APIRequest(method: .post, path: "/v1/media/upload-sessions", body: Data("{}".utf8))
+            for: APIRequest(
+                method: .post,
+                path: "/v1/media/upload-sessions",
+                body: Data("{}".utf8),
+                headers: ["Idempotency-Key": "test-upload-session"]
+            )
         )
 
         XCTAssertEqual(String(data: data, encoding: .utf8), "{\"ok\":true}")
@@ -52,6 +57,88 @@ final class APIClientTests: XCTestCase {
 
         XCTAssertEqual(RetryURLProtocol.lastURL?.path, "/v1/video-templates")
         XCTAssertEqual(RetryURLProtocol.lastURL?.query, "project_type=story")
+    }
+
+    func testRetriesTransientServerResponseForRecentProjectsRead() async throws {
+        RetryURLProtocol.responses = [
+            .success(statusCode: 503, data: Data("service unavailable".utf8)),
+            .success(statusCode: 200, data: Data("[]".utf8))
+        ]
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RetryURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let client = URLSessionAPIClient(
+            baseURL: URL(string: "https://api.framemio.test")!,
+            session: session,
+            tokenProvider: StaticAuthTokenProvider(token: "token"),
+            maxNetworkRetries: 0,
+            maxTransientStatusRetries: 1,
+            retryBaseDelayNanoseconds: 0
+        )
+
+        let data = try await client.data(
+            for: APIRequest(method: .get, path: "/v1/stories")
+        )
+
+        XCTAssertEqual(String(data: data, encoding: .utf8), "[]")
+        XCTAssertEqual(RetryURLProtocol.requestCount, 2)
+    }
+
+    func testDoesNotRetryNonIdempotentPostAfterNetworkFailure() async throws {
+        RetryURLProtocol.responses = [
+            .failure(URLError(.networkConnectionLost)),
+            .success(statusCode: 201, data: Data("{\"ok\":true}".utf8))
+        ]
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RetryURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let client = URLSessionAPIClient(
+            baseURL: URL(string: "https://api.framemio.test")!,
+            session: session,
+            tokenProvider: StaticAuthTokenProvider(token: "token"),
+            maxNetworkRetries: 1,
+            retryBaseDelayNanoseconds: 0
+        )
+
+        do {
+            _ = try await client.data(
+                for: APIRequest(method: .post, path: "/v1/stories", body: Data("{}".utf8))
+            )
+            XCTFail("Expected the transient network failure to be surfaced")
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .networkConnectionLost)
+        }
+
+        XCTAssertEqual(RetryURLProtocol.requestCount, 1)
+    }
+
+    func testDoesNotRetryNonIdempotentPostWithoutIdempotencyKey() async throws {
+        RetryURLProtocol.responses = [
+            .success(statusCode: 503, data: Data("service unavailable".utf8)),
+            .success(statusCode: 201, data: Data("{\"ok\":true}".utf8))
+        ]
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RetryURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let client = URLSessionAPIClient(
+            baseURL: URL(string: "https://api.framemio.test")!,
+            session: session,
+            tokenProvider: StaticAuthTokenProvider(token: "token"),
+            maxNetworkRetries: 0,
+            maxTransientStatusRetries: 1,
+            retryBaseDelayNanoseconds: 0
+        )
+
+        do {
+            _ = try await client.data(
+                for: APIRequest(method: .post, path: "/v1/stories", body: Data("{}".utf8))
+            )
+            XCTFail("Expected the transient server response to be surfaced")
+        } catch let APIClientError.server(statusCode, _) {
+            XCTAssertEqual(statusCode, 503)
+        }
+
+        XCTAssertEqual(RetryURLProtocol.requestCount, 1)
     }
 }
 

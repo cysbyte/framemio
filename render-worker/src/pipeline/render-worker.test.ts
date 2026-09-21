@@ -171,6 +171,51 @@ test('normalizes a photo-over-video overlay without replacing the base video', (
   assert.equal(composition.broll[0].opacity, 0.8);
 });
 
+test('accepts concrete scale and move b-roll animations', () => {
+  const assets = fixtureMediaAssets();
+  for (const animation of ['scale', 'move'] as const) {
+    const composition = buildComposition(
+      fixtureStoryPlan({
+        template_id: 'photo-over-video',
+        template_version: 1,
+        template_configuration: {
+          aspect_ratio: '9:16',
+          duration_seconds: 8,
+          layout: 'picture_in_picture',
+          overlay_placement: 'bottom_right',
+          overlay_size: 'medium',
+          overlay_opacity: 1,
+          overlay_frame: 'subtle',
+          overlay_animation: animation,
+        },
+        broll: [{
+          asset_id: 'photo-2',
+          media_type: 'photo',
+          start_ms: 1000,
+          duration_ms: 1500,
+          presentation: 'picture_in_picture',
+          placement: 'bottom_right',
+          size: 'medium',
+          opacity: 1,
+          frame: 'subtle',
+          animation,
+        }],
+      }),
+      assets,
+      new Map(assets.map((asset) => [asset.id, `/asset/${asset.file_name}`])),
+      new Map(),
+      {
+        work_dir: '/work',
+        assets_dir: '/work/assets',
+        clips_dir: '/work/clips',
+        output_file: '/work/story.mp4',
+        composition_file: '/work/composition.json',
+      },
+    );
+    assert.equal(composition.broll[0].animation, animation);
+  }
+});
+
 test('normalizes a full-source composition longer than 60 seconds', () => {
   const assets = fixtureMediaAssets();
   const fullSourceMoment = {
@@ -571,7 +616,7 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
 
     const args = JSON.parse(await readFile(argsPath, 'utf8')) as string[];
     const filterComplex = args[args.indexOf('-filter_complex') + 1];
-    assert.match(filterComplex, /font='DejaVu Sans Bold'/);
+    assert.match(filterComplex, /font='Noto Sans Bold'/);
     assert.match(filterComplex, /fontcolor=0xFFE066/);
     assert.match(filterComplex, /fontsize=58/);
     assert.match(filterComplex, /borderw=6/);

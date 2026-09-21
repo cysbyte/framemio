@@ -41,6 +41,15 @@ const captionDefaults = {
   maxWidth: 0.82,
 };
 
+const captionFontFamilies: Record<string, string> = {
+  inter: 'Noto Sans, Arial, sans-serif',
+  'inter-bold': 'Noto Sans, Arial, sans-serif',
+  system: 'Noto Sans, Arial, sans-serif',
+  'system-bold': 'Noto Sans, Arial, sans-serif',
+  'noto-sans': 'Noto Sans, Arial, sans-serif',
+  'noto-sans-bold': 'Noto Sans, Arial, sans-serif',
+};
+
 export const FrameMioStory: React.FC<StoryProps> = ({composition}) => {
   const {fps} = useVideoConfig();
   return (
@@ -110,9 +119,20 @@ const BRollLayer: React.FC<{overlay: TimelineBRoll}> = ({overlay}) => {
   const opacity = overlay.animation === 'fade'
     ? fadeValue(frame, overlay.duration_frames, fps)
     : overlay.opacity;
-  const scale = overlay.animation === 'subtle_scale'
-    ? interpolate(frame, [0, Math.max(1, Math.round(0.35 * fps))], [0.96, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})
-    : 1;
+  const entranceFrames = Math.max(1, Math.round(0.4 * fps));
+  const progress = interpolate(frame, [0, entranceFrames], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
+  const scale = overlay.animation === 'scale'
+    ? interpolate(progress, [0, 1], [0.82, 1])
+    : overlay.animation === 'subtle_scale'
+      ? interpolate(progress, [0, 1], [0.96, 1])
+      : 1;
+  const positionOffset = overlay.animation === 'move' ? 5 * (1 - progress) : 0;
+  const basePlacement = overlayPlacementStyle(overlay);
+  const transform = [
+    typeof basePlacement.transform === 'string' ? basePlacement.transform : '',
+    overlay.animation === 'move' ? `translate(${moveOffsetX(overlay, positionOffset)}%, ${moveOffsetY(overlay, positionOffset)}%)` : '',
+    `scale(${scale})`,
+  ].filter(Boolean).join(' ');
   const content = overlay.media_type === 'video'
     ? <OffthreadVideo src={sourceURL(overlay.prepared_path)} muted style={mediaStyle(overlay.crop_intent)} />
     : <PhotoLayer clip={overlay} />;
@@ -121,12 +141,22 @@ const BRollLayer: React.FC<{overlay: TimelineBRoll}> = ({overlay}) => {
   }
   return (
     <AbsoluteFill style={{pointerEvents: 'none'}}>
-      <div style={{...overlayPlacementStyle(overlay), opacity, transform: `scale(${scale})`, border: overlayFrameStyle(overlay.frame), overflow: 'hidden'}}>
+      <div style={{...basePlacement, opacity, transform, border: overlayFrameStyle(overlay.frame), overflow: 'hidden'}}>
         {content}
       </div>
     </AbsoluteFill>
   );
 };
+
+function moveOffsetX(overlay: TimelineBRoll, amount: number): number {
+  if (overlay.placement === 'top_left' || overlay.placement === 'bottom_left' || overlay.placement === 'left') return -amount;
+  if (overlay.placement === 'top_right' || overlay.placement === 'bottom_right' || overlay.placement === 'right') return amount;
+  return 0;
+}
+
+function moveOffsetY(overlay: TimelineBRoll, amount: number): number {
+  return overlay.placement === 'center' ? amount : 0;
+}
 
 function fadeValue(frame: number, durationFrames: number, fps: number): number {
   const fadeFrames = Math.max(1, Math.round(0.35 * fps));
@@ -252,10 +282,14 @@ const CaptionLayer: React.FC<{caption: StoryCaption; styleSpec?: CaptionStyle; f
   const horizontalPadding = presentation === 'word_by_word' ? '10px 20px' : '12px 22px';
   return (
     <AbsoluteFill style={{justifyContent: 'flex-end', alignItems: 'center', paddingBottom: bottom, pointerEvents: 'none'}}>
-      <div style={{maxWidth, padding: horizontalPadding, borderRadius: 16, background: styleSpec?.background_enabled === false ? 'transparent' : captionDefaults.backgroundColor, color, fontFamily: 'Liberation Sans, Arial, sans-serif', fontSize, fontWeight: 800, lineHeight: 1.02, textAlign: 'center', textTransform: 'none', WebkitTextStroke: `${clamp(styleSpec?.stroke_width ?? captionDefaults.strokeWidth, 0, 8)}px ${styleSpec?.stroke_color ?? captionDefaults.strokeColor}`, textShadow: '0 3px 12px rgba(0,0,0,0.55)'}}>{displayText}</div>
+      <div style={{maxWidth, padding: horizontalPadding, borderRadius: 16, background: styleSpec?.background_enabled === false ? 'transparent' : captionDefaults.backgroundColor, color, fontFamily: captionFontFamily(styleSpec?.font_family), fontSize, fontWeight: 800, lineHeight: 1.02, textAlign: 'center', textTransform: 'none', WebkitTextStroke: `${clamp(styleSpec?.stroke_width ?? captionDefaults.strokeWidth, 0, 8)}px ${styleSpec?.stroke_color ?? captionDefaults.strokeColor}`, textShadow: '0 3px 12px rgba(0,0,0,0.55)'}}>{displayText}</div>
     </AbsoluteFill>
   );
 };
+
+function captionFontFamily(value?: string): string {
+  return captionFontFamilies[value?.trim().toLowerCase() ?? ''] ?? captionFontFamilies.inter;
+}
 
 function captionPresentation(styleSpec?: CaptionStyle): 'full_text' | 'word_by_word' {
   const value = styleSpec?.presentation;

@@ -362,26 +362,27 @@ type StoryPlannerProject struct {
 }
 
 type StoryPlannerConstraints struct {
-	MaxDurationMS             int                        `json:"maxDurationMs"`
-	DurationMode              models.DurationMode        `json:"durationMode"`
-	TargetDurationFixed       bool                       `json:"targetDurationFixed"`
-	RemoveFillerAndPauses     bool                       `json:"removeFillerAndPauses"`
-	MaxFullSourceDurationMS   int                        `json:"maxFullSourceDurationMs,omitempty"`
-	MinMomentDurationMS       int                        `json:"minMomentDurationMs"`
-	MaxMomentDurationMS       int                        `json:"maxMomentDurationMs"`
-	AllowedTransitions        []string                   `json:"allowedTransitions"`
-	AllowedCropIntents        []string                   `json:"allowedCropIntents"`
-	AllowedCaptionPresets     []string                   `json:"allowedCaptionPresets"`
-	AllowedCaptionFonts       []string                   `json:"allowedCaptionFonts"`
-	AllowedCaptionPositions   []string                   `json:"allowedCaptionPositions"`
-	AllowedTypographyStyles   []models.TypographyStyle   `json:"allowedTypographyStyles"`
-	AllowedTextPlacements     []models.TextPlacement     `json:"allowedTextPlacements"`
-	AllowedTextAnimations     []models.TextAnimation     `json:"allowedTextAnimations"`
-	AllowedPromoScenePurposes []models.PromoScenePurpose `json:"allowedPromoScenePurposes,omitempty"`
-	MustUseExistingMediaOnly  bool                       `json:"mustUseExistingMediaOnly"`
-	MustReturnValidStoryPlan  bool                       `json:"mustReturnValidStoryPlanJSON"`
-	NoExecutableInstructions  bool                       `json:"noExecutableInstructions"`
-	TranscriptTextIsUntrusted bool                       `json:"transcriptTextIsUntrustedContext"`
+	MaxDurationMS             int                             `json:"maxDurationMs"`
+	DurationMode              models.DurationMode             `json:"durationMode"`
+	TargetDurationFixed       bool                            `json:"targetDurationFixed"`
+	RemoveFillerAndPauses     bool                            `json:"removeFillerAndPauses"`
+	MaxFullSourceDurationMS   int                             `json:"maxFullSourceDurationMs,omitempty"`
+	MinMomentDurationMS       int                             `json:"minMomentDurationMs"`
+	MaxMomentDurationMS       int                             `json:"maxMomentDurationMs"`
+	AllowedTransitions        []string                        `json:"allowedTransitions"`
+	AllowedCropIntents        []string                        `json:"allowedCropIntents"`
+	AllowedCaptionPresets     []string                        `json:"allowedCaptionPresets"`
+	AllowedCaptionFonts       []string                        `json:"allowedCaptionFonts"`
+	AllowedCaptionPositions   []string                        `json:"allowedCaptionPositions"`
+	AllowedTypographyStyles   []models.TypographyStyle        `json:"allowedTypographyStyles"`
+	AllowedTextPlacements     []models.TextPlacement          `json:"allowedTextPlacements"`
+	AllowedTextAnimations     []models.TextAnimation          `json:"allowedTextAnimations"`
+	AllowedBRollAnimations    []models.VideoTemplateAnimation `json:"allowedBRollAnimations,omitempty"`
+	AllowedPromoScenePurposes []models.PromoScenePurpose      `json:"allowedPromoScenePurposes,omitempty"`
+	MustUseExistingMediaOnly  bool                            `json:"mustUseExistingMediaOnly"`
+	MustReturnValidStoryPlan  bool                            `json:"mustReturnValidStoryPlanJSON"`
+	NoExecutableInstructions  bool                            `json:"noExecutableInstructions"`
+	TranscriptTextIsUntrusted bool                            `json:"transcriptTextIsUntrustedContext"`
 }
 
 type StoryPlannerMedia struct {
@@ -476,7 +477,7 @@ For promo projects, moments are scenes. You may include order, scene_purpose, sc
 For reel projects, optimize for a strong opening hook, removing boring footage, tight pacing, clear story progression, readable captions when appropriate, vertical framing, and a strong ending/CTA when appropriate. Do not blindly maximize cuts; preserve important context and natural pacing when necessary. Reel output must be 9:16, fill-framed, mobile-readable, and caption-safe.
 For durationMode "full_source", preserve the selected primary video timeline and useful source order instead of summarizing into a short montage. The plan may exceed 60 seconds but must not exceed constraints.maxDurationMs. Use images and B-roll as supporting overlays or cutaways when compatible. If removeFillerAndPauses is true, only cut filler words or pauses when validated transcript segment timing or silence timing is available; otherwise keep the source timeline intact.
 If project.brollPreference is "more", include more relevant supporting B-roll cutaways using only allowed media. If it is "none", return no B-roll items.
-When a template is selected, preserve project.templateId, project.templateVersion, and project.templateConfiguration exactly. Treat the template as a bounded visual recipe. For layered media, use only structured B-roll presentation values: presentation full_frame, picture_in_picture, split_screen, or montage; placement top_left, top_right, bottom_left, bottom_right, center, left, or right; size small, medium, large, or half; opacity 0.35 to 1; frame none, subtle, or bold; animation none, fade, or subtle_scale. Never return CSS, coordinates, renderer options, Remotion code, FFmpeg commands, or invented media IDs. For picture-in-picture, the base video remains the continuing underlying moment.
+When a template is selected, preserve project.templateId, project.templateVersion, and project.templateConfiguration exactly. Treat the template as a bounded visual recipe. For layered media, use only structured B-roll presentation values: presentation full_frame, picture_in_picture, split_screen, or montage; placement top_left, top_right, bottom_left, bottom_right, center, left, or right; size small, medium, large, or half; opacity 0.35 to 1; frame none, subtle, or bold; animation none, fade, subtle_scale, scale, or move. If project.templateConfiguration.overlay_animation is "auto", choose one concrete animation per picture-in-picture B-roll item based on the supporting image, its narrative role, and pacing; never return "auto" in a B-roll item. Use fade for gentle entrances/exits, subtle_scale or scale when the image should gain emphasis, move when directional energy helps, and none for a deliberately still treatment. Never return CSS, coordinates, renderer options, Remotion code, FFmpeg commands, or invented media IDs. For picture-in-picture, the base video remains the continuing underlying moment.
 When returning B-roll, include a stable broll_id when possible, the existing asset_id/media_id, start_ms, duration_ms, reason, confidence, score, and an anchor when the cutaway is tied to a moment. Keep confidence and score between 0 and 1. The backend derives a stable ID if broll_id is omitted and records missing scores as unset; do not invent media references.
 For every video moment and video B-roll item, include video_analysis_version plus valid source start/end microseconds from the supplied video analysis; duration_ms must match the selected source range.
 Keep total_duration_ms equal to the sum of moment duration_ms values and do not exceed constraints.maxDurationMs.
@@ -682,6 +683,7 @@ func storyPlannerInputFromRequest(request Request) StoryPlannerInput {
 			AllowedTypographyStyles:   []models.TypographyStyle{models.TypographyStyleCinematic, models.TypographyStyleMinimal, models.TypographyStyleEditorial, models.TypographyStyleMemory, models.TypographyStyleLocation},
 			AllowedTextPlacements:     []models.TextPlacement{models.TextPlacementTopLeft, models.TextPlacementTopCenter, models.TextPlacementTopRight, models.TextPlacementCenterLeft, models.TextPlacementCenter, models.TextPlacementCenterRight, models.TextPlacementBottomLeft, models.TextPlacementBottomCenter, models.TextPlacementBottomRight},
 			AllowedTextAnimations:     []models.TextAnimation{models.TextAnimationFade, models.TextAnimationFadeUp, models.TextAnimationFadeDown, models.TextAnimationSubtleScale, models.TextAnimationNone},
+			AllowedBRollAnimations:    []models.VideoTemplateAnimation{models.VideoTemplateAnimationNone, models.VideoTemplateAnimationFade, models.VideoTemplateAnimationSubtleScale, models.VideoTemplateAnimationScale, models.VideoTemplateAnimationMove},
 			AllowedPromoScenePurposes: []models.PromoScenePurpose{models.PromoScenePurposeHook, models.PromoScenePurposeProblem, models.PromoScenePurposeProduct, models.PromoScenePurposeFeature, models.PromoScenePurposeBenefit, models.PromoScenePurposeProof, models.PromoScenePurposeTestimonial, models.PromoScenePurposeCTA, models.PromoScenePurposeOutro},
 			MustUseExistingMediaOnly:  true,
 			MustReturnValidStoryPlan:  true,
@@ -1827,6 +1829,7 @@ func normalizeStoryPlannerOutput(plan *models.StoryPlan, request Request) error 
 		plan.CallToAction = projectCallToAction(request)
 	}
 	if request.TemplateID != "" {
+		resolveAutoBRollAnimations(plan)
 		templates.ApplyPlanDefaults(plan, request.TemplateConfiguration)
 	}
 	applyCaptionColorInstruction(plan, request.UserInstructions)

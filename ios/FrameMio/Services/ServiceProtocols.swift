@@ -577,7 +577,7 @@ final class CreditBalanceStore: ObservableObject {
         return "\(displayCredits) credits available."
     }
 
-    func refresh() {
+    func refresh(force: Bool = false) {
         guard let creditService else { return }
         guard refreshTask == nil else { return }
         let shouldShowLoading = balance == nil
@@ -593,7 +593,7 @@ final class CreditBalanceStore: ObservableObject {
                 refreshTask = nil
             }
             do {
-                let latestBalance = try await creditService.refreshBalance()
+                let latestBalance = try await (force ? creditService.refreshBalance() : creditService.balance())
                 if balance != latestBalance {
                     balance = latestBalance
                 }

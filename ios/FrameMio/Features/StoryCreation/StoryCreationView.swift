@@ -397,7 +397,11 @@ struct StoryCreationView: View {
         if template.editableOptions.contains("overlay_size") { resolved.overlaySize = previous.overlaySize }
         if template.editableOptions.contains("overlay_opacity") { resolved.overlayOpacity = previous.overlayOpacity }
         if template.editableOptions.contains("overlay_frame") { resolved.overlayFrame = previous.overlayFrame }
-        if template.editableOptions.contains("overlay_animation") { resolved.overlayAnimation = previous.overlayAnimation }
+        if template.editableOptions.contains("overlay_animation"),
+           let previousAnimation = previous.overlayAnimation,
+           previousAnimation == "auto" ? template.id == "photo-over-video" : template.rendererCapabilities.contains(previousAnimation) {
+            resolved.overlayAnimation = previousAnimation
+        }
         return resolved
     }
 
@@ -966,7 +970,9 @@ private struct StoryGenerationOptionsSheet: View {
                 TemplateOptionMenu(
                     title: "Motion",
                     selection: templateConfiguration?.overlayAnimation ?? "fade",
-                    options: ["none", "fade", "subtle_scale"]
+                    options: template?.id == "photo-over-video"
+                        ? ["auto", "none", "fade", "scale", "move"]
+                        : ["none", "fade", "subtle_scale"]
                 ) { templateConfiguration?.overlayAnimation = $0 }
             }
         }

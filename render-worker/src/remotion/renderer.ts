@@ -160,12 +160,14 @@ const DEFAULT_CAPTION_STYLE: ResolvedCaptionStyle = {
 };
 
 const FONT_FAMILY_MAP = new Map<string, string>([
-  ['inter', 'DejaVu Sans'],
-  ['inter-bold', 'DejaVu Sans Bold'],
-  ['system', 'DejaVu Sans'],
-  ['system-bold', 'DejaVu Sans Bold'],
-  ['noto-sans', 'DejaVu Sans'],
-  ['noto-sans-bold', 'DejaVu Sans Bold'],
+  // Keep the public font identifiers stable while using the bundled Noto
+  // Sans family for consistent FFmpeg output across render environments.
+  ['inter', 'Noto Sans'],
+  ['inter-bold', 'Noto Sans Bold'],
+  ['system', 'Noto Sans'],
+  ['system-bold', 'Noto Sans Bold'],
+  ['noto-sans', 'Noto Sans'],
+  ['noto-sans-bold', 'Noto Sans Bold'],
 ]);
 
 const TYPOGRAPHY_FONT_FAMILY_MAP = new Map<string, string>([
@@ -271,7 +273,7 @@ function brollVideoFilters(composition: CompositionSpec): {filters: string[]; ou
     } else {
       const layerLabel = `bo${index}`;
       filters.push(`[${sourceLabel}]${brollLayerFilter(overlay, composition)}[${layerLabel}]`);
-      filters.push(`[${baseInput}][${layerLabel}]overlay=${brollPlacementExpression(overlay)}:enable='between(t,${start},${end})'[${outputLabel}]`);
+      filters.push(`[${baseInput}][${layerLabel}]overlay=${brollPlacementExpression(overlay, composition)}:enable='between(t,${start},${end})'[${outputLabel}]`);
     }
     baseInput = outputLabel;
   });
@@ -291,6 +293,12 @@ function brollLayerFilter(overlay: TimelineBRoll, composition: CompositionSpec):
     const thickness = overlay.frame === 'bold' ? 6 : 3;
     filters.push(`drawbox=x=0:y=0:w=iw-1:h=ih-1:color=white@0.9:t=${thickness}`);
   }
+  if (overlay.animation === 'subtle_scale' || overlay.animation === 'scale') {
+    const progress = brollMotionProgress(overlay, composition);
+    const fromScale = overlay.animation === 'scale' ? 0.82 : 0.96;
+    const scale = `${ffmpegNumber(fromScale)}+(${ffmpegNumber(1 - fromScale)})*${progress}`;
+    filters.push(`scale=iw*(${scale}):ih*(${scale}):eval=frame`);
+  }
   if (overlay.animation === 'fade') {
     const duration = clipDurationSeconds(overlay);
     const fadeDuration = Math.min(0.35, Math.max(0.05, overlay.duration_ms / 1000 / 3));
@@ -298,6 +306,12 @@ function brollLayerFilter(overlay: TimelineBRoll, composition: CompositionSpec):
     filters.push(`fade=t=out:st=${ffmpegNumber(Math.max(0, Number(duration) - fadeDuration))}:d=${ffmpegNumber(fadeDuration)}:alpha=1`);
   }
   return filters.join(',');
+}
+
+function brollMotionProgress(overlay: TimelineBRoll, composition: CompositionSpec): string {
+  const start = secondsFromFrames(overlay.start_frame, composition.fps);
+  const duration = Math.min(0.45, Math.max(0.12, overlay.duration_ms / 1000 / 3));
+  return `if(lt(t\\,${start}+${ffmpegNumber(duration)})\\,(t-${start})/${ffmpegNumber(duration)}\\,1)`;
 }
 
 function overlaySizeFactor(size: TimelineBRoll['size']): number {
@@ -309,7 +323,20 @@ function overlaySizeFactor(size: TimelineBRoll['size']): number {
   }
 }
 
-function brollPlacementExpression(overlay: TimelineBRoll): string {
+function brollPlacementExpression(overlay: TimelineBRoll, composition: CompositionSpec): string {
+  if (overlay.animation === 'move') {
+    const progress = brollMotionProgress(overlay, composition);
+    const offset = `W*0.05*(1-${progress})`;
+    switch (overlay.placement) {
+      case 'top_left': return `W*0.05-${offset}:H*0.05`;
+      case 'top_right': return `W-w-W*0.05+${offset}:H*0.05`;
+      case 'bottom_left': return `W*0.05-${offset}:H-h-H*0.08`;
+      case 'center': return `(W-w)/2:(H-h)/2+${offset}`;
+      case 'left': return `-${offset}:0`;
+      case 'right': return `W-w+${offset}:0`;
+      default: return `W-w-W*0.05+${offset}:H-h-H*0.08`;
+    }
+  }
   switch (overlay.placement) {
     case 'top_left': return 'W*0.05:H*0.05';
     case 'top_right': return 'W-w-W*0.05:H*0.05';

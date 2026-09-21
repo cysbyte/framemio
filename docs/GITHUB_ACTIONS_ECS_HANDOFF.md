@@ -128,7 +128,7 @@ aws ecr describe-images \
 
 This repository now uses GitHub Actions to build, push, and deploy each service automatically. See `DB_ECS_DEPLOYMENT_SCALING.md` for the full deployment and scaling runbook.
 
-- Backend workflow keeps its ECS service at `desiredCount=1`.
+- Backend workflow deploys with `desiredCount=1`, registers an Application Auto Scaling target with `min=0`, `max=1`, and uses ALB request alarms to scale between zero and one task.
 - Video and render worker workflows keep ECS services at `desiredCount=0` and register scalable targets with `min=0`, `max=1`.
 - Backend starts worker one-off tasks with `RunTask` when work arrives.
 - If a service does not exist yet, the workflow creates it in `my-cluster` using the workflow network defaults or repository variable overrides.
@@ -223,6 +223,7 @@ aws logs tail <log-group-name> --region us-east-1 --follow
 
 FrameMio now follows the same zero-idle ECS pattern as `product-video/worker`:
 
+- The backend service is allowed to scale to zero after five minutes without requests. A load-balancer request alarm scales it back to one task; the first cold-start request can receive an ALB `503` while ECS launches and health-checks the task.
 - Worker ECS services are deployed with `desiredCount=0` so they do not stay running while idle, and each worker deploy resets manual scale-ups back to zero.
 - Worker workflows register Application Auto Scaling scalable targets with `min=0` and `max=1` for service DesiredCount. No queue-depth scaling policy is attached by default because the backend starts one-off tasks directly.
 - The backend publishes the durable SQS job message first, then starts a one-off Fargate task with `ecs:RunTask` when the queued job belongs to an external worker.
