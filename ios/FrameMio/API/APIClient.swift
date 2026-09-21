@@ -24,7 +24,7 @@ final class URLSessionAPIClient: APIClient, @unchecked Sendable {
         session: URLSession = .shared,
         tokenProvider: AuthTokenProvider,
         maxNetworkRetries: Int = 2,
-        maxTransientStatusRetries: Int = 5,
+        maxTransientStatusRetries: Int = 18,
         retryBaseDelayNanoseconds: UInt64 = 1_000_000_000
     ) {
         self.baseURL = baseURL
@@ -60,7 +60,6 @@ final class URLSessionAPIClient: APIClient, @unchecked Sendable {
         apiClientDebugLog("request response method=\(request.method.rawValue) path=\(request.path) status=\(httpResponse.statusCode)")
 
         if httpResponse.statusCode == 401,
-           urlRequest.value(forHTTPHeaderField: "Authorization") != nil,
            let retryData = try await retryWithFreshToken(urlRequest, apiRequest: request) {
             return retryData
         }
@@ -205,6 +204,9 @@ final class KeychainAuthTokenProvider: AuthTokenProvider, @unchecked Sendable {
     private let session: URLSession
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private let maxNetworkRetries = 2
+    private let maxTransientStatusRetries = 18
+    private let retryBaseDelayNanoseconds: UInt64 = 1_000_000_000
 
     init(
         service: String = "com.framemio.app",
@@ -256,14 +258,15 @@ final class KeychainAuthTokenProvider: AuthTokenProvider, @unchecked Sendable {
         request.httpBody = try? encoder.encode(AnonymousAuthRequest(installationID: installation.id))
 
         do {
-            let (data, response) = try await session.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse,
-                  (200..<300).contains(httpResponse.statusCode) else {
+            let (data, httpResponse) = try await dataWithTransientRetry(for: request)
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                apiClientDebugLog("anonymous auth failed status=\(httpResponse.statusCode)")
                 return nil
             }
             let token = try saveAuthResponse(data)
             return token
         } catch {
+            apiClientDebugLog("anonymous auth failed error=\(error.localizedDescription)")
             return nil
         }
     }
@@ -281,16 +284,89 @@ final class KeychainAuthTokenProvider: AuthTokenProvider, @unchecked Sendable {
         request.httpBody = try? encoder.encode(RefreshAuthRequest(refreshToken: refreshToken))
 
         do {
-            let (data, response) = try await session.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse,
-                  (200..<300).contains(httpResponse.statusCode) else {
-                deleteValue(account: refreshAccount)
+            let (data, httpResponse) = try await dataWithTransientRetry(for: request)
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                if httpResponse.statusCode == 400 || httpResponse.statusCode == 401 {
+                    deleteValue(account: refreshAccount)
+                }
+                apiClientDebugLog("refresh auth failed status=\(httpResponse.statusCode)")
                 return nil
             }
             return try saveAuthResponse(data)
         } catch {
+            apiClientDebugLog("refresh auth failed error=\(error.localizedDescription)")
             return nil
         }
+    }
+
+    private func dataWithTransientRetry(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        var networkRetries = 0
+        var statusRetries = 0
+
+        while true {
+            do {
+                let (data, response) = try await session.data(for: request)
+                try Task.checkCancellation()
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    throw APIClientError.invalidResponse
+                }
+
+                if isRetryableHTTPStatus(httpResponse.statusCode),
+                   statusRetries < maxTransientStatusRetries {
+                    statusRetries += 1
+                    apiClientDebugLog("auth retry status=\(httpResponse.statusCode) attempt=\(statusRetries)")
+                    try await sleepBeforeRetry(attempts: statusRetries, response: httpResponse)
+                    continue
+                }
+
+                return (data, httpResponse)
+            } catch {
+                try Task.checkCancellation()
+                guard networkRetries < maxNetworkRetries,
+                      isTransientNetworkFailure(error) else {
+                    throw error
+                }
+
+                networkRetries += 1
+                apiClientDebugLog("auth retry network attempt=\(networkRetries) error=\(error.localizedDescription)")
+                try await sleepBeforeRetry(attempts: networkRetries, response: nil)
+            }
+        }
+    }
+
+    private func isTransientNetworkFailure(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else {
+            return false
+        }
+        switch urlError.code {
+        case .networkConnectionLost, .timedOut, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .notConnectedToInternet:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func isRetryableHTTPStatus(_ statusCode: Int) -> Bool {
+        statusCode == 408 || statusCode == 425 || statusCode == 429 || statusCode == 500 || statusCode == 502 || statusCode == 503 || statusCode == 504
+    }
+
+    private func sleepBeforeRetry(attempts: Int, response: HTTPURLResponse?) async throws {
+        let retryAfterDelay = response.flatMap(retryAfterDelayNanoseconds)
+        let backoffDelay = retryBaseDelayNanoseconds * UInt64(1 << min(attempts - 1, 3))
+        let delay = min(retryAfterDelay ?? backoffDelay, 8_000_000_000)
+        if delay > 0 {
+            try await Task.sleep(nanoseconds: delay)
+        }
+    }
+
+    private func retryAfterDelayNanoseconds(from response: HTTPURLResponse) -> UInt64? {
+        guard let retryAfter = response.value(forHTTPHeaderField: "Retry-After")?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !retryAfter.isEmpty,
+              let seconds = Double(retryAfter),
+              seconds >= 0 else {
+            return nil
+        }
+        return UInt64(seconds * 1_000_000_000)
     }
 
     private func saveAuthResponse(_ data: Data) throws -> String {

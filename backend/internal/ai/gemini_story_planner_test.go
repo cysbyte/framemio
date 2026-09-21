@@ -42,7 +42,7 @@ func TestGeminiStoryPlannerUsesOpenAICompatibleGateway(t *testing.T) {
 	})}
 
 	planner := GeminiStoryPlanner{
-		BaseURL:   "https://api2.65535.space",
+		BaseURL:   "https://api.cheaperinference.com/v1",
 		APIKey:    "gemini-key",
 		ModelName: "gemini-story",
 		Client:    client,

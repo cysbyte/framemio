@@ -531,9 +531,17 @@ final class CreditBalanceStore: ObservableObject {
 
     private let creditService: CreditService?
     private var refreshTask: Task<Void, Never>?
+    private let maxRefreshRetries: Int
+    private let refreshRetryBaseDelayNanoseconds: UInt64
 
-    init(creditService: CreditService?) {
+    init(
+        creditService: CreditService?,
+        maxRefreshRetries: Int = 2,
+        refreshRetryBaseDelayNanoseconds: UInt64 = 2_000_000_000
+    ) {
         self.creditService = creditService
+        self.maxRefreshRetries = max(0, maxRefreshRetries)
+        self.refreshRetryBaseDelayNanoseconds = refreshRetryBaseDelayNanoseconds
     }
 
     var availableCredits: Int? {
@@ -593,7 +601,7 @@ final class CreditBalanceStore: ObservableObject {
                 refreshTask = nil
             }
             do {
-                let latestBalance = try await (force ? creditService.refreshBalance() : creditService.balance())
+                let latestBalance = try await loadBalanceWithRetry(force: force, creditService: creditService)
                 if balance != latestBalance {
                     balance = latestBalance
                 }
@@ -607,6 +615,44 @@ final class CreditBalanceStore: ObservableObject {
                     errorMessage = latestErrorMessage
                 }
             }
+        }
+    }
+
+    private func loadBalanceWithRetry(force: Bool, creditService: CreditService) async throws -> CreditBalance {
+        var retryCount = 0
+
+        while true {
+            do {
+                let shouldRefresh = force || retryCount > 0
+                return try await (shouldRefresh ? creditService.refreshBalance() : creditService.balance())
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                guard retryCount < maxRefreshRetries, Self.isRetryableBalanceError(error) else {
+                    throw error
+                }
+
+                retryCount += 1
+                let delay = refreshRetryBaseDelayNanoseconds * UInt64(1 << min(retryCount - 1, 3))
+                if delay > 0 {
+                    try await Task.sleep(nanoseconds: delay)
+                }
+            }
+        }
+    }
+
+    private static func isRetryableBalanceError(_ error: Error) -> Bool {
+        if case let APIClientError.server(statusCode, _) = error {
+            return statusCode == 408 || statusCode == 425 || statusCode == 429 || (500...599).contains(statusCode)
+        }
+
+        switch AppError.from(error) {
+        case .networkUnavailable:
+            return true
+        case let .server(statusCode):
+            return statusCode == 408 || statusCode == 425 || statusCode == 429 || (500...599).contains(statusCode)
+        default:
+            return false
         }
     }
 

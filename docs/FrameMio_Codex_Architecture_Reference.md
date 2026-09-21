@@ -1363,7 +1363,7 @@ Current implementation notes:
 - frame extraction seeks before opening the input (`-ss` before `-i`) for faster representative-frame extraction
 - preprocessing artifacts are cached by user, media, input/analysis version, and source ETag
 - VideoAnalysis is cached by user, media, input version, understanding version, provider/model, and source ETag
-- production deployments use either a FrameMio-compatible provider adapter or direct OpenAI-compatible video understanding with `VIDEO_UNDERSTANDING_DIRECT=true`, `VIDEO_UNDERSTANDING_PROVIDER=openai-direct`, `VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL=https://api2.65535.space`, and `VIDEO_UNDERSTANDING_MODEL=ggpt-5.6-luna`; `heuristic-v1` is a development fallback only
+- production deployments use either a FrameMio-compatible provider adapter or direct OpenAI-compatible video understanding with `VIDEO_UNDERSTANDING_DIRECT=true`, `VIDEO_UNDERSTANDING_PROVIDER=openai-direct`, `VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL=https://api.cheaperinference.com/v1`, and `VIDEO_UNDERSTANDING_MODEL=ggpt-5.6-luna`; `heuristic-v1` is a development fallback only
 - transcription uses the replaceable backend provider abstraction; production can use Deepgram prerecorded STT with `TRANSCRIPTION_PROVIDER=deepgram`, `TRANSCRIPTION_MODEL=nova-3`, `DEEPGRAM_API_KEY=...`, optional `DEEPGRAM_BASE_URL`, and `ENABLE_TRANSCRIPTION=true`, or an upstream/OpenAI-compatible adapter with an authorized transcription model, while still falling back to visual-only evidence when the provider is unavailable
 - force reanalysis should reuse deterministic preprocessing where possible and append a new semantic analysis version rather than overwriting old records
 
@@ -1728,7 +1728,7 @@ Initial StoryPlan generation is selected by backend configuration only. iOS neve
 ```text
 STORY_PLANNER_PROVIDER=local|gemini|gemini-agentic|gemini_agentic|gemini-interactions|gemini_interactions|openai|openai-compatible|ai-gateway
 STORY_PLANNER_GEMINI_MODEL=gemini-3.8-flash
-STORY_PLANNER_GEMINI_BASE_URL=https://api2.65535.space
+STORY_PLANNER_GEMINI_BASE_URL=https://api.cheaperinference.com/v1
 STORY_PLANNER_GEMINI_API_KEY=
 STORY_PLANNER_GEMINI_TIMEOUT=90s
 STORY_PLANNER_GEMINI_FALLBACK_TIMEOUT=80s
@@ -1761,7 +1761,7 @@ Rules:
   gateway wire format as the working video-understanding worker.
 - `STORY_PLANNER_GEMINI_BASE_URL` falls back to
   `VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL`, then `OPENAI_BASE_URL`, then
-  `https://api2.65535.space`.
+  `https://api.cheaperinference.com/v1`.
 - `STORY_PLANNER_GEMINI_MODEL` defaults to `gemini-3.8-flash`.
 - `STORY_PLANNER_GEMINI_API_KEY` falls back to `GEMINI_API_KEY` and then
   `GOOGLE_API_KEY`.
@@ -2459,12 +2459,12 @@ Gemini:
 ```text
 STORY_PLANNER_PROVIDER=gemini
 STORY_PLANNER_GEMINI_MODEL=gemini-3.8-flash
-STORY_PLANNER_GEMINI_BASE_URL=https://api2.65535.space
+STORY_PLANNER_GEMINI_BASE_URL=https://api.cheaperinference.com/v1
 STORY_PLANNER_GEMINI_TIMEOUT=90s
 STORY_PLANNER_GEMINI_FALLBACK_TIMEOUT=80s
 
 STORY_PLANNER_MODEL=gpt-5.6-luna
-STORY_PLANNER_BASE_URL=https://api2.65535.space
+STORY_PLANNER_BASE_URL=https://api.cheaperinference.com/v1
 STORY_PLANNER_WIRE_API=chat_completions
 STORY_PLANNER_TIMEOUT=90s
 STORY_PLANNER_FALLBACK_TIMEOUT=80s

@@ -589,6 +589,14 @@ struct VideoTemplate: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+enum TemplateAccessPolicy {
+    static let freeTemplateLimit = 3
+
+    static func isLocked(index: Int, hasTemplateAccess: Bool) -> Bool {
+        !hasTemplateAccess && index >= freeTemplateLimit
+    }
+}
+
 enum StoryStatus: String, Codable, Hashable, Sendable {
     case queued
     case analyzing

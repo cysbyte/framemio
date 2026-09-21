@@ -283,9 +283,9 @@ configure_request_autoscaling() {
   aws cloudwatch put-metric-alarm \
     --region "$AWS_REGION" \
     --alarm-name "$ECS_SERVICE-request-scale-out" \
-    --alarm-description "Scale $ECS_SERVICE to $ECS_REQUEST_SCALE_OUT_CAPACITY when the backend load balancer receives a request." \
+    --alarm-description "Scale $ECS_SERVICE to $ECS_REQUEST_SCALE_OUT_CAPACITY when the backend load balancer returns an error with no healthy target." \
     --namespace AWS/ApplicationELB \
-    --metric-name RequestCount \
+    --metric-name HTTPCode_ELB_5XX_Count \
     --dimensions "Name=LoadBalancer,Value=$load_balancer_dimension" \
     --statistic Sum \
     --period 60 \
@@ -296,14 +296,59 @@ configure_request_autoscaling() {
     --treat-missing-data notBreaching \
     --alarm-actions "$scale_out_policy_arn" >/dev/null
 
+  local scale_in_metrics
+  scale_in_metrics="$(
+    LOAD_BALANCER_DIMENSION="$load_balancer_dimension" \
+    TARGET_GROUP_DIMENSION="$target_group_dimension" \
+    node --input-type=module -e '
+      const loadBalancer = process.env.LOAD_BALANCER_DIMENSION;
+      const targetGroup = process.env.TARGET_GROUP_DIMENSION;
+      const metrics = [
+        {
+          Id: "requests",
+          MetricStat: {
+            Metric: {
+              Namespace: "AWS/ApplicationELB",
+              MetricName: "RequestCount",
+              Dimensions: [{ Name: "LoadBalancer", Value: loadBalancer }]
+            },
+            Period: 60,
+            Stat: "Sum"
+          },
+          ReturnData: false
+        },
+        {
+          Id: "healthy",
+          MetricStat: {
+            Metric: {
+              Namespace: "AWS/ApplicationELB",
+              MetricName: "HealthyHostCount",
+              Dimensions: [
+                { Name: "LoadBalancer", Value: loadBalancer },
+                { Name: "TargetGroup", Value: targetGroup }
+              ]
+            },
+            Period: 60,
+            Stat: "Average"
+          },
+          ReturnData: false
+        },
+        {
+          Id: "idle",
+          Expression: "IF(FILL(healthy,0)>0,FILL(requests,0),1)",
+          Label: "Idle requests while healthy",
+          ReturnData: true
+        }
+      ];
+      process.stdout.write(JSON.stringify(metrics));
+    '
+  )"
+
   aws cloudwatch put-metric-alarm \
     --region "$AWS_REGION" \
     --alarm-name "$ECS_SERVICE-request-scale-in" \
-    --alarm-description "Scale $ECS_SERVICE to 0 after the backend load balancer has been idle for five minutes." \
-    --namespace AWS/ApplicationELB \
-    --metric-name RequestCount \
-    --dimensions "Name=LoadBalancer,Value=$load_balancer_dimension" \
-    --statistic Sum \
+    --alarm-description "Scale $ECS_SERVICE to 0 after five idle minutes while at least one backend target is healthy." \
+    --metrics "$scale_in_metrics" \
     --period 60 \
     --evaluation-periods "$ECS_REQUEST_SCALE_IN_EVALUATION_PERIODS" \
     --datapoints-to-alarm "$ECS_REQUEST_SCALE_IN_EVALUATION_PERIODS" \

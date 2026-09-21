@@ -563,7 +563,7 @@ def main() -> int:
         args.video_base_url.strip()
         or os.environ.get("GATEWAY_VIDEO_UPSTREAM_BASE_URL", "").strip()
         or os.environ.get("SEEDANCE_VIDEO_BASE_URL", "").strip()
-        or "https://task-api-1-cn.65535.space"
+        or "https://api.cheaperinference.com/v1"
     )
 
     image_url = normalize_images_url(image_base_url)

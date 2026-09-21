@@ -183,7 +183,7 @@ func TestOpenAICompatibleTranscriptionProviderSendsMultipartAudio(t *testing.T) 
 		t.Fatal(err)
 	}
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if request.Method != http.MethodPost || request.URL.String() != "https://api2.65535.space/v1/audio/transcriptions" {
+		if request.Method != http.MethodPost || request.URL.String() != "https://api.cheaperinference.com/v1/v1/audio/transcriptions" {
 			t.Fatalf("unexpected request target: %s %s", request.Method, request.URL.String())
 		}
 		if request.Header.Get("Authorization") != "Bearer secret" {
@@ -206,7 +206,7 @@ func TestOpenAICompatibleTranscriptionProviderSendsMultipartAudio(t *testing.T) 
 		return jsonResponse(`{"language":"en","text":"hello there","segments":[{"start":1.25,"end":2.75,"text":"hello there"}]}`), nil
 	})}
 	provider := OpenAICompatibleTranscriptionProvider{
-		BaseURL: "https://api2.65535.space", APIKey: "secret", ProviderName: "openai-direct", ModelName: "gpt-5.4-mini-transcribe", Client: client,
+		BaseURL: "https://api.cheaperinference.com/v1", APIKey: "secret", ProviderName: "openai-direct", ModelName: "gpt-5.4-mini-transcribe", Client: client,
 	}
 	result, err := provider.Transcribe(context.Background(), transcription.ProviderRequest{
 		MediaID: "media-1", Reference: transcription.MediaReference{LocalPath: audioPath, MediaType: "audio", DurationMicros: 4_000_000},
@@ -233,7 +233,7 @@ func TestOpenAICompatibleVideoUnderstandingProviderSendsChatCompletionsRequest(t
 		t.Fatal(err)
 	}
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if request.Method != http.MethodPost || request.URL.String() != "https://api2.65535.space/v1/chat/completions" {
+		if request.Method != http.MethodPost || request.URL.String() != "https://api.cheaperinference.com/v1/v1/chat/completions" {
 			t.Fatalf("unexpected request target: %s %s", request.Method, request.URL.String())
 		}
 		if request.Header.Get("Authorization") != "Bearer secret" {
@@ -267,7 +267,7 @@ func TestOpenAICompatibleVideoUnderstandingProviderSendsChatCompletionsRequest(t
 		return jsonResponse(string(body)), nil
 	})}
 	provider := OpenAICompatibleVideoUnderstandingProvider{
-		BaseURL: "https://api2.65535.space", APIKey: "secret", ProviderName: "openai-direct",
+		BaseURL: "https://api.cheaperinference.com/v1", APIKey: "secret", ProviderName: "openai-direct",
 		ModelName: "gemini-3.8-flash", WireAPI: "chat_completions", ImageDetail: "high", MaxOutputTokens: 6000, Client: client,
 	}
 	response, err := provider.Understand(context.Background(), providerUnderstandingInput())
@@ -286,7 +286,7 @@ func TestOpenAICompatibleVideoUnderstandingProviderSupportsResponsesWireAPI(t *t
 		t.Fatal(err)
 	}
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if request.Method != http.MethodPost || request.URL.String() != "https://api2.65535.space/v1/responses" {
+		if request.Method != http.MethodPost || request.URL.String() != "https://api.cheaperinference.com/v1/v1/responses" {
 			t.Fatalf("unexpected request target: %s %s", request.Method, request.URL.String())
 		}
 		var envelope struct {
@@ -314,7 +314,7 @@ func TestOpenAICompatibleVideoUnderstandingProviderSupportsResponsesWireAPI(t *t
 		return jsonResponse(string(body)), nil
 	})}
 	provider := OpenAICompatibleVideoUnderstandingProvider{
-		BaseURL: "https://api2.65535.space/v1", APIKey: "secret", ProviderName: "openai-direct",
+		BaseURL: "https://api.cheaperinference.com/v1/v1", APIKey: "secret", ProviderName: "openai-direct",
 		ModelName: "gpt-5.6-luna", WireAPI: "responses", Client: client,
 	}
 	response, err := provider.Understand(context.Background(), providerUnderstandingInput())

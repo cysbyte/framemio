@@ -10,7 +10,7 @@ func TestLoadAllowsDirectUnderstandingWithoutAdapterURL(t *testing.T) {
 	t.Setenv("VIDEO_UNDERSTANDING_DIRECT", "true")
 	t.Setenv("VIDEO_UNDERSTANDING_PROVIDER", "openai")
 	t.Setenv("VIDEO_UNDERSTANDING_API_URL", "")
-	t.Setenv("VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL", "https://api2.65535.space")
+	t.Setenv("VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL", "https://api.cheaperinference.com/v1")
 	t.Setenv("VIDEO_UNDERSTANDING_API_KEY", "secret")
 	t.Setenv("VIDEO_UNDERSTANDING_WIRE_API", "chat_completions")
 	t.Setenv("VIDEO_UNDERSTANDING_IMAGE_DETAIL", "low")
@@ -23,7 +23,7 @@ func TestLoadAllowsDirectUnderstandingWithoutAdapterURL(t *testing.T) {
 	if !configuration.UsesDirectUnderstanding() || configuration.UsesLocalUnderstanding() {
 		t.Fatalf("unexpected understanding mode: %+v", configuration)
 	}
-	if configuration.UnderstandingUpstreamBaseURL != "https://api2.65535.space" || configuration.UnderstandingMaxOutputTokens != 6000 {
+	if configuration.UnderstandingUpstreamBaseURL != "https://api.cheaperinference.com/v1" || configuration.UnderstandingMaxOutputTokens != 6000 {
 		t.Fatalf("direct understanding settings were not loaded: %+v", configuration)
 	}
 }
@@ -34,7 +34,7 @@ func TestLoadUsesOpenAICompatibleGatewayForGeminiModel(t *testing.T) {
 	t.Setenv("VIDEO_UNDERSTANDING_MODEL", "gemini-3.8-flash")
 	t.Setenv("VIDEO_UNDERSTANDING_DIRECT", "true")
 	t.Setenv("VIDEO_UNDERSTANDING_API_URL", "")
-	t.Setenv("VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL", "https://api2.65535.space")
+	t.Setenv("VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL", "https://api.cheaperinference.com/v1")
 	t.Setenv("VIDEO_UNDERSTANDING_API_KEY", "gateway-secret")
 	t.Setenv("VIDEO_UNDERSTANDING_WIRE_API", "chat_completions")
 
@@ -46,7 +46,7 @@ func TestLoadUsesOpenAICompatibleGatewayForGeminiModel(t *testing.T) {
 		t.Fatalf("unexpected understanding mode: %+v", configuration)
 	}
 	if configuration.UnderstandingModel != "gemini-3.8-flash" ||
-		configuration.UnderstandingUpstreamBaseURL != "https://api2.65535.space" ||
+		configuration.UnderstandingUpstreamBaseURL != "https://api.cheaperinference.com/v1" ||
 		configuration.UnderstandingWireAPI != "chat_completions" {
 		t.Fatalf("unexpected gateway settings: %+v", configuration)
 	}
@@ -106,7 +106,7 @@ func TestLoadRequiresDirectUnderstandingAPIKey(t *testing.T) {
 	t.Setenv("VIDEO_UNDERSTANDING_API_KEY", "")
 	t.Setenv("AI_GATEWAY_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
-	t.Setenv("VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL", "https://api2.65535.space")
+	t.Setenv("VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL", "https://api.cheaperinference.com/v1")
 
 	if _, err := Load(); err == nil {
 		t.Fatal("expected missing direct API key error")
@@ -121,13 +121,13 @@ func TestLoadAllowsDirectTranscriptionWithoutAdapterURL(t *testing.T) {
 	t.Setenv("TRANSCRIPTION_PROVIDER", "openai-direct")
 	t.Setenv("TRANSCRIPTION_API_URL", "")
 	t.Setenv("TRANSCRIPTION_API_KEY", "speech-secret")
-	t.Setenv("TRANSCRIPTION_UPSTREAM_BASE_URL", "https://api2.65535.space")
+	t.Setenv("TRANSCRIPTION_UPSTREAM_BASE_URL", "https://api.cheaperinference.com/v1")
 
 	configuration, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !configuration.UsesDirectTranscription() || configuration.TranscriptionUpstreamBaseURL != "https://api2.65535.space" {
+	if !configuration.UsesDirectTranscription() || configuration.TranscriptionUpstreamBaseURL != "https://api.cheaperinference.com/v1" {
 		t.Fatalf("direct transcription settings were not loaded: %+v", configuration)
 	}
 }
@@ -144,7 +144,7 @@ func TestLoadRequiresDirectTranscriptionAPIKey(t *testing.T) {
 	t.Setenv("AI_GATEWAY_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("VIDEO_UNDERSTANDING_API_KEY", "")
-	t.Setenv("TRANSCRIPTION_UPSTREAM_BASE_URL", "https://api2.65535.space")
+	t.Setenv("TRANSCRIPTION_UPSTREAM_BASE_URL", "https://api.cheaperinference.com/v1")
 
 	if _, err := Load(); err == nil {
 		t.Fatal("expected missing direct transcription API key error")
@@ -253,7 +253,7 @@ func TestLoadPrefersDeepgramSpecificKeyAndBaseURL(t *testing.T) {
 	t.Setenv("TRANSCRIPTION_API_URL", "")
 	t.Setenv("TRANSCRIPTION_API_KEY", "old-openai-key")
 	t.Setenv("DEEPGRAM_API_KEY", "deepgram-secret")
-	t.Setenv("TRANSCRIPTION_UPSTREAM_BASE_URL", "https://api2.65535.space")
+	t.Setenv("TRANSCRIPTION_UPSTREAM_BASE_URL", "https://api.cheaperinference.com/v1")
 	t.Setenv("DEEPGRAM_BASE_URL", "https://api.deepgram.com")
 
 	configuration, err := Load()

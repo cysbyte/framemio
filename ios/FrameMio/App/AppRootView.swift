@@ -134,7 +134,10 @@ struct AppRootView: View {
 
     private var templatesTab: some View {
         NavigationStack(path: $templatesPath) {
-            TemplatesView(storyService: dependencies.storyService) { template, projectType in
+            TemplatesView(
+                storyService: dependencies.storyService,
+                hasTemplateAccess: hasTemplateAccess
+            ) { template, projectType in
                 templatesPath.append(.mediaPicker(draft: .fromTemplate(template, projectType: projectType)))
             }
             .navigationDestination(for: AppRoute.self) { route in
@@ -167,6 +170,10 @@ struct AppRootView: View {
         }
 
         openPurchaseDestination(source)
+    }
+
+    private var hasTemplateAccess: Bool {
+        creditStore.balance?.hasActiveSubscriptionCycle == true
     }
 
     private func openBuyCredits(_ source: PricingEntryPoint) {
@@ -276,6 +283,7 @@ struct AppRootView: View {
                 photoLibrary: dependencies.photoLibrary,
                 storyService: dependencies.storyService,
                 promptTranscriptionService: dependencies.promptTranscriptionService,
+                hasTemplateAccess: hasTemplateAccess,
                 onContinue: { configuredDraft in
                     appendRoute(.storyCreating(draft: configuredDraft, assets: assets, launchID: UUID()))
                 }
@@ -295,6 +303,7 @@ struct AppRootView: View {
                 draft: draft,
                 storyService: dependencies.storyService,
                 promptTranscriptionService: dependencies.promptTranscriptionService,
+                hasTemplateAccess: hasTemplateAccess,
                 onCreate: { configuredDraft in
                     appendRoute(.storyCreating(draft: configuredDraft, assets: assets, launchID: UUID()))
                 },
@@ -455,6 +464,7 @@ struct CreateView: View {
 
 struct TemplatesView: View {
     let storyService: StoryService
+    let hasTemplateAccess: Bool
     let onUseTemplate: (VideoTemplate, VideoProjectType) -> Void
     @State private var selectedProjectType: VideoProjectType = .story
     @State private var templates: [VideoTemplate] = []
@@ -497,13 +507,16 @@ struct TemplatesView: View {
                     LoadingState(title: "Loading templates", message: "Fetching the latest reviewed styles.")
                 } else {
                     LazyVGrid(columns: templateGridColumns, alignment: .leading, spacing: FrameMioSpacing.md) {
-                        ForEach(visibleTemplates) { template in
+                        ForEach(Array(visibleTemplates.enumerated()), id: \.element.id) { index, template in
+                            let isLocked = templateIsLocked(at: index)
                             TemplateCard(
                                 template: template,
                                 isSelected: selectedTemplateID == template.id,
+                                isLocked: isLocked,
                                 cardWidth: nil,
                                 previewHeight: 132
                             ) {
+                                guard !isLocked else { return }
                                 selectedTemplateID = template.id
                             }
                         }
@@ -546,6 +559,7 @@ struct TemplatesView: View {
         .navigationTitle("Templates")
         .navigationBarTitleDisplayMode(.inline)
         .task { await loadTemplates() }
+        .refreshable { await loadTemplates(force: true) }
     }
 
     private var templateGridColumns: [GridItem] {
@@ -555,18 +569,65 @@ struct TemplatesView: View {
         ]
     }
 
-    private func loadTemplates() async {
-        guard templates.isEmpty else { return }
+    private func templateIsLocked(at index: Int) -> Bool {
+        TemplateAccessPolicy.isLocked(index: index, hasTemplateAccess: hasTemplateAccess)
+    }
+
+    private func loadTemplates(force: Bool = false) async {
+        guard force || templates.isEmpty else { return }
         isLoading = true
         defer { isLoading = false }
+
         do {
-            let loaded = try await storyService.videoTemplates(for: nil)
+            let loaded = try await loadTemplateCatalogWithRetry()
             templates = loaded.isEmpty ? VideoTemplate.localFallbackCatalog : loaded
+        } catch is CancellationError {
+            return
         } catch {
             purchaseRoutingDebugLog("templates_tab_catalog_fallback error=\(String(describing: error))")
-            templates = VideoTemplate.localFallbackCatalog
+            if templates.isEmpty {
+                templates = VideoTemplate.localFallbackCatalog
+            }
         }
         selectedTemplateID = visibleTemplates.first?.id
+    }
+
+    private func loadTemplateCatalogWithRetry() async throws -> [VideoTemplate] {
+        let maxRetries = 2
+        let retryBaseDelayNanoseconds: UInt64 = 2_000_000_000
+        var retryCount = 0
+
+        while true {
+            do {
+                return try await storyService.videoTemplates(for: nil)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                guard retryCount < maxRetries, Self.isRetryableTemplateLoadError(error) else {
+                    throw error
+                }
+
+                retryCount += 1
+                purchaseRoutingDebugLog("templates_tab_catalog_retry attempt=\(retryCount) error=\(String(describing: error))")
+                let delay = retryBaseDelayNanoseconds * UInt64(1 << min(retryCount - 1, 3))
+                try await Task.sleep(nanoseconds: delay)
+            }
+        }
+    }
+
+    private static func isRetryableTemplateLoadError(_ error: Error) -> Bool {
+        if case let APIClientError.server(statusCode, _) = error {
+            return statusCode == 408 || statusCode == 425 || statusCode == 429 || (500...599).contains(statusCode)
+        }
+
+        switch AppError.from(error) {
+        case .networkUnavailable:
+            return true
+        case let .server(statusCode):
+            return statusCode == 408 || statusCode == 425 || statusCode == 429 || (500...599).contains(statusCode)
+        default:
+            return false
+        }
     }
 }
 
@@ -591,6 +652,7 @@ struct ProjectConfigurationView: View {
     let photoLibrary: PhotoLibraryService
     let storyService: StoryService
     let promptTranscriptionService: PromptTranscriptionService?
+    let hasTemplateAccess: Bool
     let onContinue: (VideoProjectDraft) -> Void
 
     init(
@@ -599,6 +661,7 @@ struct ProjectConfigurationView: View {
         photoLibrary: PhotoLibraryService,
         storyService: StoryService,
         promptTranscriptionService: PromptTranscriptionService? = nil,
+        hasTemplateAccess: Bool = false,
         onContinue: @escaping (VideoProjectDraft) -> Void
     ) {
         self.draft = draft
@@ -606,6 +669,7 @@ struct ProjectConfigurationView: View {
         self.photoLibrary = photoLibrary
         self.storyService = storyService
         self.promptTranscriptionService = promptTranscriptionService
+        self.hasTemplateAccess = hasTemplateAccess
         self.onContinue = onContinue
         _promoSubject = State(initialValue: draft.promo?.subject ?? .product)
         _promoGoal = State(initialValue: draft.promo?.goal ?? .sell)
@@ -768,14 +832,17 @@ struct ProjectConfigurationView: View {
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: FrameMioSpacing.md) {
-                        ForEach(templates) { template in
+                        ForEach(Array(templates.enumerated()), id: \.element.id) { index, template in
+                            let isLocked = templateIsLocked(at: index)
                             TemplateCard(
                                 template: template,
                                 isSelected: selectedTemplateID == template.id,
+                                isLocked: isLocked,
                                 cardWidth: 184,
                                 previewHeight: 122,
                                 minHeight: 268
                             ) {
+                                guard !isLocked else { return }
                                 select(template)
                             }
                         }
@@ -990,8 +1057,13 @@ struct ProjectConfigurationView: View {
     }
 
     private func select(_ template: VideoTemplate) {
+        guard let index = templates.firstIndex(where: { $0.id == template.id }), !templateIsLocked(at: index) else { return }
         selectedTemplateID = template.id
         templateConfiguration = compatibleConfiguration(templateConfiguration, with: template)
+    }
+
+    private func templateIsLocked(at index: Int) -> Bool {
+        TemplateAccessPolicy.isLocked(index: index, hasTemplateAccess: hasTemplateAccess)
     }
 
     private func compatibleConfiguration(_ previous: VideoTemplateConfiguration?, with template: VideoTemplate) -> VideoTemplateConfiguration {
@@ -1452,6 +1524,7 @@ private struct ProjectTemplateSettingsSheet: View {
 struct TemplateCard: View {
     let template: VideoTemplate
     let isSelected: Bool
+    let isLocked: Bool
     let onSelect: () -> Void
     @State private var fullScreenDemo: TemplateDemoPlayback?
     private let cardWidth: CGFloat?
@@ -1462,6 +1535,7 @@ struct TemplateCard: View {
     init(
         template: VideoTemplate,
         isSelected: Bool,
+        isLocked: Bool = false,
         cardWidth: CGFloat? = 226,
         previewHeight: CGFloat = 176,
         minHeight: CGFloat = 314,
@@ -1469,6 +1543,7 @@ struct TemplateCard: View {
     ) {
         self.template = template
         self.isSelected = isSelected
+        self.isLocked = isLocked
         self.cardWidth = cardWidth
         self.previewHeight = previewHeight
         self.minHeight = minHeight
@@ -1481,9 +1556,18 @@ struct TemplateCard: View {
                 InlineTemplateVideo(path: template.demoVideoPath)
                     .frame(maxWidth: .infinity)
                     .frame(height: previewHeight)
+                    .blur(radius: isLocked ? 4 : 0)
+                    .saturation(isLocked ? 0.35 : 1)
+                    .overlay {
+                        if isLocked {
+                            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                                .fill(.black.opacity(0.34))
+                        }
+                    }
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
 
                 Button {
+                    guard !isLocked else { return }
                     FrameMioHaptics.secondaryAction()
                     if let url = templateDemoURL(template.demoVideoPath) {
                         fullScreenDemo = TemplateDemoPlayback(title: template.name, url: url)
@@ -1501,11 +1585,31 @@ struct TemplateCard: View {
                 .buttonStyle(FrameMioPressButtonStyle())
                 .padding(FrameMioSpacing.xs)
                 .accessibilityLabel("Play \(template.name) fullscreen")
+                .disabled(isLocked)
+                .opacity(isLocked ? 0 : 1)
+
+                if isLocked {
+                    VStack(spacing: FrameMioSpacing.xs) {
+                        Image(systemName: "lock.fill")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 42, height: 42)
+                            .background(.black.opacity(0.58), in: Circle())
+                        Text("Pro")
+                            .font(FrameMioTypography.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, FrameMioSpacing.sm)
+                            .padding(.vertical, 4)
+                            .background(.black.opacity(0.58), in: Capsule())
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .accessibilityHidden(true)
+                }
             }
 
             Text(template.name)
                 .font(FrameMioTypography.headline)
-                .foregroundStyle(FrameMioColors.ink)
+                .foregroundStyle(isLocked ? FrameMioColors.secondaryInk : FrameMioColors.ink)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
             Text(template.description)
@@ -1521,7 +1625,7 @@ struct TemplateCard: View {
         .background(isSelected ? FrameMioColors.accentMuted : FrameMioColors.elevatedSurface, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .stroke(isSelected ? FrameMioColors.accent : FrameMioColors.divider, lineWidth: isSelected ? 2 : 1)
+                .stroke(isSelected ? FrameMioColors.accent : (isLocked ? FrameMioColors.divider.opacity(0.54) : FrameMioColors.divider), lineWidth: isSelected ? 2 : 1)
         }
         .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .onTapGesture(perform: onSelect)
@@ -1529,7 +1633,7 @@ struct TemplateCard: View {
             FullScreenTemplateDemoPlayer(url: demo.url, title: demo.title)
         }
         .accessibilityLabel("\(template.name). \(template.description)")
-        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityValue(isLocked ? "Locked" : (isSelected ? "Selected" : "Not selected"))
         .accessibilityAddTraits(.isButton)
         .accessibilityAction {
             onSelect()

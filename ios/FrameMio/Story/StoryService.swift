@@ -54,7 +54,10 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
     func story(id: String) async throws -> Story {
         do {
             let data = try await apiClient.data(for: APIRequest(method: .get, path: "/v1/stories/\(id)"))
-            return try decoder.decode(Story.self, from: data)
+            let story = try decoder.decode(Story.self, from: data)
+            let existing = try await persistence.loadStories()
+            try await persistence.saveStories([story] + existing.filter { $0.id != story.id })
+            return story
         } catch is CancellationError {
             throw CancellationError()
         } catch {

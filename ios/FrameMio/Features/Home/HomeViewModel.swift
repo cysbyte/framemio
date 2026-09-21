@@ -38,11 +38,15 @@ final class HomeViewModel: ObservableObject {
     }
 
     func load() {
+        guard loadTask == nil else { return }
         loadTask?.cancel()
         loadTask = Task { [weak self] in
             guard let self else { return }
             isLoading = true
-            defer { isLoading = false }
+            defer {
+                isLoading = false
+                loadTask = nil
+            }
 
             do {
                 if let mockState {

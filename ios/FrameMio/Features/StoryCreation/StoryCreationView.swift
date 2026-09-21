@@ -16,6 +16,7 @@ struct StoryCreationView: View {
     let onCreated: (Story) -> Void
     let onOpenPricing: (PricingEntryPoint) -> Void
     let promptTranscriptionService: PromptTranscriptionService?
+    let hasTemplateAccess: Bool
     @State private var generationOptions = StoryGenerationOptions.automatic
     @State private var isShowingCustomization = false
     @State private var templates: [VideoTemplate] = []
@@ -27,6 +28,7 @@ struct StoryCreationView: View {
         draft: VideoProjectDraft,
         storyService: StoryService,
         promptTranscriptionService: PromptTranscriptionService? = nil,
+        hasTemplateAccess: Bool = false,
         onCreate: @escaping (VideoProjectDraft) -> Void,
         onCreated: @escaping (Story) -> Void,
         onOpenPricing: @escaping (PricingEntryPoint) -> Void
@@ -38,6 +40,7 @@ struct StoryCreationView: View {
         _selectedTemplateID = State(initialValue: draft.templateID)
         _templateConfiguration = State(initialValue: draft.templateConfiguration)
         self.promptTranscriptionService = promptTranscriptionService
+        self.hasTemplateAccess = hasTemplateAccess
         self.onCreate = onCreate
         self.onCreated = onCreated
         self.onOpenPricing = onOpenPricing
@@ -293,14 +296,20 @@ struct StoryCreationView: View {
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: FrameMioSpacing.md) {
-                        ForEach(templates) { template in
+                        ForEach(Array(templates.enumerated()), id: \.element.id) { index, template in
+                            let isLocked = templateIsLocked(at: index)
                             TemplateCard(
                                 template: template,
                                 isSelected: selectedTemplateID == template.id,
+                                isLocked: isLocked,
                                 cardWidth: 184,
                                 previewHeight: 122,
                                 minHeight: 268
                             ) {
+                                guard !isLocked else {
+                                    onOpenPricing(.settings)
+                                    return
+                                }
                                 select(template)
                             }
                         }
@@ -373,9 +382,14 @@ struct StoryCreationView: View {
     }
 
     private func select(_ template: VideoTemplate) {
+        guard let index = templates.firstIndex(where: { $0.id == template.id }), !templateIsLocked(at: index) else { return }
         selectedTemplateID = template.id
         templateConfiguration = compatibleConfiguration(templateConfiguration, with: template)
         applyTemplateDefaultsToStoryOptions(templateConfiguration)
+    }
+
+    private func templateIsLocked(at index: Int) -> Bool {
+        TemplateAccessPolicy.isLocked(index: index, hasTemplateAccess: hasTemplateAccess)
     }
 
     private func compatibleConfiguration(_ previous: VideoTemplateConfiguration?, with template: VideoTemplate) -> VideoTemplateConfiguration {

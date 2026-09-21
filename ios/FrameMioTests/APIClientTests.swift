@@ -84,6 +84,60 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(RetryURLProtocol.requestCount, 2)
     }
 
+    func testRetriesColdStartFailuresUntilBackendBecomesHealthy() async throws {
+        RetryURLProtocol.responses = Array(
+            repeating: .success(statusCode: 503, data: Data("service unavailable".utf8)),
+            count: 18
+        ) + [.success(statusCode: 200, data: Data("{\"available\":20}".utf8))]
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RetryURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let client = URLSessionAPIClient(
+            baseURL: URL(string: "https://api.framemio.test")!,
+            session: session,
+            tokenProvider: StaticAuthTokenProvider(token: "token"),
+            maxNetworkRetries: 0,
+            retryBaseDelayNanoseconds: 0
+        )
+
+        let data = try await client.data(
+            for: APIRequest(method: .get, path: "/v1/me/credits")
+        )
+
+        XCTAssertEqual(String(data: data, encoding: .utf8), "{\"available\":20}")
+        XCTAssertEqual(RetryURLProtocol.requestCount, 19)
+    }
+
+    func testAcquiresTokenAfterInitialUnauthenticatedRequest() async throws {
+        RetryURLProtocol.responses = [
+            .success(statusCode: 401, data: Data("unauthorized".utf8)),
+            .success(statusCode: 200, data: Data("[]".utf8))
+        ]
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RetryURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let tokenProvider = RefreshingAuthTokenProvider()
+        let client = URLSessionAPIClient(
+            baseURL: URL(string: "https://api.framemio.test")!,
+            session: session,
+            tokenProvider: tokenProvider,
+            maxNetworkRetries: 0,
+            maxTransientStatusRetries: 0,
+            retryBaseDelayNanoseconds: 0
+        )
+
+        let data = try await client.data(
+            for: APIRequest(method: .get, path: "/v1/stories")
+        )
+
+        XCTAssertEqual(String(data: data, encoding: .utf8), "[]")
+        XCTAssertEqual(RetryURLProtocol.requestCount, 2)
+        let accessTokenCallCount = await tokenProvider.accessTokenCallCount
+        let invalidateCallCount = await tokenProvider.invalidateCallCount
+        XCTAssertEqual(accessTokenCallCount, 2)
+        XCTAssertEqual(invalidateCallCount, 1)
+    }
+
     func testDoesNotRetryNonIdempotentPostAfterNetworkFailure() async throws {
         RetryURLProtocol.responses = [
             .failure(URLError(.networkConnectionLost)),
@@ -154,6 +208,20 @@ private actor StaticAuthTokenProvider: AuthTokenProvider {
     }
 
     func invalidateAccessToken() async {}
+}
+
+private actor RefreshingAuthTokenProvider: AuthTokenProvider {
+    private(set) var accessTokenCallCount = 0
+    private(set) var invalidateCallCount = 0
+
+    func accessToken() async -> String? {
+        accessTokenCallCount += 1
+        return accessTokenCallCount == 1 ? nil : "refreshed-token"
+    }
+
+    func invalidateAccessToken() async {
+        invalidateCallCount += 1
+    }
 }
 
 private final class RetryURLProtocol: URLProtocol, @unchecked Sendable {
@@ -303,6 +371,80 @@ final class CreditBalanceModelTests: XCTestCase {
 
         XCTAssertEqual(balance.available, 100)
         XCTAssertFalse(balance.hasActiveSubscriptionCycle)
+    }
+}
+
+@MainActor
+final class CreditBalanceStoreTests: XCTestCase {
+    func testProfileCreditRefreshRetriesAfterTransientFailure() async throws {
+        let service = RetryingCreditService(
+            failuresBeforeSuccess: 1,
+            balance: CreditBalance(available: 42, reserved: 0)
+        )
+        let store = CreditBalanceStore(
+            creditService: service,
+            maxRefreshRetries: 1,
+            refreshRetryBaseDelayNanoseconds: 0
+        )
+
+        store.refresh()
+
+        for _ in 0..<100 {
+            if store.balance != nil {
+                break
+            }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+
+        XCTAssertEqual(store.balance?.available, 42)
+        XCTAssertFalse(store.isLoading)
+        XCTAssertNil(store.errorMessage)
+        let requestCount = await service.requestCount
+        XCTAssertEqual(requestCount, 2)
+    }
+}
+
+private actor RetryingCreditService: CreditService {
+    private var remainingFailures: Int
+    private let storedBalance: CreditBalance
+    private(set) var requestCount = 0
+
+    init(failuresBeforeSuccess: Int, balance: CreditBalance) {
+        remainingFailures = failuresBeforeSuccess
+        storedBalance = balance
+    }
+
+    func balance() async throws -> CreditBalance {
+        try await load()
+    }
+
+    func refreshBalance() async throws -> CreditBalance {
+        try await load()
+    }
+
+    func quote(action: CreditAction, stats: CreditMediaStats) async throws -> CreditQuote {
+        fatalError("not used in CreditBalanceStoreTests")
+    }
+
+    func creditPacks() async throws -> [CreditPack] {
+        fatalError("not used in CreditBalanceStoreTests")
+    }
+
+    func grantPurchasedCredits(packID: String, purchaseID: String) async throws -> CreditBalance {
+        fatalError("not used in CreditBalanceStoreTests")
+    }
+
+    func grantSubscriptionCycleCredits(plan: String, purchaseID: String, expiresAt: Date?) async throws -> CreditBalance {
+        fatalError("not used in CreditBalanceStoreTests")
+    }
+
+    private func load() throws -> CreditBalance {
+        requestCount += 1
+        guard remainingFailures == 0 else {
+            remainingFailures -= 1
+            throw APIClientError.server(statusCode: 503)
+        }
+        return storedBalance
     }
 }
 

@@ -4,6 +4,7 @@ import UIKit
 
 struct HomeView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var viewModel: HomeViewModel
     @ObservedObject private var creditStore: CreditBalanceStore
     let onCreateStory: (MomentContext) -> Void
@@ -73,6 +74,14 @@ struct HomeView: View {
         .task {
             viewModel.load()
             creditStore.refresh()
+        }
+        .onAppear {
+            viewModel.load()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                viewModel.load()
+            }
         }
         .refreshable {
             viewModel.load()
