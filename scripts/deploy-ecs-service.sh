@@ -349,7 +349,6 @@ configure_request_autoscaling() {
     --alarm-name "$ECS_SERVICE-request-scale-in" \
     --alarm-description "Scale $ECS_SERVICE to 0 after five idle minutes while at least one backend target is healthy." \
     --metrics "$scale_in_metrics" \
-    --period 60 \
     --evaluation-periods "$ECS_REQUEST_SCALE_IN_EVALUATION_PERIODS" \
     --datapoints-to-alarm "$ECS_REQUEST_SCALE_IN_EVALUATION_PERIODS" \
     --comparison-operator LessThanOrEqualToThreshold \
