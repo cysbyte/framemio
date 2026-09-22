@@ -23,7 +23,24 @@ export class DeterministicRenderWorker {
 
   async render(input: RenderInput): Promise<RenderResult> {
     const rendererVersion = input.renderer_version ?? RENDER_VERSION;
-    console.info(JSON.stringify({level: 'info', msg: 'render job started', job_id: input.job_id, project_id: input.project_id, media_count: input.media_assets.length, moment_count: input.story_plan.moments.length, broll_count: input.story_plan.broll?.length ?? 0, broll_trace: brollTrace(input.story_plan.broll ?? []), caption_count: input.story_plan.captions?.length ?? 0, output_s3_key: input.output_s3_key, renderer_version: rendererVersion}));
+    console.info(JSON.stringify({
+      level: 'info',
+      msg: 'render job started',
+      job_id: input.job_id,
+      project_id: input.project_id,
+      media_count: input.media_assets.length,
+      moment_count: input.story_plan.moments.length,
+      broll_count: input.story_plan.broll?.length ?? 0,
+      broll_trace: brollTrace(input.story_plan.broll ?? []),
+      caption_count: input.story_plan.captions?.length ?? 0,
+      caption_style_preset: input.story_plan.caption_style?.preset ?? 'unset',
+      caption_style_presentation: input.story_plan.caption_style?.presentation ?? 'unset',
+      audio_source_requested: input.story_plan.audio?.source ?? 'unset',
+      audio_original_audio_requested: input.story_plan.audio?.original_audio ?? null,
+      audio_original_volume_requested: input.story_plan.audio?.original_volume ?? null,
+      output_s3_key: input.output_s3_key,
+      renderer_version: rendererVersion,
+    }));
     validateInput(input, rendererVersion);
     const fingerprint = renderFingerprint(input, rendererVersion);
     const paths = await ensureRenderDirs(this.dependencies.workRoot, fingerprint);
@@ -35,7 +52,27 @@ export class DeterministicRenderWorker {
     console.info(JSON.stringify({level: 'info', msg: 'render clips prepared', job_id: input.job_id, project_id: input.project_id, prepared_count: preparedPaths.size}));
     const composition = buildComposition(input.story_plan, input.media_assets, assetPaths, preparedPaths, paths, {rendererVersion, fps: DEFAULT_FPS, projectType: input.project_type, projectConfiguration: input.project_configuration});
     await writeFile(paths.composition_file, JSON.stringify(composition, null, 2), 'utf8');
-    console.info(JSON.stringify({level: 'info', msg: 'render composition built', job_id: input.job_id, project_id: input.project_id, duration_ms: composition.duration_ms, width: composition.resolution.width, height: composition.resolution.height, clip_count: composition.clips.length, broll_count: composition.broll.length, broll_trace: timelineBRollTrace(composition.broll), caption_count: composition.captions.length, transition_summary: transitionSummary(composition)}));
+    console.info(JSON.stringify({
+      level: 'info',
+      msg: 'render composition built',
+      job_id: input.job_id,
+      project_id: input.project_id,
+      duration_ms: composition.duration_ms,
+      width: composition.resolution.width,
+      height: composition.resolution.height,
+      clip_count: composition.clips.length,
+      video_clip_count: composition.clips.filter((clip) => clip.media_type === 'video').length,
+      audio_eligible_video_clip_count: composition.clips.filter((clip) => clip.media_type === 'video' && clip.volume > 0).length,
+      broll_count: composition.broll.length,
+      broll_trace: timelineBRollTrace(composition.broll),
+      caption_count: composition.captions.length,
+      caption_style_preset: composition.caption_style?.preset ?? 'unset',
+      caption_style_presentation: composition.caption_style?.presentation ?? 'unset',
+      audio_source_resolved: composition.audio.source,
+      audio_original_audio_resolved: composition.audio.original_audio,
+      audio_original_volume_resolved: composition.audio.original_volume,
+      transition_summary: transitionSummary(composition),
+    }));
     const remotionIntermediate = path.join(paths.work_dir, 'remotion-output.mp4');
     await this.dependencies.remotion.renderComposition(composition, remotionIntermediate);
     console.info(JSON.stringify({level: 'info', msg: 'remotion render completed', job_id: input.job_id, project_id: input.project_id}));
@@ -131,14 +168,46 @@ export class DeterministicRenderWorker {
       const endMicros = moment.end_micros ?? Math.round((asset.duration_seconds ?? moment.duration_ms / 1000) * 1_000_000);
       const clipID = stableClipId(moment, index);
       const destination = path.join(clipsDir, `${clipID}.mp4`);
+      const keepAudio = input.story_plan.audio?.original_audio ?? true;
+      const sourceProbe = await this.dependencies.ffmpeg.probeMedia(sourcePath);
+      console.info(JSON.stringify({
+        level: 'info',
+        msg: 'preparing render video clip',
+        job_id: input.job_id,
+        project_id: input.project_id,
+        clip_id: clipID,
+        asset_id: asset.id,
+        moment_id: moment.moment_id ?? '',
+        source_start_micros: startMicros,
+        source_end_micros: endMicros,
+        speed: moment.speed ?? 1,
+        keep_audio: keepAudio,
+        audio_source_requested: input.story_plan.audio?.source ?? 'unset',
+        source_audio_stream_count: sourceProbe.audioStreamCount,
+        source_video_stream_count: sourceProbe.videoStreamCount,
+        source_duration_seconds: sourceProbe.durationSeconds ?? null,
+      }));
       await this.dependencies.ffmpeg.trimVideo({
         inputPath: sourcePath,
         outputPath: destination,
         startMicros,
         endMicros,
         speed: moment.speed ?? 1,
-        keepAudio: input.story_plan.audio?.original_audio ?? true,
+        keepAudio,
       });
+      const preparedProbe = await this.dependencies.ffmpeg.probeMedia(destination);
+      console.info(JSON.stringify({
+        level: 'info',
+        msg: 'prepared render video clip',
+        job_id: input.job_id,
+        project_id: input.project_id,
+        clip_id: clipID,
+        asset_id: asset.id,
+        keep_audio: keepAudio,
+        prepared_audio_stream_count: preparedProbe.audioStreamCount,
+        prepared_video_stream_count: preparedProbe.videoStreamCount,
+        prepared_duration_seconds: preparedProbe.durationSeconds ?? null,
+      }));
       prepared.set(clipID, destination);
     }
     for (const [index, overlay] of (input.story_plan.broll ?? []).entries()) {

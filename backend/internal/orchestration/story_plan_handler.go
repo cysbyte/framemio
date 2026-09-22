@@ -29,6 +29,8 @@ type StoryPlanHandler struct {
 
 const flexibleStoryRevisionMaxDurationMS = 60000
 const defaultFullSourceMaxDurationMS = 10 * 60 * 1000
+const defaultStoryDurationLongVideoThreshold = 2 * time.Minute
+const defaultStoryDurationLongVideoTarget = 60 * time.Second
 
 func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJob) error {
 	handlerStarted := time.Now()
@@ -124,7 +126,29 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		}
 	}
 	brollWithScoreCount, brollWithConfidenceCount := brollMetadataCounts(plan.BRoll)
-	h.logger().Info("story planner output ready", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.Int("candidate_count", len(photoAnalyses)+totalVideoSegments(videoAnalyses)), slog.Int("requested_duration_ms", plan.RequestedDurationMS), slog.Int("planned_duration_ms", plan.TotalDurationMS), slog.Int("output_max_duration_seconds", plan.Output.MaxDurationS), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("broll_with_score_count", brollWithScoreCount), slog.Int("broll_with_confidence_count", brollWithConfidenceCount), slog.String("broll_scores", brollScores(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)), slog.Int("typography_count", typographyCount(plan.Moments)), slog.Int("video_moment_count", videoMomentCount(plan.Moments)), slog.String("caption_style_preset", storyPlanCaptionStylePreset(plan)))
+	h.logger().Info("story planner output ready",
+		slog.String("job_id", job.ID),
+		slog.String("project_id", project.ID),
+		slog.String("story_plan_id", plan.ID),
+		slog.Int("story_plan_version", plan.Version),
+		slog.Int("candidate_count", len(photoAnalyses)+totalVideoSegments(videoAnalyses)),
+		slog.Int("requested_duration_ms", plan.RequestedDurationMS),
+		slog.Int("planned_duration_ms", plan.TotalDurationMS),
+		slog.Int("output_max_duration_seconds", plan.Output.MaxDurationS),
+		slog.Int("moment_count", len(plan.Moments)),
+		slog.Int("broll_count", len(plan.BRoll)),
+		slog.Int("broll_with_score_count", brollWithScoreCount),
+		slog.Int("broll_with_confidence_count", brollWithConfidenceCount),
+		slog.String("broll_scores", brollScores(plan.BRoll)),
+		slog.Int("caption_count", len(plan.Captions)),
+		slog.Int("typography_count", typographyCount(plan.Moments)),
+		slog.Int("video_moment_count", videoMomentCount(plan.Moments)),
+		slog.String("caption_style_preset", storyPlanCaptionStylePreset(plan)),
+		slog.String("caption_style_presentation", storyPlanCaptionStylePresentation(plan)),
+		slog.String("audio_source", storyPlanAudioSource(plan)),
+		slog.String("audio_original_audio", storyPlanOriginalAudio(plan)),
+		slog.Float64("audio_original_volume", storyPlanOriginalVolume(plan)),
+	)
 	if h.Validator != nil {
 		validationStarted := time.Now()
 		if validationErr := h.Validator.Validate(ctx, job.UserID, plan); validationErr != nil {
@@ -255,17 +279,19 @@ func firstNonEmptyStoryRevisionVisualStyle(values ...models.VisualStyle) models.
 
 func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configuration map[string]string, mediaByID map[string]models.MediaAsset, photoAnalyses []models.PhotoAnalysis, videoAnalyses []models.VideoAnalysis, clusters []models.MediaCluster) ai.Request {
 	version, _ := strconv.Atoi(strings.TrimSpace(configuration["story_plan_version"]))
-	duration := defaultProjectDuration(project, mediaByID)
+	defaultDuration := defaultProjectDuration(project, mediaByID)
+	duration := defaultDuration
 	targetDurationFixed := false
 	selectedMediaIDs := splitStoryPlanConfigList(configuration["selected_media_ids"])
 	if len(selectedMediaIDs) == 0 {
 		selectedMediaIDs = append([]string(nil), project.MediaIDs...)
 	}
-	durationMode := models.NormalizeDurationMode(models.DurationMode(strings.TrimSpace(configuration["duration_mode"])))
-	if durationMode == models.DurationModeAuto {
+	configuredDurationMode := strings.TrimSpace(configuration["duration_mode"])
+	durationMode := models.NormalizeDurationMode(models.DurationMode(configuredDurationMode))
+	if durationMode == models.DurationModeAuto && configuredDurationMode == "" {
 		durationMode = project.Configuration.DurationMode
 	}
-	if durationMode == models.DurationModeAuto {
+	if durationMode == models.DurationModeAuto && configuredDurationMode == "" {
 		switch project.Type {
 		case models.ProjectTypePromo:
 			if project.Configuration.Promo != nil {
@@ -277,10 +303,11 @@ func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configur
 			}
 		}
 	}
-	if durationMode == models.DurationModeAuto && project.Configuration.TemplateConfiguration.DurationMode != "" {
+	if durationMode == models.DurationModeAuto && configuredDurationMode == "" && project.Configuration.TemplateConfiguration.DurationMode != "" {
 		durationMode = project.Configuration.TemplateConfiguration.DurationMode
 	}
 	targetDurationSeconds, _ := strconv.Atoi(strings.TrimSpace(configuration["target_duration_seconds"]))
+	durationResolution := "media_auto_default"
 	if targetDurationSeconds > 0 && strings.TrimSpace(configuration["duration_mode"]) == "" {
 		durationMode = models.DurationModeFixed
 	}
@@ -303,17 +330,19 @@ func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configur
 		if targetDurationSeconds > 0 {
 			duration = time.Duration(targetDurationSeconds) * time.Second
 			targetDurationFixed = true
+			durationResolution = "explicit_target"
 		}
 	} else if durationMode == models.DurationModeFullSource {
 		duration = h.fullSourceDuration(selectedMediaIDs, videoAnalyses)
 		if duration <= 0 {
-			duration = defaultProjectDuration(project, mediaByID)
+			duration = defaultDuration
 		}
 		maxDuration := fullSourceMaxDuration()
 		if duration > maxDuration {
 			duration = maxDuration
 		}
 		targetDurationFixed = false
+		durationResolution = "full_source"
 	} else {
 		durationMode = models.DurationModeAuto
 	}
@@ -349,9 +378,13 @@ func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configur
 			brollPreference = "none"
 		}
 	}
-	if durationMode != models.DurationModeFullSource && !targetDurationFixed && templateConfiguration.DurationSeconds > 0 {
+	if durationMode != models.DurationModeFullSource &&
+		!targetDurationFixed &&
+		configuredDurationMode == "" &&
+		templateConfiguration.DurationSeconds > 0 {
 		duration = time.Duration(templateConfiguration.DurationSeconds) * time.Second
 		targetDurationFixed = true
+		durationResolution = "template_default"
 	}
 	removeFiller := boolPointerFromConfig(configuration["remove_filler_and_pauses"])
 	removeFillerAndPauses := durationMode == models.DurationModeFullSource && removeFiller != nil && *removeFiller
@@ -364,6 +397,28 @@ func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configur
 			removeFillerAndPauses = project.Configuration.Reel.RemoveFillerAndPauses
 		}
 	}
+	totalVideoSeconds := totalUploadedVideoDurationSeconds(project.MediaIDs, mediaByID)
+	if durationResolution == "media_auto_default" && totalVideoSeconds > defaultStoryDurationLongVideoThreshold.Seconds() {
+		durationResolution = "long_video_auto_default"
+	}
+	h.logger().Info("story_duration_resolved",
+		slog.String("project_id", project.ID),
+		slog.String("project_type", string(project.Type)),
+		slog.String("configured_duration_mode", configuredDurationModeOrUnset(configuredDurationMode)),
+		slog.String("resolved_duration_mode", string(durationMode)),
+		slog.Int("configured_target_duration_seconds", targetDurationSeconds),
+		slog.Bool("target_duration_fixed", targetDurationFixed),
+		slog.String("resolution", durationResolution),
+		slog.Int64("default_duration_ms", defaultDuration.Milliseconds()),
+		slog.Int64("resolved_duration_ms", duration.Milliseconds()),
+		slog.Float64("total_uploaded_video_seconds", totalVideoSeconds),
+		slog.Float64("long_video_threshold_seconds", defaultStoryDurationLongVideoThreshold.Seconds()),
+		slog.Int("media_count", len(project.MediaIDs)),
+		slog.Int("selected_media_count", len(selectedMediaIDs)),
+		slog.Int("video_count", uploadedVideoCount(project.MediaIDs, mediaByID)),
+		slog.Int("template_duration_seconds", templateConfiguration.DurationSeconds),
+		slog.String("template_duration_mode", string(templateConfiguration.DurationMode)),
+	)
 	return ai.Request{
 		ProjectID:             project.ID,
 		Version:               version,
@@ -391,6 +446,37 @@ func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configur
 		VideoAnalyses:         videoAnalyses,
 		MediaClusters:         clusters,
 	}
+}
+
+func totalUploadedVideoDurationSeconds(mediaIDs []string, mediaByID map[string]models.MediaAsset) float64 {
+	total := 0.0
+	for _, mediaID := range mediaIDs {
+		media, exists := mediaByID[mediaID]
+		if !exists || media.Type != models.MediaTypeVideo || media.DurationSeconds == nil || *media.DurationSeconds <= 0 {
+			continue
+		}
+		total += *media.DurationSeconds
+	}
+	return total
+}
+
+func uploadedVideoCount(mediaIDs []string, mediaByID map[string]models.MediaAsset) int {
+	count := 0
+	for _, mediaID := range mediaIDs {
+		media, exists := mediaByID[mediaID]
+		if !exists || media.Type != models.MediaTypeVideo || media.DurationSeconds == nil || *media.DurationSeconds <= 0 {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func configuredDurationModeOrUnset(value string) string {
+	if value == "" {
+		return "unset"
+	}
+	return value
 }
 
 func normalizedProjectType(value models.ProjectType) models.ProjectType {
@@ -544,6 +630,34 @@ func storyPlanCaptionStylePreset(plan models.StoryPlan) string {
 	return valueOrUnset(plan.CaptionStyle.Preset)
 }
 
+func storyPlanCaptionStylePresentation(plan models.StoryPlan) string {
+	if plan.CaptionStyle == nil {
+		return "unset"
+	}
+	return valueOrUnset(plan.CaptionStyle.Presentation)
+}
+
+func storyPlanAudioSource(plan models.StoryPlan) string {
+	if plan.Audio == nil {
+		return "unset"
+	}
+	return valueOrUnset(plan.Audio.Source)
+}
+
+func storyPlanOriginalAudio(plan models.StoryPlan) string {
+	if plan.Audio == nil || plan.Audio.OriginalAudio == nil {
+		return "unset"
+	}
+	return strconv.FormatBool(*plan.Audio.OriginalAudio)
+}
+
+func storyPlanOriginalVolume(plan models.StoryPlan) float64 {
+	if plan.Audio == nil {
+		return 0
+	}
+	return plan.Audio.OriginalVolume
+}
+
 func splitStoryPlanConfigList(value string) []string {
 	parts := strings.Split(value, ",")
 	result := make([]string, 0, len(parts))
@@ -607,15 +721,10 @@ func defaultStoryDuration(project models.StoryProject, mediaByID map[string]mode
 	if len(project.MediaIDs) >= 4 && seconds < 15 {
 		seconds = 15
 	}
-	videoSeconds := 0.0
-	videoCount := 0
-	for _, mediaID := range project.MediaIDs {
-		media, exists := mediaByID[mediaID]
-		if !exists || media.Type != models.MediaTypeVideo || media.DurationSeconds == nil || *media.DurationSeconds <= 0 {
-			continue
-		}
-		videoCount++
-		videoSeconds += *media.DurationSeconds
+	videoSeconds := totalUploadedVideoDurationSeconds(project.MediaIDs, mediaByID)
+	videoCount := uploadedVideoCount(project.MediaIDs, mediaByID)
+	if videoSeconds > defaultStoryDurationLongVideoThreshold.Seconds() {
+		return defaultStoryDurationLongVideoTarget
 	}
 	if videoSeconds > 0 {
 		videoBasedSeconds := int(math.Ceil(videoSeconds/8.0)) + 15

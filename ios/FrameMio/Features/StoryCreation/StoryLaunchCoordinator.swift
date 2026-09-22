@@ -120,7 +120,10 @@ final class StoryLaunchCoordinator: ObservableObject {
         }
 
         let instruction = draft.prompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        storyLaunchDebugLog("launch requested id=\(launchID) type=\(draft.type.rawValue) assets=\(assets.count) videos=\(assets.filter(\.isVideo).count) prompt_present=\(!instruction.isEmpty) prompt_length=\(instruction.count)")
+        let totalVideoSourceDuration = assets.reduce(0.0) { total, asset in
+            asset.isVideo ? total + max(0, asset.duration) : total
+        }
+        storyLaunchDebugLog("launch requested id=\(launchID) type=\(draft.type.rawValue) assets=\(assets.count) videos=\(assets.filter(\.isVideo).count) total_video_source_seconds=\(totalVideoSourceDuration) duration_mode=\(draft.storyOptions.durationMode.rawValue) target_duration=\(draft.storyOptions.targetDuration.map { String(Int($0.rounded())) } ?? "auto") template_id=\(draft.templateID ?? "none") prompt_present=\(!instruction.isEmpty) prompt_length=\(instruction.count)")
         launchTask?.cancel()
         activeLaunchID = launchID
         isPreparing = true
@@ -168,7 +171,7 @@ final class StoryLaunchCoordinator: ObservableObject {
                 phaseTitle = buildingTitle(for: draft.type)
                 phaseDetail = "Sending analyzed media to FrameMio before server-side planning starts."
                 progress = max(progress, 0.86)
-                storyLaunchDebugLog("phase=story_create_start app_percent=\(Int(progress * 100)) analyses=\(analyses.count)")
+                storyLaunchDebugLog("phase=story_create_start app_percent=\(Int(progress * 100)) analyses=\(analyses.count) duration_mode=\(draft.storyOptions.durationMode.rawValue) target_duration=\(draft.storyOptions.targetDuration.map { String(Int($0.rounded())) } ?? "auto") total_video_source_seconds=\(totalVideoSourceDuration)")
                 let story = try await createStoryWithUploadRefreshRetry(
                     draft: draft,
                     assets: assets,

@@ -1296,6 +1296,18 @@ func (s *Server) createIOSStory(response http.ResponseWriter, request *http.Requ
 		TotalVideoSeconds: sumIOSStoryVideoSeconds(resolved),
 		TotalBytes:        totalBytes,
 	}
+	s.Logger.Info("ios_story_duration_input_resolved",
+		"user_id", user.ID,
+		"project_id", projectID,
+		"duration_mode", durationMode,
+		"target_duration_seconds", input.TargetDuration,
+		"has_target_duration", input.TargetDuration > 0,
+		"total_uploaded_video_seconds", totalIOSStoryVideoDurationSeconds(resolved),
+		"long_video_threshold_seconds", 120,
+		"template_duration_mode", normalizedTemplateConfiguration.TemplateConfiguration.DurationMode,
+		"template_duration_seconds", normalizedTemplateConfiguration.TemplateConfiguration.DurationSeconds,
+		"automatic_long_video_candidate", durationMode == models.DurationModeAuto && input.TargetDuration <= 0 && totalIOSStoryVideoDurationSeconds(resolved) > 120,
+	)
 	reservation, ok := s.reserveIOSStoryCredits(response, request, user.ID, models.CreditActionCreateStory, projectID, stats, map[string]any{"context": input.Context, "asset_count": len(resolved)})
 	if !ok {
 		return
@@ -1393,6 +1405,17 @@ func sumIOSStoryVideoSeconds(assets []resolvedIOSStoryAsset) int {
 			continue
 		}
 		total += int(*asset.media.DurationSeconds + 0.5)
+	}
+	return total
+}
+
+func totalIOSStoryVideoDurationSeconds(assets []resolvedIOSStoryAsset) float64 {
+	var total float64
+	for _, asset := range assets {
+		if asset.media.Type != models.MediaTypeVideo || asset.media.DurationSeconds == nil || *asset.media.DurationSeconds <= 0 {
+			continue
+		}
+		total += *asset.media.DurationSeconds
 	}
 	return total
 }

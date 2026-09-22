@@ -22,6 +22,7 @@ struct StoryCreationView: View {
     @State private var templates: [VideoTemplate] = []
     @State private var selectedTemplateID: String?
     @State private var templateConfiguration: VideoTemplateConfiguration?
+    @State private var hasExplicitDurationSelection = false
 
     init(
         viewModel: StoryCreationViewModel,
@@ -152,6 +153,7 @@ struct StoryCreationView: View {
             StoryGenerationOptionsSheet(
                 options: $generationOptions,
                 templateConfiguration: $templateConfiguration,
+                hasExplicitDurationSelection: $hasExplicitDurationSelection,
                 assets: viewModel.assets,
                 promptTranscriptionService: promptTranscriptionService,
                 template: selectedTemplate
@@ -339,7 +341,9 @@ struct StoryCreationView: View {
         guard let template = selectedTemplate else { return templateConfiguration }
         var resolved = templateConfiguration ?? template.defaults
         if template.editableOptions.contains("duration_seconds") {
-            resolved.durationSeconds = generationOptions.targetDuration.map { Int($0.rounded()) } ?? resolved.durationSeconds
+            resolved.durationSeconds = generationOptions.durationMode == .fixed
+                ? generationOptions.targetDuration.map { Int($0.rounded()) } ?? resolved.durationSeconds
+                : 0
         }
         if template.editableOptions.contains("duration_mode") {
             resolved.durationMode = generationOptions.durationMode
@@ -427,8 +431,10 @@ struct StoryCreationView: View {
         generationOptions.subtitlesEnabled = configuration.captionsEnabled
         generationOptions.subtitleStyle = configuration.captionStyle
         generationOptions.sceneDetailStyle = configuration.sceneDetail
-        generationOptions.durationMode = configuration.durationMode ?? (configuration.durationSeconds == nil ? .auto : .fixed)
-        generationOptions.targetDuration = generationOptions.durationMode == .fixed ? configuration.durationSeconds.map(TimeInterval.init) : nil
+        guard !hasExplicitDurationSelection else { return }
+        let templateDurationMode = configuration.durationMode ?? (configuration.durationSeconds == nil ? .auto : .fixed)
+        generationOptions.durationMode = templateDurationMode == .fullSource ? .fullSource : .auto
+        generationOptions.targetDuration = nil
         generationOptions.removeFillerAndPauses = generationOptions.durationMode == .fullSource && configuration.removeFillerAndPauses == true
     }
 
@@ -725,6 +731,7 @@ private struct StoryGenerationOptionsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var options: StoryGenerationOptions
     @Binding var templateConfiguration: VideoTemplateConfiguration?
+    @Binding var hasExplicitDurationSelection: Bool
     let assets: [MediaAsset]
     let promptTranscriptionService: PromptTranscriptionService?
     let template: VideoTemplate?
@@ -1008,6 +1015,7 @@ private struct StoryGenerationOptionsSheet: View {
             SectionHeader(title: "Length", subtitle: "Auto fits your selected media")
             LazyVGrid(columns: optionGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
                 optionChip(title: "Auto", isSelected: options.durationMode == .auto) {
+                    hasExplicitDurationSelection = true
                     options.durationMode = .auto
                     options.targetDuration = nil
                     options.removeFillerAndPauses = false
@@ -1020,6 +1028,7 @@ private struct StoryGenerationOptionsSheet: View {
                         isSelected: options.durationMode == .fixed && Int((options.targetDuration ?? 0).rounded()) == seconds,
                         isDisabled: disabled
                     ) {
+                        hasExplicitDurationSelection = true
                         options.durationMode = .fixed
                         options.targetDuration = TimeInterval(seconds)
                         options.removeFillerAndPauses = false
@@ -1033,6 +1042,7 @@ private struct StoryGenerationOptionsSheet: View {
                         isSelected: options.durationMode == .fullSource,
                         isDisabled: disabled
                     ) {
+                        hasExplicitDurationSelection = true
                         options.durationMode = .fullSource
                         options.targetDuration = nil
                     }

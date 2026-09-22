@@ -740,8 +740,85 @@ func TestDefaultStoryDurationUsesVideoLengthForLongUploads(t *testing.T) {
 		"photo":       {ID: "photo", Type: models.MediaTypePhoto},
 	}
 	got := defaultStoryDuration(project, mediaByID)
-	if got != 54*time.Second {
-		t.Fatalf("long-upload duration = %s, want 54s", got)
+	if got != 60*time.Second {
+		t.Fatalf("long-upload duration = %s, want 60s", got)
+	}
+}
+
+func TestDefaultStoryDurationUses60SecondsWhenVideosExceedTwoMinutes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		videoSeconds float64
+		expected     time.Duration
+	}{
+		{name: "exactly two minutes", videoSeconds: 120, expected: 30 * time.Second},
+		{name: "just over two minutes", videoSeconds: 120.1, expected: 60 * time.Second},
+		{name: "ten minutes", videoSeconds: 10 * 60, expected: 60 * time.Second},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			project := models.StoryProject{MediaIDs: []string{"video"}}
+			mediaByID := map[string]models.MediaAsset{
+				"video": {ID: "video", Type: models.MediaTypeVideo, DurationSeconds: ptrFloat64(test.videoSeconds)},
+			}
+			if got := defaultStoryDuration(project, mediaByID); got != test.expected {
+				t.Fatalf("video duration %.1fs produced %s, want %s", test.videoSeconds, got, test.expected)
+			}
+		})
+	}
+}
+
+func TestStoryPlanRequestUsesAutomaticLongVideoDuration(t *testing.T) {
+	t.Parallel()
+	project := models.StoryProject{
+		ID:       "project-long-video-auto",
+		MediaIDs: []string{"video-a", "video-b"},
+	}
+	mediaByID := map[string]models.MediaAsset{
+		"video-a": {ID: "video-a", Type: models.MediaTypeVideo, DurationSeconds: ptrFloat64(240)},
+		"video-b": {ID: "video-b", Type: models.MediaTypeVideo, DurationSeconds: ptrFloat64(360)},
+	}
+	request := (StoryPlanHandler{}).storyPlanRequest(
+		project,
+		map[string]string{"duration_mode": "auto"},
+		mediaByID,
+		nil,
+		nil,
+		nil,
+	)
+	if request.DurationMode != models.DurationModeAuto || request.TargetDurationFixed {
+		t.Fatalf("expected automatic duration mode, got mode=%q fixed=%v", request.DurationMode, request.TargetDurationFixed)
+	}
+	if request.DesiredDuration != 60*time.Second {
+		t.Fatalf("automatic long-video duration = %s, want 60s", request.DesiredDuration)
+	}
+}
+
+func TestStoryPlanRequestPreservesExplicit30SecondDuration(t *testing.T) {
+	t.Parallel()
+	project := models.StoryProject{
+		ID:       "project-long-video-fixed",
+		MediaIDs: []string{"video"},
+	}
+	mediaByID := map[string]models.MediaAsset{
+		"video": {ID: "video", Type: models.MediaTypeVideo, DurationSeconds: ptrFloat64(10 * 60)},
+	}
+	request := (StoryPlanHandler{}).storyPlanRequest(
+		project,
+		map[string]string{
+			"duration_mode":           "fixed",
+			"target_duration_seconds": "30",
+		},
+		mediaByID,
+		nil,
+		nil,
+		nil,
+	)
+	if request.DesiredDuration != 30*time.Second || !request.TargetDurationFixed {
+		t.Fatalf("explicit duration was changed: duration=%s fixed=%v", request.DesiredDuration, request.TargetDurationFixed)
 	}
 }
 

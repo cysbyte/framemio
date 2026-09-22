@@ -1444,7 +1444,22 @@ func (s *Server) getRenderInput(response http.ResponseWriter, request *http.Requ
 	if strings.TrimSpace(outputKey) == "" {
 		outputKey = renderOutputKey(job.UserID, job.ProjectID, plan.Version, job.Configuration["output_preset"])
 	}
-	s.Logger.Info("render input prepared", slog.String("job_id", job.ID), slog.String("project_id", job.ProjectID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.String("broll_trace", renderBRollTrace(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)), slog.Int("media_asset_count", len(assets)))
+	s.Logger.Info("render input prepared",
+		slog.String("job_id", job.ID),
+		slog.String("project_id", job.ProjectID),
+		slog.String("story_plan_id", plan.ID),
+		slog.Int("story_plan_version", plan.Version),
+		slog.Int("moment_count", len(plan.Moments)),
+		slog.Int("broll_count", len(plan.BRoll)),
+		slog.String("broll_trace", renderBRollTrace(plan.BRoll)),
+		slog.Int("caption_count", len(plan.Captions)),
+		slog.Int("media_asset_count", len(assets)),
+		slog.String("caption_style_preset", storyPlanCaptionStylePreset(plan)),
+		slog.String("caption_style_presentation", storyPlanCaptionStylePresentation(plan)),
+		slog.String("audio_source", storyPlanAudioSource(plan)),
+		slog.String("audio_original_audio", storyPlanOriginalAudio(plan)),
+		slog.Float64("audio_original_volume", storyPlanOriginalVolume(plan)),
+	)
 	s.writeJSON(response, http.StatusOK, renderInputResponse{
 		JobID:                job.ID,
 		ProjectID:            job.ProjectID,
@@ -1485,6 +1500,48 @@ func renderBRollTrace(overlays []models.StoryBRoll) string {
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, ",")
+}
+
+func storyPlanCaptionStylePreset(plan models.StoryPlan) string {
+	if plan.CaptionStyle == nil {
+		return "unset"
+	}
+	return renderValueOrUnset(plan.CaptionStyle.Preset)
+}
+
+func storyPlanCaptionStylePresentation(plan models.StoryPlan) string {
+	if plan.CaptionStyle == nil {
+		return "unset"
+	}
+	return renderValueOrUnset(plan.CaptionStyle.Presentation)
+}
+
+func storyPlanAudioSource(plan models.StoryPlan) string {
+	if plan.Audio == nil {
+		return "unset"
+	}
+	return renderValueOrUnset(plan.Audio.Source)
+}
+
+func storyPlanOriginalAudio(plan models.StoryPlan) string {
+	if plan.Audio == nil || plan.Audio.OriginalAudio == nil {
+		return "unset"
+	}
+	return strconv.FormatBool(*plan.Audio.OriginalAudio)
+}
+
+func storyPlanOriginalVolume(plan models.StoryPlan) float64 {
+	if plan.Audio == nil {
+		return 0
+	}
+	return plan.Audio.OriginalVolume
+}
+
+func renderValueOrUnset(value string) string {
+	if trimmed := strings.TrimSpace(value); trimmed != "" {
+		return trimmed
+	}
+	return "unset"
 }
 
 func renderInputMediaIDs(projectMediaIDs []string, plan models.StoryPlan) []string {

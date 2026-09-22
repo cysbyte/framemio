@@ -78,6 +78,7 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
         } catch {
             throw AppError.invalidResponse
         }
+        storyServiceDebugLog("create_story_request duration_mode=\(request.durationMode.rawValue) target_duration=\(request.targetDuration.map { String(Int($0.rounded())) } ?? "auto") assets=\(request.assets.count) videos=\(request.assets.filter(\.isVideo).count) total_video_source_seconds=\(request.assets.reduce(0.0) { total, asset in asset.isVideo ? total + max(0, asset.duration) : total }) template_id=\(request.templateID ?? "none") template_duration_mode=\(request.templateConfiguration?.durationMode?.rawValue ?? "none") template_duration_seconds=\(request.templateConfiguration?.durationSeconds.map(String.init) ?? "none")")
 
         let data = try await apiClient.data(
             for: APIRequest(

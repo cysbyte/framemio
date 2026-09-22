@@ -852,8 +852,33 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
     }
     const captions = await this.prepareCaptionOverlays(composition, outputPath);
     const typography = await this.prepareTypographyOverlays(composition, outputPath);
-    console.info(JSON.stringify({level: 'info', msg: 'ffmpeg overlays prepared', project_id: composition.project_id, story_plan_id: composition.story_plan_id, input_caption_count: composition.captions.length, caption_overlay_count: captions.length, typography_overlay_count: typography.length}));
+    const captionStyle = resolveCaptionStyle(composition.caption_style);
+    console.info(JSON.stringify({
+      level: 'info',
+      msg: 'ffmpeg overlays prepared',
+      project_id: composition.project_id,
+      story_plan_id: composition.story_plan_id,
+      input_caption_count: composition.captions.length,
+      caption_overlay_count: captions.length,
+      typography_overlay_count: typography.length,
+      caption_style_preset: composition.caption_style?.preset ?? 'unset',
+      caption_style_presentation_requested: composition.caption_style?.presentation ?? 'unset',
+      caption_style_presentation_resolved: captionStyle.presentation,
+    }));
     const filter = concatFilter(composition, captions, typography);
+    console.info(JSON.stringify({
+      level: 'info',
+      msg: 'ffmpeg audio mapping resolved',
+      project_id: composition.project_id,
+      story_plan_id: composition.story_plan_id,
+      audio_source: composition.audio.source,
+      original_audio: composition.audio.original_audio,
+      original_volume: composition.audio.original_volume,
+      video_clip_count: composition.clips.filter((clip) => clip.media_type === 'video').length,
+      audio_eligible_video_clip_count: composition.clips.filter((clip) => clip.media_type === 'video' && clip.volume > 0).length,
+      has_audio_output: filter.hasAudio,
+      output_mapping: filter.hasAudio ? '[outa]' : 'none',
+    }));
     args.push(
       '-filter_complex',
       filter.filter,

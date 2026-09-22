@@ -20,15 +20,26 @@ export interface EncodeRequest {
   durationMs: number;
 }
 
+export interface MediaProbe {
+  audioStreamCount: number;
+  videoStreamCount: number;
+  durationSeconds?: number;
+}
+
 export interface FfmpegClient {
   trimVideo(request: TrimVideoRequest): Promise<void>;
   encodeMp4(request: EncodeRequest): Promise<void>;
+  probeMedia(inputPath: string): Promise<MediaProbe>;
 }
 
 const DEFAULT_FFMPEG_TIMEOUT_MS = 5 * 60 * 1000;
 
 export class ShellFfmpegClient implements FfmpegClient {
-  constructor(private readonly ffmpegBinary = 'ffmpeg', private readonly timeoutMs = DEFAULT_FFMPEG_TIMEOUT_MS) {}
+  constructor(
+    private readonly ffmpegBinary = 'ffmpeg',
+    private readonly timeoutMs = DEFAULT_FFMPEG_TIMEOUT_MS,
+    private readonly ffprobeBinary = 'ffprobe',
+  ) {}
 
   async trimVideo(request: TrimVideoRequest): Promise<void> {
     await mkdir(path.dirname(request.outputPath), {recursive: true});
@@ -100,6 +111,26 @@ export class ShellFfmpegClient implements FfmpegClient {
       request.outputPath,
     ], this.timeoutMs);
   }
+
+  async probeMedia(inputPath: string): Promise<MediaProbe> {
+    const output = await runCapture(this.ffprobeBinary, [
+      '-v', 'error',
+      '-show_entries', 'stream=codec_type:format=duration',
+      '-of', 'json',
+      inputPath,
+    ], this.timeoutMs);
+    const parsed = JSON.parse(output) as {
+      streams?: Array<{codec_type?: string}>;
+      format?: {duration?: string};
+    };
+    const streams = parsed.streams ?? [];
+    const duration = Number.parseFloat(parsed.format?.duration ?? '');
+    return {
+      audioStreamCount: streams.filter((stream) => stream.codec_type === 'audio').length,
+      videoStreamCount: streams.filter((stream) => stream.codec_type === 'video').length,
+      durationSeconds: Number.isFinite(duration) ? duration : undefined,
+    };
+  }
 }
 
 export class DeterministicFixtureFfmpegClient implements FfmpegClient {
@@ -115,6 +146,10 @@ export class DeterministicFixtureFfmpegClient implements FfmpegClient {
     this.operations.push({name: 'encodeMp4', request});
     await mkdir(path.dirname(request.outputPath), {recursive: true});
     await writeFile(request.outputPath, `fixture mp4\n${stableFixtureJson(request)}\n`, 'utf8');
+  }
+
+  async probeMedia(_inputPath: string): Promise<MediaProbe> {
+    return {audioStreamCount: 1, videoStreamCount: 1};
   }
 }
 
@@ -187,6 +222,52 @@ async function run(command: string, args: string[], timeoutMs = DEFAULT_FFMPEG_T
       clearTimeout(timeout);
       if (code === 0) {
         resolve();
+        return;
+      }
+      reject(new Error(`${command} exited with ${code}: ${stderr}`));
+    });
+  });
+}
+
+async function runCapture(command: string, args: string[], timeoutMs = DEFAULT_FFMPEG_TIMEOUT_MS): Promise<string> {
+  return await new Promise<string>((resolve, reject) => {
+    const child = spawn(command, args, {stdio: ['ignore', 'pipe', 'pipe']});
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      child.kill('SIGKILL');
+      reject(new Error(`${command} timed out after ${timeoutMs}ms: ${stderr}`));
+    }, timeoutMs);
+    child.stdout.on('data', (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += String(chunk);
+      if (stderr.length > 16000) {
+        stderr = stderr.slice(-16000);
+      }
+    });
+    child.on('error', (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.on('close', (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      if (code === 0) {
+        resolve(stdout);
         return;
       }
       reject(new Error(`${command} exited with ${code}: ${stderr}`));

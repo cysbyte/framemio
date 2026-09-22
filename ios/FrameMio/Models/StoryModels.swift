@@ -405,8 +405,9 @@ struct VideoProjectDraft: Codable, Hashable, Sendable {
             options.subtitlesEnabled = template.defaults.captionsEnabled
             options.subtitleStyle = template.defaults.captionStyle
             options.sceneDetailStyle = template.defaults.sceneDetail
-            options.durationMode = template.defaults.durationMode ?? (template.defaults.durationSeconds == nil ? .auto : .fixed)
-            options.targetDuration = template.defaults.durationSeconds.map(TimeInterval.init)
+            let templateDurationMode = template.defaults.durationMode ?? (template.defaults.durationSeconds == nil ? .auto : .fixed)
+            options.durationMode = templateDurationMode == .fullSource ? .fullSource : .auto
+            options.targetDuration = options.durationMode == .fixed ? template.defaults.durationSeconds.map(TimeInterval.init) : nil
             options.removeFillerAndPauses = template.defaults.removeFillerAndPauses == true && options.durationMode == .fullSource
             draft.storyOptions = options
         case .promo:

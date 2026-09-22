@@ -142,6 +142,23 @@ export function buildComposition(
   const effects = normalizedEffects(clips);
   const branding = normalizeBranding(options.projectConfiguration, mediaAssets, assetPaths);
   const cta = normalizeCTA(storyPlan.call_to_action);
+  const audio = resolveAudio(storyPlan, paths, fps);
+  console.info(JSON.stringify({
+    level: 'info',
+    msg: 'timeline audio and caption settings resolved',
+    project_id: storyPlan.project_id,
+    story_plan_id: storyPlan.id,
+    story_plan_version: storyPlan.version,
+    audio_source_requested: storyPlan.audio?.source ?? 'unset',
+    audio_original_audio_requested: storyPlan.audio?.original_audio ?? null,
+    audio_original_volume_requested: storyPlan.audio?.original_volume ?? null,
+    audio_source_resolved: audio.source,
+    audio_original_audio_resolved: audio.original_audio,
+    audio_original_volume_resolved: audio.original_volume,
+    caption_style_preset: storyPlan.caption_style?.preset ?? 'unset',
+    caption_style_presentation: storyPlan.caption_style?.presentation ?? 'unset',
+    caption_count: storyPlan.captions?.length ?? 0,
+  }));
   return {
     renderer_version: rendererVersion,
     project_type: projectType,
@@ -179,7 +196,7 @@ export function buildComposition(
     broll,
     captions: storyPlan.captions ?? [],
     caption_style: storyPlan.caption_style,
-    audio: resolveAudio(storyPlan, paths, fps),
+    audio,
   };
 }
 
