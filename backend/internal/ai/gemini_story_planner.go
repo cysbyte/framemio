@@ -72,11 +72,15 @@ func (p GeminiStoryPlanner) Plan(ctx context.Context, request Request) (models.S
 		return models.StoryPlan{}, fmt.Errorf("story planner provider request: %w", err)
 	}
 	if p.Logger != nil {
+		responseMetadata := storyPlannerProviderResponseMetadata(raw, "chat_completions")
 		p.Logger.Info("story_planner_external_response_received",
 			slog.String("provider", p.Name()),
 			slog.String("model", p.Model()),
 			slog.Int64("latency_ms", time.Since(started).Milliseconds()),
 			slog.Int("response_bytes", len(raw)),
+			slog.String("finish_reason", responseMetadata.FinishReason),
+			slog.String("response_status", responseMetadata.Status),
+			slog.String("incomplete_reason", responseMetadata.IncompleteReason),
 		)
 	}
 	text, err := extractTypographyModelText(raw, "chat_completions")

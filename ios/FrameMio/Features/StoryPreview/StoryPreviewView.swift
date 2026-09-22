@@ -20,14 +20,20 @@ struct StoryPreviewView: View {
 
     private let generatedVideoAspectRatio: CGFloat = 9.0 / 16.0
     private let onOpenPricing: (PricingEntryPoint) -> Void
+    private let onClose: (() -> Void)?
 
     private var editorConfiguration: VideoProjectEditorConfiguration {
         viewModel.editorConfiguration
     }
 
-    init(viewModel: StoryPreviewViewModel, onOpenPricing: @escaping (PricingEntryPoint) -> Void) {
+    init(
+        viewModel: StoryPreviewViewModel,
+        onOpenPricing: @escaping (PricingEntryPoint) -> Void,
+        onClose: (() -> Void)? = nil
+    ) {
         _viewModel = StateObject(wrappedValue: viewModel)
         self.onOpenPricing = onOpenPricing
+        self.onClose = onClose
     }
 
     var body: some View {
@@ -56,6 +62,20 @@ struct StoryPreviewView: View {
         .background(FrameMioColors.canvas.ignoresSafeArea())
         .navigationTitle("My \(editorConfiguration.terminology.projectName)")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(onClose != nil)
+        .toolbar {
+            if let onClose {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        FrameMioHaptics.secondaryAction()
+                        onClose()
+                    } label: {
+                        Label("Back", systemImage: "chevron.left")
+                    }
+                    .accessibilityLabel("Back to Projects")
+                }
+            }
+        }
         .task {
             viewModel.load()
             viewModel.refreshCreditBalance()

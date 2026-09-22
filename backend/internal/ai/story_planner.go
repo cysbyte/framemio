@@ -57,18 +57,19 @@ const defaultMaxFullSourceDuration = 10 * time.Minute
 const maxStoryPlanCaptionLength = 220
 
 type candidate struct {
-	moment        models.StoryMoment
-	captionCues   []captionCue
-	sourceTime    int64
-	score         float64
-	repetition    string
-	mediaID       string
-	sceneID       string
-	clusterID     string
-	semanticTerms map[string]struct{}
-	isVideo       bool
-	isSelected    bool
-	isEnding      bool
+	moment          models.StoryMoment
+	captionCues     []captionCue
+	sourceTime      int64
+	score           float64
+	repetition      string
+	mediaID         string
+	sceneID         string
+	clusterID       string
+	sourceEndMicros int64
+	semanticTerms   map[string]struct{}
+	isVideo         bool
+	isSelected      bool
+	isEnding        bool
 }
 
 type captionCue struct {
@@ -103,22 +104,30 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 		}
 	}
 	clusterByMedia := buildClusterIndex(request.MediaClusters)
+	rawCandidateCount := 0
+	expandedCandidateCount := 0
 	candidates := filterExcludedCandidates(buildCandidates(request, selected, clusterByMedia), excludedMedia, excludedMoments)
+	rawCandidateCount = len(candidates)
 	applyInstructionPreferences(candidates, request.UserInstructions)
 	if request.DurationMode == models.DurationModeFullSource {
 		candidates = filterExcludedCandidates(buildFullSourceCandidates(request, selected, clusterByMedia), excludedMedia, excludedMoments)
+		rawCandidateCount = len(candidates)
 		if request.RemoveFillerAndPauses && p != nil && p.Logger != nil {
 			p.Logger.Info("story_planner_full_source_cleanup_fallback",
 				slog.String("project_id", request.ProjectID),
 				slog.String("reason", "validated filler/silence timing unavailable"),
 			)
 		}
+	} else if request.TargetDurationFixed {
+		candidates = filterExcludedCandidates(expandFixedDurationCandidates(candidates, request), excludedMedia, excludedMoments)
+		expandedCandidateCount = len(candidates)
+		applyInstructionPreferences(candidates, request.UserInstructions)
 	}
 	if len(candidates) == 0 {
 		return models.StoryPlan{}, errors.New("story planner requires at least one usable analysis")
 	}
 	strategy := EditStrategyForRequest(request)
-	chosen := strategy.SelectCandidates(candidates, request.DesiredDuration)
+	chosen := strategy.SelectCandidates(candidates, request)
 	if len(chosen) == 0 {
 		return models.StoryPlan{}, errors.New("story planner could not assemble a coherent story")
 	}
@@ -205,6 +214,18 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 	templates.ApplyPlanDefaults(&plan, request.TemplateConfiguration)
 	EnforceSceneTransitions(&plan, request.VideoAnalyses, visualStyle)
 	applyCaptionColorInstruction(&plan, request.UserInstructions)
+	if p != nil && p.Logger != nil {
+		p.Logger.Info("story_planner_local_selection",
+			slog.String("project_id", request.ProjectID),
+			slog.String("duration_mode", string(request.DurationMode)),
+			slog.Bool("target_duration_fixed", request.TargetDurationFixed),
+			slog.Int64("desired_duration_ms", request.DesiredDuration.Milliseconds()),
+			slog.Int("raw_candidate_count", rawCandidateCount),
+			slog.Int("expanded_candidate_count", expandedCandidateCount),
+			slog.Int("selected_moment_count", len(plan.Moments)),
+			slog.Int("planned_duration_ms", plan.TotalDurationMS),
+		)
+	}
 	if err := ValidateStoryPlan(plan); err != nil {
 		if p != nil && p.Logger != nil {
 			brollDurationMS := 0
@@ -954,7 +975,8 @@ func buildCandidates(request Request, selected map[string]struct{}, clusters map
 				moment: moment, captionCues: transcriptCaptionCues(analysis.Transcript, segment.StartMicros, endMicros),
 				sourceTime: sourceTimelineMicros(mediaBaseTime, segmentTime), score: score,
 				repetition: repetitionKey(mediaID, clusterID, segmentTime, segment.SceneID),
-				mediaID:    mediaID, sceneID: segment.SceneID, clusterID: clusterID, semanticTerms: videoSegmentSemanticTerms(segment), isVideo: true, isSelected: hasMedia(selected, mediaID),
+				mediaID:    mediaID, sceneID: segment.SceneID, clusterID: clusterID, sourceEndMicros: segment.EndMicros,
+				semanticTerms: videoSegmentSemanticTerms(segment), isVideo: true, isSelected: hasMedia(selected, mediaID),
 			})
 		}
 	}
@@ -1038,6 +1060,92 @@ func buildFullSourceCandidates(request Request, selected map[string]struct{}, cl
 		usedMicros += endMicros
 	}
 	return candidates
+}
+
+func expandFixedDurationCandidates(candidates []candidate, request Request) []candidate {
+	targetMS := candidateDurationTargetMS(request.DesiredDuration)
+	if targetMS <= 0 || storyCandidateDuration(candidates) >= targetMS {
+		return candidates
+	}
+	expanded := append([]candidate(nil), candidates...)
+	seen := make(map[string]struct{}, len(expanded))
+	for _, entry := range expanded {
+		seen[momentKey(entry.moment)] = struct{}{}
+	}
+	sort.SliceStable(candidates, func(left, right int) bool {
+		if candidates[left].sourceTime == candidates[right].sourceTime {
+			return candidates[left].score > candidates[right].score
+		}
+		return candidates[left].sourceTime < candidates[right].sourceTime
+	})
+	for _, entry := range candidates {
+		if !entry.isVideo || entry.sourceEndMicros <= entry.moment.StartMicros {
+			continue
+		}
+		for _, extra := range expandedWindowsForCandidate(entry) {
+			key := momentKey(extra.moment)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			expanded = append(expanded, extra)
+			seen[key] = struct{}{}
+		}
+		if storyCandidateDuration(expanded) >= targetMS*2 {
+			break
+		}
+	}
+	return expanded
+}
+
+func expandedWindowsForCandidate(entry candidate) []candidate {
+	if !entry.isVideo {
+		return nil
+	}
+	windowMicros := maxVideoMomentDuration.Microseconds()
+	startMicros := entry.moment.StartMicros + windowMicros
+	endLimit := entry.sourceEndMicros
+	if endLimit <= entry.moment.EndMicros {
+		return nil
+	}
+	result := make([]candidate, 0, int((endLimit-entry.moment.EndMicros+windowMicros-1)/windowMicros))
+	for startMicros < endLimit {
+		endMicros := minInt64(startMicros+windowMicros, endLimit)
+		if endMicros <= startMicros {
+			break
+		}
+		extra := entry
+		extra.moment.StartMicros = startMicros
+		extra.moment.EndMicros = endMicros
+		extra.moment.DurationMS = max(1, int((endMicros-startMicros)/1000))
+		extra.moment.MomentID = ""
+		extra.moment.Score = maxFloat64(0.05, entry.moment.Score-0.03*float64(len(result)+1))
+		extra.score = maxFloat64(0.05, entry.score-0.03*float64(len(result)+1))
+		extra.sourceTime = entry.sourceTime + (startMicros - entry.moment.StartMicros)
+		extra.repetition = repetitionKey(entry.mediaID, entry.clusterID, extra.sourceTime, fmt.Sprintf("%s-window-%d", entry.sceneID, len(result)+1))
+		extra.captionCues = trimCaptionCues(entry.captionCues, startMicros, endMicros)
+		result = append(result, extra)
+		startMicros += windowMicros
+	}
+	return result
+}
+
+func trimCaptionCues(cues []captionCue, startMicros, endMicros int64) []captionCue {
+	if len(cues) == 0 || endMicros <= startMicros {
+		return nil
+	}
+	trimmed := make([]captionCue, 0, len(cues))
+	for _, cue := range cues {
+		if cue.EndMicros <= cue.StartMicros || cue.EndMicros <= startMicros || cue.StartMicros >= endMicros {
+			continue
+		}
+		overlapStart := maxInt64(cue.StartMicros, startMicros)
+		overlapEnd := minInt64(cue.EndMicros, endMicros)
+		if overlapEnd-overlapStart < 250_000 {
+			continue
+		}
+		trimmed = append(trimmed, captionCue{Text: cue.Text, StartMicros: overlapStart, EndMicros: overlapEnd})
+	}
+	return trimmed
 }
 
 func preferredFullSourceOrder(request Request) []string {
@@ -1173,9 +1281,29 @@ func instructionPacingMultiplier(instructions string) float64 {
 	return 1
 }
 
-func selectCandidates(candidates []candidate, desired time.Duration) []candidate {
+func candidateDurationTargetMS(desired time.Duration) int {
+	targetMS := int(desired / time.Millisecond)
+	if targetMS <= 0 {
+		return 15000
+	}
+	return targetMS
+}
+
+func storyCandidateDuration(candidates []candidate) int {
+	total := 0
+	for _, entry := range candidates {
+		total += max(0, entry.moment.DurationMS)
+	}
+	return total
+}
+
+func selectCandidates(candidates []candidate, request Request) []candidate {
 	if len(candidates) == 0 {
 		return nil
+	}
+	desired := request.DesiredDuration
+	if request.TargetDurationFixed && request.DurationMode != models.DurationModeFullSource {
+		return selectFixedDurationCandidates(candidates, candidateDurationTargetMS(desired))
 	}
 	sort.Slice(candidates, func(left, right int) bool {
 		if candidates[left].score == candidates[right].score {
@@ -1186,10 +1314,7 @@ func selectCandidates(candidates []candidate, desired time.Duration) []candidate
 	selected := make([]candidate, 0, minInt(len(candidates), max(1, int(math.Ceil(desired.Seconds()/4)))))
 	seenKeys := make(map[string]struct{}, len(candidates))
 	selectedPerMedia := make(map[string]int, len(candidates))
-	targetMS := int(desired / time.Millisecond)
-	if targetMS <= 0 {
-		targetMS = 15000
-	}
+	targetMS := candidateDurationTargetMS(desired)
 	totalMS := 0
 	addCandidate := func(entry candidate, force bool) bool {
 		if _, exists := seenKeys[entry.repetition]; exists {
@@ -1222,6 +1347,72 @@ func selectCandidates(candidates []candidate, desired time.Duration) []candidate
 	if totalMS > targetMS {
 		selected = trimToDuration(selected, targetMS)
 	}
+	return selected
+}
+
+func selectFixedDurationCandidates(candidates []candidate, targetMS int) []candidate {
+	if len(candidates) == 0 {
+		return nil
+	}
+	if targetMS <= 0 {
+		targetMS = 15000
+	}
+	sort.SliceStable(candidates, func(left, right int) bool {
+		if candidates[left].score == candidates[right].score {
+			return candidates[left].sourceTime < candidates[right].sourceTime
+		}
+		return candidates[left].score > candidates[right].score
+	})
+	selected := make([]candidate, 0, minInt(len(candidates), max(1, int(math.Ceil(float64(targetMS)/4000)))))
+	seenKeys := make(map[string]struct{}, len(candidates))
+	totalMS := 0
+	addCandidate := func(entry candidate) bool {
+		if _, exists := seenKeys[momentKey(entry.moment)]; exists {
+			return false
+		}
+		if totalMS+entry.moment.DurationMS > targetMS && len(selected) > 0 {
+			return false
+		}
+		selected = append(selected, entry)
+		seenKeys[momentKey(entry.moment)] = struct{}{}
+		totalMS += entry.moment.DurationMS
+		return true
+	}
+	for _, candidate := range bestCandidatePerMedia(candidates) {
+		addCandidate(candidate)
+	}
+	for _, candidate := range candidates {
+		if totalMS >= targetMS && len(selected) > 0 {
+			break
+		}
+		addCandidate(candidate)
+	}
+	if len(selected) == 0 {
+		selected = append(selected, candidates[0])
+		totalMS = candidates[0].moment.DurationMS
+	}
+	if totalMS < targetMS {
+		for _, candidate := range candidates {
+			if totalMS >= targetMS {
+				break
+			}
+			if _, exists := seenKeys[momentKey(candidate.moment)]; exists {
+				continue
+			}
+			if totalMS+candidate.moment.DurationMS > targetMS {
+				continue
+			}
+			selected = append(selected, candidate)
+			seenKeys[momentKey(candidate.moment)] = struct{}{}
+			totalMS += candidate.moment.DurationMS
+		}
+	}
+	sort.SliceStable(selected, func(left, right int) bool {
+		if selected[left].sourceTime == selected[right].sourceTime {
+			return selected[left].score > selected[right].score
+		}
+		return selected[left].sourceTime < selected[right].sourceTime
+	})
 	return selected
 }
 
@@ -2047,6 +2238,13 @@ func clamp(value float64) float64 {
 		return 1
 	}
 	return value
+}
+
+func maxFloat64(left, right float64) float64 {
+	if left > right {
+		return left
+	}
+	return right
 }
 
 func minInt64(left, right int64) int64 {

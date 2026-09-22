@@ -716,6 +716,46 @@ func TestPlannerBuildsVideoOnlyStoryAcrossVideos(t *testing.T) {
 	}
 }
 
+func TestPlannerFixedTargetExpandsLongVideoSegments(t *testing.T) {
+	t.Parallel()
+	request := Request{
+		ProjectID:           "project-long-fixed",
+		DesiredDuration:     60 * time.Second,
+		TargetDurationFixed: true,
+		StoryType:           models.StoryTypeCustom,
+		VisualStyle:         models.VisualStyleCinematic,
+		SelectedMediaIDs:    []string{"video-1", "video-2", "video-3", "video-4"},
+	}
+	for _, mediaID := range request.SelectedMediaIDs {
+		request.VideoAnalyses = append(request.VideoAnalyses, models.VideoAnalysis{
+			ID: "analysis-" + mediaID, VideoID: mediaID, ProjectID: "project-long-fixed", AnalysisVersion: "video-analysis-v1", DurationMicros: 70_000_000,
+			QualitySignals: models.VideoQualitySignals{OverallScore: 0.85},
+			Segments: []models.VideoSegment{{
+				SegmentID: "segment-" + mediaID, SceneID: "scene-" + mediaID, StartMicros: 0, EndMicros: 30_000_000,
+				Description: "Extended meaningful family scene", Importance: 0.92, VisualQuality: 0.85, MemoryValue: 0.9, EmotionalValue: 0.88, StoryRelevance: 0.91,
+				Recommended: true, RecommendedUsage: "main",
+			}},
+		})
+	}
+
+	plan, err := (&Planner{}).Plan(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.TotalDurationMS < 55_000 {
+		t.Fatalf("fixed target plan too short: duration=%d moments=%+v", plan.TotalDurationMS, plan.Moments)
+	}
+	if plan.TotalDurationMS > 60_000 {
+		t.Fatalf("fixed target plan exceeded request: duration=%d moments=%+v", plan.TotalDurationMS, plan.Moments)
+	}
+	if len(plan.Moments) < 12 {
+		t.Fatalf("expected expanded 5s windows, got %d moments: %+v", len(plan.Moments), plan.Moments)
+	}
+	if err := ValidateStoryPlan(plan); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPlannerExcludesRemovedMomentsDuringRevision(t *testing.T) {
 	t.Parallel()
 	request := storyPlannerRequest()

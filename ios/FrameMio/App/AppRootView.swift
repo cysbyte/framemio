@@ -328,7 +328,12 @@ struct AppRootView: View {
                     promptTranscriptionService: dependencies.promptTranscriptionService,
                     onCreditsUpdated: refreshCredits
                 ),
-                onOpenPricing: openPricing
+                onOpenPricing: openPricing,
+                onClose: {
+                    homeViewModel.load()
+                    createPath = []
+                    selectedTab = .create
+                }
             )
         case let .storyPreview(story):
             StoryPreviewView(

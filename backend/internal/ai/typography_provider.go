@@ -252,6 +252,59 @@ func extractTypographyModelText(data []byte, wireAPI string) (string, error) {
 	}
 }
 
+type providerResponseMetadata struct {
+	FinishReason     string
+	Status           string
+	IncompleteReason string
+}
+
+func storyPlannerProviderResponseMetadata(data []byte, wireAPI string) providerResponseMetadata {
+	switch wireAPI {
+	case "chat_completions":
+		return chatCompletionsResponseMetadata(data)
+	case "responses":
+		return responsesResponseMetadata(data)
+	default:
+		return providerResponseMetadata{}
+	}
+}
+
+func chatCompletionsResponseMetadata(data []byte) providerResponseMetadata {
+	var response struct {
+		Choices []struct {
+			FinishReason string `json:"finish_reason,omitempty"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(data, &response); err != nil || len(response.Choices) == 0 {
+		return providerResponseMetadata{}
+	}
+	return providerResponseMetadata{FinishReason: strings.TrimSpace(response.Choices[0].FinishReason)}
+}
+
+func responsesResponseMetadata(data []byte) providerResponseMetadata {
+	var response struct {
+		Status     string `json:"status,omitempty"`
+		Incomplete *struct {
+			Reason string `json:"reason,omitempty"`
+		} `json:"incomplete_details,omitempty"`
+		Output []struct {
+			Status string `json:"status,omitempty"`
+		} `json:"output,omitempty"`
+	}
+	if err := json.Unmarshal(data, &response); err != nil {
+		return providerResponseMetadata{}
+	}
+	status := strings.TrimSpace(response.Status)
+	if status == "" && len(response.Output) > 0 {
+		status = strings.TrimSpace(response.Output[0].Status)
+	}
+	incompleteReason := ""
+	if response.Incomplete != nil {
+		incompleteReason = strings.TrimSpace(response.Incomplete.Reason)
+	}
+	return providerResponseMetadata{Status: status, IncompleteReason: incompleteReason}
+}
+
 func extractTypographyChatText(data []byte) (string, error) {
 	var response struct {
 		Choices []struct {

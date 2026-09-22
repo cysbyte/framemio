@@ -2,7 +2,6 @@ package ai
 
 import (
 	"strings"
-	"time"
 
 	"github.com/framemio/backend/internal/models"
 )
@@ -14,7 +13,7 @@ type EditStrategy interface {
 	ProjectType() models.ProjectType
 	Objective() string
 	PromptGuidance() string
-	SelectCandidates([]candidate, time.Duration) []candidate
+	SelectCandidates([]candidate, Request) []candidate
 	SortCandidates([]candidate, Request)
 	ApplyMomentDefaults(Request, []models.StoryMoment)
 	ApplyPlanDefaults(*models.StoryPlan, Request)
@@ -53,8 +52,8 @@ func (StoryEditStrategy) Objective() string {
 func (StoryEditStrategy) PromptGuidance() string {
 	return "Optimize for chronological/contextual coherence, important moments, emotional progression, variety, natural pacing, and a meaningful ending. Avoid excessive effects."
 }
-func (StoryEditStrategy) SelectCandidates(candidates []candidate, desired time.Duration) []candidate {
-	return selectCandidates(candidates, desired)
+func (StoryEditStrategy) SelectCandidates(candidates []candidate, request Request) []candidate {
+	return selectCandidates(candidates, request)
 }
 func (StoryEditStrategy) SortCandidates(candidates []candidate, request Request) {
 	sortCandidatesForStory(candidates, request.PreferredMediaOrder)
@@ -87,8 +86,8 @@ func (PromoEditStrategy) Objective() string {
 func (PromoEditStrategy) PromptGuidance() string {
 	return "Optimize for hook, product visibility, benefits, proof/demo, clear messaging, CTA, and brand consistency. A useful arc is HOOK -> PROBLEM -> PRODUCT -> BENEFIT -> PROOF -> CTA, but omit stages that do not apply."
 }
-func (PromoEditStrategy) SelectCandidates(candidates []candidate, desired time.Duration) []candidate {
-	return selectCandidates(candidates, desired)
+func (PromoEditStrategy) SelectCandidates(candidates []candidate, request Request) []candidate {
+	return selectCandidates(candidates, request)
 }
 func (PromoEditStrategy) SortCandidates(candidates []candidate, request Request) {
 	sortCandidatesForStory(candidates, request.PreferredMediaOrder)
@@ -162,8 +161,8 @@ func (ReelEditStrategy) Objective() string {
 func (ReelEditStrategy) PromptGuidance() string {
 	return "Optimize for strong opening, concise storytelling, pacing, retention, captions, vertical framing, and a clear ending. Do not use viral as a guaranteed outcome."
 }
-func (ReelEditStrategy) SelectCandidates(candidates []candidate, desired time.Duration) []candidate {
-	return selectCandidates(candidates, desired)
+func (ReelEditStrategy) SelectCandidates(candidates []candidate, request Request) []candidate {
+	return selectCandidates(candidates, request)
 }
 func (ReelEditStrategy) SortCandidates(candidates []candidate, request Request) {
 	sortCandidatesForStory(candidates, request.PreferredMediaOrder)

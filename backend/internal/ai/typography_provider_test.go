@@ -110,6 +110,18 @@ func TestTypographyProviderHelpers(t *testing.T) {
 	}
 }
 
+func TestStoryPlannerProviderResponseMetadata(t *testing.T) {
+	t.Parallel()
+	chat := storyPlannerProviderResponseMetadata([]byte(`{"choices":[{"finish_reason":"length","message":{"content":"{}"}}]}`), "chat_completions")
+	if chat.FinishReason != "length" {
+		t.Fatalf("chat finish_reason = %q", chat.FinishReason)
+	}
+	responses := storyPlannerProviderResponseMetadata([]byte(`{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[{"status":"incomplete","content":[{"text":"{}"}]}]}`), "responses")
+	if responses.Status != "incomplete" || responses.IncompleteReason != "max_output_tokens" {
+		t.Fatalf("responses metadata = %+v", responses)
+	}
+}
+
 func typographyProviderTestInput() TypographyPlanningInput {
 	return TypographyPlanningInput{
 		ProjectID: "project-1", StoryPlanID: "plan-1", StoryPlanVersion: 1, TypographyVersion: TypographyPromptVersion,
