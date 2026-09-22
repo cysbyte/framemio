@@ -1862,6 +1862,9 @@ func normalizeStoryPlannerOutput(plan *models.StoryPlan, request Request) error 
 			if momentDurationMS < minDurationMS {
 				return fmt.Errorf("story planner result duration %d is below fixed target minimum %d for requested duration %d", momentDurationMS, minDurationMS, requestedDurationMS)
 			}
+			if autoLongVideoSoftTarget(request) && momentDurationMS > requestedDurationMS {
+				requestedDurationMS = momentDurationMS
+			}
 			plan.RequestedDurationMS = requestedDurationMS
 		} else if plan.RequestedDurationMS < momentDurationMS {
 			plan.RequestedDurationMS = momentDurationMS
@@ -1884,6 +1887,9 @@ func normalizeStoryPlannerOutput(plan *models.StoryPlan, request Request) error 
 	}
 	if plan.Output.MaxDurationS <= 0 && plan.RequestedDurationMS > 0 {
 		plan.Output.MaxDurationS = int(math.Ceil(float64(plan.RequestedDurationMS) / 1000))
+	}
+	if autoLongVideoSoftTarget(request) && plan.TotalDurationMS > 0 && plan.Output.MaxDurationS*1000 < plan.TotalDurationMS {
+		plan.Output.MaxDurationS = int(math.Ceil(float64(plan.TotalDurationMS) / 1000))
 	}
 	if plan.Output.Preset == "" {
 		plan.Output.Preset = "premium-memory"

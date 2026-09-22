@@ -181,6 +181,12 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 	if preset := strings.TrimSpace(request.CaptionStylePreset); preset != "" {
 		captionStyle = captionStylePresetForProject(preset, projectType, storyType, visualStyle)
 	}
+	requestedDurationMS := max(1, int(request.DesiredDuration.Milliseconds()))
+	outputMaxDurationS := max(1, int(math.Ceil(request.DesiredDuration.Seconds())))
+	if autoLongVideoSoftTarget(request) && totalDuration > requestedDurationMS {
+		requestedDurationMS = totalDuration
+		outputMaxDurationS = max(1, int(math.Ceil(float64(totalDuration)/1000)))
+	}
 	plan := models.StoryPlan{
 		SchemaVersion:         models.StoryPlanSchemaVersionV1,
 		ID:                    planID(request, moments),
@@ -190,7 +196,7 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 		TemplateID:            request.TemplateID,
 		TemplateVersion:       request.TemplateVersion,
 		TemplateConfiguration: request.TemplateConfiguration,
-		RequestedDurationMS:   max(1, int(request.DesiredDuration.Milliseconds())),
+		RequestedDurationMS:   requestedDurationMS,
 		StoryType:             storyType,
 		VisualStyle:           visualStyle,
 		TitleText:             titleText,
@@ -203,7 +209,7 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 		CaptionStyle:          captionStyle,
 		Output: models.StoryOutput{
 			AspectRatio:  projectAspectRatio(request),
-			MaxDurationS: max(1, int(math.Ceil(request.DesiredDuration.Seconds()))),
+			MaxDurationS: outputMaxDurationS,
 			Preset:       "premium-memory",
 		},
 		TotalDurationMS: totalDuration,

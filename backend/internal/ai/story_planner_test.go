@@ -800,6 +800,9 @@ func TestPlannerAutoLongVideoCanExtendForSourceCoverage(t *testing.T) {
 	if plan.TotalDurationMS > 120_000 {
 		t.Fatalf("auto long-video plan exceeded max: duration=%d", plan.TotalDurationMS)
 	}
+	if plan.RequestedDurationMS < plan.TotalDurationMS || plan.Output.MaxDurationS*1000 < plan.TotalDurationMS {
+		t.Fatalf("auto extended plan metadata would fail validation: total=%d requested=%d max_s=%d", plan.TotalDurationMS, plan.RequestedDurationMS, plan.Output.MaxDurationS)
+	}
 	durations := make(map[string]int)
 	for _, moment := range plan.Moments {
 		durations[moment.MediaID] += moment.DurationMS
