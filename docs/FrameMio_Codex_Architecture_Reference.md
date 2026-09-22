@@ -1733,7 +1733,7 @@ Initial StoryPlan generation is selected by backend configuration only. iOS neve
 
 ```text
 STORY_PLANNER_PROVIDER=local|gemini|gemini-agentic|gemini_agentic|gemini-interactions|gemini_interactions|openai|openai-compatible|ai-gateway
-STORY_PLANNER_GEMINI_MODEL=gemini-3.8-flash
+STORY_PLANNER_GEMINI_MODEL=gemini-3.7-flash
 STORY_PLANNER_GEMINI_BASE_URL=https://api.cheaperinference.com/v1
 STORY_PLANNER_GEMINI_API_KEY=
 STORY_PLANNER_GEMINI_TIMEOUT=90s
@@ -1768,7 +1768,7 @@ Rules:
 - `STORY_PLANNER_GEMINI_BASE_URL` falls back to
   `VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL`, then `OPENAI_BASE_URL`, then
   `https://api.cheaperinference.com/v1`.
-- `STORY_PLANNER_GEMINI_MODEL` defaults to `gemini-3.8-flash`.
+- `STORY_PLANNER_GEMINI_MODEL` defaults to `gemini-3.7-flash`.
 - `STORY_PLANNER_GEMINI_API_KEY` falls back to `GEMINI_API_KEY` and then
   `GOOGLE_API_KEY`.
 - When a Gemini provider is selected, startup requires the Gemini API key and
@@ -2485,7 +2485,7 @@ Gemini:
 
 ```text
 STORY_PLANNER_PROVIDER=gemini
-STORY_PLANNER_GEMINI_MODEL=gemini-3.8-flash
+STORY_PLANNER_GEMINI_MODEL=gemini-3.7-flash
 STORY_PLANNER_GEMINI_BASE_URL=https://api.cheaperinference.com/v1
 STORY_PLANNER_GEMINI_TIMEOUT=90s
 STORY_PLANNER_GEMINI_FALLBACK_TIMEOUT=80s

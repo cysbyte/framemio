@@ -6,6 +6,10 @@ private func mediaUploadDebugLog(_ message: @autoclosure () -> String) {
 #endif
 }
 
+private func mediaUploadElapsedMS(since start: Date) -> Int {
+    max(0, Int(Date().timeIntervalSince(start) * 1000))
+}
+
 final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
     private let source: OriginalMediaSource
     private let authorizer: MediaUploadAuthorizer
@@ -36,16 +40,20 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
 
         let eligibleIDs = Set(selection.uploadEligibleAssetIDs)
         let eligibleAssets = assets.filter { eligibleIDs.contains($0.id) }
-        mediaUploadDebugLog("upload requested assets=\(assets.count) eligible=\(eligibleAssets.count) max_concurrent=\(options.maximumConcurrentUploads) part_size=\(options.partSizeBytes) background=\(options.usesBackgroundURLSession)")
+        let uploadStartedAt = Date()
+        let totalVideoSeconds = eligibleAssets.reduce(0.0) { total, asset in
+            asset.isVideo ? total + max(0, asset.duration) : total
+        }
+        mediaUploadDebugLog("upload requested assets=\(assets.count) eligible=\(eligibleAssets.count) videos=\(eligibleAssets.filter(\.isVideo).count) total_video_seconds=\(String(format: "%.1f", totalVideoSeconds)) max_concurrent=\(options.maximumConcurrentUploads) part_size=\(options.partSizeBytes) background=\(options.usesBackgroundURLSession)")
         guard !eligibleAssets.isEmpty else {
             return []
         }
         let preparedAssets = try await prepareUploads(eligibleAssets, options: options)
-        mediaUploadDebugLog("prepared uploads count=\(preparedAssets.count)")
+        mediaUploadDebugLog("prepared uploads count=\(preparedAssets.count) elapsed_ms=\(mediaUploadElapsedMS(since: uploadStartedAt))")
         if let completedUploads = try await completedUploadsIfAllCompleted(preparedAssets, options: options) {
             let totalBytes = completedUploads.reduce(Int64(0)) { $0 + max(0, $1.fileSizeBytes) }
             if let representative = completedUploads.first {
-                mediaUploadDebugLog("upload skipped all completed uploads=\(completedUploads.count)")
+                mediaUploadDebugLog("upload skipped all completed uploads=\(completedUploads.count) total_bytes=\(totalBytes) elapsed_ms=\(mediaUploadElapsedMS(since: uploadStartedAt))")
                 progress(MediaUploadProgress(
                     uploadID: representative.id,
                     assetID: representative.assetID,
@@ -57,11 +65,14 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
             }
             return completedUploads
         }
-        return try await uploadInBatches(
+        let uploads = try await uploadInBatches(
             preparedAssets,
             options: options,
             progress: progress
         )
+        let totalBytes = uploads.reduce(Int64(0)) { $0 + max(0, $1.fileSizeBytes) }
+        mediaUploadDebugLog("upload finished uploads=\(uploads.count) total_bytes=\(totalBytes) elapsed_ms=\(mediaUploadElapsedMS(since: uploadStartedAt))")
+        return uploads
     }
 
     func resumePendingUploads(
@@ -96,19 +107,21 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         var prepared: [PreparedMediaUpload] = []
         var totalBytes: Int64 = 0
 
+        let prepareStartedAt = Date()
         do {
             for asset in assets {
+                let assetStartedAt = Date()
                 let uploadID = MediaUpload.makeID(for: asset.id, optimization: options.optimization)
                 let existing = try await store.upload(for: uploadID)
 
                 if let existing, existing.status == .completed {
                     totalBytes += existing.fileSizeBytes
-                    mediaUploadDebugLog("prepare existing completed upload=\(existing.id) asset=\(asset.id) media=\(existing.mediaID ?? "nil") bytes=\(existing.fileSizeBytes)")
+                    mediaUploadDebugLog("prepare existing completed upload=\(existing.id) asset=\(asset.id) kind=\(asset.kind.rawValue) duration=\(String(format: "%.1f", asset.duration)) media=\(existing.mediaID ?? "nil") bytes=\(existing.fileSizeBytes) elapsed_ms=\(mediaUploadElapsedMS(since: assetStartedAt))")
                     prepared.append(PreparedMediaUpload(asset: asset, record: existing, mediaFile: nil, isNewMaterialization: false))
                 } else {
                     let staged = try await materializePreparedFile(for: asset, existing: existing, options: options)
                     totalBytes += staged.file.fileSizeBytes
-                    mediaUploadDebugLog("prepare staged upload=\(MediaUpload.makeID(for: asset.id, optimization: options.optimization)) asset=\(asset.id) bytes=\(staged.file.fileSizeBytes) new_materialization=\(staged.isNewMaterialization)")
+                    mediaUploadDebugLog("prepare staged upload=\(MediaUpload.makeID(for: asset.id, optimization: options.optimization)) asset=\(asset.id) kind=\(asset.kind.rawValue) duration=\(String(format: "%.1f", asset.duration)) bytes=\(staged.file.fileSizeBytes) content_type=\(staged.file.contentType) new_materialization=\(staged.isNewMaterialization) elapsed_ms=\(mediaUploadElapsedMS(since: assetStartedAt))")
                     prepared.append(PreparedMediaUpload(asset: asset, record: existing, mediaFile: staged.file, isNewMaterialization: staged.isNewMaterialization))
                 }
 
@@ -133,6 +146,7 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
                 record.updatedAt = Date()
                 try await store.save(record)
             }
+            mediaUploadDebugLog("prepare uploads complete count=\(prepared.count) total_bytes=\(totalBytes) elapsed_ms=\(mediaUploadElapsedMS(since: prepareStartedAt))")
             return assets
         } catch is CancellationError {
             await removeNewMaterializations(prepared)
@@ -682,21 +696,31 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
     ) async throws -> (file: OriginalMediaFile, isNewMaterialization: Bool) {
         if let stagedURL = existing?.stagedFileURL,
            FileManager.default.fileExists(atPath: stagedURL.path) {
+            let fileSize = materializedFileSize(at: stagedURL) ?? existing?.fileSizeBytes ?? 0
+            mediaUploadDebugLog("materialize reuse staged file asset=\(asset.id) kind=\(asset.kind.rawValue) url=\(stagedURL.lastPathComponent) bytes=\(fileSize)")
             return (
                 OriginalMediaFile(
                     url: stagedURL,
                     fileName: existing?.fileName ?? "media",
                     contentType: existing?.contentType ?? "application/octet-stream",
-                    fileSizeBytes: materializedFileSize(at: stagedURL) ?? existing?.fileSizeBytes ?? 0
+                    fileSizeBytes: fileSize
                 ),
                 false
             )
         }
+        let materializeStartedAt = Date()
+        mediaUploadDebugLog("materialize start asset=\(asset.id) kind=\(asset.kind.rawValue) duration=\(String(format: "%.1f", asset.duration)) allows_network=\(options.allowsNetworkAccessToPhotos)")
         let file = try await source.materializeOriginalMedia(
             for: asset,
             allowsNetworkAccess: options.allowsNetworkAccessToPhotos,
-            progress: nil
+            progress: { value in
+                let percent = Int((value * 100).rounded())
+                if percent == 25 || percent == 50 || percent == 75 || percent >= 99 {
+                    mediaUploadDebugLog("materialize progress asset=\(asset.id) kind=\(asset.kind.rawValue) percent=\(percent)")
+                }
+            }
         )
+        mediaUploadDebugLog("materialize complete asset=\(asset.id) kind=\(asset.kind.rawValue) bytes=\(file.fileSizeBytes) content_type=\(file.contentType) elapsed_ms=\(mediaUploadElapsedMS(since: materializeStartedAt))")
         return (file, true)
     }
 

@@ -137,7 +137,7 @@ func (p GeminiAgenticVideoUnderstandingProvider) Model() string {
 	if strings.TrimSpace(p.ModelName) != "" {
 		return p.ModelName
 	}
-	return "gemini-3.8-flash"
+	return "gemini-3.7-flash"
 }
 
 type geminiFile struct {

@@ -253,7 +253,7 @@ func TestOpenAICompatibleVideoUnderstandingProviderSendsChatCompletionsRequest(t
 		if err := json.NewDecoder(request.Body).Decode(&envelope); err != nil {
 			t.Fatal(err)
 		}
-		if envelope.Model != "gemini-3.8-flash" || envelope.MaxTokens != 6000 || envelope.ResponseFormat.Type != "json_object" || len(envelope.Messages) != 2 {
+		if envelope.Model != "gemini-3.7-flash" || envelope.MaxTokens != 6000 || envelope.ResponseFormat.Type != "json_object" || len(envelope.Messages) != 2 {
 			t.Fatalf("unexpected chat completions envelope: %+v", envelope)
 		}
 		content := string(envelope.Messages[1].Content)
@@ -268,13 +268,13 @@ func TestOpenAICompatibleVideoUnderstandingProviderSendsChatCompletionsRequest(t
 	})}
 	provider := OpenAICompatibleVideoUnderstandingProvider{
 		BaseURL: "https://api.cheaperinference.com/v1", APIKey: "secret", ProviderName: "openai-direct",
-		ModelName: "gemini-3.8-flash", WireAPI: "chat_completions", ImageDetail: "high", MaxOutputTokens: 6000, Client: client,
+		ModelName: "gemini-3.7-flash", WireAPI: "chat_completions", ImageDetail: "high", MaxOutputTokens: 6000, Client: client,
 	}
 	response, err := provider.Understand(context.Background(), providerUnderstandingInput())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.SchemaVersion != domain.VideoAnalysisSchemaV1 || len(response.Candidates) != 1 || provider.Name() != "openai-direct" || provider.Model() != "gemini-3.8-flash" {
+	if response.SchemaVersion != domain.VideoAnalysisSchemaV1 || len(response.Candidates) != 1 || provider.Name() != "openai-direct" || provider.Model() != "gemini-3.7-flash" {
 		t.Fatalf("unexpected direct understanding response: %+v", response)
 	}
 }
@@ -394,7 +394,7 @@ func TestGeminiAgenticVideoUnderstandingProviderUploadsPollsAndStreams(t *testin
 			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 				t.Fatal(err)
 			}
-			if body.Model != "gemini-3.8-flash" || !body.Stream || len(body.Input) != 2 ||
+			if body.Model != "gemini-3.7-flash" || !body.Stream || len(body.Input) != 2 ||
 				body.Input[0].Type != "video" || body.Input[0].URI == "" || body.Input[0].Processing != "agentic" ||
 				body.Input[1].Type != "text" || !strings.Contains(body.Input[1].Text, "video-analysis.v1") ||
 				strings.Contains(body.Input[1].Text, "https://evidence.example.test/frame.jpg") {
@@ -416,7 +416,7 @@ func TestGeminiAgenticVideoUnderstandingProviderUploadsPollsAndStreams(t *testin
 	})}
 	provider := GeminiAgenticVideoUnderstandingProvider{
 		BaseURL: "https://gemini.example.test", APIKey: "gemini-secret", ProviderName: "gemini-agentic",
-		ModelName: "gemini-3.8-flash", Client: client, PollInterval: time.Nanosecond, FileWaitTimeout: time.Second,
+		ModelName: "gemini-3.7-flash", Client: client, PollInterval: time.Nanosecond, FileWaitTimeout: time.Second,
 	}
 	response, err := provider.UnderstandVideo(context.Background(), providerUnderstandingInput(), "https://source.example.test/video.mp4")
 	if err != nil {
@@ -454,7 +454,7 @@ func TestGeminiAgenticVideoUnderstandingProviderRejectsFailedFile(t *testing.T) 
 		}
 	})}
 	provider := GeminiAgenticVideoUnderstandingProvider{
-		BaseURL: "https://gemini.example.test", APIKey: "gemini-secret", ModelName: "gemini-3.8-flash",
+		BaseURL: "https://gemini.example.test", APIKey: "gemini-secret", ModelName: "gemini-3.7-flash",
 		Client: client, PollInterval: time.Nanosecond, FileWaitTimeout: time.Second,
 	}
 	if _, err := provider.UnderstandVideo(context.Background(), providerUnderstandingInput(), "https://source.example.test/video.mp4"); err == nil {

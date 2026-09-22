@@ -133,7 +133,7 @@ func Load() (Config, error) {
 		InternalToken:                     os.Getenv("INTERNAL_API_TOKEN"),
 	}
 	if configuration.UsesGeminiUnderstanding() && configuration.UnderstandingModel == "configured-model" {
-		configuration.UnderstandingModel = "gemini-3.8-flash"
+		configuration.UnderstandingModel = "gemini-3.7-flash"
 	}
 	if configuration.UsesGeminiUnderstanding() && os.Getenv("VIDEO_UNDERSTANDING_PROVIDER_TIMEOUT") == "" &&
 		os.Getenv("PROVIDER_TIMEOUT") == "" && os.Getenv("OPENAI_REQUEST_TIMEOUT_MS") == "" {

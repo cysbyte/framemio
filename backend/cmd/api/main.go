@@ -204,7 +204,7 @@ func loadConfiguration() (configuration, error) {
 		StoryPlannerFallbackTimeout:       environmentDuration("STORY_PLANNER_FALLBACK_TIMEOUT", 80*time.Second),
 		StoryPlannerGeminiBaseURL:         environment("STORY_PLANNER_GEMINI_BASE_URL", environment("VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL", environment("OPENAI_BASE_URL", "https://api.cheaperinference.com/v1"))),
 		StoryPlannerGeminiAPIKey:          environmentFirst([]string{"STORY_PLANNER_GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"}),
-		StoryPlannerGeminiModel:           environment("STORY_PLANNER_GEMINI_MODEL", "gemini-3.8-flash"),
+		StoryPlannerGeminiModel:           environment("STORY_PLANNER_GEMINI_MODEL", "gemini-3.7-flash"),
 		StoryPlannerGeminiTimeout:         environmentDuration("STORY_PLANNER_GEMINI_TIMEOUT", 90*time.Second),
 		StoryPlannerGeminiFallbackTimeout: environmentDuration("STORY_PLANNER_GEMINI_FALLBACK_TIMEOUT", 80*time.Second),
 		StoryRevisionProvider:             environment("STORY_REVISION_PROVIDER", "local"),

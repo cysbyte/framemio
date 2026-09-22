@@ -31,7 +31,7 @@ func TestLoadAllowsDirectUnderstandingWithoutAdapterURL(t *testing.T) {
 func TestLoadUsesOpenAICompatibleGatewayForGeminiModel(t *testing.T) {
 	setRequiredEnvironment(t)
 	t.Setenv("VIDEO_UNDERSTANDING_PROVIDER", "openai-direct")
-	t.Setenv("VIDEO_UNDERSTANDING_MODEL", "gemini-3.8-flash")
+	t.Setenv("VIDEO_UNDERSTANDING_MODEL", "gemini-3.7-flash")
 	t.Setenv("VIDEO_UNDERSTANDING_DIRECT", "true")
 	t.Setenv("VIDEO_UNDERSTANDING_API_URL", "")
 	t.Setenv("VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL", "https://api.cheaperinference.com/v1")
@@ -45,7 +45,7 @@ func TestLoadUsesOpenAICompatibleGatewayForGeminiModel(t *testing.T) {
 	if !configuration.UsesDirectUnderstanding() || configuration.UsesGeminiUnderstanding() {
 		t.Fatalf("unexpected understanding mode: %+v", configuration)
 	}
-	if configuration.UnderstandingModel != "gemini-3.8-flash" ||
+	if configuration.UnderstandingModel != "gemini-3.7-flash" ||
 		configuration.UnderstandingUpstreamBaseURL != "https://api.cheaperinference.com/v1" ||
 		configuration.UnderstandingWireAPI != "chat_completions" {
 		t.Fatalf("unexpected gateway settings: %+v", configuration)
@@ -66,7 +66,7 @@ func TestLoadAllowsGeminiAgenticUnderstandingWithoutAdapterURL(t *testing.T) {
 	if !configuration.UsesGeminiUnderstanding() || configuration.UsesDirectUnderstanding() {
 		t.Fatalf("unexpected Gemini mode: %+v", configuration)
 	}
-	if configuration.UnderstandingModel != "gemini-3.8-flash" || configuration.UnderstandingTimeout != 15*time.Minute || configuration.UnderstandingRetries != 1 {
+	if configuration.UnderstandingModel != "gemini-3.7-flash" || configuration.UnderstandingTimeout != 15*time.Minute || configuration.UnderstandingRetries != 1 {
 		t.Fatalf("unexpected Gemini defaults: %+v", configuration)
 	}
 }

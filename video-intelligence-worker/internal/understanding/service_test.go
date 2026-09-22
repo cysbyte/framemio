@@ -182,7 +182,7 @@ func TestServicePresignsSourceForSourceAwareProvider(t *testing.T) {
 	t.Parallel()
 	repository := newMemoryRepository()
 	artifacts := &memoryArtifacts{}
-	provider := &sourceAwareFakeProvider{name: "gemini-agentic", model: "gemini-3.8-flash"}
+	provider := &sourceAwareFakeProvider{name: "gemini-agentic", model: "gemini-3.7-flash"}
 	service := newService(provider, repository, artifacts)
 
 	if _, err := service.Analyze(context.Background(), testRequest()); err != nil {

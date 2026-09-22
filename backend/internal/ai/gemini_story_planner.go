@@ -39,7 +39,7 @@ func (p GeminiStoryPlanner) Model() string {
 	if strings.TrimSpace(p.ModelName) != "" {
 		return strings.TrimSpace(p.ModelName)
 	}
-	return "gemini-3.8-flash"
+	return "gemini-3.7-flash"
 }
 
 func (p GeminiStoryPlanner) Plan(ctx context.Context, request Request) (models.StoryPlan, error) {
