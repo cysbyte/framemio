@@ -115,6 +115,33 @@ func TestStoryPlannerProviderInputCarriesProjectModeConfiguration(t *testing.T) 
 	}
 }
 
+func TestNormalizeRequestKeepsAutomaticReelTemplateFlexible(t *testing.T) {
+	t.Parallel()
+
+	request := normalizeRequest(Request{
+		ProjectID:        "project-reel-template",
+		ProjectType:      models.ProjectTypeReel,
+		DurationMode:     models.DurationModeAuto,
+		DesiredDuration:  60 * time.Second,
+		SelectedMediaIDs: []string{"video"},
+		ProjectConfiguration: models.VideoProjectConfiguration{
+			Reel: &models.ReelProjectConfiguration{DurationMode: models.DurationModeAuto, AspectRatio: "9:16"},
+			TemplateConfiguration: models.VideoTemplateConfiguration{
+				DurationMode:    models.DurationModeFixed,
+				DurationSeconds: 15,
+				AspectRatio:     "9:16",
+			},
+		},
+	})
+	if request.DurationMode != models.DurationModeAuto || request.TargetDurationFixed {
+		t.Fatalf("automatic reel template was fixed during normalization: mode=%q fixed=%v", request.DurationMode, request.TargetDurationFixed)
+	}
+	input := storyPlannerInputFromRequest(request)
+	if input.Constraints.TargetDurationFixed || input.Constraints.MaxDurationMS != storyPlannerMaxGeneratedDurationMS {
+		t.Fatalf("automatic reel constraints should stay flexible: %+v", input.Constraints)
+	}
+}
+
 func TestPlannerNormalizesUnsupportedModeAspectRatio(t *testing.T) {
 	t.Parallel()
 

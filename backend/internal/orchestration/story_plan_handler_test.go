@@ -797,6 +797,44 @@ func TestStoryPlanRequestUsesAutomaticLongVideoDuration(t *testing.T) {
 	}
 }
 
+func TestStoryPlanRequestKeepsAutomaticReelTemplateFlexible(t *testing.T) {
+	t.Parallel()
+	project := models.StoryProject{
+		ID:       "project-reel-auto-template",
+		Type:     models.ProjectTypeReel,
+		MediaIDs: []string{"video-a", "video-b"},
+		Configuration: models.VideoProjectConfiguration{
+			Reel: &models.ReelProjectConfiguration{
+				DurationMode: models.DurationModeAuto,
+			},
+			TemplateID:      "fast-montage",
+			TemplateVersion: 1,
+			TemplateConfiguration: models.VideoTemplateConfiguration{
+				DurationMode:    models.DurationModeFixed,
+				DurationSeconds: 15,
+			},
+		},
+	}
+	mediaByID := map[string]models.MediaAsset{
+		"video-a": {ID: "video-a", Type: models.MediaTypeVideo, DurationSeconds: ptrFloat64(180)},
+		"video-b": {ID: "video-b", Type: models.MediaTypeVideo, DurationSeconds: ptrFloat64(90)},
+	}
+	request := (StoryPlanHandler{}).storyPlanRequest(
+		project,
+		map[string]string{},
+		mediaByID,
+		nil,
+		nil,
+		nil,
+	)
+	if request.DurationMode != models.DurationModeAuto || request.TargetDurationFixed {
+		t.Fatalf("expected automatic reel duration, got mode=%q fixed=%v", request.DurationMode, request.TargetDurationFixed)
+	}
+	if request.DesiredDuration != 60*time.Second {
+		t.Fatalf("automatic long reel duration = %s, want 60s", request.DesiredDuration)
+	}
+}
+
 func TestStoryPlanRequestPreservesExplicit30SecondDuration(t *testing.T) {
 	t.Parallel()
 	project := models.StoryProject{
@@ -819,6 +857,44 @@ func TestStoryPlanRequestPreservesExplicit30SecondDuration(t *testing.T) {
 	)
 	if request.DesiredDuration != 30*time.Second || !request.TargetDurationFixed {
 		t.Fatalf("explicit duration was changed: duration=%s fixed=%v", request.DesiredDuration, request.TargetDurationFixed)
+	}
+}
+
+func TestStoryPlanRequestPreservesExplicitReelDuration(t *testing.T) {
+	t.Parallel()
+	project := models.StoryProject{
+		ID:       "project-reel-fixed",
+		Type:     models.ProjectTypeReel,
+		MediaIDs: []string{"video"},
+		Configuration: models.VideoProjectConfiguration{
+			Reel: &models.ReelProjectConfiguration{
+				DurationMode:       models.DurationModeAuto,
+				TargetDurationSecs: 0,
+			},
+			TemplateID:      "fast-montage",
+			TemplateVersion: 1,
+			TemplateConfiguration: models.VideoTemplateConfiguration{
+				DurationMode:    models.DurationModeFixed,
+				DurationSeconds: 15,
+			},
+		},
+	}
+	mediaByID := map[string]models.MediaAsset{
+		"video": {ID: "video", Type: models.MediaTypeVideo, DurationSeconds: ptrFloat64(10 * 60)},
+	}
+	request := (StoryPlanHandler{}).storyPlanRequest(
+		project,
+		map[string]string{
+			"duration_mode":           "fixed",
+			"target_duration_seconds": "30",
+		},
+		mediaByID,
+		nil,
+		nil,
+		nil,
+	)
+	if request.DurationMode != models.DurationModeFixed || request.DesiredDuration != 30*time.Second || !request.TargetDurationFixed {
+		t.Fatalf("explicit reel duration was changed: mode=%q duration=%s fixed=%v", request.DurationMode, request.DesiredDuration, request.TargetDurationFixed)
 	}
 }
 

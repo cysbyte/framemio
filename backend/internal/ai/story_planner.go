@@ -1849,7 +1849,9 @@ func normalizeRequest(request Request) Request {
 			}
 		}
 	}
-	if request.DurationMode == models.DurationModeAuto && request.TemplateConfiguration.DurationMode != "" {
+	if request.DurationMode == models.DurationModeAuto &&
+		request.ProjectType != models.ProjectTypeReel &&
+		request.TemplateConfiguration.DurationMode != "" {
 		request.DurationMode = request.TemplateConfiguration.DurationMode
 	}
 	if request.DurationMode != models.DurationModeFullSource {

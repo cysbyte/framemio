@@ -303,7 +303,10 @@ func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configur
 			}
 		}
 	}
-	if durationMode == models.DurationModeAuto && configuredDurationMode == "" && project.Configuration.TemplateConfiguration.DurationMode != "" {
+	if durationMode == models.DurationModeAuto &&
+		configuredDurationMode == "" &&
+		project.Type != models.ProjectTypeReel &&
+		project.Configuration.TemplateConfiguration.DurationMode != "" {
 		durationMode = project.Configuration.TemplateConfiguration.DurationMode
 	}
 	targetDurationSeconds, _ := strconv.Atoi(strings.TrimSpace(configuration["target_duration_seconds"]))
@@ -381,6 +384,7 @@ func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configur
 	if durationMode != models.DurationModeFullSource &&
 		!targetDurationFixed &&
 		configuredDurationMode == "" &&
+		project.Type != models.ProjectTypeReel &&
 		templateConfiguration.DurationSeconds > 0 {
 		duration = time.Duration(templateConfiguration.DurationSeconds) * time.Second
 		targetDurationFixed = true
