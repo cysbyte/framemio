@@ -20,6 +20,7 @@ import (
 const StoryPlannerPromptVersion = "story-planner-v1"
 const minStoryPlannerCaptionDurationMS = 250
 const minFixedStoryPlannerDurationRatio = 0.85
+const minFixedStoryPlannerLongVideoCoverageRatio = 0.5
 
 type StoryPlanner interface {
 	Plan(ctx context.Context, request Request) (models.StoryPlan, error)
@@ -633,6 +634,8 @@ func storyPlannerInputFromRequest(request Request) StoryPlannerInput {
 		if maxDurationMS <= 0 {
 			maxDurationMS = int(defaultMaxFullSourceDuration.Milliseconds())
 		}
+	} else if autoLongVideoSoftTarget(request) {
+		maxDurationMS = autoLongVideoMaxDurationMS(request)
 	} else if !request.TargetDurationFixed {
 		maxDurationMS = storyPlannerMaxGeneratedDurationMS
 	}
@@ -1424,6 +1427,62 @@ func validateStoryPlannerOutputMediaReferences(plan models.StoryPlan, request Re
 	return nil
 }
 
+func validateFixedStoryPlannerLongVideoCoverage(plan models.StoryPlan, request Request) error {
+	request = normalizeRequest(request)
+	if (!request.TargetDurationFixed && !autoLongVideoSoftTarget(request)) || request.DurationMode == models.DurationModeFullSource || len(request.VideoAnalyses) < 2 {
+		return nil
+	}
+	targetMS := candidateDurationTargetMS(request.DesiredDuration)
+	if targetMS < 45_000 {
+		return nil
+	}
+	selected := make(map[string]struct{}, len(request.SelectedMediaIDs))
+	for _, mediaID := range request.SelectedMediaIDs {
+		if mediaID = strings.TrimSpace(mediaID); mediaID != "" {
+			selected[mediaID] = struct{}{}
+		}
+	}
+	longVideos := storyPlannerLongVideoAnalyses(request)
+	if len(longVideos) < 2 {
+		return nil
+	}
+	mediaDuration := make(map[string]int, len(plan.Moments))
+	for _, moment := range plan.Moments {
+		if moment.MediaType != "" && moment.MediaType != models.MediaTypeVideo {
+			continue
+		}
+		mediaID := strings.TrimSpace(firstNonEmpty(moment.MediaID, moment.AssetID))
+		if mediaID == "" {
+			continue
+		}
+		mediaDuration[mediaID] += max(0, moment.DurationMS)
+	}
+	required := 0
+	for _, analysis := range longVideos {
+		mediaID := strings.TrimSpace(analysis.VideoID)
+		if mediaID == "" {
+			continue
+		}
+		if len(selected) > 0 {
+			if _, ok := selected[mediaID]; !ok {
+				continue
+			}
+		}
+		required++
+		minCoverageMS := int(math.Round(float64(fixedDurationMinimumMediaCoverageMS(analysis.DurationMicros, targetMS)) * minFixedStoryPlannerLongVideoCoverageRatio))
+		if minCoverageMS <= 0 {
+			continue
+		}
+		if mediaDuration[mediaID] < minCoverageMS {
+			return fmt.Errorf("story planner underused long source video %q: duration %d below minimum %d", mediaID, mediaDuration[mediaID], minCoverageMS)
+		}
+		if required >= 2 {
+			break
+		}
+	}
+	return nil
+}
+
 func clampFloat64(value, lower, upper float64) float64 {
 	if value < lower {
 		return lower
@@ -1767,6 +1826,9 @@ func normalizeStoryPlannerOutput(plan *models.StoryPlan, request Request) error 
 	if err := validateStoryPlannerOutputMediaReferences(*plan, request); err != nil {
 		return err
 	}
+	if err := validateFixedStoryPlannerLongVideoCoverage(*plan, request); err != nil {
+		return err
+	}
 	EnforceSceneTransitions(plan, request.VideoAnalyses, normalizeVisualStyle(request.VisualStyle))
 	synthesizeStoryPlannerCaptions(plan, request)
 	if strings.TrimSpace(plan.ID) == "" {
@@ -1794,7 +1856,7 @@ func normalizeStoryPlannerOutput(plan *models.StoryPlan, request Request) error 
 			return fmt.Errorf("story planner result duration %d exceeds max duration %d", momentDurationMS, maxDurationMS)
 		}
 		plan.TotalDurationMS = momentDurationMS
-		if request.TargetDurationFixed {
+		if request.TargetDurationFixed || autoLongVideoSoftTarget(request) {
 			requestedDurationMS := max(1, int(request.DesiredDuration.Milliseconds()))
 			minDurationMS := int(math.Round(float64(requestedDurationMS) * minFixedStoryPlannerDurationRatio))
 			if momentDurationMS < minDurationMS {
@@ -1861,6 +1923,9 @@ func storyPlannerDurationLimitMS(request Request) int {
 	if request.TargetDurationFixed {
 		return desiredMS
 	}
+	if autoLongVideoSoftTarget(request) {
+		return autoLongVideoMaxDurationMS(request)
+	}
 	return storyPlannerMaxGeneratedDurationMS
 }
 
@@ -1875,5 +1940,5 @@ func storyPlannerMaxOutputTokens(value int) int {
 	if value > 0 {
 		return value
 	}
-	return 16000
+	return 80000
 }

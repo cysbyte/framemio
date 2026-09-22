@@ -118,7 +118,7 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 				slog.String("reason", "validated filler/silence timing unavailable"),
 			)
 		}
-	} else if request.TargetDurationFixed {
+	} else if request.TargetDurationFixed || autoLongVideoSoftTarget(request) {
 		candidates = filterExcludedCandidates(expandFixedDurationCandidates(candidates, request), excludedMedia, excludedMoments)
 		expandedCandidateCount = len(candidates)
 		applyInstructionPreferences(candidates, request.UserInstructions)
@@ -1064,7 +1064,7 @@ func buildFullSourceCandidates(request Request, selected map[string]struct{}, cl
 
 func expandFixedDurationCandidates(candidates []candidate, request Request) []candidate {
 	targetMS := candidateDurationTargetMS(request.DesiredDuration)
-	if targetMS <= 0 || storyCandidateDuration(candidates) >= targetMS {
+	if targetMS <= 0 {
 		return candidates
 	}
 	expanded := append([]candidate(nil), candidates...)
@@ -1072,28 +1072,31 @@ func expandFixedDurationCandidates(candidates []candidate, request Request) []ca
 	for _, entry := range expanded {
 		seen[momentKey(entry.moment)] = struct{}{}
 	}
-	sort.SliceStable(candidates, func(left, right int) bool {
-		if candidates[left].sourceTime == candidates[right].sourceTime {
-			return candidates[left].score > candidates[right].score
-		}
-		return candidates[left].sourceTime < candidates[right].sourceTime
-	})
-	for _, entry := range candidates {
-		if !entry.isVideo || entry.sourceEndMicros <= entry.moment.StartMicros {
-			continue
-		}
-		for _, extra := range expandedWindowsForCandidate(entry) {
-			key := momentKey(extra.moment)
-			if _, exists := seen[key]; exists {
+	if storyCandidateDuration(candidates) < targetMS {
+		sort.SliceStable(candidates, func(left, right int) bool {
+			if candidates[left].sourceTime == candidates[right].sourceTime {
+				return candidates[left].score > candidates[right].score
+			}
+			return candidates[left].sourceTime < candidates[right].sourceTime
+		})
+		for _, entry := range candidates {
+			if !entry.isVideo || entry.sourceEndMicros <= entry.moment.StartMicros {
 				continue
 			}
-			expanded = append(expanded, extra)
-			seen[key] = struct{}{}
-		}
-		if storyCandidateDuration(expanded) >= targetMS*2 {
-			break
+			for _, extra := range expandedWindowsForCandidate(entry) {
+				key := momentKey(extra.moment)
+				if _, exists := seen[key]; exists {
+					continue
+				}
+				expanded = append(expanded, extra)
+				seen[key] = struct{}{}
+			}
+			if storyCandidateDuration(expanded) >= targetMS*2 {
+				break
+			}
 		}
 	}
+	expanded = appendFixedDurationSourceCoverageWindows(expanded, request, seen, targetMS)
 	return expanded
 }
 
@@ -1127,6 +1130,182 @@ func expandedWindowsForCandidate(entry candidate) []candidate {
 		startMicros += windowMicros
 	}
 	return result
+}
+
+func appendFixedDurationSourceCoverageWindows(expanded []candidate, request Request, seen map[string]struct{}, targetMS int) []candidate {
+	if targetMS <= 0 || len(request.VideoAnalyses) == 0 {
+		return expanded
+	}
+	selected := make(map[string]struct{}, len(request.SelectedMediaIDs))
+	for _, mediaID := range request.SelectedMediaIDs {
+		if mediaID = strings.TrimSpace(mediaID); mediaID != "" {
+			selected[mediaID] = struct{}{}
+		}
+	}
+	byMedia := candidatesByMedia(expanded)
+	longVideos := storyPlannerLongVideoAnalyses(request)
+	for _, analysis := range longVideos {
+		mediaID := strings.TrimSpace(analysis.VideoID)
+		if mediaID == "" {
+			continue
+		}
+		if len(selected) > 0 {
+			if _, ok := selected[mediaID]; !ok {
+				continue
+			}
+		}
+		exemplar, ok := bestVideoCandidateForMedia(byMedia[mediaID])
+		if !ok {
+			continue
+		}
+		minCoverageMS := fixedDurationMinimumMediaCoverageMS(analysis.DurationMicros, targetMS)
+		for mediaDurationMS(byMedia[mediaID]) < minCoverageMS && storyCandidateDuration(expanded) < targetMS*2 {
+			extra, ok := nextFixedDurationCoverageWindow(exemplar, analysis, byMedia[mediaID], seen)
+			if !ok {
+				break
+			}
+			expanded = append(expanded, extra)
+			byMedia[mediaID] = append(byMedia[mediaID], extra)
+			seen[momentKey(extra.moment)] = struct{}{}
+		}
+	}
+	return expanded
+}
+
+func storyPlannerLongVideoAnalyses(request Request) []models.VideoAnalysis {
+	analyses := make([]models.VideoAnalysis, 0, len(request.VideoAnalyses))
+	for _, analysis := range request.VideoAnalyses {
+		if strings.TrimSpace(analysis.VideoID) == "" || analysis.DurationMicros < 30_000_000 {
+			continue
+		}
+		if analysis.ProjectID != "" && analysis.ProjectID != request.ProjectID {
+			continue
+		}
+		analyses = append(analyses, analysis)
+	}
+	sort.SliceStable(analyses, func(left, right int) bool {
+		if analyses[left].DurationMicros == analyses[right].DurationMicros {
+			return strings.TrimSpace(analyses[left].VideoID) < strings.TrimSpace(analyses[right].VideoID)
+		}
+		return analyses[left].DurationMicros > analyses[right].DurationMicros
+	})
+	return analyses
+}
+
+func candidatesByMedia(candidates []candidate) map[string][]candidate {
+	byMedia := make(map[string][]candidate, len(candidates))
+	for _, entry := range candidates {
+		if mediaID := strings.TrimSpace(entry.mediaID); mediaID != "" {
+			byMedia[mediaID] = append(byMedia[mediaID], entry)
+		}
+	}
+	return byMedia
+}
+
+func bestVideoCandidateForMedia(candidates []candidate) (candidate, bool) {
+	var best candidate
+	ok := false
+	for _, entry := range candidates {
+		if !entry.isVideo {
+			continue
+		}
+		if !ok || entry.score > best.score || (entry.score == best.score && entry.sourceTime < best.sourceTime) {
+			best = entry
+			ok = true
+		}
+	}
+	return best, ok
+}
+
+func mediaDurationMS(candidates []candidate) int {
+	total := 0
+	for _, entry := range candidates {
+		total += max(0, entry.moment.DurationMS)
+	}
+	return total
+}
+
+func fixedDurationMinimumMediaCoverageMS(sourceDurationMicros int64, targetMS int) int {
+	if sourceDurationMicros <= 0 || targetMS <= 0 {
+		return 0
+	}
+	sourceMS := int(sourceDurationMicros / 1000)
+	minCoverage := minInt(sourceMS, max(5000, targetMS/6))
+	return minInt(minCoverage, 15000)
+}
+
+func nextFixedDurationCoverageWindow(exemplar candidate, analysis models.VideoAnalysis, existing []candidate, seen map[string]struct{}) (candidate, bool) {
+	if analysis.DurationMicros <= 0 {
+		return candidate{}, false
+	}
+	windowMicros := minInt64(maxVideoMomentDuration.Microseconds(), analysis.DurationMicros)
+	if windowMicros <= 0 {
+		return candidate{}, false
+	}
+	offsets := fixedDurationCoverageOffsets(analysis.DurationMicros, windowMicros)
+	for _, startMicros := range offsets {
+		endMicros := minInt64(startMicros+windowMicros, analysis.DurationMicros)
+		if endMicros <= startMicros || overlapsCandidateSource(existing, startMicros, endMicros) {
+			continue
+		}
+		extra := exemplar
+		extra.moment.StartMicros = startMicros
+		extra.moment.EndMicros = endMicros
+		extra.moment.DurationMS = max(1, int((endMicros-startMicros)/1000))
+		extra.moment.MomentID = ""
+		extra.moment.Narrative = firstNonEmpty(captionFromTranscript(analysis.Transcript, startMicros, endMicros), exemplar.moment.Narrative, "Additional scene from long video")
+		extra.moment.Caption = captionFromTranscript(analysis.Transcript, startMicros, endMicros)
+		extra.moment.Reason = "long video coverage"
+		extra.moment.Score = maxFloat64(0.05, exemplar.moment.Score-0.08)
+		extra.score = maxFloat64(0.05, exemplar.score-0.08)
+		extra.sourceTime = exemplar.sourceTime + midpoint(startMicros, endMicros) - midpoint(exemplar.moment.StartMicros, exemplar.moment.EndMicros)
+		extra.repetition = repetitionKey(exemplar.mediaID, exemplar.clusterID, startMicros, fmt.Sprintf("long-video-window-%d", startMicros/windowMicros))
+		extra.sourceEndMicros = analysis.DurationMicros
+		extra.captionCues = transcriptCaptionCues(analysis.Transcript, startMicros, endMicros)
+		if _, exists := seen[momentKey(extra.moment)]; exists {
+			continue
+		}
+		return extra, true
+	}
+	return candidate{}, false
+}
+
+func fixedDurationCoverageOffsets(sourceDurationMicros, windowMicros int64) []int64 {
+	if sourceDurationMicros <= 0 || windowMicros <= 0 {
+		return nil
+	}
+	maxStart := maxInt64(0, sourceDurationMicros-windowMicros)
+	if maxStart == 0 {
+		return []int64{0}
+	}
+	values := []int64{0, maxStart}
+	for _, ratio := range []float64{0.25, 0.5, 0.75} {
+		values = append(values, int64(math.Round(float64(maxStart)*ratio)))
+	}
+	sort.Slice(values, func(left, right int) bool { return values[left] < values[right] })
+	deduped := values[:0]
+	var previous int64 = -1
+	for _, value := range values {
+		value = maxInt64(0, minInt64(value, maxStart))
+		if value == previous {
+			continue
+		}
+		deduped = append(deduped, value)
+		previous = value
+	}
+	return deduped
+}
+
+func overlapsCandidateSource(candidates []candidate, startMicros, endMicros int64) bool {
+	for _, entry := range candidates {
+		if !entry.isVideo || entry.moment.EndMicros <= entry.moment.StartMicros {
+			continue
+		}
+		if maxInt64(entry.moment.StartMicros, startMicros) < minInt64(entry.moment.EndMicros, endMicros) {
+			return true
+		}
+	}
+	return false
 }
 
 func trimCaptionCues(cues []captionCue, startMicros, endMicros int64) []captionCue {
@@ -1303,7 +1482,12 @@ func selectCandidates(candidates []candidate, request Request) []candidate {
 	}
 	desired := request.DesiredDuration
 	if request.TargetDurationFixed && request.DurationMode != models.DurationModeFullSource {
-		return selectFixedDurationCandidates(candidates, candidateDurationTargetMS(desired))
+		targetMS := candidateDurationTargetMS(desired)
+		return selectFixedDurationCandidates(candidates, targetMS, targetMS)
+	}
+	if autoLongVideoSoftTarget(request) {
+		targetMS := candidateDurationTargetMS(desired)
+		return selectFixedDurationCandidates(candidates, targetMS, autoLongVideoMaxDurationMS(request))
 	}
 	sort.Slice(candidates, func(left, right int) bool {
 		if candidates[left].score == candidates[right].score {
@@ -1350,12 +1534,15 @@ func selectCandidates(candidates []candidate, request Request) []candidate {
 	return selected
 }
 
-func selectFixedDurationCandidates(candidates []candidate, targetMS int) []candidate {
+func selectFixedDurationCandidates(candidates []candidate, targetMS, maxMS int) []candidate {
 	if len(candidates) == 0 {
 		return nil
 	}
 	if targetMS <= 0 {
 		targetMS = 15000
+	}
+	if maxMS <= 0 || maxMS < targetMS {
+		maxMS = targetMS
 	}
 	sort.SliceStable(candidates, func(left, right int) bool {
 		if candidates[left].score == candidates[right].score {
@@ -1370,7 +1557,7 @@ func selectFixedDurationCandidates(candidates []candidate, targetMS int) []candi
 		if _, exists := seenKeys[momentKey(entry.moment)]; exists {
 			return false
 		}
-		if totalMS+entry.moment.DurationMS > targetMS && len(selected) > 0 {
+		if totalMS+entry.moment.DurationMS > maxMS && len(selected) > 0 {
 			return false
 		}
 		selected = append(selected, entry)
@@ -1381,8 +1568,14 @@ func selectFixedDurationCandidates(candidates []candidate, targetMS int) []candi
 	for _, candidate := range bestCandidatePerMedia(candidates) {
 		addCandidate(candidate)
 	}
+	for _, candidate := range fixedDurationCoverageCandidates(candidates, selected, targetMS) {
+		if totalMS >= maxMS && len(selected) > 0 {
+			break
+		}
+		addCandidate(candidate)
+	}
 	for _, candidate := range candidates {
-		if totalMS >= targetMS && len(selected) > 0 {
+		if totalMS >= maxMS && len(selected) > 0 {
 			break
 		}
 		addCandidate(candidate)
@@ -1399,7 +1592,7 @@ func selectFixedDurationCandidates(candidates []candidate, targetMS int) []candi
 			if _, exists := seenKeys[momentKey(candidate.moment)]; exists {
 				continue
 			}
-			if totalMS+candidate.moment.DurationMS > targetMS {
+			if totalMS+candidate.moment.DurationMS > maxMS {
 				continue
 			}
 			selected = append(selected, candidate)
@@ -1414,6 +1607,92 @@ func selectFixedDurationCandidates(candidates []candidate, targetMS int) []candi
 		return selected[left].sourceTime < selected[right].sourceTime
 	})
 	return selected
+}
+
+func autoLongVideoSoftTarget(request Request) bool {
+	return request.DurationMode == models.DurationModeAuto &&
+		!request.TargetDurationFixed &&
+		request.DesiredDuration >= defaultStoryDurationLongVideoTargetForPlanner &&
+		totalVideoAnalysisDurationMicros(request.VideoAnalyses) > defaultStoryDurationLongVideoThresholdForPlanner.Microseconds()
+}
+
+var defaultStoryDurationLongVideoTargetForPlanner = 60 * time.Second
+var defaultStoryDurationLongVideoThresholdForPlanner = 2 * time.Minute
+
+func autoLongVideoMaxDurationMS(request Request) int {
+	desiredMS := candidateDurationTargetMS(request.DesiredDuration)
+	totalVideoMS := int(totalVideoAnalysisDurationMicros(request.VideoAnalyses) / 1000)
+	if totalVideoMS <= desiredMS {
+		return desiredMS
+	}
+	maxMS := max(desiredMS, int(math.Ceil(float64(totalVideoMS)/3.0)))
+	return minInt(maxMS, 120_000)
+}
+
+func totalVideoAnalysisDurationMicros(analyses []models.VideoAnalysis) int64 {
+	total := int64(0)
+	for _, analysis := range analyses {
+		if analysis.DurationMicros > 0 {
+			total += analysis.DurationMicros
+		}
+	}
+	return total
+}
+
+func fixedDurationCoverageCandidates(candidates, selected []candidate, targetMS int) []candidate {
+	if targetMS < 45_000 {
+		return nil
+	}
+	selectedByMedia := candidatesByMedia(selected)
+	candidatesByMedia := candidatesByMedia(candidates)
+	type mediaCoverage struct {
+		mediaID string
+		needMS  int
+		haveMS  int
+	}
+	coverages := make([]mediaCoverage, 0, len(candidatesByMedia))
+	for mediaID, entries := range candidatesByMedia {
+		maxSourceMicros := int64(0)
+		for _, entry := range entries {
+			if entry.isVideo {
+				maxSourceMicros = maxInt64(maxSourceMicros, entry.sourceEndMicros)
+			}
+		}
+		if maxSourceMicros < 30_000_000 {
+			continue
+		}
+		needMS := fixedDurationMinimumMediaCoverageMS(maxSourceMicros, targetMS)
+		haveMS := mediaDurationMS(selectedByMedia[mediaID])
+		if haveMS >= needMS {
+			continue
+		}
+		coverages = append(coverages, mediaCoverage{mediaID: mediaID, needMS: needMS, haveMS: haveMS})
+	}
+	sort.SliceStable(coverages, func(left, right int) bool {
+		if coverages[left].needMS-coverages[left].haveMS == coverages[right].needMS-coverages[right].haveMS {
+			return coverages[left].mediaID < coverages[right].mediaID
+		}
+		return coverages[left].needMS-coverages[left].haveMS > coverages[right].needMS-coverages[right].haveMS
+	})
+	result := make([]candidate, 0)
+	for _, coverage := range coverages {
+		entries := append([]candidate(nil), candidatesByMedia[coverage.mediaID]...)
+		sort.SliceStable(entries, func(left, right int) bool {
+			if entries[left].sourceTime == entries[right].sourceTime {
+				return entries[left].score > entries[right].score
+			}
+			return entries[left].sourceTime < entries[right].sourceTime
+		})
+		used := coverage.haveMS
+		for _, entry := range entries {
+			if used >= coverage.needMS {
+				break
+			}
+			result = append(result, entry)
+			used += entry.moment.DurationMS
+		}
+	}
+	return result
 }
 
 func bestCandidatePerMedia(candidates []candidate) []candidate {

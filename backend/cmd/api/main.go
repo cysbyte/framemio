@@ -199,7 +199,7 @@ func loadConfiguration() (configuration, error) {
 		StoryPlannerAPIKey:                environment("STORY_PLANNER_API_KEY", os.Getenv("OPENAI_API_KEY")),
 		StoryPlannerModel:                 os.Getenv("STORY_PLANNER_MODEL"),
 		StoryPlannerWireAPI:               environment("STORY_PLANNER_WIRE_API", "responses"),
-		StoryPlannerMaxTokens:             environmentInt("STORY_PLANNER_MAX_OUTPUT_TOKENS", 16000),
+		StoryPlannerMaxTokens:             environmentInt("STORY_PLANNER_MAX_OUTPUT_TOKENS", 80000),
 		StoryPlannerTimeout:               environmentDuration("STORY_PLANNER_TIMEOUT", 90*time.Second),
 		StoryPlannerFallbackTimeout:       environmentDuration("STORY_PLANNER_FALLBACK_TIMEOUT", 80*time.Second),
 		StoryPlannerGeminiBaseURL:         environment("STORY_PLANNER_GEMINI_BASE_URL", environment("VIDEO_UNDERSTANDING_UPSTREAM_BASE_URL", environment("OPENAI_BASE_URL", "https://api.cheaperinference.com/v1"))),

@@ -756,6 +756,62 @@ func TestPlannerFixedTargetExpandsLongVideoSegments(t *testing.T) {
 	}
 }
 
+func TestPlannerAutoLongVideoCanExtendForSourceCoverage(t *testing.T) {
+	t.Parallel()
+	request := Request{
+		ProjectID:        "project-long-auto",
+		DurationMode:     models.DurationModeAuto,
+		DesiredDuration:  60 * time.Second,
+		StoryType:        models.StoryTypeCustom,
+		VisualStyle:      models.VisualStyleCinematic,
+		SelectedMediaIDs: []string{"video-short", "video-medium", "video-long"},
+	}
+	videos := []struct {
+		id            string
+		duration      int64
+		segmentStart  int64
+		segmentEnd    int64
+		overallScore  float64
+		segmentPrefix string
+	}{
+		{id: "video-short", duration: 44_000_000, segmentStart: 0, segmentEnd: 44_000_000, overallScore: 0.95, segmentPrefix: "High scoring short video"},
+		{id: "video-medium", duration: 68_000_000, segmentStart: 0, segmentEnd: 1_500_000, overallScore: 0.75, segmentPrefix: "Sparse medium video"},
+		{id: "video-long", duration: 143_000_000, segmentStart: 65_000_000, segmentEnd: 70_000_000, overallScore: 0.72, segmentPrefix: "Sparse long video"},
+	}
+	for _, video := range videos {
+		request.VideoAnalyses = append(request.VideoAnalyses, models.VideoAnalysis{
+			ID: "analysis-" + video.id, VideoID: video.id, ProjectID: "project-long-auto", AnalysisVersion: "video-analysis-v1", DurationMicros: video.duration,
+			QualitySignals: models.VideoQualitySignals{OverallScore: video.overallScore},
+			Segments: []models.VideoSegment{{
+				SegmentID: "segment-" + video.id, SceneID: "scene-" + video.id, StartMicros: video.segmentStart, EndMicros: video.segmentEnd,
+				Description: video.segmentPrefix, Importance: video.overallScore, VisualQuality: video.overallScore, MemoryValue: video.overallScore, EmotionalValue: video.overallScore, StoryRelevance: video.overallScore,
+				Recommended: true, RecommendedUsage: "hero",
+			}},
+		})
+	}
+
+	plan, err := (&Planner{}).Plan(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.TotalDurationMS <= 60_000 {
+		t.Fatalf("expected auto long-video plan to extend past 60s for coverage, got duration=%d moments=%+v", plan.TotalDurationMS, plan.Moments)
+	}
+	if plan.TotalDurationMS > 120_000 {
+		t.Fatalf("auto long-video plan exceeded max: duration=%d", plan.TotalDurationMS)
+	}
+	durations := make(map[string]int)
+	for _, moment := range plan.Moments {
+		durations[moment.MediaID] += moment.DurationMS
+	}
+	if durations["video-long"] < 10_000 || durations["video-medium"] < 10_000 {
+		t.Fatalf("expected long videos to receive meaningful coverage, durations=%+v moments=%+v", durations, plan.Moments)
+	}
+	if err := ValidateStoryPlan(plan); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPlannerExcludesRemovedMomentsDuringRevision(t *testing.T) {
 	t.Parallel()
 	request := storyPlannerRequest()
