@@ -417,7 +417,7 @@ struct VideoProjectDraft: Codable, Hashable, Sendable {
         }
         draft.templateID = template.id
         draft.templateVersion = template.version
-        draft.templateConfiguration = template.defaults
+        draft.templateConfiguration = projectType == .story ? template.defaults : template.defaults.withAutomaticCreationDuration()
         return draft
     }
 
@@ -464,6 +464,23 @@ struct VideoTemplateConfiguration: Codable, Hashable, Sendable {
         case overlayOpacity = "overlay_opacity"
         case overlayFrame = "overlay_frame"
         case overlayAnimation = "overlay_animation"
+    }
+}
+
+extension VideoTemplateConfiguration {
+    func withAutomaticCreationDuration() -> VideoTemplateConfiguration {
+        var configuration = self
+        let durationMode = configuration.durationMode ?? (configuration.durationSeconds == nil ? .auto : .fixed)
+        if durationMode == .fullSource {
+            configuration.durationMode = .fullSource
+            configuration.durationSeconds = nil
+            configuration.removeFillerAndPauses = configuration.removeFillerAndPauses == true
+        } else {
+            configuration.durationMode = .auto
+            configuration.durationSeconds = nil
+            configuration.removeFillerAndPauses = false
+        }
+        return configuration
     }
 }
 

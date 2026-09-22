@@ -45,6 +45,16 @@ final class VideoProjectCreationTests: XCTestCase {
         XCTAssertEqual(reel.prompt, "Make this fast and punchy.")
     }
 
+    func testPromoTemplateDefaultsToAutoDurationForCreation() throws {
+        let template = try XCTUnwrap(VideoTemplate.localFallbackCatalog.first { $0.supportedProjectTypes.contains(.promo) })
+
+        let draft = VideoProjectDraft.fromTemplate(template, projectType: .promo)
+
+        XCTAssertEqual(draft.promo?.duration.durationMode, .auto)
+        XCTAssertEqual(draft.templateConfiguration?.durationMode, .auto)
+        XCTAssertNil(draft.templateConfiguration?.durationSeconds)
+    }
+
     func testOldStoryWithoutTypeDefaultsToStoryProjectType() throws {
         let data = Data("""
         {

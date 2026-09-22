@@ -1006,6 +1006,9 @@ func sanitizeStoryPlannerCaptionStyle(plan *models.StoryPlan) {
 	if base == nil {
 		base = &models.CaptionStyle{Preset: "clean_minimal", FontFamily: "inter", FontSize: 42, TextColor: "#FFFFFF", StrokeColor: "#000000", Position: "bottom", MaxLines: 2, MaxCharactersPerLine: 34}
 	}
+	if plan.ProjectType == models.ProjectTypePromo {
+		base = captionStyleForProject(models.ProjectTypePromo, plan.StoryType, plan.VisualStyle)
+	}
 	style := plan.CaptionStyle
 	style.Preset = sanitizeStoryPlannerCaptionPreset(style.Preset, base.Preset)
 	if plan.ProjectType == models.ProjectTypeStory && style.Preset == "cinematic_subtitle" {

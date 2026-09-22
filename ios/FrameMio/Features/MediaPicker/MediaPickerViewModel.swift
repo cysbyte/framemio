@@ -3,6 +3,12 @@ import Foundation
 import SwiftUI
 import UIKit
 
+private func mediaPickerDebugLog(_ message: @autoclosure () -> String) {
+#if DEBUG
+    print("[FrameMio][MediaPicker] \(message())")
+#endif
+}
+
 struct MediaAssetSection: Identifiable {
     let id: String
     let title: String
@@ -11,6 +17,8 @@ struct MediaAssetSection: Identifiable {
 
 @MainActor
 final class MediaPickerViewModel: ObservableObject {
+    private static let initialFetchLimit = 120
+
     @Published private(set) var assets: [MediaAsset] = []
     @Published private(set) var thumbnails: [String: UIImage] = [:]
     @Published private(set) var isLoading = false
@@ -107,7 +115,10 @@ final class MediaPickerViewModel: ObservableObject {
                     return
                 }
 
-                let fetchedAssets = try await selectionService.fetchAssets(in: scope, filter: .all)
+                let loadStart = Date()
+                let initialScope = scope.limited(to: Self.initialFetchLimit)
+                mediaPickerDebugLog("load_initial_start scope=\(scope.debugDescription) initial_scope=\(initialScope.debugDescription)")
+                let fetchedAssets = try await selectionService.fetchAssets(in: initialScope, filter: .all)
                 try Task.checkCancellation()
                 guard currentLoadSequence == loadSequence else { return }
                 allAssets = fetchedAssets
@@ -116,6 +127,13 @@ final class MediaPickerViewModel: ObservableObject {
                 updateDisplayedAssets()
                 refreshCache()
                 errorMessage = nil
+                mediaPickerDebugLog("load_initial_complete scope=\(initialScope.debugDescription) count=\(fetchedAssets.count) elapsed_ms=\(Int(Date().timeIntervalSince(loadStart) * 1000))")
+
+                if initialScope != scope {
+                    isLoading = false
+                    hasCompletedInitialLoad = true
+                    loadRemainingAssets(scope: scope, currentLoadSequence: currentLoadSequence)
+                }
             } catch is CancellationError {
             } catch {
                 guard currentLoadSequence == loadSequence else { return }
@@ -208,6 +226,34 @@ final class MediaPickerViewModel: ObservableObject {
         )
     }
 
+    private func loadRemainingAssets(scope: MediaSelectionScope, currentLoadSequence: Int) {
+        Task { [weak self, selectionService] in
+            do {
+                let loadStart = Date()
+                mediaPickerDebugLog("load_remaining_start scope=\(scope.debugDescription)")
+                let fetchedAssets = try await selectionService.fetchAssets(in: scope, filter: .all)
+                try Task.checkCancellation()
+                await MainActor.run {
+                    guard let self, currentLoadSequence == self.loadSequence else { return }
+                    let selectedBefore = self.selectedIDs
+                    self.allAssets = fetchedAssets
+                    let availableIDs = Set(fetchedAssets.map(\.id))
+                    self.selectedIDs = selectedBefore.intersection(availableIDs)
+                    self.updateDisplayedAssets()
+                    self.refreshCache()
+                    mediaPickerDebugLog("load_remaining_complete scope=\(scope.debugDescription) count=\(fetchedAssets.count) elapsed_ms=\(Int(Date().timeIntervalSince(loadStart) * 1000))")
+                }
+            } catch is CancellationError {
+            } catch {
+                await MainActor.run {
+                    guard let self, currentLoadSequence == self.loadSequence, self.errorMessage == nil else { return }
+                    self.errorMessage = AppError.from(error).localizedDescription
+                    mediaPickerDebugLog("load_remaining_failed scope=\(scope.debugDescription) error=\(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
     private func cancelThumbnailTasks() {
         thumbnailTasks.values.forEach { $0.cancel() }
         thumbnailTasks.removeAll()
@@ -252,5 +298,37 @@ final class MediaPickerViewModel: ObservableObject {
     deinit {
         loadTask?.cancel()
         thumbnailTasks.values.forEach { $0.cancel() }
+    }
+}
+
+private extension MediaSelectionScope {
+    func limited(to fetchLimit: Int) -> MediaSelectionScope {
+        switch kind {
+        case .all:
+            return .all(fetchLimit: fetchLimit)
+        case .context:
+            guard let context else { return .all(fetchLimit: fetchLimit) }
+            return .context(context, fetchLimit: fetchLimit)
+        case .timePeriod:
+            guard let startDate, let endDate else { return self }
+            return .timePeriod(startDate: startDate, endDate: endDate, fetchLimit: fetchLimit)
+        case .album:
+            guard let albumLocalIdentifier else { return self }
+            return .album(localIdentifier: albumLocalIdentifier, fetchLimit: fetchLimit)
+        }
+    }
+
+    var debugDescription: String {
+        let limit = fetchLimit.map(String.init) ?? "none"
+        switch kind {
+        case .all:
+            return "all limit=\(limit)"
+        case .context:
+            return "context:\(context?.rawValue ?? "nil") limit=\(limit)"
+        case .timePeriod:
+            return "time_period start=\(startDate?.description ?? "nil") end=\(endDate?.description ?? "nil") limit=\(limit)"
+        case .album:
+            return "album:\(albumLocalIdentifier ?? "nil") limit=\(limit)"
+        }
     }
 }

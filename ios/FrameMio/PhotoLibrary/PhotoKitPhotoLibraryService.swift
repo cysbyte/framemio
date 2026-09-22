@@ -59,6 +59,9 @@ final class PhotoKitPhotoLibraryService: PhotoLibraryService, MediaSelectionServ
         options.sortDescriptors = [NSSortDescriptor(key: #keyPath(PHAsset.creationDate), ascending: false)]
         options.includeHiddenAssets = false
         options.includeAllBurstAssets = false
+        if let fetchLimit = scope.fetchLimit, fetchLimit > 0 {
+            options.fetchLimit = fetchLimit
+        }
 
         var predicates: [NSPredicate] = []
 
@@ -617,14 +620,19 @@ final class MockPhotoLibraryService: PhotoLibraryService, MediaSelectionService,
                 return true
             }
         }
+        let filteredAssets: [MediaAsset]
         switch filter {
         case .all:
-            return scopedAssets
+            filteredAssets = scopedAssets
         case .photos:
-            return scopedAssets.filter { !$0.isVideo }
+            filteredAssets = scopedAssets.filter { !$0.isVideo }
         case .videos:
-            return scopedAssets.filter(\.isVideo)
+            filteredAssets = scopedAssets.filter(\.isVideo)
         }
+        if let fetchLimit = scope.fetchLimit, fetchLimit > 0 {
+            return Array(filteredAssets.prefix(fetchLimit))
+        }
+        return filteredAssets
     }
 
     func fetchAlbums() async throws -> [MediaAlbum] {

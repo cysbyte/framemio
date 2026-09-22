@@ -24,19 +24,24 @@ struct MediaSelectionScope: Codable, Hashable, Sendable {
     let startDate: Date?
     let endDate: Date?
     let albumLocalIdentifier: String?
+    let fetchLimit: Int?
 
     static let all = MediaSelectionScope(kind: .all)
 
-    static func context(_ context: MomentContext) -> MediaSelectionScope {
-        MediaSelectionScope(kind: .context, context: context)
+    static func all(fetchLimit: Int?) -> MediaSelectionScope {
+        MediaSelectionScope(kind: .all, fetchLimit: fetchLimit)
     }
 
-    static func timePeriod(startDate: Date, endDate: Date) -> MediaSelectionScope {
-        MediaSelectionScope(kind: .timePeriod, startDate: startDate, endDate: endDate)
+    static func context(_ context: MomentContext, fetchLimit: Int? = nil) -> MediaSelectionScope {
+        MediaSelectionScope(kind: .context, context: context, fetchLimit: fetchLimit)
     }
 
-    static func album(localIdentifier: String) -> MediaSelectionScope {
-        MediaSelectionScope(kind: .album, albumLocalIdentifier: localIdentifier)
+    static func timePeriod(startDate: Date, endDate: Date, fetchLimit: Int? = nil) -> MediaSelectionScope {
+        MediaSelectionScope(kind: .timePeriod, startDate: startDate, endDate: endDate, fetchLimit: fetchLimit)
+    }
+
+    static func album(localIdentifier: String, fetchLimit: Int? = nil) -> MediaSelectionScope {
+        MediaSelectionScope(kind: .album, albumLocalIdentifier: localIdentifier, fetchLimit: fetchLimit)
     }
 
     private init(
@@ -44,13 +49,15 @@ struct MediaSelectionScope: Codable, Hashable, Sendable {
         context: MomentContext? = nil,
         startDate: Date? = nil,
         endDate: Date? = nil,
-        albumLocalIdentifier: String? = nil
+        albumLocalIdentifier: String? = nil,
+        fetchLimit: Int? = nil
     ) {
         self.kind = kind
         self.context = context
         self.startDate = startDate
         self.endDate = endDate
         self.albumLocalIdentifier = albumLocalIdentifier
+        self.fetchLimit = fetchLimit
     }
 }
 

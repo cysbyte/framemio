@@ -591,9 +591,9 @@ func captionStyleForProject(projectType models.ProjectType, storyType models.Sto
 	switch projectType {
 	case models.ProjectTypePromo:
 		return &models.CaptionStyle{
-			Preset: "clean_minimal", FontFamily: "inter-bold", FontSize: 46, TextColor: "#FFFFFF",
+			Preset: "clean_minimal", FontFamily: "inter-bold", FontSize: 58, TextColor: "#FFFFFF",
 			StrokeColor: "#000000", StrokeWidth: 3, BackgroundEnabled: true, BackgroundColor: "#000000",
-			BackgroundOpacity: 0.28, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 36,
+			BackgroundOpacity: 0.28, Position: "bottom", BottomOffset: 150, MaxLines: 1, MaxCharactersPerLine: 24,
 		}
 	case models.ProjectTypeReel:
 		return &models.CaptionStyle{
@@ -614,8 +614,8 @@ func captionStylePresetForProject(preset string, projectType models.ProjectType,
 	switch strings.ToLower(strings.TrimSpace(preset)) {
 	case "clean_minimal":
 		return &models.CaptionStyle{
-			Preset: "clean_minimal", FontFamily: "inter", FontSize: 42, TextColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 2,
-			BackgroundEnabled: false, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 34,
+			Preset: "clean_minimal", FontFamily: "inter-bold", FontSize: 58, TextColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 3,
+			BackgroundEnabled: true, BackgroundColor: "#000000", BackgroundOpacity: 0.28, Position: "bottom", BottomOffset: 150, MaxLines: 1, MaxCharactersPerLine: 24,
 		}
 	case "playful_pop":
 		return &models.CaptionStyle{
@@ -630,8 +630,8 @@ func captionStylePresetForProject(preset string, projectType models.ProjectType,
 			}
 		}
 		return &models.CaptionStyle{
-			Preset: "cinematic_subtitle", FontFamily: "inter-bold", FontSize: 48, TextColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 4,
-			BackgroundEnabled: true, BackgroundColor: "#000000", BackgroundOpacity: 0.32, Position: "bottom", BottomOffset: 150, MaxLines: 2, MaxCharactersPerLine: 32,
+			Preset: "cinematic_subtitle", FontFamily: "inter-bold", FontSize: 60, TextColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 4,
+			BackgroundEnabled: true, BackgroundColor: "#000000", BackgroundOpacity: 0.32, Position: "bottom", BottomOffset: 150, MaxLines: 1, MaxCharactersPerLine: 24,
 		}
 	case "bold_social":
 		return &models.CaptionStyle{

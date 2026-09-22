@@ -136,7 +136,8 @@ struct AppRootView: View {
         NavigationStack(path: $templatesPath) {
             TemplatesView(
                 storyService: dependencies.storyService,
-                hasTemplateAccess: hasTemplateAccess
+                hasTemplateAccess: hasTemplateAccess,
+                onOpenPricing: openPricing
             ) { template, projectType in
                 templatesPath.append(.mediaPicker(draft: .fromTemplate(template, projectType: projectType)))
             }
@@ -183,20 +184,22 @@ struct AppRootView: View {
 
     private func openPurchaseDestination(_ source: PricingEntryPoint) {
         Task { @MainActor in
-            let shouldShowCreditPacks = await shouldShowCreditPacksForPurchase()
             let balance = (try? await dependencies.creditService.balance()) ?? creditStore.balance
-            purchaseRoutingDebugLog("destination_lookup_complete source=\(source.rawValue) show_credit_packs=\(shouldShowCreditPacks) available=\(balance?.available.description ?? "nil") reserved=\(balance?.reserved.description ?? "nil")")
+            let hasBackendSubscriptionCycle = balance?.hasActiveSubscriptionCycle == true
+            let hasStoreKitProEntitlement = hasBackendSubscriptionCycle ? false : await hasActiveProEntitlementForCreditPacks()
+            let shouldShowCreditPacks = hasBackendSubscriptionCycle || hasStoreKitProEntitlement
+            purchaseRoutingDebugLog("destination_lookup_complete source=\(source.rawValue) show_credit_packs=\(shouldShowCreditPacks) available=\(balance?.available.description ?? "nil") reserved=\(balance?.reserved.description ?? "nil") has_subscription_cycle=\(balance?.hasActiveSubscriptionCycle.description ?? "nil")")
             if shouldShowCreditPacks {
-                purchaseRoutingDebugLog("destination=credit_packs source=\(source.rawValue) reason=active_and_renewing_subscription available=\(balance?.available.description ?? "nil") reserved=\(balance?.reserved.description ?? "nil")")
+                purchaseRoutingDebugLog("destination=credit_packs source=\(source.rawValue) reason=active_subscription available=\(balance?.available.description ?? "nil") reserved=\(balance?.reserved.description ?? "nil")")
                 purchaseDestination = .creditPacks(source)
             } else {
-                purchaseRoutingDebugLog("destination=pro source=\(source.rawValue) reason=cancelled_or_not_renewing_subscription available=\(balance?.available.description ?? "nil") reserved=\(balance?.reserved.description ?? "nil")")
+                purchaseRoutingDebugLog("destination=pro source=\(source.rawValue) reason=no_active_subscription available=\(balance?.available.description ?? "nil") reserved=\(balance?.reserved.description ?? "nil")")
                 purchaseDestination = .pro(source)
             }
         }
     }
 
-    private func shouldShowCreditPacksForPurchase() async -> Bool {
+    private func hasActiveProEntitlementForCreditPacks() async -> Bool {
         for await result in Transaction.currentEntitlements {
             guard case let .verified(transaction) = result,
                   FrameMioProCatalog.productIDs.contains(transaction.productID),
@@ -210,9 +213,8 @@ struct AppRootView: View {
             }
             do {
                 let renewalInfo = try verifiedRenewalInfo(from: status.renewalInfo)
-                let shouldShowCreditPacks = renewalInfo.willAutoRenew
-                purchaseRoutingDebugLog("subscription_route_status product=\(transaction.productID) state=\(String(describing: status.state)) will_auto_renew=\(renewalInfo.willAutoRenew) result=\(shouldShowCreditPacks ? "credit_packs" : "pro")")
-                return shouldShowCreditPacks
+                purchaseRoutingDebugLog("subscription_route_status product=\(transaction.productID) state=\(String(describing: status.state)) will_auto_renew=\(renewalInfo.willAutoRenew) result=credit_packs")
+                return true
             } catch {
                 purchaseRoutingDebugLog("subscription_route_status_unverified product=\(transaction.productID) error=\(error.localizedDescription)")
                 return true
@@ -282,11 +284,13 @@ struct AppRootView: View {
                 assets: assets,
                 photoLibrary: dependencies.photoLibrary,
                 storyService: dependencies.storyService,
+                creditService: dependencies.creditService,
                 promptTranscriptionService: dependencies.promptTranscriptionService,
                 hasTemplateAccess: hasTemplateAccess,
                 onContinue: { configuredDraft in
                     appendRoute(.storyCreating(draft: configuredDraft, assets: assets, launchID: UUID()))
-                }
+                },
+                onOpenPricing: openPricing
             )
         case let .storyCreation(draft, assets):
             StoryCreationView(
@@ -470,6 +474,7 @@ struct CreateView: View {
 struct TemplatesView: View {
     let storyService: StoryService
     let hasTemplateAccess: Bool
+    let onOpenPricing: (PricingEntryPoint) -> Void
     let onUseTemplate: (VideoTemplate, VideoProjectType) -> Void
     @State private var selectedProjectType: VideoProjectType = .story
     @State private var templates: [VideoTemplate] = []
@@ -521,7 +526,10 @@ struct TemplatesView: View {
                                 cardWidth: nil,
                                 previewHeight: 132
                             ) {
-                                guard !isLocked else { return }
+                                guard !isLocked else {
+                                    onOpenPricing(.settings)
+                                    return
+                                }
                                 selectedTemplateID = template.id
                             }
                         }
@@ -537,17 +545,6 @@ struct TemplatesView: View {
                             .font(FrameMioTypography.body)
                             .foregroundStyle(FrameMioColors.secondaryInk)
                             .fixedSize(horizontal: false, vertical: true)
-                        Button {
-                            FrameMioHaptics.primaryAction()
-                            onUseTemplate(selectedTemplate, selectedProjectType)
-                        } label: {
-                            Label("Use Template", systemImage: "plus.circle.fill")
-                                .frame(maxWidth: .infinity)
-                                .frame(minHeight: 45)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(FrameMioColors.accent)
-                        .padding(.top, FrameMioSpacing.sm)
                     }
                     .padding(FrameMioSpacing.lg)
                     .background(FrameMioColors.surface.opacity(0.86), in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous))
@@ -563,8 +560,30 @@ struct TemplatesView: View {
         .background(FrameMioColors.canvas.ignoresSafeArea())
         .navigationTitle("Templates")
         .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom) {
+            if selectedTemplate != nil {
+                fixedUseTemplateButton
+            }
+        }
         .task { await loadTemplates() }
         .refreshable { await loadTemplates(force: true) }
+    }
+
+    private var fixedUseTemplateButton: some View {
+        VStack(spacing: 0) {
+            Divider()
+                .overlay(FrameMioColors.divider.opacity(0.7))
+            PrimaryButton(
+                title: "Use Template",
+                systemImage: "plus.circle.fill",
+                action: useSelectedTemplate,
+                isDisabled: selectedTemplateIsLocked
+            )
+            .padding(.horizontal, FrameMioSpacing.lg)
+            .padding(.top, FrameMioSpacing.md)
+            .padding(.bottom, FrameMioSpacing.md)
+            .background(FrameMioColors.canvas.opacity(0.96))
+        }
     }
 
     private var templateGridColumns: [GridItem] {
@@ -576,6 +595,20 @@ struct TemplatesView: View {
 
     private func templateIsLocked(at index: Int) -> Bool {
         TemplateAccessPolicy.isLocked(index: index, hasTemplateAccess: hasTemplateAccess)
+    }
+
+    private var selectedTemplateIndex: Int? {
+        visibleTemplates.firstIndex { $0.id == selectedTemplate?.id }
+    }
+
+    private var selectedTemplateIsLocked: Bool {
+        guard let selectedTemplateIndex else { return true }
+        return templateIsLocked(at: selectedTemplateIndex)
+    }
+
+    private func useSelectedTemplate() {
+        guard let selectedTemplate, !selectedTemplateIsLocked else { return }
+        onUseTemplate(selectedTemplate, selectedProjectType)
     }
 
     private func loadTemplates(force: Bool = false) async {
@@ -651,31 +684,41 @@ struct ProjectConfigurationView: View {
     @State private var isShowingCustomization = false
     @State private var thumbnails: [String: UIImage] = [:]
     @State private var thumbnailTasks: [String: Task<Void, Never>] = [:]
+    @State private var isCheckingCredits = false
+    @State private var creditCost: Int
+    @State private var creditBalance: Int?
+    @State private var creditErrorMessage: String?
 
     let draft: VideoProjectDraft
     let assets: [MediaAsset]
     let photoLibrary: PhotoLibraryService
     let storyService: StoryService
+    let creditService: CreditService?
     let promptTranscriptionService: PromptTranscriptionService?
     let hasTemplateAccess: Bool
     let onContinue: (VideoProjectDraft) -> Void
+    let onOpenPricing: (PricingEntryPoint) -> Void
 
     init(
         draft: VideoProjectDraft,
         assets: [MediaAsset],
         photoLibrary: PhotoLibraryService,
         storyService: StoryService,
+        creditService: CreditService? = nil,
         promptTranscriptionService: PromptTranscriptionService? = nil,
         hasTemplateAccess: Bool = false,
-        onContinue: @escaping (VideoProjectDraft) -> Void
+        onContinue: @escaping (VideoProjectDraft) -> Void,
+        onOpenPricing: @escaping (PricingEntryPoint) -> Void
     ) {
         self.draft = draft
         self.assets = assets
         self.photoLibrary = photoLibrary
         self.storyService = storyService
+        self.creditService = creditService
         self.promptTranscriptionService = promptTranscriptionService
         self.hasTemplateAccess = hasTemplateAccess
         self.onContinue = onContinue
+        self.onOpenPricing = onOpenPricing
         _promoSubject = State(initialValue: draft.promo?.subject ?? .product)
         _promoGoal = State(initialValue: draft.promo?.goal ?? .sell)
         _promoDuration = State(initialValue: draft.promo?.duration ?? .automatic)
@@ -685,6 +728,7 @@ struct ProjectConfigurationView: View {
         _prompt = State(initialValue: draft.prompt ?? "")
         _selectedTemplateID = State(initialValue: draft.templateID)
         _templateConfiguration = State(initialValue: draft.templateConfiguration)
+        _creditCost = State(initialValue: CreditPricing.price(for: .createStory, stats: Self.creditStats(for: assets)))
     }
 
     var body: some View {
@@ -704,6 +748,13 @@ struct ProjectConfigurationView: View {
                 }
 
                 customizationEntry
+
+                if let creditErrorMessage {
+                    Text(creditErrorMessage)
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(FrameMioColors.accent)
+                        .accessibilityAddTraits(.isStaticText)
+                }
             }
             .padding(.horizontal, FrameMioSpacing.lg)
             .padding(.top, FrameMioSpacing.lg)
@@ -718,10 +769,12 @@ struct ProjectConfigurationView: View {
         .task {
             await loadTemplates()
             loadMissingThumbnails()
+            refreshCreditQuote()
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
             loadMissingThumbnails()
+            refreshCreditQuote()
         }
         .sheet(isPresented: $isShowingCustomization) {
             if let template = selectedTemplate {
@@ -742,14 +795,83 @@ struct ProjectConfigurationView: View {
         VStack(spacing: 0) {
             Divider()
                 .overlay(FrameMioColors.divider.opacity(0.7))
-            PrimaryButton(title: "Generate First Draft", systemImage: "sparkles") {
-                onContinue(configuredDraft)
-            }
+            PrimaryButton(
+                title: "\(createButtonTitle) (\(creditCost) credits)",
+                systemImage: "sparkles",
+                action: requestContinue,
+                isDisabled: isCheckingCredits,
+                isLoading: isCheckingCredits
+            )
             .padding(.horizontal, FrameMioSpacing.lg)
             .padding(.top, FrameMioSpacing.md)
             .padding(.bottom, FrameMioSpacing.md)
             .background(FrameMioColors.canvas.opacity(0.96))
         }
+    }
+
+    private var createButtonTitle: String {
+        draft.type == .promo ? "Create Promo" : "Create Reel"
+    }
+
+    private func refreshCreditQuote() {
+        guard let creditService else { return }
+        Task { @MainActor in
+            do {
+                async let balanceTask = creditService.balance()
+                async let quoteTask = creditService.quote(action: .createStory, stats: creditStats)
+                let (balance, quote) = try await (balanceTask, quoteTask)
+                creditBalance = balance.displayCredits
+                creditCost = quote.credits
+                creditErrorMessage = nil
+            } catch {
+                if creditErrorMessage == nil {
+                    creditErrorMessage = AppError.from(error).localizedDescription
+                }
+            }
+        }
+    }
+
+    private func requestContinue() {
+        guard !isCheckingCredits else { return }
+        guard let creditService else {
+            onContinue(configuredDraft)
+            return
+        }
+
+        isCheckingCredits = true
+        creditErrorMessage = nil
+        Task { @MainActor in
+            defer { isCheckingCredits = false }
+            do {
+                let quote = try await creditService.quote(action: .createStory, stats: creditStats)
+                creditBalance = quote.balance
+                creditCost = quote.credits
+                if let issue = Self.creditIssue(from: quote, action: .createStory) {
+                    purchaseRoutingDebugLog("project_config_preflight_insufficient_credits type=\(draft.type.rawValue) required=\(issue.required) available=\(issue.available)")
+                    onOpenPricing(.insufficientCredits)
+                    return
+                }
+                purchaseRoutingDebugLog("project_config_preflight_ok type=\(draft.type.rawValue) required=\(quote.credits) balance=\(quote.balance)")
+                onContinue(configuredDraft)
+            } catch {
+                creditErrorMessage = AppError.from(error).localizedDescription
+            }
+        }
+    }
+
+    private var creditStats: CreditMediaStats {
+        Self.creditStats(for: assets)
+    }
+
+    private static func creditStats(for assets: [MediaAsset]) -> CreditMediaStats {
+        CreditMediaStats.createStory(assets: assets)
+    }
+
+    private static func creditIssue(from quote: CreditQuote, action: CreditAction) -> CreditIssue? {
+        guard quote.eligible, quote.balance >= quote.credits else {
+            return CreditIssue(action: action, required: quote.credits, available: quote.balance)
+        }
+        return nil
     }
 
     private var selectedMediaSection: some View {
@@ -847,7 +969,10 @@ struct ProjectConfigurationView: View {
                                 previewHeight: 122,
                                 minHeight: 268
                             ) {
-                                guard !isLocked else { return }
+                                guard !isLocked else {
+                                    onOpenPricing(.settings)
+                                    return
+                                }
                                 select(template)
                             }
                         }
@@ -1072,7 +1197,7 @@ struct ProjectConfigurationView: View {
     }
 
     private func compatibleConfiguration(_ previous: VideoTemplateConfiguration?, with template: VideoTemplate) -> VideoTemplateConfiguration {
-        var resolved = template.defaults
+        var resolved = draft.type == .story ? template.defaults : template.defaults.withAutomaticCreationDuration()
         guard let previous else { return resolved }
         if template.editableOptions.contains("duration_seconds") { resolved.durationSeconds = previous.durationSeconds }
         if template.supportsFullSourceDuration && template.editableOptions.contains("duration_mode") {
@@ -1559,8 +1684,7 @@ struct TemplateCard: View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
             ZStack(alignment: .bottomTrailing) {
                 InlineTemplateVideo(path: template.demoVideoPath)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: previewHeight)
+                    .frame(maxWidth: .infinity, minHeight: previewHeight, maxHeight: previewHeight)
                     .blur(radius: isLocked ? 4 : 0)
                     .saturation(isLocked ? 0.35 : 1)
                     .overlay {
@@ -1611,17 +1735,19 @@ struct TemplateCard: View {
                     .accessibilityHidden(true)
                 }
             }
+            .frame(maxWidth: .infinity, minHeight: previewHeight, maxHeight: previewHeight)
+            .clipped()
 
             Text(template.name)
                 .font(FrameMioTypography.headline)
                 .foregroundStyle(isLocked ? FrameMioColors.secondaryInk : FrameMioColors.ink)
                 .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, minHeight: 46, maxHeight: 46, alignment: .topLeading)
             Text(template.description)
                 .font(FrameMioTypography.caption)
                 .foregroundStyle(FrameMioColors.secondaryInk)
                 .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, minHeight: 58, maxHeight: 58, alignment: .topLeading)
         }
         .padding(FrameMioSpacing.md)
         .frame(maxWidth: .infinity, alignment: .topLeading)

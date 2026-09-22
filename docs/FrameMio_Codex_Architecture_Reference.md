@@ -910,12 +910,18 @@ configuration.composition:
   aspect_ratio = 9:16 for Reel
 ```
 
-`duration_mode=fixed` requires a target duration and remains capped at the
-short-output maximum. `duration_mode=auto` preserves the existing short
-generation behavior. `duration_mode=full_source` preserves the selected source
+`duration_mode=fixed` requires a target duration and remains an exact target.
+`duration_mode=auto` preserves the existing short generation behavior for
+normal uploads, but long uploaded video is a soft-target case: when total
+uploaded video duration exceeds the long-video threshold, the backend starts
+from the 60-second automatic target and may extend the generated story within a
+bounded maximum so key scenes from the longest source videos are not dropped.
+This extension changes the generated `StoryPlan.requested_duration_ms` and
+`output.max_duration_seconds` to match the actual planned duration before
+validation/rendering. `duration_mode=full_source` preserves the selected source
 video timeline up to the backend full-source safety limit
 (`FULL_SOURCE_MAX_DURATION_SECONDS`, default 600 seconds) and may exceed the
-normal 60-second short-output cap.
+normal short-output cap.
 
 Story projects retain the existing `/v1/stories` compatibility contract.
 Promo and Reel responses are converted by iOS into the shared `Story` display
@@ -1736,7 +1742,7 @@ STORY_PLANNER_MODEL=gpt-5.6-luna
 STORY_PLANNER_BASE_URL=
 STORY_PLANNER_API_KEY=
 STORY_PLANNER_WIRE_API=chat_completions|responses
-STORY_PLANNER_MAX_OUTPUT_TOKENS=6000
+STORY_PLANNER_MAX_OUTPUT_TOKENS=80000
 STORY_PLANNER_TIMEOUT=90s
 STORY_PLANNER_FALLBACK_TIMEOUT=80s
 STORY_REVISION_FALLBACK_TIMEOUT=45s
@@ -1777,6 +1783,10 @@ Rules:
   `STORY_PLANNER_GEMINI_FALLBACK_TIMEOUT` bounds Gemini primary latency before
   the GPT fallback starts. Each fallback timeout must be lower than its
   corresponding HTTP timeout.
+- `STORY_PLANNER_MAX_OUTPUT_TOKENS` defaults to 80000 because the planner is the
+  most important creative call and long-source plans can require many moments,
+  B-roll rows, and validation metadata. Deployment workflows must keep the ECS
+  task-definition environment in sync with the code default.
 - GPT receives bounded structured `PhotoAnalysis`, `VideoAnalysis`, transcript segments, media clusters, selected/excluded IDs, desired duration, style, and constraints; it does not receive original full-resolution media or provider secrets.
 - For user editing prompts, GPT receives a bounded structured request containing:
 
@@ -1805,9 +1815,11 @@ Rules:
   preserve unrelated scenes and media references whenever possible.
 - GPT must return the existing `models.StoryPlan` JSON shape only, with `schema_version` exactly `story_plan_v1`; it must never return Remotion code, FFmpeg commands, shell commands, SQL, JavaScript, or executable instructions. Current production deployment defaults use `chat_completions` for OpenAI-compatible gateway compatibility; `responses` remains supported when the upstream supports it. `STORY_PLANNER_FALLBACK_TIMEOUT` defaults to 80 seconds and bounds initial GPT planning latency before falling back to the deterministic local planner, while `STORY_PLANNER_TIMEOUT` remains the 90-second HTTP hard timeout; startup rejects a fallback timeout that is not below the HTTP timeout. The provider returns immediately when the complete upstream response body arrives; `story_planner_external_response_received` records that boundary so response latency can be distinguished from parsing and validation time.
 - The provider boundary canonicalizes narrow v1 schema aliases such as `1.0` to `story_plan_v1`, repairs bounded media-reference omissions from existing analysis data, sanitizes common renderer-facing aliases for transitions, crop intents, caption styles, caption timing, aspect ratio, and source-audio intent, coerces bounded `audio.original_audio` string booleans before typed decode, overwrites video moment and video b-roll `video_analysis_version` from the backend-owned `VideoAnalysis`, derives a deterministic local `broll_id` when an external B-roll row omits one, drops malformed caption rows, removes broad full-moment captions when more granular timed captions exist for the same moment, serializes the final caption timeline so only one subtitle is active at any timestamp, backfills top-level timed captions from transcript cues or moment captions when an external plan omits valid `captions` and subtitles are not disabled, then runs lightweight structural validation. Structurally invalid Gemini or GPT plans fall back to the next configured planner; if all external planners fail, the deterministic local planner is used before persistence. JSON-level repair is traceable via `story_planner_external_json_sanitized`; caption/media-reference/B-roll metadata repair is traceable via `story_planner_external_output_sanitized` and `story_planner_primary_output_sanitized`; repaired primary plans should emit `story_planner_primary_succeeded` instead of falling back.
+- Fixed-duration and auto-long-video outputs have additional duration and source-coverage gates. A fixed target must not come back materially short. Auto long-video starts from the 60-second suggestion but can extend to include source coverage; if it extends, `requested_duration_ms` and `output.max_duration_seconds` are normalized to the actual moment duration. External plans that omit or severely underuse the longest usable selected videos are rejected and fall back locally.
+- The deterministic local planner expands long-video candidates for fixed and auto-long-video planning. It first uses analyzed video segments, then synthesizes additional 5-second source windows across long videos when analysis is sparse. Selection seeds at least one strong candidate per media and prioritizes minimum coverage for the longest videos before score-based filling. Failed external planner batches should not force retrying the entire story when deterministic local fallback can produce a valid plan.
 - Provider sanitization must stay bounded. It may normalize aliases such as `contain` to `fit`, `center crop` to `fill`, `cinematic` to `cinematic_subtitle`, `Inter Bold` to `inter-bold`, named colors to `#RRGGBB`, and malformed caption timing to the owning moment range. It must not repair invented project identity, invented media, excluded media, excluded moments, unsupported media types, over-duration plans, or executable/renderer-specific instructions. Those outputs are invalid and must fall back locally.
 - Scene-detail preference is a bounded planner control, not a renderer command. `more` lowers the local planner's matching threshold to admit additional relevant cutaways while retaining the shared 35% B-roll duration cap; `none` removes B-roll after both local and external planning; an unset preference preserves the normal balanced behavior. The local planner and validator use the same cap so short fixed-duration fallback plans remain valid. The external prompt asks for B-roll identity, timing, reason, confidence, and score, but missing scores are not fabricated.
-- Story-plan observability is emitted at each boundary. `story_planner_request_ready` records the selected style, subtitle controls, scene-detail/B-roll preference, and duration constraint; `story_planner_external_response_received` records when the complete Gemini or GPT response body/stream is received and its bounded byte count; `story_planner_external_output_sanitized` records missing B-roll IDs/scores, raw/final caption counts, and raw/final overlapping caption counts; `story_planner_primary_failed_falling_back` records the failed provider, next fallback provider, `primary_timed_out`, and configured deadline; `story_planner_local_output_invalid` records local fallback B-roll count, used duration, duration limit, preference, and validation errors; `story planner output ready` records B-roll counts, score/confidence coverage, and a bounded `broll_scores` trace formatted as `broll_id:asset_id:start=...:duration=...:score=...:confidence=...`; backend `render input prepared`, render-worker `render input received`, and `render composition built` repeat the B-roll trace so a missing or dropped cutaway can be located between planning and rendering.
+- Story-plan observability is emitted at each boundary. `story_planner_request_ready` records the selected style, subtitle controls, scene-detail/B-roll preference, and duration constraint; `story_duration_resolved` records whether automatic long-video mode is using the 60-second soft target; `story_planner_external_response_received` records when the complete Gemini or GPT response body/stream is received, bounded byte count, finish reason, response status, and incomplete reason; `story_planner_external_output_sanitized` records missing B-roll IDs/scores, raw/final caption counts, and raw/final overlapping caption counts; `story_planner_primary_failed_falling_back` records the failed provider, next fallback provider, `primary_timed_out`, and configured deadline; `story_planner_local_selection` records raw/expanded candidate counts, selected moment count, and planned duration; `story_planner_local_output_invalid` records local fallback B-roll count, used duration, duration limit, preference, and validation errors; `story planner output ready` records B-roll counts, score/confidence coverage, planned/requested duration, and a bounded `broll_scores` trace formatted as `broll_id:asset_id:start=...:duration=...:score=...:confidence=...`; backend `render input prepared`, render-worker `render input received`, and `render composition built` repeat the B-roll trace so a missing or dropped cutaway can be located between planning and rendering.
 - For Story projects, initial external StoryPlan generation must strip
   `moments[].typography` during first-release stabilization, even if the model
   emits a valid-looking `TextOverlay`; Story photo typography remains deferred.
@@ -2336,8 +2348,17 @@ The user sees asynchronous progress.
 
 Rendering workers can later scale horizontally based on queue depth.
 
+Auto-long-video stories may render substantially longer outputs than the
+60-second starting target. A 90-120 second vertical video with many video
+moments, original audio, and B-roll overlays can take several minutes to
+render. A cold render service also adds queue/scale-up time before the job
+enters `RUNNING`; distinguish this from actual render-worker runtime.
+
 If rendering is slow, first investigate:
 
+- queue wait / ECS service scale-up delay before `VIDEO_RENDER` becomes
+  `RUNNING`
+- output duration, moment count, video clip count, and B-roll count
 - unnecessary re-encoding
 - source resolution
 - frame rate
@@ -2347,6 +2368,12 @@ If rendering is slow, first investigate:
 - worker CPU/memory
 - downloading the same asset repeatedly
 - redundant intermediate files
+
+Useful log boundaries:
+
+- backend `stage job stored`, `queue publish succeeded`, `worker service scale requested`, and `job status updated` show enqueue, activation, queue wait, running, and completion.
+- render-worker `render input received`, `render source assets downloaded`, `render clips prepared`, `render composition built`, `remotion render completed`, `render artifact uploaded`, and `render pipeline completed` show where render time was spent.
+- `render composition built` records final composition duration, clip count, video clip count, audio-eligible video clip count, B-roll count, caption count, and transition summary. Use these fields before changing renderer architecture.
 
 Do not replace Remotion with another architecture merely because one render is slow unless benchmarking demonstrates the need.
 
@@ -2419,12 +2446,12 @@ Workers should remain private.
 Current AWS operation supports both queued workers and one-off ECS task activation:
 
 - backend orchestration publishes identifier-only SQS messages to type-specific queues: `SQS_STORY_QUEUE_URL` (`framemio-story-processing`) for `STORY_PLAN` and revision/orchestration jobs, `SQS_VIDEO_QUEUE_URL` (`framemio-video-analysis`) for `MEDIA_PREPROCESS`/`TRANSCRIBE`/`VIDEO_UNDERSTAND`, and `SQS_RENDER_QUEUE_URL` (`framemio-render-processing`) for `VIDEO_RENDER`; `SQS_PROCESSING_QUEUE_URL` remains a fallback only
-- when configured, the Go API can start one-off ECS Fargate worker tasks for video, story planning, and rendering stages
+- when configured, the Go API can start one-off ECS Fargate worker tasks for video and story planning stages; render jobs currently activate the render-worker service and may wait for ECS service scale-up before the SQS message is received
 - one-off workers receive `JOB_ID`/`JOB_TYPE` overrides and must process only that target job; non-target active messages are briefly released, while stale or terminal non-target messages may be deleted
 - story one-off wait and SQS visibility defaults are bounded to 3 minutes unless overridden by `STORY_WORKER_RUN_ONCE_WAIT_TIMEOUT`, `WORKER_RUN_ONCE_WAIT_TIMEOUT`, `STORY_WORKER_SQS_VISIBILITY_TIMEOUT`, or `SQS_VISIBILITY_TIMEOUT`
 - video-analysis worker receive visibility defaults are short enough for fast retry (`90s` in GitHub Actions, `2m` code fallback); shutdown cancellations release messages with a short retry visibility instead of leaving them hidden for the full queue timeout
 - render-worker receive visibility defaults to `15m` in GitHub Actions via `RENDER_WORKER_SQS_VISIBILITY_TIMEOUT`; `SIGTERM` during an active render releases the message after `RENDER_WORKER_SHUTDOWN_RELEASE_VISIBILITY_TIMEOUT` (`15s` default) so interrupted deploys retry quickly
-- long-running worker services can also be manually scaled with scripts, but normal production worker deploys keep `desiredCount=0` and backend `RunTask` activation starts one-off tasks when jobs arrive
+- long-running worker services can also be manually scaled with scripts, but normal production worker deploys keep `desiredCount=0`; backend activation starts one-off tasks for allowed job types and scales the render-worker service for `VIDEO_RENDER`
 
 Current helper scripts:
 

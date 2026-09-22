@@ -72,7 +72,7 @@ final class StoryVideoPlayerController: ObservableObject {
         // silenced by an unrelated ringer switch.
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
         try? AVAudioSession.sharedInstance().setActive(true)
-        storyVideoPlayerDebugLog("playback enabled current_url=\(redactedURL(currentURL)) autoplays=\(autoplays) player_status=\(String(describing: player.status)) time_control=\(String(describing: player.timeControlStatus))")
+        storyVideoPlayerDebugLog("playback enabled current_url=\(Self.redactedURL(currentURL)) autoplays=\(autoplays) player_status=\(String(describing: player.status)) time_control=\(String(describing: player.timeControlStatus))")
         if autoplays {
             player.play()
         }
@@ -87,13 +87,13 @@ final class StoryVideoPlayerController: ObservableObject {
     }
 
     func pause() {
-        storyVideoPlayerDebugLog("playback paused current_url=\(redactedURL(currentURL)) time_control=\(String(describing: player.timeControlStatus))")
+        storyVideoPlayerDebugLog("playback paused current_url=\(Self.redactedURL(currentURL)) time_control=\(String(describing: player.timeControlStatus))")
         player.pause()
     }
 
     func replace(url: URL, autoplays: Bool) {
         guard url != currentURL else { return }
-        storyVideoPlayerDebugLog("replacing player item old_url=\(redactedURL(currentURL)) new_url=\(redactedURL(url)) autoplays=\(autoplays)")
+        storyVideoPlayerDebugLog("replacing player item old_url=\(Self.redactedURL(currentURL)) new_url=\(Self.redactedURL(url)) autoplays=\(autoplays)")
         load(url: url)
         if autoplays {
             player.play()
@@ -102,6 +102,7 @@ final class StoryVideoPlayerController: ObservableObject {
 
     private func load(url: URL) {
         currentURL = url
+        let urlDescription = Self.redactedURL(url)
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
             self.endObserver = nil
@@ -114,10 +115,18 @@ final class StoryVideoPlayerController: ObservableObject {
         player.replaceCurrentItem(with: nil)
 
         let item = AVPlayerItem(url: url)
-        attachItemObservers(item)
-        let durationSeconds = item.asset.duration.seconds
-        let durationDescription = durationSeconds.isFinite ? String(format: "%.3f", durationSeconds) : "unknown"
-        storyVideoPlayerDebugLog("loading player item url=\(redactedURL(url)) asset_duration=\(durationDescription)")
+        attachItemObservers(item, urlDescription: urlDescription)
+        storyVideoPlayerDebugLog("loading player item url=\(urlDescription)")
+        Task {
+            do {
+                let duration = try await item.asset.load(.duration)
+                let durationSeconds = duration.seconds
+                let durationDescription = durationSeconds.isFinite ? String(format: "%.3f", durationSeconds) : "unknown"
+                storyVideoPlayerDebugLog("loaded player item duration url=\(urlDescription) asset_duration=\(durationDescription)")
+            } catch {
+                storyVideoPlayerDebugLog("loaded player item duration failed url=\(urlDescription) error=\(error.localizedDescription)")
+            }
+        }
         player.replaceCurrentItem(with: item)
 
         // Leave the last frame up and rewind, so replay is one tap rather than a
@@ -127,7 +136,7 @@ final class StoryVideoPlayerController: ObservableObject {
             object: item,
             queue: .main
         ) { [weak player] _ in
-            storyVideoPlayerDebugLog("item reached end current_url=\(self.redactedURL(url))")
+            storyVideoPlayerDebugLog("item reached end current_url=\(urlDescription)")
             player?.seek(to: .zero)
         }
     }
@@ -141,34 +150,34 @@ final class StoryVideoPlayerController: ObservableObject {
         }
     }
 
-    private func attachItemObservers(_ item: AVPlayerItem) {
+    private func attachItemObservers(_ item: AVPlayerItem, urlDescription: String) {
         currentItemStatusObserver = item.observe(\.status, options: [.initial, .new]) { item, _ in
             let durationSeconds = item.duration.seconds
             let durationDescription = durationSeconds.isFinite ? String(format: "%.3f", durationSeconds) : "unknown"
-            storyVideoPlayerDebugLog("item status changed status=\(String(describing: item.status)) duration=\(durationDescription) error=\(item.error?.localizedDescription ?? "nil")")
+            storyVideoPlayerDebugLog("item status changed url=\(urlDescription) status=\(String(describing: item.status)) duration=\(durationDescription) error=\(item.error?.localizedDescription ?? "nil")")
         }
         currentItemErrorObserver = item.observe(\.error, options: [.initial, .new]) { item, _ in
             if let error = item.error {
-                storyVideoPlayerDebugLog("item error changed error=\(error.localizedDescription)")
+                storyVideoPlayerDebugLog("item error changed url=\(urlDescription) error=\(error.localizedDescription)")
             }
         }
         currentItemBufferObserver = item.observe(\.isPlaybackBufferEmpty, options: [.initial, .new]) { item, _ in
-            storyVideoPlayerDebugLog("item buffer state empty=\(item.isPlaybackBufferEmpty) likelyToKeepUp=\(item.isPlaybackLikelyToKeepUp)")
+            storyVideoPlayerDebugLog("item buffer state url=\(urlDescription) empty=\(item.isPlaybackBufferEmpty) likelyToKeepUp=\(item.isPlaybackLikelyToKeepUp)")
         }
         currentItemKeepUpObserver = item.observe(\.isPlaybackLikelyToKeepUp, options: [.initial, .new]) { item, _ in
-            storyVideoPlayerDebugLog("item likely to keep up changed likely=\(item.isPlaybackLikelyToKeepUp) bufferEmpty=\(item.isPlaybackBufferEmpty)")
+            storyVideoPlayerDebugLog("item likely to keep up changed url=\(urlDescription) likely=\(item.isPlaybackLikelyToKeepUp) bufferEmpty=\(item.isPlaybackBufferEmpty)")
         }
         itemFailureObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemFailedToPlayToEndTime,
             object: item,
             queue: .main
-        ) { [weak self] notification in
+        ) { notification in
             let error = (notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? NSError)?.localizedDescription ?? item.error?.localizedDescription ?? "unknown"
-            storyVideoPlayerDebugLog("item failed to play to end current_url=\(self?.redactedURL(self?.currentURL)) error=\(error)")
+            storyVideoPlayerDebugLog("item failed to play to end current_url=\(urlDescription) error=\(error)")
         }
     }
 
-    private func redactedURL(_ url: URL?) -> String {
+    nonisolated private static func redactedURL(_ url: URL?) -> String {
         guard let url else { return "nil" }
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         let host = components?.host ?? url.host ?? "nil"

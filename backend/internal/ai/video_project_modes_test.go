@@ -167,6 +167,9 @@ func TestPlannerKeepsModeCaptionDefaultsForUnknownPreset(t *testing.T) {
 	if plan.CaptionStyle == nil || plan.CaptionStyle.Preset != "clean_minimal" {
 		t.Fatalf("promo caption style = %+v, want clean_minimal mode default", plan.CaptionStyle)
 	}
+	if plan.CaptionStyle.FontSize != 58 || plan.CaptionStyle.MaxLines != 1 || plan.CaptionStyle.MaxCharactersPerLine != 24 {
+		t.Fatalf("promo caption sizing = %+v, want larger short-line captions", plan.CaptionStyle)
+	}
 }
 
 func TestPlannerGeneratesPromoSceneWorkflowMetadata(t *testing.T) {
