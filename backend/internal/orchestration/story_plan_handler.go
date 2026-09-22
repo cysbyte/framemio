@@ -400,6 +400,7 @@ func (h StoryPlanHandler) storyPlanRequest(project models.StoryProject, configur
 	totalVideoSeconds := totalUploadedVideoDurationSeconds(project.MediaIDs, mediaByID)
 	if durationResolution == "media_auto_default" && totalVideoSeconds > defaultStoryDurationLongVideoThreshold.Seconds() {
 		durationResolution = "long_video_auto_default"
+		targetDurationFixed = true
 	}
 	h.logger().Info("story_duration_resolved",
 		slog.String("project_id", project.ID),

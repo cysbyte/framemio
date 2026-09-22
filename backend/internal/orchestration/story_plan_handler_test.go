@@ -789,7 +789,7 @@ func TestStoryPlanRequestUsesAutomaticLongVideoDuration(t *testing.T) {
 		nil,
 		nil,
 	)
-	if request.DurationMode != models.DurationModeAuto || request.TargetDurationFixed {
+	if request.DurationMode != models.DurationModeAuto || !request.TargetDurationFixed {
 		t.Fatalf("expected automatic duration mode, got mode=%q fixed=%v", request.DurationMode, request.TargetDurationFixed)
 	}
 	if request.DesiredDuration != 60*time.Second {
