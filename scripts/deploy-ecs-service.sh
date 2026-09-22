@@ -253,7 +253,7 @@ configure_request_autoscaling() {
     exit 1
   fi
 
-  target_group_dimension="${target_group_arn##*targetgroup/}"
+  target_group_dimension="${target_group_arn##*:}"
   load_balancer_dimension="${load_balancer_arn##*loadbalancer/}"
 
   echo "Configuring request autoscaling for $ECS_SERVICE using load balancer $load_balancer_dimension"
