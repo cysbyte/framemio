@@ -636,6 +636,76 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
   }
 });
 
+test('ffmpeg fallback renderer paginates long full-text captions instead of truncating with ellipsis', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'framemio-caption-pagination-render-test-'));
+  const fakeFfmpeg = path.join(root, 'fake-ffmpeg.cjs');
+  const argsPath = path.join(root, 'ffmpeg-args.json');
+  const outputPath = path.join(root, 'story.mp4');
+  await writeFile(fakeFfmpeg, `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.writeFileSync(process.env.FRAMEMIO_FFMPEG_ARGS_PATH, JSON.stringify(args));
+fs.writeFileSync(args[args.length - 1], 'fake mp4');
+`, 'utf8');
+  await chmod(fakeFfmpeg, 0o755);
+
+  const previousArgsPath = process.env.FRAMEMIO_FFMPEG_ARGS_PATH;
+  process.env.FRAMEMIO_FFMPEG_ARGS_PATH = argsPath;
+  try {
+    const assets = fixtureMediaAssets();
+    const assetPaths = new Map(assets.map((asset) => [asset.id, `/asset/${asset.file_name}`]));
+    const composition = buildComposition(fixtureStoryPlan({
+      captions: [{
+        moment_id: 'moment-video-1',
+        text: 'Your camera roll is full of memories waiting to become a polished story.',
+        start_ms: 3200,
+        end_ms: 6200,
+      }],
+      caption_style: {
+        preset: 'clean_minimal',
+        font_family: 'inter-bold',
+        font_size: 58,
+        background_enabled: true,
+        max_lines: 1,
+        max_characters_per_line: 24,
+      },
+    }), assets, assetPaths, new Map(), {
+      work_dir: root,
+      assets_dir: path.join(root, 'assets'),
+      clips_dir: path.join(root, 'clips'),
+      output_file: outputPath,
+      composition_file: path.join(root, 'composition.json'),
+    });
+
+    await new FfmpegCompositionRenderer({ffmpegBinary: fakeFfmpeg}).renderComposition(composition, outputPath);
+
+    const args = JSON.parse(await readFile(argsPath, 'utf8')) as string[];
+    const filterComplex = args[args.indexOf('-filter_complex') + 1];
+    assert.match(filterComplex, /caption-0-0-/);
+    assert.match(filterComplex, /caption-0-1-/);
+    assert.match(filterComplex, /caption-0-2-/);
+    assert.match(filterComplex, /enable='between\(t,3\.200,4\.200\)'/);
+    assert.match(filterComplex, /enable='between\(t,4\.200,5\.200\)'/);
+    assert.match(filterComplex, /enable='between\(t,5\.200,6\.200\)'/);
+
+    const captionFileMatches = [...filterComplex.matchAll(/textfile='([^']*caption-0-\d-[^']+)'/g)];
+    assert.equal(captionFileMatches.length, 3);
+    const captionTexts = await Promise.all(captionFileMatches.map((match) => readFile(match[1], 'utf8')));
+    assert.deepEqual(captionTexts, [
+      'Your camera roll is full',
+      'of memories waiting to',
+      'become a polished story.',
+    ]);
+    assert.equal(captionTexts.some((text) => text.includes('...') || text.includes('…')), false);
+  } finally {
+    if (previousArgsPath === undefined) {
+      delete process.env.FRAMEMIO_FFMPEG_ARGS_PATH;
+    } else {
+      process.env.FRAMEMIO_FFMPEG_ARGS_PATH = previousArgsPath;
+    }
+  }
+});
+
 test('ffmpeg fallback renderer includes typography overlays', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'framemio-typography-render-test-'));
   const fakeFfmpeg = path.join(root, 'fake-ffmpeg.cjs');

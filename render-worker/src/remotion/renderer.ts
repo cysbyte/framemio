@@ -695,6 +695,42 @@ function normalizeCaptionText(value: string, style: ResolvedCaptionStyle): strin
   return wrapCaptionText(value.trim().replace(/\s+/g, ' ').slice(0, 120), style.maxCharactersPerLine, style.maxLines);
 }
 
+function captionPages(value: string, style: ResolvedCaptionStyle): string[] {
+  const normalized = value.trim().replace(/\s+/g, ' ').slice(0, 120);
+  if (!normalized) {
+    return [];
+  }
+  const words = normalized.split(' ');
+  const pages: string[] = [];
+  let lines: string[] = [];
+  let current = '';
+  const flushPage = () => {
+    if (current) {
+      lines.push(current);
+      current = '';
+    }
+    if (lines.length > 0) {
+      pages.push(lines.join('\n'));
+      lines = [];
+    }
+  };
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (next.length <= style.maxCharactersPerLine || !current) {
+      current = next;
+      continue;
+    }
+    lines.push(current);
+    current = word;
+    if (lines.length === style.maxLines) {
+      pages.push(lines.join('\n'));
+      lines = [];
+    }
+  }
+  flushPage();
+  return pages;
+}
+
 function wrapCaptionText(value: string, maxLineLength: number, maxLines: number): string {
   if (!value) {
     return '';
@@ -735,7 +771,19 @@ function captionTiming(caption: StoryCaption, composition: CompositionSpec): {st
 
 function expandCaptionTextAndTiming(text: string, timing: {startSeconds: string; endSeconds: string}, style: ResolvedCaptionStyle): Array<{text: string; startSeconds: string; endSeconds: string}> {
   if (style.presentation !== 'word_by_word') {
-    return [{text: normalizeCaptionText(text, style), startSeconds: timing.startSeconds, endSeconds: timing.endSeconds}];
+    const pages = captionPages(text, style);
+    if (pages.length <= 1) {
+      return [{text: normalizeCaptionText(text, style), startSeconds: timing.startSeconds, endSeconds: timing.endSeconds}];
+    }
+    const start = Number.parseFloat(timing.startSeconds);
+    const end = Number.parseFloat(timing.endSeconds);
+    const duration = Math.max(0.25, end - start);
+    const step = duration / pages.length;
+    return pages.map((page, index) => ({
+      text: page,
+      startSeconds: (start + (step * index)).toFixed(3),
+      endSeconds: (index === pages.length - 1 ? end : start + (step * (index + 1))).toFixed(3),
+    }));
   }
   const words = text.trim().replace(/\s+/g, ' ').split(' ').map((word) => word.trim()).filter(Boolean);
   if (words.length <= 1) {
