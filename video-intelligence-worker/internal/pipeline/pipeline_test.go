@@ -134,6 +134,51 @@ func TestProcessorSkipsPhotoPreprocessingAndCompletesWithSource(t *testing.T) {
 	}
 }
 
+func TestProcessorCompletesMediaPreprocessWithoutUnderstandingProvider(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.September, 22, 16, 0, 0, 0, time.UTC)
+	repository := newMemoryRepository(now)
+	objects := newMemoryObjects()
+	tools := &fakeTools{metadata: domain.VideoMetadata{
+		DurationMicros: 18_000_000, Width: 1920, Height: 1080, FPS: 30,
+		VideoCodec: "hevc", BitRate: 8_000_000, FileSizeBytes: 1000, HasAudio: false,
+	}, boundaries: []domain.SceneBoundary{{TimestampMicros: 6_000_000, Score: 0.6}, {TimestampMicros: 12_000_000, Score: 0.7}}}
+	provider := &fakeUnderstandingProvider{}
+	completion := &fakeCompletionReporter{}
+	processor := &Processor{
+		Config: Config{
+			WorkRoot: t.TempDir(), AnalysisVersion: "video-v1", SceneThreshold: 0.32, MaxSceneBoundaries: 100,
+			Planner: PlannerConfig{
+				MinSceneDuration: 750 * time.Millisecond, MaxSegmentDuration: 12 * time.Second,
+				LongVideoThreshold: 5 * time.Minute, MaxFramesShort: 12, MaxFramesLong: 24,
+			},
+			DuplicateHashDistance: 4, StageRetries: 1, EnableTranscription: false,
+			UnderstandingVersion: "video-understanding-v1", EvidenceURLExpiry: time.Hour,
+		},
+		Repository: repository, Objects: objects, Tools: tools,
+		Understanding: &understanding.Service{Provider: provider, Repository: repository, Artifacts: objects, RetryAttempts: 1, RetryDelay: time.Nanosecond, FrameURLExpiry: time.Hour, Now: func() time.Time { return now }},
+		Completion:    completion,
+		Now:           func() time.Time { return now },
+	}
+
+	result, err := processor.Process(context.Background(), repository.addMediaPreprocessJob("job-media-preprocess", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Analysis.ID != "" || result.Reused {
+		t.Fatalf("media preprocess should not return semantic analysis: %+v", result)
+	}
+	if provider.calls != 0 {
+		t.Fatalf("media preprocess called understanding provider %d times", provider.calls)
+	}
+	if completion.calls != 1 || !strings.Contains(completion.artifactS3Key, "/evidence.json") {
+		t.Fatalf("media preprocess did not complete with evidence artifact: %+v", completion)
+	}
+	if tools.frameCalls == 0 {
+		t.Fatal("media preprocess did not prepare frame evidence")
+	}
+}
+
 func TestProcessorRejectsCrossProjectPreprocessingCache(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.August, 29, 10, 0, 0, 0, time.UTC)
@@ -422,6 +467,14 @@ func newMemoryRepository(now time.Time) *memoryRepository {
 }
 
 func (r *memoryRepository) addJob(jobID string, force bool) domain.JobMessage {
+	return r.addVideoJob(jobID, "VIDEO_UNDERSTAND", force)
+}
+
+func (r *memoryRepository) addMediaPreprocessJob(jobID string, force bool) domain.JobMessage {
+	return r.addVideoJob(jobID, "MEDIA_PREPROCESS", force)
+}
+
+func (r *memoryRepository) addVideoJob(jobID, jobType string, force bool) domain.JobMessage {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	configuration := map[string]string{"analysis_version": "video-v1"}
@@ -429,7 +482,7 @@ func (r *memoryRepository) addJob(jobID string, force bool) domain.JobMessage {
 		configuration["force_reanalyze"] = "true"
 	}
 	job := domain.ProcessingJob{
-		ID: jobID, UserID: "user-1", ProjectID: "project-1", MediaID: "media-1", Type: "analysis",
+		ID: jobID, UserID: "user-1", ProjectID: "project-1", MediaID: "media-1", Type: jobType,
 		Status: "queued", Configuration: configuration, CreatedAt: r.now, UpdatedAt: r.now,
 	}
 	media := domain.MediaAsset{
@@ -438,7 +491,7 @@ func (r *memoryRepository) addJob(jobID string, force bool) domain.JobMessage {
 	}
 	project := domain.StoryProject{ID: "project-1", UserID: "user-1", MediaIDs: []string{"media-1"}, Status: "analyzing", CreatedAt: r.now, UpdatedAt: r.now}
 	r.contexts[jobID] = domain.JobContext{Job: job, Media: media, Project: project}
-	return domain.JobMessage{JobID: jobID, ProjectID: project.ID, MediaID: media.ID, JobType: "analysis", Configuration: configuration}
+	return domain.JobMessage{JobID: jobID, ProjectID: project.ID, MediaID: media.ID, JobType: jobType, Configuration: configuration}
 }
 
 func (r *memoryRepository) addPhotoJob(jobID string, force bool) domain.JobMessage {

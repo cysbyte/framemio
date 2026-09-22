@@ -292,6 +292,12 @@ func TestPlannerGeneratesReelEditPlanDefaults(t *testing.T) {
 		if moment.DurationMS > 4200 {
 			t.Fatalf("reel clip duration = %d, want tight default", moment.DurationMS)
 		}
+		if moment.MediaType == models.MediaTypeVideo {
+			sourceDurationMS := int((moment.EndMicros - moment.StartMicros) / 1000)
+			if sourceDurationMS != moment.DurationMS {
+				t.Fatalf("reel video clip source duration mismatch: source=%d duration=%d moment=%+v", sourceDurationMS, moment.DurationMS, moment)
+			}
+		}
 	}
 }
 

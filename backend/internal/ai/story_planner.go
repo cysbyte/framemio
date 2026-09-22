@@ -315,6 +315,9 @@ func applyReelSceneDefaults(request Request, moments []models.StoryMoment) {
 		moments[index].CropIntent = "fill"
 		if request.DurationMode != models.DurationModeFullSource && moments[index].DurationMS > 4200 {
 			moments[index].DurationMS = 4200
+			if moments[index].MediaType == models.MediaTypeVideo && moments[index].EndMicros > moments[index].StartMicros {
+				moments[index].EndMicros = moments[index].StartMicros + int64(moments[index].DurationMS)*1000
+			}
 		}
 		if index == 0 && moments[index].Typography == nil {
 			if overlay := reelHookTypography(request, moments[index]); overlay != nil {

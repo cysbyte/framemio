@@ -98,6 +98,10 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 	if p.Understanding == nil {
 		return Result{}, domain.Permanent(fmt.Errorf("video understanding service is required"))
 	}
+	switch normalizedJobType(message.JobType) {
+	case "MEDIA_PREPROCESS", "TRANSCRIBE":
+		return p.processVideoEvidenceStage(ctx, jobContext, inputVersion, sourceETag)
+	}
 	if !force {
 		cached, lookupErr := p.Understanding.FindCached(ctx, understanding.CacheRequest{
 			UserID: jobContext.Job.UserID, MediaID: jobContext.Media.ID, SourceETag: sourceETag,
@@ -153,6 +157,36 @@ func (p *Processor) Process(ctx context.Context, message domain.JobMessage) (Res
 		return Result{}, err
 	}
 	return Result{Analysis: analysis, Reused: understandingResult.Reused}, nil
+}
+
+func (p *Processor) processVideoEvidenceStage(ctx context.Context, jobContext domain.JobContext, inputVersion, sourceETag string) (Result, error) {
+	if _, err := p.Repository.StartJobAttempt(ctx, jobContext.Job.ID); err != nil {
+		p.logger().Error("start video evidence job attempt failed", slog.String("job_id", jobContext.Job.ID), slog.String("job_type", jobContext.Job.Type), slog.Any("error", err))
+		return Result{}, err
+	}
+	evidence, artifact, err := p.loadOrPreprocess(ctx, jobContext, inputVersion, sourceETag)
+	if err != nil {
+		p.logger().Error("video evidence preparation failed", slog.String("job_id", jobContext.Job.ID), slog.String("job_type", jobContext.Job.Type), slog.String("media_id", jobContext.Media.ID), slog.Any("error", err))
+		return Result{}, err
+	}
+	p.logger().Info("video evidence stage ready",
+		slog.String("job_id", jobContext.Job.ID),
+		slog.String("job_type", jobContext.Job.Type),
+		slog.String("media_id", jobContext.Media.ID),
+		slog.Int("scene_count", len(evidence.Scenes)),
+		slog.Int("segment_count", len(evidence.Segments)),
+		slog.Int("frame_count", artifact.FrameCount),
+		slog.Bool("transcript_has_speech", evidence.Transcript.HasSpeech),
+		slog.Int("transcript_segment_count", len(evidence.Transcript.Segments)),
+		slog.String("evidence_s3_key", artifact.EvidenceS3Key),
+	)
+	if _, err := p.Repository.UpdateJob(ctx, jobContext.Job.ID, "RUNNING", 0.92, "", "", artifact.EvidenceS3Key); err != nil {
+		return Result{}, err
+	}
+	if err := p.completeJob(ctx, jobContext.Job, artifact.EvidenceS3Key); err != nil {
+		return Result{}, err
+	}
+	return Result{}, nil
 }
 
 func (p *Processor) processPhoto(ctx context.Context, jobContext domain.JobContext, version, sourceETag string, force bool) (Result, error) {
@@ -482,12 +516,20 @@ func validateMessage(message domain.JobMessage) error {
 }
 
 func isVideoAnalysisJobType(jobType string) bool {
-	switch jobType {
+	switch normalizedJobType(jobType) {
 	case "analysis", "MEDIA_PREPROCESS", "TRANSCRIBE", "VIDEO_UNDERSTAND":
 		return true
 	default:
 		return false
 	}
+}
+
+func normalizedJobType(jobType string) string {
+	trimmed := strings.TrimSpace(jobType)
+	if strings.EqualFold(trimmed, "analysis") {
+		return "analysis"
+	}
+	return strings.ToUpper(trimmed)
 }
 
 func validCachedEvidence(evidence domain.VideoEvidence, jobContext domain.JobContext, version, sourceETag string) bool {
