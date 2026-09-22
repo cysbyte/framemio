@@ -259,8 +259,12 @@ func ApplyPlanDefaults(plan *models.StoryPlan, config models.VideoTemplateConfig
 	for index := range plan.BRoll {
 		overlay := &plan.BRoll[index]
 		presentationChanged := false
-		if overlay.Presentation == "" || (hasTemplate && !planPresentationAllowedForTemplate(template, overlay.Presentation)) {
-			overlay.Presentation = config.Layout
+		defaultPresentation := config.Layout
+		if config.Layout == models.VideoTemplateLayoutMontage {
+			defaultPresentation = models.VideoTemplateLayoutFullFrame
+		}
+		if overlay.Presentation == "" || (config.Layout == models.VideoTemplateLayoutMontage && overlay.Presentation == models.VideoTemplateLayoutMontage) || (hasTemplate && !planPresentationAllowedForTemplate(template, overlay.Presentation)) {
+			overlay.Presentation = defaultPresentation
 			presentationChanged = true
 		}
 		if overlay.Placement == "" || presentationChanged || (hasTemplate && !templateSupportsPlacement(template, overlay.Presentation, overlay.Placement)) {

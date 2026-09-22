@@ -162,11 +162,11 @@ func TestApplyPlanDefaultsNormalizesUnsupportedBRollForTemplate(t *testing.T) {
 	ApplyPlanDefaults(&plan, configuration)
 
 	overlay := plan.BRoll[0]
-	if overlay.Presentation != models.VideoTemplateLayoutMontage ||
+	if overlay.Presentation != models.VideoTemplateLayoutFullFrame ||
 		overlay.Placement != models.VideoTemplatePlacementCenter ||
 		overlay.Size != models.VideoTemplateSizeLarge ||
 		overlay.Animation != models.VideoTemplateAnimationNone {
-		t.Fatalf("expected unsupported B-roll settings to be normalized to montage defaults: %+v", overlay)
+		t.Fatalf("expected unsupported B-roll settings to be normalized to full-frame montage defaults: %+v", overlay)
 	}
 	if err := ValidatePlan(plan); err != nil {
 		t.Fatalf("expected normalized template plan to validate: %v", err)

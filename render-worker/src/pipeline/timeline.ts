@@ -201,7 +201,10 @@ export function buildComposition(
 }
 
 function normalizePresentation(value?: VideoTemplateLayout): VideoTemplateLayout {
-  return value === 'picture_in_picture' || value === 'split_screen' || value === 'montage' || value === 'full_frame' ? value : 'full_frame';
+  if (value === 'montage') {
+    return 'full_frame';
+  }
+  return value === 'picture_in_picture' || value === 'split_screen' || value === 'full_frame' ? value : 'full_frame';
 }
 
 function normalizePlacement(value?: VideoTemplatePlacement): VideoTemplatePlacement {

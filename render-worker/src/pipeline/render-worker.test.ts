@@ -216,6 +216,51 @@ test('accepts concrete scale and move b-roll animations', () => {
   }
 });
 
+test('normalizes montage b-roll to full-frame cutaways', () => {
+  const assets = fixtureMediaAssets();
+  const composition = buildComposition(
+    fixtureStoryPlan({
+      template_id: 'fast-montage',
+      template_version: 1,
+      template_configuration: {
+        aspect_ratio: '9:16',
+        duration_seconds: 15,
+        layout: 'montage',
+        overlay_placement: 'center',
+        overlay_size: 'large',
+        overlay_opacity: 1,
+        overlay_frame: 'none',
+        overlay_animation: 'none',
+      },
+      broll: [{
+        asset_id: 'photo-2',
+        media_type: 'photo',
+        start_ms: 1000,
+        duration_ms: 1500,
+        presentation: 'montage',
+        placement: 'center',
+        size: 'large',
+        opacity: 1,
+        frame: 'none',
+        animation: 'none',
+      }],
+    }),
+    assets,
+    new Map(assets.map((asset) => [asset.id, `/asset/${asset.file_name}`])),
+    new Map(),
+    {
+      work_dir: '/work',
+      assets_dir: '/work/assets',
+      clips_dir: '/work/clips',
+      output_file: '/work/story.mp4',
+      composition_file: '/work/composition.json',
+    },
+  );
+
+  assert.equal(composition.broll.length, 1);
+  assert.equal(composition.broll[0].presentation, 'full_frame');
+});
+
 test('normalizes a full-source composition longer than 60 seconds', () => {
   const assets = fixtureMediaAssets();
   const fullSourceMoment = {
