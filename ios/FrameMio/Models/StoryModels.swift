@@ -470,15 +470,31 @@ struct VideoTemplateConfiguration: Codable, Hashable, Sendable {
 extension VideoTemplateConfiguration {
     func withAutomaticCreationDuration() -> VideoTemplateConfiguration {
         var configuration = self
+        configuration.durationMode = .auto
+        configuration.durationSeconds = nil
+        configuration.removeFillerAndPauses = false
+        return configuration
+    }
+
+    func sanitized(for template: VideoTemplate) -> VideoTemplateConfiguration {
+        var configuration = self
+        let supportsDurationMode = template.editableOptions.contains("duration_mode")
+        let supportsFullSource = template.supportsFullSourceDuration
         let durationMode = configuration.durationMode ?? (configuration.durationSeconds == nil ? .auto : .fixed)
-        if durationMode == .fullSource {
-            configuration.durationMode = .fullSource
-            configuration.durationSeconds = nil
-            configuration.removeFillerAndPauses = configuration.removeFillerAndPauses == true
-        } else {
-            configuration.durationMode = .auto
-            configuration.durationSeconds = nil
+
+        if !supportsDurationMode {
+            configuration.durationMode = template.defaults.durationMode
+            configuration.durationSeconds = template.defaults.durationSeconds
             configuration.removeFillerAndPauses = false
+        } else if durationMode == .fullSource && !supportsFullSource {
+            configuration.durationMode = configuration.durationSeconds == nil ? .auto : .fixed
+            configuration.removeFillerAndPauses = false
+        }
+        if configuration.durationMode != .fullSource {
+            configuration.removeFillerAndPauses = false
+        }
+        if configuration.durationMode != .fixed {
+            configuration.durationSeconds = nil
         }
         return configuration
     }

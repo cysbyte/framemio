@@ -55,6 +55,64 @@ final class VideoProjectCreationTests: XCTestCase {
         XCTAssertNil(draft.templateConfiguration?.durationSeconds)
     }
 
+    func testTemplateConfigurationSanitizesUnsupportedFullSource() throws {
+        let template = try XCTUnwrap(VideoTemplate.localFallbackCatalog.first { $0.id == "fast-montage" })
+        var configuration = template.defaults
+        configuration.durationSeconds = nil
+        configuration.durationMode = .fullSource
+        configuration.removeFillerAndPauses = true
+
+        let sanitized = configuration.sanitized(for: template)
+
+        XCTAssertEqual(sanitized.durationMode, template.defaults.durationMode)
+        XCTAssertEqual(sanitized.durationSeconds, template.defaults.durationSeconds)
+        XCTAssertEqual(sanitized.removeFillerAndPauses, false)
+    }
+
+    func testReelCreationDoesNotSendUnsupportedFullSourceTemplateConfiguration() async throws {
+        let apiClient = RecordingAPIClient(responses: [
+            Self.genericProjectResponse(id: "reel-1", type: .reel, title: "Instagram Reel", mediaIDs: ["media-1"]),
+            Data("{}".utf8)
+        ])
+        let service = RemoteStoryService(apiClient: apiClient, persistence: MockStoryPersistence())
+        let template = try XCTUnwrap(VideoTemplate.localFallbackCatalog.first { $0.id == "fast-montage" })
+        var draft = VideoProjectDraft.reel(
+            configuration: ReelCreationConfiguration(
+                platform: .instagram,
+                duration: .automatic,
+                removeFillerAndPauses: false,
+                style: .dynamic
+            )
+        )
+        draft.templateID = template.id
+        draft.templateVersion = template.version
+        var templateConfiguration = template.defaults
+        templateConfiguration.durationSeconds = nil
+        templateConfiguration.durationMode = .fullSource
+        templateConfiguration.removeFillerAndPauses = true
+        draft.templateConfiguration = templateConfiguration.sanitized(for: template)
+
+        _ = try await service.createProject(
+            request: CreateVideoProjectRequest(
+                draft: draft,
+                assets: [Self.asset(id: "asset-1")],
+                analyses: [Self.analysis(assetID: "asset-1")],
+                mediaIDsByAssetID: ["asset-1": "media-1"]
+            )
+        )
+
+        let requests = await apiClient.recordedRequests()
+        let body: [String: Any] = try XCTUnwrap(requests.first?.jsonBody)
+        let configuration = try XCTUnwrap(body["configuration"] as? [String: Any])
+        let reel = try XCTUnwrap(configuration["reel"] as? [String: Any])
+        let encodedTemplateConfiguration = try XCTUnwrap(configuration["template_configuration"] as? [String: Any])
+
+        XCTAssertEqual(reel["duration_mode"] as? String, "auto")
+        XCTAssertEqual(encodedTemplateConfiguration["duration_mode"] as? String, "fixed")
+        XCTAssertEqual(encodedTemplateConfiguration["duration_seconds"] as? Int, 15)
+        XCTAssertEqual(encodedTemplateConfiguration["remove_filler_and_pauses"] as? Bool, false)
+    }
+
     func testOldStoryWithoutTypeDefaultsToStoryProjectType() throws {
         let data = Data("""
         {

@@ -1173,10 +1173,11 @@ func sanitizeStoryPlannerAudio(plan *models.StoryPlan) {
 type storyPlannerJSONSanitization struct {
 	AudioOriginalAudioCoerced bool
 	AudioOriginalAudioDropped bool
+	BRollAnchorStringCoerced  bool
 }
 
 func (s storyPlannerJSONSanitization) changed() bool {
-	return s.AudioOriginalAudioCoerced || s.AudioOriginalAudioDropped
+	return s.AudioOriginalAudioCoerced || s.AudioOriginalAudioDropped || s.BRollAnchorStringCoerced
 }
 
 func sanitizeStoryPlannerResponseJSON(input []byte) ([]byte, storyPlannerJSONSanitization, error) {
@@ -1186,19 +1187,34 @@ func sanitizeStoryPlannerResponseJSON(input []byte) ([]byte, storyPlannerJSONSan
 	if err := decoder.Decode(&root); err != nil {
 		return input, storyPlannerJSONSanitization{}, nil
 	}
-	audio, ok := root["audio"].(map[string]any)
-	if !ok {
-		return input, storyPlannerJSONSanitization{}, nil
-	}
 	var result storyPlannerJSONSanitization
-	switch value := audio["original_audio"].(type) {
-	case string:
-		if parsed, ok := storyPlannerBoolAlias(value); ok {
-			audio["original_audio"] = parsed
-			result.AudioOriginalAudioCoerced = true
-		} else {
-			delete(audio, "original_audio")
-			result.AudioOriginalAudioDropped = true
+	if audio, ok := root["audio"].(map[string]any); ok {
+		switch value := audio["original_audio"].(type) {
+		case string:
+			if parsed, ok := storyPlannerBoolAlias(value); ok {
+				audio["original_audio"] = parsed
+				result.AudioOriginalAudioCoerced = true
+			} else {
+				delete(audio, "original_audio")
+				result.AudioOriginalAudioDropped = true
+			}
+		}
+	}
+	if brollItems, ok := root["broll"].([]any); ok {
+		for _, item := range brollItems {
+			overlay, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if value, ok := overlay["anchor"].(string); ok {
+				anchor := strings.TrimSpace(value)
+				if anchor == "" || anchor == "moment" || anchor == "transcript" {
+					delete(overlay, "anchor")
+				} else {
+					overlay["anchor"] = map[string]any{"type": anchor}
+				}
+				result.BRollAnchorStringCoerced = true
+			}
 		}
 	}
 	if !result.changed() {

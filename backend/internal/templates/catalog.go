@@ -255,24 +255,27 @@ func ApplyPlanDefaults(plan *models.StoryPlan, config models.VideoTemplateConfig
 	if plan == nil || len(plan.BRoll) == 0 || config.Layout == "" {
 		return
 	}
+	template, hasTemplate := Find(plan.TemplateID, plan.TemplateVersion, plan.ProjectType)
 	for index := range plan.BRoll {
 		overlay := &plan.BRoll[index]
-		if overlay.Presentation == "" {
+		presentationChanged := false
+		if overlay.Presentation == "" || (hasTemplate && !planPresentationAllowedForTemplate(template, overlay.Presentation)) {
 			overlay.Presentation = config.Layout
+			presentationChanged = true
 		}
-		if overlay.Placement == "" {
+		if overlay.Placement == "" || presentationChanged || (hasTemplate && !templateSupportsPlacement(template, overlay.Presentation, overlay.Placement)) {
 			overlay.Placement = config.OverlayPlacement
 		}
-		if overlay.Size == "" {
+		if overlay.Size == "" || presentationChanged || (hasTemplate && !templateSupportsSize(template, overlay.Presentation, overlay.Size)) {
 			overlay.Size = config.OverlaySize
 		}
 		if overlay.Opacity == 0 {
 			overlay.Opacity = config.OverlayOpacity
 		}
-		if overlay.Frame == "" {
+		if overlay.Frame == "" || presentationChanged {
 			overlay.Frame = config.OverlayFrame
 		}
-		if overlay.Animation == "" {
+		if overlay.Animation == "" || presentationChanged || (hasTemplate && overlay.Animation != models.VideoTemplateAnimationNone && !contains(template.RendererCapabilities, string(overlay.Animation))) {
 			if config.OverlayAnimation == models.VideoTemplateAnimationAuto {
 				overlay.Animation = models.VideoTemplateAnimationFade
 			} else {
@@ -280,6 +283,13 @@ func ApplyPlanDefaults(plan *models.StoryPlan, config models.VideoTemplateConfig
 			}
 		}
 	}
+}
+
+func planPresentationAllowedForTemplate(template models.VideoTemplate, presentation models.VideoTemplateLayout) bool {
+	if presentation == "" || presentation == template.Defaults.Layout || presentation == models.VideoTemplateLayoutFullFrame {
+		return true
+	}
+	return presentation != models.VideoTemplateLayoutFullFrame && templateSupportsPresentation(template, presentation)
 }
 
 func ValidatePlan(plan models.StoryPlan) error {
@@ -328,7 +338,7 @@ func ValidatePlan(plan models.StoryPlan) error {
 		if overlay.Animation != "" && !validAnimation(overlay.Animation) {
 			return fmt.Errorf("b-roll %d animation %q is unsupported", index, overlay.Animation)
 		}
-		if overlay.Animation != "" && !contains(template.RendererCapabilities, string(overlay.Animation)) {
+		if overlay.Animation != "" && overlay.Animation != models.VideoTemplateAnimationNone && !contains(template.RendererCapabilities, string(overlay.Animation)) {
 			return fmt.Errorf("b-roll %d animation %q is not supported by template %q", index, overlay.Animation, template.ID)
 		}
 	}

@@ -330,41 +330,56 @@ struct StoryCreationView: View {
 
     private var configuredDraft: VideoProjectDraft {
         var configured = draft
-        configured.storyOptions = generationOptions
+        configured.storyOptions = resolvedStoryOptions
         configured.templateID = selectedTemplateID
         configured.templateVersion = selectedTemplate?.version
         configured.templateConfiguration = resolvedTemplateConfiguration
         return configured
     }
 
+    private var resolvedStoryOptions: StoryGenerationOptions {
+        var options = generationOptions
+        if options.durationMode == .fullSource
+            && (selectedTemplate?.supportsFullSourceDuration == false || viewModel.assets.filter(\.isVideo).isEmpty) {
+            options.durationMode = .auto
+            options.targetDuration = nil
+            options.removeFillerAndPauses = false
+        }
+        if options.durationMode != .fullSource {
+            options.removeFillerAndPauses = false
+        }
+        return options
+    }
+
     private var resolvedTemplateConfiguration: VideoTemplateConfiguration? {
         guard let template = selectedTemplate else { return templateConfiguration }
         var resolved = templateConfiguration ?? template.defaults
+        let options = resolvedStoryOptions
         if template.editableOptions.contains("duration_seconds") {
-            resolved.durationSeconds = generationOptions.durationMode == .fixed
-                ? generationOptions.targetDuration.map { Int($0.rounded()) } ?? resolved.durationSeconds
+            resolved.durationSeconds = options.durationMode == .fixed
+                ? options.targetDuration.map { Int($0.rounded()) } ?? resolved.durationSeconds
                 : 0
         }
         if template.editableOptions.contains("duration_mode") {
-            resolved.durationMode = generationOptions.durationMode
-            resolved.removeFillerAndPauses = generationOptions.durationMode == .fullSource && generationOptions.removeFillerAndPauses
-            if generationOptions.durationMode != .fixed {
+            resolved.durationMode = options.durationMode
+            resolved.removeFillerAndPauses = options.durationMode == .fullSource && options.removeFillerAndPauses
+            if options.durationMode != .fixed {
                 resolved.durationSeconds = nil
             }
         }
         if template.editableOptions.contains("visual_style") {
-            resolved.visualStyle = generationOptions.style
+            resolved.visualStyle = options.style
         }
         if template.editableOptions.contains("captions_enabled") {
-            resolved.captionsEnabled = generationOptions.subtitlesEnabled
+            resolved.captionsEnabled = options.subtitlesEnabled
         }
         if template.editableOptions.contains("caption_style") {
-            resolved.captionStyle = generationOptions.subtitleStyle
+            resolved.captionStyle = options.subtitleStyle
         }
         if template.editableOptions.contains("scene_detail") {
-            resolved.sceneDetail = generationOptions.sceneDetailStyle
+            resolved.sceneDetail = options.sceneDetailStyle
         }
-        return resolved
+        return resolved.sanitized(for: template)
     }
 
     private func loadTemplates() async {
@@ -375,11 +390,15 @@ struct StoryCreationView: View {
                 : loaded
             if selectedTemplateID == nil, let first = templates.first {
                 select(first)
+            } else if let selectedTemplate {
+                templateConfiguration = resolvedTemplateConfiguration?.sanitized(for: selectedTemplate)
             }
         } catch {
             templates = VideoTemplate.localFallbackCatalog.filter { $0.supportedProjectTypes.contains(.story) }
             if selectedTemplateID == nil, let first = templates.first {
                 select(first)
+            } else if let selectedTemplate {
+                templateConfiguration = resolvedTemplateConfiguration?.sanitized(for: selectedTemplate)
             }
             storyCreationViewDebugLog("template_catalog_fallback error=\(String(describing: error))")
         }
@@ -420,7 +439,7 @@ struct StoryCreationView: View {
            previousAnimation == "auto" ? template.id == "photo-over-video" : template.rendererCapabilities.contains(previousAnimation) {
             resolved.overlayAnimation = previousAnimation
         }
-        return resolved
+        return resolved.sanitized(for: template)
     }
 
     private func applyTemplateDefaultsToStoryOptions(_ configuration: VideoTemplateConfiguration?) {

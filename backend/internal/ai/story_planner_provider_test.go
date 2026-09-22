@@ -273,6 +273,47 @@ func TestOpenAICompatibleStoryPlannerDerivesMissingBRollIDWithoutInventingScore(
 	}
 }
 
+func TestOpenAICompatibleStoryPlannerNormalizesTemplateBRollAndStringAnchor(t *testing.T) {
+	t.Parallel()
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		planJSON := `{"schema_version":"story_plan_v1","id":"plan-gpt","project_id":"project-gpt","version":3,"requested_duration_ms":4000,"project_type":"reel","story_type":"trip","visual_style":"cinematic","title_text":"Beach Story","ending_text":"Until next time.","moments":[{"moment_id":"moment-1","asset_id":"photo-gpt","media_id":"photo-gpt","media_type":"photo","narrative":"A beach sunset opens the story.","duration_ms":4000,"crop_intent":"fit","transition":"cut"}],"broll":[{"broll_id":"broll-1","asset_id":"photo-gpt","media_id":"photo-gpt","media_type":"photo","start_ms":500,"duration_ms":1000,"anchor":"moment","presentation":"picture_in_picture","placement":"bottom_right","size":"small","animation":"subtle_scale","confidence":0.76,"score":0.8}],"captions":[{"moment_id":"moment-1","text":"Beach sunset","start_ms":0,"end_ms":4000}],"output":{"aspect_ratio":"9:16","max_duration_seconds":4,"preset":"premium-memory"},"total_duration_ms":4000}`
+		return typographyHTTPResponse(http.StatusOK, responsesTypographyResponse(planJSON)), nil
+	})}
+	request := storyPlannerProviderRequest()
+	request.ProjectType = models.ProjectTypeReel
+	request.TemplateID = "fast-montage"
+	request.TemplateVersion = 1
+	_, configuration, err := templates.Resolve(models.ProjectTypeReel, "fast-montage", 1, models.VideoTemplateConfiguration{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.ProjectConfiguration.TemplateID = "fast-montage"
+	request.ProjectConfiguration.TemplateVersion = 1
+	request.ProjectConfiguration.TemplateConfiguration = configuration
+	planner := OpenAICompatibleStoryPlanner{BaseURL: "https://planner.test", APIKey: "test-key", ProviderName: "openai-compatible", ModelName: "gpt-story", WireAPI: "responses", Client: client}
+
+	plan, err := planner.Plan(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.BRoll) != 1 {
+		t.Fatalf("expected one B-roll item, got %+v", plan.BRoll)
+	}
+	overlay := plan.BRoll[0]
+	if overlay.Anchor != nil {
+		t.Fatalf("expected incomplete string anchor to be dropped, got %+v", overlay.Anchor)
+	}
+	if overlay.Presentation != models.VideoTemplateLayoutMontage ||
+		overlay.Placement != models.VideoTemplatePlacementCenter ||
+		overlay.Size != models.VideoTemplateSizeLarge ||
+		overlay.Animation != models.VideoTemplateAnimationNone {
+		t.Fatalf("expected unsupported B-roll settings to be normalized, got %+v", overlay)
+	}
+	if err := ValidateStoryPlan(plan); err != nil {
+		t.Fatalf("expected normalized plan to validate: %v", err)
+	}
+}
+
 func TestOpenAICompatibleStoryPlannerSynthesizesCaptionsWhenExternalPlanOmitsThem(t *testing.T) {
 	t.Parallel()
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {

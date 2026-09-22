@@ -137,6 +137,42 @@ func TestApplyPlanDefaultsFallsBackWhenAutomaticAnimationIsUnresolved(t *testing
 	}
 }
 
+func TestApplyPlanDefaultsNormalizesUnsupportedBRollForTemplate(t *testing.T) {
+	t.Parallel()
+
+	_, configuration, err := Resolve(models.ProjectTypeReel, "fast-montage", 1, models.VideoTemplateConfiguration{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := models.StoryPlan{
+		TemplateID:            "fast-montage",
+		TemplateVersion:       1,
+		ProjectType:           models.ProjectTypeReel,
+		TemplateConfiguration: configuration,
+		Output:                models.StoryOutput{AspectRatio: configuration.AspectRatio},
+		BRoll: []models.StoryBRoll{{
+			AssetID:      "photo-1",
+			Presentation: models.VideoTemplateLayoutPictureInPicture,
+			Placement:    models.VideoTemplatePlacementBottomRight,
+			Size:         models.VideoTemplateSizeSmall,
+			Animation:    models.VideoTemplateAnimationSubtleScale,
+		}},
+	}
+
+	ApplyPlanDefaults(&plan, configuration)
+
+	overlay := plan.BRoll[0]
+	if overlay.Presentation != models.VideoTemplateLayoutMontage ||
+		overlay.Placement != models.VideoTemplatePlacementCenter ||
+		overlay.Size != models.VideoTemplateSizeLarge ||
+		overlay.Animation != models.VideoTemplateAnimationNone {
+		t.Fatalf("expected unsupported B-roll settings to be normalized to montage defaults: %+v", overlay)
+	}
+	if err := ValidatePlan(plan); err != nil {
+		t.Fatalf("expected normalized template plan to validate: %v", err)
+	}
+}
+
 func TestResolveAllowsFullSourceOnlyForSupportedTemplates(t *testing.T) {
 	t.Parallel()
 	_, resolved, err := Resolve(models.ProjectTypeReel, "talking-head-reel", 1, models.VideoTemplateConfiguration{

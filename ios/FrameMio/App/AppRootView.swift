@@ -781,9 +781,10 @@ struct ProjectConfigurationView: View {
                 ProjectTemplateSettingsSheet(
                     template: template,
                     configuration: Binding(
-                        get: { templateConfiguration ?? template.defaults },
-                        set: { templateConfiguration = $0 }
+                        get: { resolvedTemplateConfiguration ?? template.defaults.withAutomaticCreationDuration().sanitized(for: template) },
+                        set: { templateConfiguration = $0.sanitized(for: template) }
                     ),
+                    projectDuration: draft.type == .promo ? $promoDuration : $reelDuration,
                     prompt: $prompt,
                     promptTranscriptionService: promptTranscriptionService
                 )
@@ -1032,18 +1033,16 @@ struct ProjectConfigurationView: View {
 
     private var templateConfigurationSummary: String {
         guard let template = selectedTemplate else { return "Select a template first" }
-        let configuration = templateConfiguration ?? template.defaults
+        let configuration = resolvedTemplateConfiguration ?? template.defaults.withAutomaticCreationDuration().sanitized(for: template)
         var values = [template.name]
         if template.editableOptions.contains("duration_seconds") {
-            switch configuration.durationMode ?? .fixed {
+            switch selectedProjectDuration {
             case .fullSource:
                 values.append(configuration.removeFillerAndPauses == true ? "Full length, cleaned" : "Full length")
-            case .auto:
+            case .automatic:
                 values.append("Auto length")
-            case .fixed:
-                if let duration = configuration.durationSeconds {
-                    values.append("\(duration)s")
-                }
+            case .fifteen, .thirty, .fortyFive, .sixty:
+                values.append(selectedProjectDuration.title)
             }
         }
         if template.editableOptions.contains("visual_style"), let style = configuration.visualStyle {
@@ -1136,38 +1135,49 @@ struct ProjectConfigurationView: View {
 
     private var configuredDraft: VideoProjectDraft {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let configuration = resolvedTemplateConfiguration
         if draft.type == .promo {
             var configured = VideoProjectDraft.promo(
                 configuration: PromoCreationConfiguration(
                     subject: promoSubject,
                     goal: promoGoal,
                     duration: promoDuration,
-                    removeFillerAndPauses: templateConfiguration?.removeFillerAndPauses == true && templateConfiguration?.durationMode == .fullSource,
+                    removeFillerAndPauses: configuration?.removeFillerAndPauses == true && configuration?.durationMode == .fullSource,
                     prompt: trimmedPrompt.isEmpty ? nil : trimmedPrompt
                 )
             )
             configured.templateID = selectedTemplateID
             configured.templateVersion = selectedTemplate?.version
-            configured.templateConfiguration = templateConfiguration
+            configured.templateConfiguration = configuration
             return configured
         }
         var configured = VideoProjectDraft.reel(
             configuration: ReelCreationConfiguration(
                 platform: reelPlatform,
                 duration: reelDuration,
-                removeFillerAndPauses: templateConfiguration?.removeFillerAndPauses == true && templateConfiguration?.durationMode == .fullSource,
+                removeFillerAndPauses: configuration?.removeFillerAndPauses == true && configuration?.durationMode == .fullSource,
                 style: reelStyle,
                 prompt: trimmedPrompt.isEmpty ? nil : trimmedPrompt
             )
         )
         configured.templateID = selectedTemplateID
         configured.templateVersion = selectedTemplate?.version
-        configured.templateConfiguration = templateConfiguration
+        configured.templateConfiguration = configuration
         return configured
     }
 
     private var selectedTemplate: VideoTemplate? {
         templates.first(where: { $0.id == selectedTemplateID })
+    }
+
+    private var selectedProjectDuration: ProjectDurationOption {
+        draft.type == .promo ? promoDuration : reelDuration
+    }
+
+    private var resolvedTemplateConfiguration: VideoTemplateConfiguration? {
+        guard let template = selectedTemplate else { return templateConfiguration }
+        return (templateConfiguration ?? template.defaults.withAutomaticCreationDuration())
+            .sanitized(for: template)
     }
 
     private func loadTemplates() async {
@@ -1176,11 +1186,15 @@ struct ProjectConfigurationView: View {
             templates = loaded.isEmpty ? VideoTemplate.localFallbackCatalog.filter { $0.supportedProjectTypes.contains(draft.type) } : loaded
             if selectedTemplateID == nil, let first = templates.first {
                 select(first)
+            } else if let selectedTemplate {
+                templateConfiguration = resolvedTemplateConfiguration?.sanitized(for: selectedTemplate)
             }
         } catch {
             templates = VideoTemplate.localFallbackCatalog.filter { $0.supportedProjectTypes.contains(draft.type) }
             if selectedTemplateID == nil, let first = templates.first {
                 select(first)
+            } else if let selectedTemplate {
+                templateConfiguration = resolvedTemplateConfiguration?.sanitized(for: selectedTemplate)
             }
             purchaseRoutingDebugLog("template_catalog_fallback type=\(draft.type.rawValue) error=\(String(describing: error))")
         }
@@ -1221,7 +1235,7 @@ struct ProjectConfigurationView: View {
            previousAnimation == "auto" ? template.id == "photo-over-video" : template.rendererCapabilities.contains(previousAnimation) {
             resolved.overlayAnimation = previousAnimation
         }
-        return resolved
+        return resolved.sanitized(for: template)
     }
 }
 
@@ -1229,6 +1243,7 @@ private struct ProjectTemplateSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     let template: VideoTemplate
     @Binding var configuration: VideoTemplateConfiguration
+    @Binding var projectDuration: ProjectDurationOption
     @Binding var prompt: String
     let promptTranscriptionService: PromptTranscriptionService?
 
@@ -1326,8 +1341,9 @@ private struct ProjectTemplateSettingsSheet: View {
             LazyVGrid(columns: settingsGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
                 settingChip(
                     title: "Auto",
-                    isSelected: (configuration.durationMode ?? .fixed) == .auto
+                    isSelected: projectDuration == .automatic
                 ) {
+                    projectDuration = .automatic
                     configuration.durationMode = .auto
                     configuration.durationSeconds = nil
                     configuration.removeFillerAndPauses = false
@@ -1335,8 +1351,9 @@ private struct ProjectTemplateSettingsSheet: View {
                 ForEach(durationOptions, id: \.self) { seconds in
                     settingChip(
                         title: "\(seconds)s",
-                        isSelected: (configuration.durationMode ?? .fixed) == .fixed && configuration.durationSeconds == seconds
+                        isSelected: projectDuration.seconds.map(Int.init) == seconds
                     ) {
+                        projectDuration = projectDurationOption(for: seconds)
                         configuration.durationMode = .fixed
                         configuration.durationSeconds = seconds
                         configuration.removeFillerAndPauses = false
@@ -1345,14 +1362,15 @@ private struct ProjectTemplateSettingsSheet: View {
                 if supportsFullLength {
                     settingChip(
                         title: "Full length",
-                        isSelected: configuration.durationMode == .fullSource
+                        isSelected: projectDuration == .fullSource
                     ) {
+                        projectDuration = .fullSource
                         configuration.durationMode = .fullSource
                         configuration.durationSeconds = nil
                     }
                 }
             }
-            if configuration.durationMode == .fullSource {
+            if projectDuration == .fullSource {
                 Toggle("Remove filler words and pauses", isOn: Binding(
                     get: { configuration.removeFillerAndPauses ?? false },
                     set: { configuration.removeFillerAndPauses = $0 }
@@ -1589,12 +1607,25 @@ private struct ProjectTemplateSettingsSheet: View {
     }
 
     private func normalizeDurationSelection() {
+        if projectDuration == .fullSource && !supportsFullLength {
+            projectDuration = .automatic
+        }
         if configuration.durationMode == .fullSource && !supportsFullLength {
             configuration.durationMode = configuration.durationSeconds == nil ? .auto : .fixed
             configuration.removeFillerAndPauses = false
         }
-        if configuration.durationMode != .fullSource {
+        if projectDuration != .fullSource || configuration.durationMode != .fullSource {
             configuration.removeFillerAndPauses = false
+        }
+    }
+
+    private func projectDurationOption(for seconds: Int) -> ProjectDurationOption {
+        switch seconds {
+        case 15: .fifteen
+        case 30: .thirty
+        case 45: .fortyFive
+        case 60: .sixty
+        default: .automatic
         }
     }
 
