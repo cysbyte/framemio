@@ -705,6 +705,46 @@ func TestFallbackStoryPlannerUsesFallbackWhenExternalPlannerReferencesUnknownMed
 	}
 }
 
+func TestFallbackStoryPlannerUsesFallbackWhenFixedExternalPlanTooShort(t *testing.T) {
+	t.Parallel()
+	request := storyPlannerProviderRequest()
+	request.DesiredDuration = 60 * time.Second
+	request.TargetDurationFixed = true
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		planJSON := strings.Replace(storyPlannerProviderPlanJSON(), `"requested_duration_ms":4000`, `"requested_duration_ms":60000`, 1)
+		planJSON = strings.Replace(planJSON, `"max_duration_seconds":4`, `"max_duration_seconds":60`, 1)
+		return typographyHTTPResponse(http.StatusOK, responsesTypographyResponse(planJSON)), nil
+	})}
+	fallbackPlan := models.StoryPlan{
+		SchemaVersion:       models.StoryPlanSchemaVersionV1,
+		ID:                  "plan-fallback-fixed-duration",
+		ProjectID:           request.ProjectID,
+		Version:             request.Version,
+		RequestedDurationMS: int(request.DesiredDuration.Milliseconds()),
+		StoryType:           request.StoryType,
+		VisualStyle:         request.VisualStyle,
+		TitleText:           "Fallback",
+		EndingText:          "Done",
+		Moments: []models.StoryMoment{
+			{MomentID: "moment-1", MediaID: "photo-gpt", AssetID: "photo-gpt", MediaType: models.MediaTypePhoto, DurationMS: 30000, CropIntent: "fit", Transition: "fade_in"},
+			{MomentID: "moment-2", MediaID: "video-gpt", AssetID: "video-gpt", MediaType: models.MediaTypeVideo, VideoAnalysisVersion: "video-v1", StartMicros: 0, EndMicros: 5000000, DurationMS: 25000, CropIntent: "fill", Transition: "cut"},
+		},
+		Output:          models.StoryOutput{AspectRatio: "9:16", MaxDurationS: 60, Preset: "premium-memory"},
+		TotalDurationMS: 55000,
+	}
+	planner := FallbackStoryPlanner{
+		Primary:  OpenAICompatibleStoryPlanner{BaseURL: "https://planner.test", ModelName: "gpt-story", WireAPI: "responses", Client: client},
+		Fallback: staticStoryPlanner{plan: fallbackPlan},
+	}
+	plan, err := planner.Plan(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.ID != fallbackPlan.ID {
+		t.Fatalf("fallback plan not returned for short fixed external plan: %+v", plan)
+	}
+}
+
 func TestFallbackStoryPlannerUsesFallbackAfterPrimaryTimeout(t *testing.T) {
 	t.Parallel()
 	request := storyPlannerProviderRequest()

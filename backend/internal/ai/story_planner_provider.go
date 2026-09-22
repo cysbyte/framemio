@@ -19,6 +19,7 @@ import (
 
 const StoryPlannerPromptVersion = "story-planner-v1"
 const minStoryPlannerCaptionDurationMS = 250
+const minFixedStoryPlannerDurationRatio = 0.85
 
 type StoryPlanner interface {
 	Plan(ctx context.Context, request Request) (models.StoryPlan, error)
@@ -1794,7 +1795,12 @@ func normalizeStoryPlannerOutput(plan *models.StoryPlan, request Request) error 
 		}
 		plan.TotalDurationMS = momentDurationMS
 		if request.TargetDurationFixed {
-			plan.RequestedDurationMS = max(1, int(request.DesiredDuration.Milliseconds()))
+			requestedDurationMS := max(1, int(request.DesiredDuration.Milliseconds()))
+			minDurationMS := int(math.Round(float64(requestedDurationMS) * minFixedStoryPlannerDurationRatio))
+			if momentDurationMS < minDurationMS {
+				return fmt.Errorf("story planner result duration %d is below fixed target minimum %d for requested duration %d", momentDurationMS, minDurationMS, requestedDurationMS)
+			}
+			plan.RequestedDurationMS = requestedDurationMS
 		} else if plan.RequestedDurationMS < momentDurationMS {
 			plan.RequestedDurationMS = momentDurationMS
 		}
