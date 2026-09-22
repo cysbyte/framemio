@@ -32,6 +32,8 @@ type Config struct {
 	UnderstandingWireAPI              string
 	UnderstandingImageDetail          string
 	UnderstandingMaxOutputTokens      int
+	UnderstandingBatchMaxScenes       int
+	UnderstandingBatchMaxFrames       int
 	TranscriptionURL                  string
 	TranscriptionAPIKey               string
 	TranscriptionProvider             string
@@ -93,6 +95,8 @@ func Load() (Config, error) {
 		UnderstandingWireAPI:              environmentFirst([]string{"VIDEO_UNDERSTANDING_WIRE_API", "AI_GATEWAY_WIRE_API", "GATEWAY_UPSTREAM_WIRE_API"}, "chat_completions"),
 		UnderstandingImageDetail:          environment("VIDEO_UNDERSTANDING_IMAGE_DETAIL", "low"),
 		UnderstandingMaxOutputTokens:      environmentInt("VIDEO_UNDERSTANDING_MAX_OUTPUT_TOKENS", 5000),
+		UnderstandingBatchMaxScenes:       environmentInt("VIDEO_UNDERSTANDING_BATCH_MAX_SCENES", 10),
+		UnderstandingBatchMaxFrames:       environmentInt("VIDEO_UNDERSTANDING_BATCH_MAX_FRAMES", 24),
 		TranscriptionURL:                  environmentFirst([]string{"TRANSCRIPTION_API_URL", "SPEECH_API_URL"}, ""),
 		TranscriptionAPIKey:               environmentFirst([]string{"TRANSCRIPTION_API_KEY", "DEEPGRAM_API_KEY", "SPEECH_API_KEY", "AI_GATEWAY_API_KEY", "OPENAI_API_KEY", "VIDEO_UNDERSTANDING_API_KEY"}, ""),
 		TranscriptionProvider:             environmentFirst([]string{"TRANSCRIPTION_PROVIDER", "SPEECH_PROVIDER"}, "external"),
@@ -187,6 +191,9 @@ func Load() (Config, error) {
 		configuration.MaxModelFramesLong <= 0 ||
 		configuration.MaxModelFramesVeryLong <= 0 {
 		return Config{}, errors.New("duration-based frame limits are invalid")
+	}
+	if configuration.UnderstandingBatchMaxScenes <= 0 || configuration.UnderstandingBatchMaxFrames <= 0 {
+		return Config{}, errors.New("video understanding batch limits are invalid")
 	}
 	return configuration, nil
 }

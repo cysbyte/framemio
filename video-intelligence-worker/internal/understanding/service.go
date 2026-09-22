@@ -105,6 +105,8 @@ type Service struct {
 	RetryAttempts  int
 	RetryDelay     time.Duration
 	FrameURLExpiry time.Duration
+	BatchMaxScenes int
+	BatchMaxFrames int
 	Logger         *slog.Logger
 	Now            func() time.Time
 }
@@ -113,6 +115,13 @@ type sceneDetectionResult struct {
 	input    domain.VideoUnderstandingInputV1
 	evidence domain.VideoEvidence
 	err      error
+}
+
+type understandingBatch struct {
+	input             domain.VideoUnderstandingInputV1
+	transcriptIndexes []int
+	frameCount        int
+	sceneCount        int
 }
 
 func DecodeResponseV1(data []byte) (domain.VideoUnderstandingResponseV1, error) {
@@ -349,20 +358,6 @@ func (s *Service) Analyze(ctx context.Context, request Request) (Result, error) 
 	if err != nil {
 		return Result{}, err
 	}
-	if semanticProvider, ok := s.Provider.(SemanticSceneProvider); ok {
-		detection, detectionErr := semanticProvider.DetectScenes(ctx, input)
-		if detectionErr != nil {
-			return Result{}, fmt.Errorf("video scene detection provider %s failed: %w", s.Provider.Name(), detectionErr)
-		}
-		input, request.Evidence, err = remapForSceneDetection(input, request.Evidence, detection)
-		if err != nil {
-			wrapped := fmt.Errorf("video scene detection provider %s failed: %w", s.Provider.Name(), err)
-			if errors.Is(err, domain.ErrInvalidModelOutput) {
-				return Result{}, domain.Permanent(wrapped)
-			}
-			return Result{}, wrapped
-		}
-	}
 	var sourceAwareProvider VideoFileUnderstandingProvider
 	if candidate, ok := s.Provider.(VideoFileUnderstandingProvider); ok {
 		sourceAwareProvider = candidate
@@ -374,21 +369,70 @@ func (s *Service) Analyze(ctx context.Context, request Request) (Result, error) 
 			return Result{}, fmt.Errorf("presign understanding source video: %w", err)
 		}
 	}
-	var response domain.VideoUnderstandingResponseV1
-	if err := s.retry(ctx, request, input, func() error {
-		var providerErr error
-		if sourceAwareProvider != nil {
-			response, providerErr = sourceAwareProvider.UnderstandVideo(ctx, input, sourceVideoURL)
-		} else {
-			response, providerErr = s.Provider.Understand(ctx, input)
+
+	batches, err := buildUnderstandingBatches(input, s.batchMaxScenes(), s.batchMaxFrames())
+	if err != nil {
+		return Result{}, domain.Permanent(fmt.Errorf("build video understanding batches: %w", err))
+	}
+	s.logger().Info("video_understanding_batches_planned",
+		slog.String("job_id", request.RunID),
+		slog.String("project_id", request.ProjectID),
+		slog.String("media_id", request.MediaID),
+		slog.String("provider", s.Provider.Name()),
+		slog.String("model", s.Provider.Model()),
+		slog.Int("batch_count", len(batches)),
+		slog.Int("candidate_count", len(input.Segments)),
+		slog.Int("frame_count", len(input.Frames)),
+		slog.Int("max_scenes_per_batch", s.batchMaxScenes()),
+		slog.Int("max_frames_per_batch", s.batchMaxFrames()),
+	)
+
+	response := domain.VideoUnderstandingResponseV1{
+		SchemaVersion: domain.VideoAnalysisSchemaV1,
+		Candidates:    make([]domain.VideoSegmentAnalysisV1, 0, len(input.Segments)),
+	}
+	for batchIndex, batch := range batches {
+		batchResponse := domain.VideoUnderstandingResponseV1{}
+		batchNumber := batchIndex + 1
+		if err := s.retry(ctx, request, batch.input, batchNumber, len(batches), func() error {
+			var providerErr error
+			if sourceAwareProvider != nil {
+				batchResponse, providerErr = sourceAwareProvider.UnderstandVideo(ctx, batch.input, sourceVideoURL)
+			} else {
+				batchResponse, providerErr = s.Provider.Understand(ctx, batch.input)
+			}
+			if providerErr != nil {
+				return providerErr
+			}
+			batchResponse, providerErr = ValidateResponseV1(batchResponse, batch.input)
+			if providerErr != nil {
+				return providerErr
+			}
+			return remapTranscriptIndexes(&batchResponse, batch.transcriptIndexes)
+		}); err != nil {
+			wrapped := fmt.Errorf("video understanding batch %d/%d provider %s failed: %w", batchNumber, len(batches), s.Provider.Name(), err)
+			if errors.Is(err, domain.ErrInvalidModelOutput) {
+				return Result{}, domain.Permanent(wrapped)
+			}
+			return Result{}, wrapped
 		}
-		if providerErr != nil {
-			return providerErr
-		}
-		response, providerErr = ValidateResponseV1(response, input)
-		return providerErr
-	}); err != nil {
-		wrapped := fmt.Errorf("video understanding provider %s failed: %w", s.Provider.Name(), err)
+		response.Candidates = append(response.Candidates, batchResponse.Candidates...)
+		s.logger().Info("video_understanding_batch_completed",
+			slog.String("job_id", request.RunID),
+			slog.String("project_id", request.ProjectID),
+			slog.String("media_id", request.MediaID),
+			slog.String("provider", s.Provider.Name()),
+			slog.String("model", s.Provider.Model()),
+			slog.Int("batch_index", batchNumber),
+			slog.Int("batch_count", len(batches)),
+			slog.Int("candidate_count", len(batch.input.Segments)),
+			slog.Int("frame_count", batch.frameCount),
+			slog.Int("scene_count", batch.sceneCount),
+		)
+	}
+	response, err = ValidateResponseV1(response, input)
+	if err != nil {
+		wrapped := fmt.Errorf("validate merged video understanding response: %w", err)
 		if errors.Is(err, domain.ErrInvalidModelOutput) {
 			return Result{}, domain.Permanent(wrapped)
 		}
@@ -403,6 +447,136 @@ func (s *Service) Analyze(ctx context.Context, request Request) (Result, error) 
 		return Result{}, err
 	}
 	return Result{Analysis: saved, Reused: saved.ID != analysis.ID}, nil
+}
+
+func buildUnderstandingBatches(input domain.VideoUnderstandingInputV1, maxScenes, maxFrames int) ([]understandingBatch, error) {
+	if len(input.Segments) == 0 {
+		return nil, errors.New("video understanding input has no segments")
+	}
+	if maxScenes <= 0 {
+		maxScenes = 10
+	}
+	if maxFrames <= 0 {
+		maxFrames = 24
+	}
+
+	framesBySegment := make(map[string]int, len(input.Segments))
+	for _, frame := range input.Frames {
+		framesBySegment[frame.SegmentID]++
+	}
+
+	type batchRange struct {
+		start int
+		end   int
+	}
+	ranges := make([]batchRange, 0)
+	start := 0
+	currentScenes := make(map[string]struct{})
+	currentFrames := 0
+	for index, segment := range input.Segments {
+		_, sceneAlreadyIncluded := currentScenes[segment.SceneID]
+		projectedScenes := len(currentScenes)
+		if !sceneAlreadyIncluded {
+			projectedScenes++
+		}
+		projectedFrames := currentFrames + framesBySegment[segment.ID]
+		if index > start && (projectedScenes > maxScenes || projectedFrames > maxFrames) {
+			ranges = append(ranges, batchRange{start: start, end: index})
+			start = index
+			currentScenes = make(map[string]struct{})
+			currentFrames = 0
+		}
+		currentScenes[segment.SceneID] = struct{}{}
+		currentFrames += framesBySegment[segment.ID]
+	}
+	ranges = append(ranges, batchRange{start: start, end: len(input.Segments)})
+
+	batches := make([]understandingBatch, 0, len(ranges))
+	for _, item := range ranges {
+		batchInput, transcriptIndexes, frameCount, sceneCount := makeUnderstandingBatchInput(input, item.start, item.end)
+		batches = append(batches, understandingBatch{
+			input:             batchInput,
+			transcriptIndexes: transcriptIndexes,
+			frameCount:        frameCount,
+			sceneCount:        sceneCount,
+		})
+	}
+	return batches, nil
+}
+
+func makeUnderstandingBatchInput(input domain.VideoUnderstandingInputV1, start, end int) (domain.VideoUnderstandingInputV1, []int, int, int) {
+	segments := append([]domain.CandidateSegment(nil), input.Segments[start:end]...)
+	segmentIDs := make(map[string]struct{}, len(segments))
+	sceneIDs := make(map[string]struct{}, len(segments))
+	for _, segment := range segments {
+		segmentIDs[segment.ID] = struct{}{}
+		sceneIDs[segment.SceneID] = struct{}{}
+	}
+
+	frames := make([]domain.VideoUnderstandingFrameV1, 0)
+	for _, frame := range input.Frames {
+		if _, exists := segmentIDs[frame.SegmentID]; exists {
+			frames = append(frames, frame)
+		}
+	}
+
+	transcriptIndexes := make([]int, 0)
+	transcriptSegments := make([]domain.TranscriptSegment, 0)
+	for index, transcriptSegment := range input.Transcript.Segments {
+		if transcriptOverlapsSegments(transcriptSegment, segments) {
+			transcriptIndexes = append(transcriptIndexes, index)
+			transcriptSegments = append(transcriptSegments, transcriptSegment)
+		}
+	}
+	transcript := input.Transcript
+	transcript.Segments = transcriptSegments
+	transcript.HasSpeech = input.Transcript.HasSpeech && len(transcriptSegments) > 0
+	if len(transcriptSegments) > 0 {
+		text := make([]string, 0, len(transcriptSegments))
+		for _, segment := range transcriptSegments {
+			text = append(text, segment.Text)
+		}
+		transcript.Text = strings.Join(text, " ")
+	} else {
+		transcript.Text = ""
+	}
+
+	scenes := make([]domain.VideoScene, 0, len(sceneIDs))
+	for _, scene := range input.Scenes {
+		if _, exists := sceneIDs[scene.ID]; exists {
+			scenes = append(scenes, scene)
+		}
+	}
+	batchInput := input
+	batchInput.Scenes = scenes
+	batchInput.Segments = segments
+	batchInput.Frames = frames
+	batchInput.Transcript = transcript
+	return batchInput, transcriptIndexes, len(frames), len(sceneIDs)
+}
+
+func transcriptOverlapsSegments(transcript domain.TranscriptSegment, segments []domain.CandidateSegment) bool {
+	for _, segment := range segments {
+		if transcript.EndMicros > segment.StartMicros && transcript.StartMicros < segment.EndMicros {
+			return true
+		}
+	}
+	return false
+}
+
+func remapTranscriptIndexes(response *domain.VideoUnderstandingResponseV1, transcriptIndexes []int) error {
+	for candidateIndex := range response.Candidates {
+		candidate := &response.Candidates[candidateIndex]
+		remapped := make([]int, 0, len(candidate.TranscriptSegmentIndexes))
+		for _, localIndex := range candidate.TranscriptSegmentIndexes {
+			if localIndex < 0 || localIndex >= len(transcriptIndexes) {
+				return fmt.Errorf("%w: batch transcript index %d is out of range", domain.ErrInvalidModelOutput, localIndex)
+			}
+			remapped = append(remapped, transcriptIndexes[localIndex])
+		}
+		candidate.TranscriptSegmentIndexes = remapped
+	}
+	return nil
 }
 
 func makePersistentAnalysis(request Request, response domain.VideoUnderstandingResponseV1, provider, model string, createdAt time.Time) domain.VideoAnalysis {
@@ -831,7 +1005,7 @@ func (s *Service) validateDependencies() error {
 	return nil
 }
 
-func (s *Service) retry(ctx context.Context, request Request, input domain.VideoUnderstandingInputV1, operation func() error) error {
+func (s *Service) retry(ctx context.Context, request Request, input domain.VideoUnderstandingInputV1, batchIndex, batchCount int, operation func() error) error {
 	attempts := s.RetryAttempts
 	if attempts <= 0 {
 		attempts = 3
@@ -851,7 +1025,10 @@ func (s *Service) retry(ctx context.Context, request Request, input domain.Video
 			slog.String("model", s.Provider.Model()),
 			slog.Int("attempt", attemptNumber),
 			slog.Int("max_attempts", attempts),
+			slog.Int("batch_index", batchIndex),
+			slog.Int("batch_count", batchCount),
 			slog.Int("candidate_count", len(input.Segments)),
+			slog.Int("scene_count", len(input.Scenes)),
 			slog.Int("frame_count", len(input.Frames)),
 			slog.Int("transcript_segment_count", len(input.Transcript.Segments)),
 		)
@@ -863,6 +1040,8 @@ func (s *Service) retry(ctx context.Context, request Request, input domain.Video
 				slog.String("provider", s.Provider.Name()),
 				slog.String("model", s.Provider.Model()),
 				slog.Int("attempt", attemptNumber),
+				slog.Int("batch_index", batchIndex),
+				slog.Int("batch_count", batchCount),
 				slog.Int64("latency_ms", time.Since(started).Milliseconds()),
 			)
 			return nil
@@ -896,6 +1075,8 @@ func (s *Service) retry(ctx context.Context, request Request, input domain.Video
 			slog.String("project_id", request.ProjectID),
 			slog.String("media_id", request.MediaID),
 			slog.Int("next_attempt", attemptNumber+1),
+			slog.Int("batch_index", batchIndex),
+			slog.Int("batch_count", batchCount),
 			slog.Int64("delay_ms", delay.Milliseconds()),
 		)
 		timer := time.NewTimer(delay)
@@ -921,6 +1102,20 @@ func (s *Service) frameURLExpiry() time.Duration {
 		return s.FrameURLExpiry
 	}
 	return 30 * time.Minute
+}
+
+func (s *Service) batchMaxScenes() int {
+	if s.BatchMaxScenes > 0 {
+		return s.BatchMaxScenes
+	}
+	return 10
+}
+
+func (s *Service) batchMaxFrames() int {
+	if s.BatchMaxFrames > 0 {
+		return s.BatchMaxFrames
+	}
+	return 24
 }
 
 func (s *Service) now() time.Time {

@@ -196,12 +196,177 @@ func TestServicePresignsSourceForSourceAwareProvider(t *testing.T) {
 	}
 }
 
+func TestBuildUnderstandingBatchesPreservesContiguousEvidenceAndTranscriptIndexes(t *testing.T) {
+	t.Parallel()
+	input := batchTestInput(5)
+
+	batches, err := buildUnderstandingBatches(input, 10, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batches) != 3 {
+		t.Fatalf("batch count = %d, want 3", len(batches))
+	}
+	wantSegments := [][]string{
+		{"segment-0001", "segment-0002"},
+		{"segment-0003", "segment-0004"},
+		{"segment-0005"},
+	}
+	wantTranscriptIndexes := [][]int{{0, 1}, {2, 3}, {4}}
+	for index, batch := range batches {
+		if got := segmentIDs(batch.input.Segments); fmt.Sprint(got) != fmt.Sprint(wantSegments[index]) {
+			t.Fatalf("batch %d segments = %v, want %v", index+1, got, wantSegments[index])
+		}
+		if got := frameIDsFromInput(batch.input.Frames); len(got) != len(batch.input.Segments) {
+			t.Fatalf("batch %d frame count = %d, want %d", index+1, len(got), len(batch.input.Segments))
+		}
+		if fmt.Sprint(batch.transcriptIndexes) != fmt.Sprint(wantTranscriptIndexes[index]) {
+			t.Fatalf("batch %d transcript indexes = %v, want %v", index+1, batch.transcriptIndexes, wantTranscriptIndexes[index])
+		}
+	}
+}
+
+func TestServiceRetriesOnlyFailedUnderstandingBatch(t *testing.T) {
+	t.Parallel()
+	repository := newMemoryRepository()
+	provider := &batchRecordingProvider{
+		name: "provider-a", model: "model-a", failSegmentID: "segment-0003", failures: 1,
+	}
+	service := newService(provider, repository, &memoryArtifacts{})
+	service.BatchMaxScenes = 10
+	service.BatchMaxFrames = 2
+
+	result, err := service.Analyze(context.Background(), batchTestRequest(5))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.calls) != 4 {
+		t.Fatalf("provider call count = %d, want 4 (three batches plus one retry)", len(provider.calls))
+	}
+	if provider.sceneCalls != 0 {
+		t.Fatalf("remote scene detection calls = %d, want 0", provider.sceneCalls)
+	}
+	wantCalls := [][]string{
+		{"segment-0001", "segment-0002"},
+		{"segment-0003", "segment-0004"},
+		{"segment-0003", "segment-0004"},
+		{"segment-0005"},
+	}
+	for index, call := range provider.calls {
+		if fmt.Sprint(call) != fmt.Sprint(wantCalls[index]) {
+			t.Fatalf("provider call %d segments = %v, want %v", index+1, call, wantCalls[index])
+		}
+	}
+	if got := segmentIDsFromAnalysis(result.Analysis); fmt.Sprint(got) != fmt.Sprint(segmentIDs(batchTestInput(5).Segments)) {
+		t.Fatalf("merged segment IDs = %v", got)
+	}
+}
+
 func newService(provider VideoUnderstandingProvider, repository Repository, artifacts ArtifactStore) *Service {
 	return &Service{
 		Provider: provider, Repository: repository, Artifacts: artifacts,
 		RetryAttempts: 2, RetryDelay: time.Nanosecond, FrameURLExpiry: time.Hour,
 		Now: func() time.Time { return time.Date(2026, time.August, 19, 14, 0, 0, 0, time.UTC) },
 	}
+}
+
+func batchTestRequest(segmentCount int) Request {
+	evidence := batchTestEvidence(segmentCount)
+	return Request{
+		CacheRequest: CacheRequest{
+			UserID: "user-1", MediaID: evidence.MediaID, SourceETag: evidence.SourceETag,
+			InputVersion: evidence.AnalysisVersion, UnderstandingVersion: "video-understanding-v1",
+		},
+		ProjectID: evidence.ProjectID, EvidenceS3Key: "users/user-1/video-analysis/media-1/evidence.json", Evidence: evidence,
+	}
+}
+
+func batchTestEvidence(segmentCount int) domain.VideoEvidence {
+	segments := make([]domain.CandidateSegment, 0, segmentCount)
+	frames := make([]domain.SelectedFrame, 0, segmentCount)
+	transcriptSegments := make([]domain.TranscriptSegment, 0, segmentCount)
+	for index := 0; index < segmentCount; index++ {
+		start := int64(index) * 4_000_000
+		segmentID := fmt.Sprintf("segment-%04d", index+1)
+		sceneID := fmt.Sprintf("scene-%04d", index/2+1)
+		segments = append(segments, domain.CandidateSegment{
+			ID: segmentID, SceneID: sceneID, StartMicros: start, EndMicros: start + 4_000_000,
+		})
+		frames = append(frames, domain.SelectedFrame{
+			ID: fmt.Sprintf("frame-%04d", index+1), MediaID: "media-1", SceneID: sceneID, SegmentID: segmentID,
+			TimestampMicros: start + 2_000_000, S3Key: fmt.Sprintf("frames/%d.jpg", index+1), QualityScore: 0.8,
+		})
+		transcriptSegments = append(transcriptSegments, domain.TranscriptSegment{
+			StartMicros: start + 1_000_000, EndMicros: start + 2_000_000, Text: fmt.Sprintf("line %d", index+1),
+		})
+	}
+	duration := int64(segmentCount) * 4_000_000
+	scenes := make([]domain.VideoScene, 0, (segmentCount+1)/2)
+	for index := 0; index < segmentCount; index += 2 {
+		end := int64(minInt(segmentCount, index+2)) * 4_000_000
+		scenes = append(scenes, domain.VideoScene{
+			ID: fmt.Sprintf("scene-%04d", index/2+1), StartMicros: int64(index) * 4_000_000, EndMicros: end,
+		})
+	}
+	return domain.VideoEvidence{
+		SchemaVersion: 1, AnalysisVersion: "video-evidence-v1", MediaID: "media-1", ProjectID: "project-1",
+		SourceS3Key: "users/user-1/media/media-1/source.mov", SourceETag: "etag-batches",
+		Metadata: domain.VideoMetadata{DurationMicros: duration, Width: 1920, Height: 1080, FPS: 30, VideoCodec: "hevc"},
+		Scenes:   scenes, Segments: segments, Frames: frames,
+		Transcript: domain.Transcript{Language: "en", HasSpeech: true, Segments: transcriptSegments},
+		Quality:    domain.QualitySignals{OverallScore: 0.8},
+	}
+}
+
+func batchTestInput(segmentCount int) domain.VideoUnderstandingInputV1 {
+	evidence := batchTestEvidence(segmentCount)
+	frames := make([]domain.VideoUnderstandingFrameV1, 0, len(evidence.Frames))
+	for _, frame := range evidence.Frames {
+		frames = append(frames, domain.VideoUnderstandingFrameV1{
+			ID: frame.ID, SceneID: frame.SceneID, SegmentID: frame.SegmentID,
+			TimestampMicros: frame.TimestampMicros, URL: "https://example.test/" + frame.S3Key,
+			QualityScore: frame.QualityScore,
+		})
+	}
+	return domain.VideoUnderstandingInputV1{
+		SchemaVersion: domain.VideoUnderstandingInputSchemaV1,
+		InputVersion:  evidence.AnalysisVersion, AnalysisVersion: "video-understanding-v1",
+		Objective: Objective, GroundingRules: append([]string(nil), groundingRules...),
+		MediaID: evidence.MediaID, ProjectID: evidence.ProjectID, Metadata: evidence.Metadata,
+		Scenes: evidence.Scenes, Segments: evidence.Segments, Frames: frames,
+		Transcript: evidence.Transcript, Quality: evidence.Quality,
+	}
+}
+
+func segmentIDs(segments []domain.CandidateSegment) []string {
+	ids := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		ids = append(ids, segment.ID)
+	}
+	return ids
+}
+
+func frameIDsFromInput(frames []domain.VideoUnderstandingFrameV1) []string {
+	ids := make([]string, 0, len(frames))
+	for _, frame := range frames {
+		ids = append(ids, frame.ID)
+	}
+	return ids
+}
+
+func segmentIDsFromAnalysis(analysis domain.VideoAnalysis) []string {
+	ids := make([]string, 0, len(analysis.Segments))
+	for _, segment := range analysis.Segments {
+		ids = append(ids, segment.SegmentID)
+	}
+	return ids
+}
+
+func minInt(left, right int) int {
+	if left < right {
+		return left
+	}
+	return right
 }
 
 func testRequest() Request {
@@ -361,6 +526,62 @@ func (p *fakeProvider) Understand(_ context.Context, input domain.VideoUnderstan
 
 func (p *fakeProvider) Name() string  { return p.name }
 func (p *fakeProvider) Model() string { return p.model }
+
+type batchRecordingProvider struct {
+	name          string
+	model         string
+	failSegmentID string
+	failures      int
+	calls         [][]string
+	sceneCalls    int
+}
+
+func (p *batchRecordingProvider) Understand(_ context.Context, input domain.VideoUnderstandingInputV1) (domain.VideoUnderstandingResponseV1, error) {
+	ids := segmentIDs(input.Segments)
+	p.calls = append(p.calls, append([]string(nil), ids...))
+	if p.failures > 0 {
+		for _, id := range ids {
+			if id == p.failSegmentID {
+				p.failures--
+				return domain.VideoUnderstandingResponseV1{}, errors.New("transient batch failure")
+			}
+		}
+	}
+	return genericValidResponse(input), nil
+}
+
+func (p *batchRecordingProvider) Name() string  { return p.name }
+func (p *batchRecordingProvider) Model() string { return p.model }
+
+func (p *batchRecordingProvider) DetectScenes(_ context.Context, _ domain.VideoUnderstandingInputV1) (domain.VideoSceneDetectionResponseV1, error) {
+	p.sceneCalls++
+	return domain.VideoSceneDetectionResponseV1{}, errors.New("remote scene detection should not be called")
+}
+
+func genericValidResponse(input domain.VideoUnderstandingInputV1) domain.VideoUnderstandingResponseV1 {
+	candidates := make([]domain.VideoSegmentAnalysisV1, 0, len(input.Segments))
+	for _, segment := range input.Segments {
+		var frameIDs []string
+		for _, frame := range input.Frames {
+			if frame.SegmentID == segment.ID {
+				frameIDs = append(frameIDs, frame.ID)
+			}
+		}
+		candidate := domain.VideoSegmentAnalysisV1{
+			SegmentID: segment.ID, SceneID: segment.SceneID, StartMicros: segment.StartMicros, EndMicros: segment.EndMicros,
+			Description: "A grounded video moment", ImportanceScore: 0.7, VisualQualityScore: 0.7,
+			MemoryValueScore: 0.7, EmotionalValueScore: 0.7, StoryRelevanceScore: 0.7,
+			RecommendedUsage: domain.RecommendedUsageSupporting, Reason: "Grounded in supplied evidence.", FrameIDs: frameIDs,
+		}
+		for index, transcript := range input.Transcript.Segments {
+			if transcript.EndMicros > segment.StartMicros && transcript.StartMicros < segment.EndMicros {
+				candidate.TranscriptSegmentIndexes = append(candidate.TranscriptSegmentIndexes, index)
+			}
+		}
+		candidates = append(candidates, candidate)
+	}
+	return domain.VideoUnderstandingResponseV1{SchemaVersion: domain.VideoAnalysisSchemaV1, Candidates: candidates}
+}
 
 type sourceAwareFakeProvider struct {
 	name     string

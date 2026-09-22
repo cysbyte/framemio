@@ -114,6 +114,7 @@ func main() {
 	understandingService := &understanding.Service{
 		Provider: understandingProvider, Repository: repository, Artifacts: objects,
 		RetryAttempts: configuration.UnderstandingRetries, FrameURLExpiry: configuration.PresignedEvidenceExpiry,
+		BatchMaxScenes: configuration.UnderstandingBatchMaxScenes, BatchMaxFrames: configuration.UnderstandingBatchMaxFrames,
 		Logger: logger,
 	}
 	var completionReporter pipeline.CompletionReporter
@@ -154,6 +155,8 @@ func main() {
 		slog.Duration("run_once_wait_timeout", configuration.RunOnceWaitTimeout),
 		slog.Duration("video_understanding_timeout", configuration.UnderstandingTimeout),
 		slog.Int("video_understanding_retries", configuration.UnderstandingRetries),
+		slog.Int("video_understanding_batch_max_scenes", configuration.UnderstandingBatchMaxScenes),
+		slog.Int("video_understanding_batch_max_frames", configuration.UnderstandingBatchMaxFrames),
 		slog.String("video_understanding_provider", configuration.UnderstandingProvider),
 		slog.String("video_understanding_model", configuration.UnderstandingModel),
 		slog.String("queue_name", queueName(configuration.QueueURL)),
