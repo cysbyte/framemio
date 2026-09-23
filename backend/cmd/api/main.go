@@ -84,16 +84,18 @@ func main() {
 	}
 
 	application := api.NewServer(api.Server{
-		Store:              database,
-		Credits:            creditService,
-		ObjectStorage:      objects,
-		Publisher:          publisher,
-		Activator:          activator,
-		Orchestrator:       coordinator,
-		StoryPlanValidator: storyPlanValidator,
-		Authenticator:      api.HMACTokenAuthenticator{Secret: []byte(configuration.AuthHMACSecret)},
-		InternalToken:      configuration.InternalAPIToken,
-		Logger:             logger,
+		Store:                database,
+		Credits:              creditService,
+		ObjectStorage:        objects,
+		Publisher:            publisher,
+		Activator:            activator,
+		Orchestrator:         coordinator,
+		StoryPlanValidator:   storyPlanValidator,
+		Authenticator:        api.HMACTokenAuthenticator{Secret: []byte(configuration.AuthHMACSecret)},
+		InternalToken:        configuration.InternalAPIToken,
+		VideoProviderBaseURL: configuration.VideoProviderBaseURL,
+		VideoProviderAPIKey:  configuration.VideoProviderAPIKey,
+		Logger:               logger,
 	})
 	httpServer := &http.Server{
 		Addr:              ":" + configuration.Port,
@@ -162,6 +164,8 @@ type configuration struct {
 	StoryRevisionMaxTokens            int
 	StoryRevisionTimeout              time.Duration
 	StoryRevisionFallbackTimeout      time.Duration
+	VideoProviderBaseURL              string
+	VideoProviderAPIKey               string
 	WorkerRunOnce                     bool
 	WorkerJobID                       string
 	WorkerWaitTimeout                 time.Duration
@@ -215,10 +219,20 @@ func loadConfiguration() (configuration, error) {
 		StoryRevisionMaxTokens:            environmentInt("STORY_REVISION_MAX_OUTPUT_TOKENS", 6000),
 		StoryRevisionTimeout:              environmentDuration("STORY_REVISION_TIMEOUT", 90*time.Second),
 		StoryRevisionFallbackTimeout:      environmentDuration("STORY_REVISION_FALLBACK_TIMEOUT", 45*time.Second),
-		WorkerRunOnce:                     environmentBool("WORKER_RUN_ONCE", false),
-		WorkerJobID:                       os.Getenv("JOB_ID"),
-		WorkerWaitTimeout:                 environmentDuration("WORKER_RUN_ONCE_WAIT_TIMEOUT", 6*time.Minute),
-		WorkerVisibilityTimeout:           environmentDuration("SQS_VISIBILITY_TIMEOUT", 5*time.Minute),
+		VideoProviderBaseURL: environmentFirstOrDefault(
+			[]string{"GATEWAY_VIDEO_UPSTREAM_BASE_URL", "SEEDANCE_VIDEO_BASE_URL"},
+			"https://task-api-1-cn.65535.space",
+		),
+		VideoProviderAPIKey: environmentFirst([]string{
+			"GATEWAY_VIDEO_UPSTREAM_API_KEY",
+			"SEEDANCE_VIDEO_API_KEY",
+			"GATEWAY_GROK_UPSTREAM_API_KEY",
+			"GATEWAY_UPSTREAM_API_KEY",
+		}),
+		WorkerRunOnce:           environmentBool("WORKER_RUN_ONCE", false),
+		WorkerJobID:             os.Getenv("JOB_ID"),
+		WorkerWaitTimeout:       environmentDuration("WORKER_RUN_ONCE_WAIT_TIMEOUT", 6*time.Minute),
+		WorkerVisibilityTimeout: environmentDuration("SQS_VISIBILITY_TIMEOUT", 5*time.Minute),
 	}
 	if result.DatabaseURL == "" || result.S3Bucket == "" {
 		return configuration{}, errors.New("DATABASE_URL and S3_MEDIA_BUCKET are required")
@@ -292,6 +306,13 @@ func environmentFirst(names []string) string {
 		}
 	}
 	return ""
+}
+
+func environmentFirstOrDefault(names []string, fallback string) string {
+	if value := environmentFirst(names); value != "" {
+		return value
+	}
+	return fallback
 }
 
 func environment(name, fallback string) string {

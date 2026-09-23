@@ -18,6 +18,7 @@ struct AppDependencies {
     let mediaUploadService: MediaUploadService
     let creditService: CreditService
     let promptTranscriptionService: PromptTranscriptionService
+    let textToVideoService: TextToVideoService
 
     static func live() -> AppDependencies {
         let deepgramLanguageLogValue = AppConfiguration.deepgramLanguage ?? "nil"
@@ -60,7 +61,8 @@ struct AppDependencies {
             directObjectStorage: objectStorage,
             mediaUploadService: uploadService,
             creditService: RemoteCreditService(apiClient: apiClient),
-            promptTranscriptionService: RemotePromptTranscriptionService(apiClient: apiClient)
+            promptTranscriptionService: RemotePromptTranscriptionService(apiClient: apiClient),
+            textToVideoService: RemoteTextToVideoService(apiClient: apiClient)
         )
     }
 
@@ -96,7 +98,8 @@ struct AppDependencies {
             directObjectStorage: objectStorage,
             mediaUploadService: uploadService,
             creditService: MockCreditService(),
-            promptTranscriptionService: MockPromptTranscriptionService()
+            promptTranscriptionService: MockPromptTranscriptionService(),
+            textToVideoService: MockTextToVideoService()
         )
     }
 }

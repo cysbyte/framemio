@@ -189,6 +189,28 @@ protocol PromptTranscriptionService: Sendable {
     func livePromptConfiguration() async throws -> PromptLiveTranscriptionConfiguration
 }
 
+protocol TextToVideoService: Sendable {
+    func generate(
+        prompt: String,
+        duration: Int,
+        resolution: String,
+        aspectRatio: String,
+        progress: (@Sendable (TextVideoGenerationStatus) -> Void)?
+    ) async throws -> TextVideoGenerationResult
+}
+
+struct TextVideoGenerationStatus: Sendable, Hashable {
+    let taskID: String?
+    let status: String
+    let progress: String?
+    let videoURL: URL?
+}
+
+struct TextVideoGenerationResult: Sendable, Hashable {
+    let taskID: String
+    let videoURL: URL
+}
+
 enum CreditAction: String, Codable, Hashable, Sendable {
     case createStory = "CREATE_STORY"
     case regenerateStory = "REGENERATE_STORY"

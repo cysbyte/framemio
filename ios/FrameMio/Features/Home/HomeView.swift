@@ -11,6 +11,7 @@ struct HomeView: View {
     let onOpenStory: (Story) -> Void
     let onOpenAllStories: () -> Void
     let onOpenPricing: (PricingEntryPoint) -> Void
+    let onCreateTextVideo: () -> Void
 
     init(
         viewModel: HomeViewModel,
@@ -18,7 +19,8 @@ struct HomeView: View {
         onCreateProject: @escaping (VideoProjectDraft) -> Void,
         onOpenStory: @escaping (Story) -> Void,
         onOpenAllStories: @escaping () -> Void,
-        onOpenPricing: @escaping (PricingEntryPoint) -> Void
+        onOpenPricing: @escaping (PricingEntryPoint) -> Void,
+        onCreateTextVideo: @escaping () -> Void
     ) {
         _viewModel = ObservedObject(wrappedValue: viewModel)
         _creditStore = ObservedObject(wrappedValue: creditStore)
@@ -26,6 +28,7 @@ struct HomeView: View {
         self.onOpenStory = onOpenStory
         self.onOpenAllStories = onOpenAllStories
         self.onOpenPricing = onOpenPricing
+        self.onCreateTextVideo = onCreateTextVideo
     }
 
     var body: some View {
@@ -231,14 +234,16 @@ struct HomeView: View {
                     title: "Text to Video",
                     description: "Generate video from text",
                     systemImage: "text.alignleft",
-                    background: FrameMioColors.accent.opacity(0.9)
+                    background: FrameMioColors.accent.opacity(0.9),
+                    action: onCreateTextVideo
                 )
 
                 HomeCreationModeButton(
                     title: "Image to Video",
                     description: "Generate video from image",
                     systemImage: "photo.on.rectangle.angled",
-                    background: FrameMioColors.memoryLight.opacity(0.92)
+                    background: FrameMioColors.memoryLight.opacity(0.92),
+                    action: {}
                 )
             }
 
@@ -625,9 +630,10 @@ private struct HomeCreationModeButton: View {
     let description: String
     let systemImage: String
     let background: Color
+    let action: () -> Void
 
     var body: some View {
-        Button(action: {}) {
+        Button(action: action) {
             HStack(alignment: .top, spacing: FrameMioSpacing.sm) {
                 Image(systemName: systemImage)
                     .font(.headline.weight(.semibold))

@@ -121,7 +121,10 @@ struct AppRootView: View {
                     selectedTab = .history
                     historyPath = [.allProjects]
                 },
-                onOpenPricing: openPricing
+                onOpenPricing: openPricing,
+                onCreateTextVideo: {
+                    homePath.append(.textToVideo)
+                }
             )
             .navigationDestination(for: AppRoute.self) { route in
                 destination(for: route) { homePath.append($0) }
@@ -345,6 +348,8 @@ struct AppRootView: View {
                 ),
                 onOpenPricing: openPricing
             )
+        case .textToVideo:
+            TextToVideoView(service: dependencies.textToVideoService)
         }
     }
 }

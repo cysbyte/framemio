@@ -79,6 +79,8 @@
 		C70000000000000000000105 /* DirectObjectStorageClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70000000000000000000005 /* DirectObjectStorageClient.swift */; };
 		C70000000000000000000106 /* MediaUploadStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70000000000000000000006 /* MediaUploadStore.swift */; };
 		C70000000000000000000107 /* MediaUploadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70000000000000000000007 /* MediaUploadTests.swift */; };
+		E10000000000000000000001 /* TextToVideoService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000002 /* TextToVideoService.swift */; };
+		E10000000000000000000003 /* TextToVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000004 /* TextToVideoView.swift */; };
 		D80000000000000000000001 /* HomeHeroPreview.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D80000000000000000000002 /* HomeHeroPreview.mp4 */; };
 		D80000000000000000000003 /* full-screen-cinematic-cutaways.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D80000000000000000000004 /* full-screen-cinematic-cutaways.mp4 */; };
 		D80000000000000000000005 /* photo-over-video.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D80000000000000000000006 /* photo-over-video.mp4 */; };
@@ -187,6 +189,8 @@
 		C70000000000000000000005 /* DirectObjectStorageClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectObjectStorageClient.swift; sourceTree = "<group>"; };
 		C70000000000000000000006 /* MediaUploadStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaUploadStore.swift; sourceTree = "<group>"; };
 		C70000000000000000000007 /* MediaUploadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaUploadTests.swift; sourceTree = "<group>"; };
+		E10000000000000000000002 /* TextToVideoService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextToVideoService.swift; sourceTree = "<group>"; };
+		E10000000000000000000004 /* TextToVideoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextToVideoView.swift; sourceTree = "<group>"; };
 		D80000000000000000000002 /* HomeHeroPreview.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = HomeHeroPreview.mp4; sourceTree = "<group>"; };
 		D80000000000000000000004 /* full-screen-cinematic-cutaways.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "full-screen-cinematic-cutaways.mp4"; sourceTree = "<group>"; };
 		D80000000000000000000006 /* photo-over-video.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "photo-over-video.mp4"; sourceTree = "<group>"; };
@@ -274,6 +278,7 @@
 				A10000000000000000000312 /* StoryPreview */,
 				A10000000000000000000313 /* Settings */,
 				A10000000000000000000314 /* Pricing */,
+				E10000000000000000000005 /* TextToVideo */,
 				A1000000000000000000000C /* Moments */,
 				A1000000000000000000000D /* Story */,
 				A1000000000000000000000E /* Profile */,
@@ -436,6 +441,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000105 /* ServiceProtocols.swift */,
+				E10000000000000000000002 /* TextToVideoService.swift */,
 				C70000000000000000000002 /* MediaUploadService.swift */,
 				C70000000000000000000003 /* MediaUploadMocks.swift */,
 			);
@@ -540,6 +546,14 @@
 				A10000000000000000000117 /* FrameMioProView.swift */,
 			);
 			path = Pricing;
+			sourceTree = "<group>";
+		};
+		E10000000000000000000005 /* TextToVideo */ = {
+			isa = PBXGroup;
+			children = (
+				E10000000000000000000004 /* TextToVideoView.swift */,
+			);
+			path = TextToVideo;
 			sourceTree = "<group>";
 		};
 		B60000000000000000000020 /* FrameMioTests */ = {
@@ -730,6 +744,8 @@
 				C70000000000000000000104 /* MediaUploadAPI.swift in Sources */,
 				C70000000000000000000105 /* DirectObjectStorageClient.swift in Sources */,
 				C70000000000000000000106 /* MediaUploadStore.swift in Sources */,
+				E10000000000000000000001 /* TextToVideoService.swift in Sources */,
+				E10000000000000000000003 /* TextToVideoView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

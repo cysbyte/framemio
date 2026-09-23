@@ -192,6 +192,24 @@ func TestLoadConfigurationUsesSpecificSQSQueues(t *testing.T) {
 	}
 }
 
+func TestLoadConfigurationLoadsVideoProviderSettings(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("S3_MEDIA_BUCKET", "bucket")
+	t.Setenv("SQS_PROCESSING_QUEUE_URL", "queue")
+	t.Setenv("AUTH_HMAC_SECRET", "12345678901234567890123456789012")
+	t.Setenv("INTERNAL_API_TOKEN", "12345678901234567890123456789012")
+	t.Setenv("GATEWAY_VIDEO_UPSTREAM_BASE_URL", "https://video.example/v1")
+	t.Setenv("GATEWAY_VIDEO_UPSTREAM_API_KEY", "video-key")
+
+	config, err := loadConfiguration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.VideoProviderBaseURL != "https://video.example/v1" || config.VideoProviderAPIKey != "video-key" {
+		t.Fatalf("unexpected video provider config: %+v", config)
+	}
+}
+
 func TestLoadConfigurationAllowsProcessingQueueFallback(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://example")
 	t.Setenv("S3_MEDIA_BUCKET", "bucket")

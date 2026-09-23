@@ -30,19 +30,22 @@ import (
 const maxJSONBodyBytes = 1 << 20
 
 type Server struct {
-	Store              store.Store
-	Credits            *credits.Service
-	ObjectStorage      storage.ObjectStorage
-	StoryPlanValidator storyvalidation.Service
-	Publisher          queue.Publisher
-	Activator          workeractivation.Activator
-	Orchestrator       *orchestration.Coordinator
-	Authenticator      Authenticator
-	Logger             *slog.Logger
-	Now                func() time.Time
-	InternalToken      string
-	ExpensiveLimiter   ExpensiveOperationLimiter
-	PromptTranscriber  PromptTranscriber
+	Store                   store.Store
+	Credits                 *credits.Service
+	ObjectStorage           storage.ObjectStorage
+	StoryPlanValidator      storyvalidation.Service
+	Publisher               queue.Publisher
+	Activator               workeractivation.Activator
+	Orchestrator            *orchestration.Coordinator
+	Authenticator           Authenticator
+	Logger                  *slog.Logger
+	Now                     func() time.Time
+	InternalToken           string
+	ExpensiveLimiter        ExpensiveOperationLimiter
+	PromptTranscriber       PromptTranscriber
+	VideoProviderBaseURL    string
+	VideoProviderAPIKey     string
+	VideoProviderHTTPClient *http.Client
 }
 
 func NewServer(dependencies Server) *Server {
@@ -165,6 +168,23 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 	}
 	if request.URL.Path == "/v1/transcriptions" {
 		s.transcribePromptAudio(response, request)
+		return
+	}
+	if request.URL.Path == "/v1/videos" {
+		if request.Method == http.MethodPost {
+			s.createVideo(response, request)
+			return
+		}
+		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if strings.HasPrefix(request.URL.Path, "/v1/videos/") {
+		parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
+		if len(parts) == 3 && request.Method == http.MethodGet {
+			s.getVideo(response, request, parts[2])
+			return
+		}
+		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	if request.URL.Path == "/v1/credit-packs" {
