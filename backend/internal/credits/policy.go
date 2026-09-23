@@ -50,6 +50,7 @@ func DefaultPolicy() Policy {
 	return Policy{
 		Prices: map[models.CreditAction]int{
 			models.CreditActionCreateStory:     40,
+			models.CreditActionCreateVideo:     40,
 			models.CreditActionRegenerateStory: 40,
 			models.CreditActionAddMoment:       20,
 			models.CreditActionAIEditStory:     20,
@@ -87,6 +88,7 @@ func LoadPolicyFromEnv() Policy {
 	policy := DefaultPolicy()
 	for action, envName := range map[models.CreditAction]string{
 		models.CreditActionCreateStory:     "CREDIT_PRICE_CREATE_STORY",
+		models.CreditActionCreateVideo:     "CREDIT_PRICE_CREATE_VIDEO",
 		models.CreditActionRegenerateStory: "CREDIT_PRICE_REGENERATE_STORY",
 		models.CreditActionAddMoment:       "CREDIT_PRICE_ADD_MOMENT",
 		models.CreditActionAIEditStory:     "CREDIT_PRICE_AI_EDIT_STORY",

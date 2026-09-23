@@ -213,6 +213,7 @@ struct TextVideoGenerationResult: Sendable, Hashable {
 
 enum CreditAction: String, Codable, Hashable, Sendable {
     case createStory = "CREATE_STORY"
+    case createVideo = "CREATE_VIDEO"
     case regenerateStory = "REGENERATE_STORY"
     case addMoment = "ADD_MOMENT"
     case aiEditStory = "AI_EDIT_STORY"
@@ -465,6 +466,8 @@ struct CreditPricing {
         switch action {
         case .createStory:
             return createStory
+        case .createVideo:
+            return createStory
         case .regenerateStory:
             return regenerateStory
         case .addMoment:
@@ -491,6 +494,8 @@ struct CreditPricing {
         switch action {
         case .createStory:
             durationSeconds = stats.totalVideoSeconds
+        case .createVideo:
+            return fallback
         case .regenerateStory, .aiEditStory:
             durationSeconds = stats.storyVideoSeconds
         default:

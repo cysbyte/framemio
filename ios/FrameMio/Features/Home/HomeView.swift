@@ -242,7 +242,7 @@ struct HomeView: View {
                     title: "Image to Video",
                     description: "Generate video from image",
                     systemImage: "photo.on.rectangle.angled",
-                    background: FrameMioColors.memoryLight.opacity(0.92),
+                    background: FrameMioColors.selection.opacity(0.88),
                     action: {}
                 )
             }

@@ -3,17 +3,22 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/framemio/backend/internal/credits"
+	"github.com/framemio/backend/internal/models"
+	"github.com/framemio/backend/internal/store"
 )
 
 const (
 	defaultVideoModel       = "grok-imagine-video"
 	defaultVideoSeconds     = 5
 	defaultVideoResolution  = "720p"
-	defaultVideoAspectRatio = "3:4"
+	defaultVideoAspectRatio = "9:16"
 )
 
 var supportedVideoAspectRatios = map[string]struct{}{
@@ -89,6 +94,14 @@ func (input videoGenerationRequest) validate() string {
 }
 
 func (s *Server) createVideo(response http.ResponseWriter, request *http.Request) {
+	user, ok := s.authenticate(response, request)
+	if !ok {
+		return
+	}
+	idempotencyKey, ok := requiredIdempotencyKey(response, request)
+	if !ok {
+		return
+	}
 	if strings.TrimSpace(s.VideoProviderAPIKey) == "" || strings.TrimSpace(s.VideoProviderBaseURL) == "" {
 		s.writeError(response, http.StatusServiceUnavailable, "video_provider_not_configured", "video generation is not configured")
 		return
@@ -104,6 +117,56 @@ func (s *Server) createVideo(response http.ResponseWriter, request *http.Request
 		return
 	}
 
+	if s.Credits == nil {
+		s.internalError(response, errors.New("credit service not configured"), "reserve video credits")
+		return
+	}
+	reservation, _, reservationCreated, err := s.Credits.ReserveWithCreation(
+		request.Context(),
+		user.ID,
+		models.CreditActionCreateVideo,
+		"video",
+		idempotencyKey,
+		credits.StoryMediaStats{},
+		map[string]any{
+			"prompt_length": len(input.Prompt),
+			"seconds":       input.Seconds,
+			"resolution":    input.Resolution,
+			"aspect_ratio":  input.AspectRatio,
+		},
+	)
+	if err != nil {
+		if errors.Is(err, store.ErrInsufficientCredits) {
+			quote, quoteErr := s.Credits.Quote(request.Context(), user.ID, models.CreditActionCreateVideo, credits.StoryMediaStats{})
+			if quoteErr == nil {
+				s.writeJSON(response, http.StatusPaymentRequired, map[string]any{
+					"error":     "insufficient_credits",
+					"required":  quote.Credits,
+					"available": quote.Balance,
+				})
+				return
+			}
+		}
+		s.internalError(response, err, "reserve video credits")
+		return
+	}
+
+	releaseReservation := reservationCreated && reservation.ID != ""
+	defer func() {
+		if !releaseReservation {
+			return
+		}
+		if _, releaseErr := s.Credits.Release(request.Context(), user.ID, reservation.ID); releaseErr != nil &&
+			!errors.Is(releaseErr, store.ErrConflict) &&
+			!errors.Is(releaseErr, store.ErrNotFound) {
+			s.Logger.Warn("video credit reservation cleanup failed",
+				"user_id", user.ID,
+				"reservation_id", reservation.ID,
+				"error", releaseErr,
+			)
+		}
+	}()
+
 	body, err := json.Marshal(input)
 	if err != nil {
 		s.internalError(response, err, "encode video request")
@@ -115,6 +178,16 @@ func (s *Server) createVideo(response http.ResponseWriter, request *http.Request
 		return
 	}
 	defer upstreamResponse.Body.Close()
+
+	if upstreamResponse.StatusCode >= http.StatusOK && upstreamResponse.StatusCode < http.StatusMultipleChoices {
+		if reservation.ID != "" {
+			if _, err := s.Credits.Commit(request.Context(), user.ID, reservation.ID); err != nil {
+				s.internalError(response, err, "commit video credits")
+				return
+			}
+			releaseReservation = false
+		}
+	}
 	s.copyVideoProviderResponse(response, upstreamResponse)
 }
 

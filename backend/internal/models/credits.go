@@ -6,6 +6,7 @@ type CreditAction string
 
 const (
 	CreditActionCreateStory     CreditAction = "CREATE_STORY"
+	CreditActionCreateVideo     CreditAction = "CREATE_VIDEO"
 	CreditActionRegenerateStory CreditAction = "REGENERATE_STORY"
 	CreditActionAddMoment       CreditAction = "ADD_MOMENT"
 	CreditActionAIEditStory     CreditAction = "AI_EDIT_STORY"
@@ -19,6 +20,7 @@ const (
 func NormalizeCreditAction(value string) (CreditAction, bool) {
 	switch CreditAction(value) {
 	case CreditActionCreateStory,
+		CreditActionCreateVideo,
 		CreditActionRegenerateStory,
 		CreditActionAddMoment,
 		CreditActionAIEditStory,
@@ -65,18 +67,18 @@ const (
 )
 
 type CreditBalance struct {
-	Available                  int        `json:"available"`
-	Reserved                   int        `json:"reserved"`
-	SubscriptionCredits        int        `json:"subscription_credits"`
-	PurchasedCredits           int        `json:"purchased_credits"`
-	SubscriptionReserved       int        `json:"subscription_reserved,omitempty"`
-	PurchasedReserved          int        `json:"purchased_reserved,omitempty"`
-	SubscriptionCycleID        string     `json:"subscription_cycle_id,omitempty"`
-	SubscriptionCycleExpiresAt *time.Time `json:"subscription_cycle_expires_at,omitempty"`
-	InitialCreditGrant         int        `json:"initial_credit_grant,omitempty"`
-	MonthlySubscriptionCycleCredits int   `json:"monthly_subscription_cycle_credits,omitempty"`
-	YearlySubscriptionCycleCredits  int    `json:"yearly_subscription_cycle_credits,omitempty"`
-	TotalCredits               int        `json:"total_credits"`
+	Available                       int        `json:"available"`
+	Reserved                        int        `json:"reserved"`
+	SubscriptionCredits             int        `json:"subscription_credits"`
+	PurchasedCredits                int        `json:"purchased_credits"`
+	SubscriptionReserved            int        `json:"subscription_reserved,omitempty"`
+	PurchasedReserved               int        `json:"purchased_reserved,omitempty"`
+	SubscriptionCycleID             string     `json:"subscription_cycle_id,omitempty"`
+	SubscriptionCycleExpiresAt      *time.Time `json:"subscription_cycle_expires_at,omitempty"`
+	InitialCreditGrant              int        `json:"initial_credit_grant,omitempty"`
+	MonthlySubscriptionCycleCredits int        `json:"monthly_subscription_cycle_credits,omitempty"`
+	YearlySubscriptionCycleCredits  int        `json:"yearly_subscription_cycle_credits,omitempty"`
+	TotalCredits                    int        `json:"total_credits"`
 }
 
 type CreditQuote struct {

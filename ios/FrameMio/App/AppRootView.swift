@@ -349,7 +349,13 @@ struct AppRootView: View {
                 onOpenPricing: openPricing
             )
         case .textToVideo:
-            TextToVideoView(service: dependencies.textToVideoService)
+            TextToVideoView(
+                service: dependencies.textToVideoService,
+                creditService: dependencies.creditService,
+                promptTranscriptionService: dependencies.promptTranscriptionService,
+                onOpenPricing: openPricing,
+                onCreditsUpdated: refreshCredits
+            )
         }
     }
 }

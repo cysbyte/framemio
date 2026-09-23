@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -63,6 +64,13 @@ func TestVideoGenerationProxyForwardsCreateRequest(t *testing.T) {
 	if got := response.Body.String(); !strings.Contains(got, `"video_123"`) {
 		t.Fatalf("response = %s", got)
 	}
+	balance, err := server.Store.GetCreditBalance(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("get credit balance: %v", err)
+	}
+	if balance.Available != 60 || balance.Reserved != 0 {
+		t.Fatalf("unexpected balance after video generation: %+v", balance)
+	}
 }
 
 func TestVideoGenerationProxyForwardsStatusRequest(t *testing.T) {
@@ -89,6 +97,41 @@ func TestVideoGenerationProxyForwardsStatusRequest(t *testing.T) {
 	}
 	if got := response.Body.String(); !strings.Contains(got, `"completed"`) {
 		t.Fatalf("response = %s", got)
+	}
+}
+
+func TestVideoGenerationProxyReleasesCreditsWhenProviderRejectsRequest(t *testing.T) {
+	t.Parallel()
+
+	providerClient := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		return jsonResponse(http.StatusBadRequest, `{"error":"invalid_prompt"}`), nil
+	})
+
+	server := newTestServer(store.NewMemoryStore(), queue.NewMemoryPublisher())
+	server.VideoProviderBaseURL = "https://provider.example"
+	server.VideoProviderAPIKey = "provider-key"
+	server.VideoProviderHTTPClient = &http.Client{Transport: providerClient}
+
+	response := performJSON(
+		t,
+		server.Handler(),
+		http.MethodPost,
+		"/v1/videos",
+		map[string]any{"prompt": "A quiet ocean at sunset"},
+		"ios-video-provider-rejected",
+		true,
+		nil,
+	)
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	balance, err := server.Store.GetCreditBalance(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("get credit balance: %v", err)
+	}
+	if balance.Available != 100 || balance.Reserved != 0 {
+		t.Fatalf("unexpected balance after rejected video generation: %+v", balance)
 	}
 }
 
