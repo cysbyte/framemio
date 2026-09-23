@@ -796,7 +796,7 @@ func (s *PostgresStore) ListActiveTextVideoGenerations(ctx context.Context, limi
 	return generations, rows.Err()
 }
 
-func (s *PostgresStore) UpdateTextVideoGeneration(ctx context.Context, generationID string, providerTaskID string, status models.TextVideoStatus, progress float64, videoURL, errorMessage string) (models.TextVideoGeneration, error) {
+func (s *PostgresStore) UpdateTextVideoGeneration(ctx context.Context, generationID string, providerTaskID string, status models.TextVideoStatus, progress float64, videoURL, s3Key, errorMessage string) (models.TextVideoGeneration, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return models.TextVideoGeneration{}, fmt.Errorf("begin text video update: %w", err)
@@ -828,6 +828,9 @@ func (s *PostgresStore) UpdateTextVideoGeneration(ctx context.Context, generatio
 	if videoURL != "" {
 		generation.VideoURL = videoURL
 	}
+	if s3Key != "" {
+		generation.S3Key = s3Key
+	}
 	generation.ErrorMessage = errorMessage
 	generation.UpdatedAt = now
 	generation.NextPollAt = now.Add(2 * time.Second)
@@ -853,6 +856,19 @@ func (s *PostgresStore) UpdateTextVideoGeneration(ctx context.Context, generatio
 		return models.TextVideoGeneration{}, fmt.Errorf("commit text video update: %w", err)
 	}
 	return generation, nil
+}
+
+func (s *PostgresStore) DeleteTextVideoGeneration(ctx context.Context, userID, generationID string) error {
+	result, err := s.pool.Exec(ctx, `
+		DELETE FROM framemio_domain_records
+		WHERE kind='text_video' AND id=$1 AND user_id=$2`, generationID, userID)
+	if err != nil {
+		return fmt.Errorf("delete text video generation: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 const domainRecordsMigration = `

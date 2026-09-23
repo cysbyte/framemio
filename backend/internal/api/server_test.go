@@ -1702,6 +1702,10 @@ func (s *sizeMismatchObjectStorage) PutObject(ctx context.Context, key, contentT
 	return s.base.PutObject(ctx, key, contentType, data)
 }
 
+func (s *sizeMismatchObjectStorage) DeleteObject(ctx context.Context, key string) error {
+	return s.base.DeleteObject(ctx, key)
+}
+
 func (s *sizeMismatchObjectStorage) PresignedDownloadURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
 	return s.base.PresignedDownloadURL(ctx, key, expiry)
 }
@@ -1737,6 +1741,10 @@ func (s *countingObjectStorage) ObjectExists(ctx context.Context, key string) (b
 
 func (s *countingObjectStorage) PutObject(ctx context.Context, key, contentType string, data []byte) error {
 	return s.base.PutObject(ctx, key, contentType, data)
+}
+
+func (s *countingObjectStorage) DeleteObject(ctx context.Context, key string) error {
+	return s.base.DeleteObject(ctx, key)
 }
 
 func (s *countingObjectStorage) PresignedDownloadURL(ctx context.Context, key string, expiry time.Duration) (string, error) {

@@ -42,6 +42,8 @@ type textVideoGenerationResponse struct {
 
 var textVideoPollerLock sync.Mutex
 
+const textVideoDownloadURLExpiry = 2 * time.Hour
+
 func (s *Server) StartBackground(ctx context.Context) {
 	s.textVideoPollerOnce.Do(func() {
 		go s.runTextVideoPoller(ctx)
@@ -214,6 +216,34 @@ func (s *Server) getTextVideo(response http.ResponseWriter, request *http.Reques
 	s.writeJSON(response, http.StatusOK, generation)
 }
 
+func (s *Server) deleteTextVideo(response http.ResponseWriter, request *http.Request, generationID string) {
+	user, ok := s.authenticate(response, request)
+	if !ok {
+		return
+	}
+	generation, err := s.Store.GetTextVideoGeneration(request.Context(), user.ID, generationID)
+	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	if generation.S3Key != "" && s.ObjectStorage != nil {
+		if err := s.ObjectStorage.DeleteObject(request.Context(), generation.S3Key); err != nil {
+			s.internalError(response, err, "delete text video object")
+			return
+		}
+	}
+	if err := s.Store.DeleteTextVideoGeneration(request.Context(), user.ID, generation.ID); err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	if !models.IsTerminalTextVideoStatus(generation.Status) && s.Credits != nil {
+		if _, err := s.Credits.ReleaseByReference(request.Context(), user.ID, models.CreditActionCreateVideo, "text_video", generation.ID); err != nil {
+			s.Logger.Warn("release deleted text video credits failed", "generation_id", generation.ID, "error", err)
+		}
+	}
+	s.writeJSON(response, http.StatusOK, map[string]bool{"deleted": true})
+}
+
 func (s *Server) advanceTextVideo(ctx context.Context, generation models.TextVideoGeneration) error {
 	textVideoPollerLock.Lock()
 	defer textVideoPollerLock.Unlock()
@@ -221,7 +251,7 @@ func (s *Server) advanceTextVideo(ctx context.Context, generation models.TextVid
 		return nil
 	}
 	if strings.TrimSpace(s.VideoProviderAPIKey) == "" || strings.TrimSpace(s.VideoProviderBaseURL) == "" {
-		_, _ = s.Store.UpdateTextVideoGeneration(ctx, generation.ID, "", models.TextVideoStatusFailed, generation.Progress, "", "video generation is not configured")
+		_, _ = s.Store.UpdateTextVideoGeneration(ctx, generation.ID, "", models.TextVideoStatusFailed, generation.Progress, "", "", "video generation is not configured")
 		_, _ = s.Credits.ReleaseByReference(ctx, generation.UserID, models.CreditActionCreateVideo, "text_video", generation.ID)
 		return nil
 	}
@@ -251,7 +281,7 @@ func (s *Server) advanceTextVideo(ctx context.Context, generation models.TextVid
 	if err != nil {
 		// Provider/network outages are retryable. The persisted job remains active
 		// so a later poll can safely retry the same create request by idempotency key.
-		_, _ = s.Store.UpdateTextVideoGeneration(ctx, generation.ID, generation.ProviderTaskID, generation.Status, generation.Progress, "", "")
+		_, _ = s.Store.UpdateTextVideoGeneration(ctx, generation.ID, generation.ProviderTaskID, generation.Status, generation.Progress, "", "", "")
 		return nil
 	}
 	defer response.Body.Close()
@@ -263,24 +293,44 @@ func (s *Server) advanceTextVideo(ctx context.Context, generation models.TextVid
 		if response.StatusCode == http.StatusRequestTimeout ||
 			response.StatusCode == http.StatusTooManyRequests ||
 			response.StatusCode >= http.StatusInternalServerError {
-			_, _ = s.Store.UpdateTextVideoGeneration(ctx, generation.ID, generation.ProviderTaskID, generation.Status, generation.Progress, "", "")
+			_, _ = s.Store.UpdateTextVideoGeneration(ctx, generation.ID, generation.ProviderTaskID, generation.Status, generation.Progress, "", "", "")
 			return nil
 		}
-		_, _ = s.Store.UpdateTextVideoGeneration(ctx, generation.ID, "", models.TextVideoStatusFailed, generation.Progress, "", "video provider request failed")
+		_, _ = s.Store.UpdateTextVideoGeneration(ctx, generation.ID, "", models.TextVideoStatusFailed, generation.Progress, "", "", "video provider request failed")
 		_, _ = s.Credits.ReleaseByReference(ctx, generation.UserID, models.CreditActionCreateVideo, "text_video", generation.ID)
 		return nil
 	}
 	status := decodeProviderVideoStatus(responseData)
 	if status.videoURL != "" {
 		videoURL := normalizeProviderVideoURL(s.VideoProviderBaseURL, status.videoURL)
-		_, err = s.Store.UpdateTextVideoGeneration(ctx, generation.ID, status.taskID, models.TextVideoStatusCompleted, 1, videoURL, "")
+		s3Key := ""
+		if s.ObjectStorage != nil {
+			videoData, contentType, downloadErr := s.downloadProviderVideo(ctx, videoURL)
+			if downloadErr != nil {
+				// Keep the job active so the next poll can retry both the provider
+				// fetch and the S3 upload without charging the user twice.
+				_, _ = s.Store.UpdateTextVideoGeneration(ctx, generation.ID, status.taskID, models.TextVideoStatusRunning, generation.Progress, videoURL, "", "")
+				return nil
+			}
+			s3Key = textVideoS3Key(generation.UserID, generation.ID)
+			if uploadErr := s.ObjectStorage.PutObject(ctx, s3Key, contentType, videoData); uploadErr != nil {
+				_, _ = s.Store.UpdateTextVideoGeneration(ctx, generation.ID, status.taskID, models.TextVideoStatusRunning, generation.Progress, videoURL, "", "")
+				return nil
+			}
+		}
+		_, err = s.Store.UpdateTextVideoGeneration(ctx, generation.ID, status.taskID, models.TextVideoStatusCompleted, 1, videoURL, s3Key, "")
+		if err != nil && s3Key != "" && s.ObjectStorage != nil {
+			if cleanupErr := s.ObjectStorage.DeleteObject(ctx, s3Key); cleanupErr != nil {
+				s.Logger.Warn("cleanup orphaned text video object failed", "generation_id", generation.ID, "s3_key", s3Key, "error", cleanupErr)
+			}
+		}
 		if err == nil {
 			_, _ = s.Credits.CommitByReference(ctx, generation.UserID, models.CreditActionCreateVideo, "text_video", generation.ID)
 		}
 		return err
 	}
 	if status.failed {
-		_, _ = s.Store.UpdateTextVideoGeneration(ctx, generation.ID, status.taskID, models.TextVideoStatusFailed, generation.Progress, "", "Video generation failed. Try a different prompt.")
+		_, _ = s.Store.UpdateTextVideoGeneration(ctx, generation.ID, status.taskID, models.TextVideoStatusFailed, generation.Progress, "", "", "Video generation failed. Try a different prompt.")
 		_, _ = s.Credits.ReleaseByReference(ctx, generation.UserID, models.CreditActionCreateVideo, "text_video", generation.ID)
 		return nil
 	}
@@ -288,7 +338,7 @@ func (s *Server) advanceTextVideo(ctx context.Context, generation models.TextVid
 	if status.status == "queued" || status.status == "pending" {
 		nextStatus = models.TextVideoStatusQueued
 	}
-	_, err = s.Store.UpdateTextVideoGeneration(ctx, generation.ID, status.taskID, nextStatus, status.progress, "", "")
+	_, err = s.Store.UpdateTextVideoGeneration(ctx, generation.ID, status.taskID, nextStatus, status.progress, "", "", "")
 	return err
 }
 
@@ -306,11 +356,24 @@ func (s *Server) getTextVideoContent(response http.ResponseWriter, request *http
 		s.internalError(response, err, "get text video content")
 		return
 	}
-	if generation.Status != models.TextVideoStatusCompleted || strings.TrimSpace(generation.VideoURL) == "" {
+	if generation.Status != models.TextVideoStatusCompleted {
 		s.writeError(response, http.StatusConflict, "text_video_not_ready", "the generated video is not ready")
 		return
 	}
 
+	if generation.S3Key != "" && s.ObjectStorage != nil {
+		downloadURL, err := s.ObjectStorage.PresignedDownloadURL(request.Context(), generation.S3Key, textVideoDownloadURLExpiry)
+		if err != nil {
+			s.internalError(response, err, "presign text video content")
+			return
+		}
+		http.Redirect(response, request, downloadURL, http.StatusTemporaryRedirect)
+		return
+	}
+	if strings.TrimSpace(generation.VideoURL) == "" {
+		s.writeError(response, http.StatusConflict, "text_video_not_ready", "the generated video is not ready")
+		return
+	}
 	videoURL, err := resolveProviderVideoURL(s.VideoProviderBaseURL, generation.VideoURL)
 	if err != nil {
 		s.internalError(response, err, "resolve text video content url")
@@ -353,6 +416,45 @@ func (s *Server) getTextVideoContent(response http.ResponseWriter, request *http
 	if _, err := io.Copy(response, upstreamResponse.Body); err != nil {
 		s.Logger.Error("copy text video content", "generation_id", generationID, "error", err)
 	}
+}
+
+func (s *Server) downloadProviderVideo(ctx context.Context, videoURL string) ([]byte, string, error) {
+	providerRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, videoURL, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	providerRequest.Header.Set("Accept", "video/*,application/octet-stream")
+	if providerBaseURL := strings.TrimSpace(s.VideoProviderBaseURL); providerBaseURL != "" {
+		base, parseErr := url.Parse(providerBaseURL)
+		if parseErr == nil && strings.EqualFold(providerRequest.URL.Host, base.Host) {
+			providerRequest.Header.Set("Authorization", "Bearer "+s.VideoProviderAPIKey)
+		}
+	}
+	client := s.VideoProviderHTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	providerResponse, err := client.Do(providerRequest)
+	if err != nil {
+		return nil, "", err
+	}
+	defer providerResponse.Body.Close()
+	if providerResponse.StatusCode < http.StatusOK || providerResponse.StatusCode >= http.StatusMultipleChoices {
+		return nil, "", fmt.Errorf("provider video download returned status %d", providerResponse.StatusCode)
+	}
+	data, err := io.ReadAll(providerResponse.Body)
+	if err != nil {
+		return nil, "", err
+	}
+	contentType := providerResponse.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "video/mp4"
+	}
+	return data, contentType, nil
+}
+
+func textVideoS3Key(userID, generationID string) string {
+	return fmt.Sprintf("users/%s/text-videos/%s.mp4", userID, generationID)
 }
 
 func (s *Server) videoProviderRequestContext(ctx context.Context, method, endpoint string, body []byte, idempotencyKey string) (*http.Response, error) {

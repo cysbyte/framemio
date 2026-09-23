@@ -45,7 +45,8 @@ type Store interface {
 	GetTextVideoGeneration(ctx context.Context, userID, generationID string) (models.TextVideoGeneration, error)
 	ListTextVideoGenerations(ctx context.Context, userID string) ([]models.TextVideoGeneration, error)
 	ListActiveTextVideoGenerations(ctx context.Context, limit int) ([]models.TextVideoGeneration, error)
-	UpdateTextVideoGeneration(ctx context.Context, generationID string, providerTaskID string, status models.TextVideoStatus, progress float64, videoURL, errorMessage string) (models.TextVideoGeneration, error)
+	UpdateTextVideoGeneration(ctx context.Context, generationID string, providerTaskID string, status models.TextVideoStatus, progress float64, videoURL, s3Key, errorMessage string) (models.TextVideoGeneration, error)
+	DeleteTextVideoGeneration(ctx context.Context, userID, generationID string) error
 	SaveAnalysis(ctx context.Context, userID string, analysis models.MediaAnalysis) error
 	SaveVideoAnalysis(ctx context.Context, userID string, analysis models.VideoAnalysis) error
 	GetVideoAnalysis(ctx context.Context, userID, videoID, analysisVersion string) (models.VideoAnalysis, error)

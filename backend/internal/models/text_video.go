@@ -27,6 +27,7 @@ type TextVideoGeneration struct {
 	Status         TextVideoStatus `json:"status"`
 	Progress       float64         `json:"progress"`
 	VideoURL       string          `json:"video_url,omitempty"`
+	S3Key          string          `json:"s3_key,omitempty"`
 	ErrorMessage   string          `json:"error_message,omitempty"`
 	CreatedAt      time.Time       `json:"created_at"`
 	UpdatedAt      time.Time       `json:"updated_at"`

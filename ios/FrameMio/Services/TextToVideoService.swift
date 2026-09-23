@@ -83,6 +83,15 @@ final class RemoteTextToVideoService: TextToVideoService, @unchecked Sendable {
         }
     }
 
+    func delete(generationID: String) async throws {
+        _ = try await apiClient.data(
+            for: APIRequest(
+                method: .delete,
+                path: "/v1/text-videos/\(Self.percentEncodedPathComponent(generationID))"
+            )
+        )
+    }
+
     private static func percentEncodedPathComponent(_ value: String) -> String {
         value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
     }
@@ -127,5 +136,9 @@ final actor MockTextToVideoService: TextToVideoService {
             throw AppError.invalidResponse
         }
         return videoURL
+    }
+
+    func delete(generationID: String) async throws {
+        generations.removeAll { $0.id == generationID }
     }
 }

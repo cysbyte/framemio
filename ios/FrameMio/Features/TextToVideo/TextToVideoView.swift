@@ -13,8 +13,13 @@ struct TextToVideoView: View {
     @State private var resolution = TextVideoResolutionOption.sevenTwenty
     @State private var aspectRatio = TextVideoAspectRatioOption.nineSixteen
     @State private var isGenerating = false
-    @State private var statusText: String?
+    @State private var isSubmittingGeneration = false
     @State private var generations: [TextVideoGeneration] = []
+    @State private var activeGeneration: TextVideoGeneration?
+    @State private var pendingPrompt: String?
+    @State private var pendingDuration: Int?
+    @State private var pendingResolution: String?
+    @State private var pendingAspectRatio: String?
     @State private var errorMessage: String?
     @State private var creditCost: Int
     @State private var isCheckingCredits = false
@@ -38,7 +43,6 @@ struct TextToVideoView: View {
         self.promptTranscriptionService = promptTranscriptionService
         self.onOpenPricing = onOpenPricing
         self.onCreditsUpdated = onCreditsUpdated
-        _prompt = State(initialValue: "")
         _creditCost = State(initialValue: CreditPricing.price(for: .createVideo))
     }
 
@@ -51,9 +55,11 @@ struct TextToVideoView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: FrameMioSpacing.xl) {
+                if isGenerating {
+                    generatingVideoSection
+                }
                 promptSection
                 settingsSection
-                generationStatusSection
                 historySection
             }
             .padding(.horizontal, FrameMioSpacing.lg)
@@ -87,6 +93,52 @@ struct TextToVideoView: View {
             }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
+        }
+    }
+
+    private var generatingVideoSection: some View {
+        let progress = activeGeneration.map { max(0, min(1, $0.progress)) }
+
+        return VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            HStack(spacing: FrameMioSpacing.sm) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Generating video")
+                    .font(FrameMioTypography.headline)
+                    .foregroundStyle(FrameMioColors.ink)
+                Spacer(minLength: FrameMioSpacing.sm)
+                Text(progress.map { "\(Int($0 * 100))%" } ?? "Preparing")
+                    .font(FrameMioTypography.footnote)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+            }
+
+            Text(activeGeneration?.prompt ?? pendingPrompt ?? prompt)
+                .font(FrameMioTypography.body)
+                .foregroundStyle(FrameMioColors.ink)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+
+            FrameMioProgressView(
+                value: progress,
+                title: activeGeneration?.status == .queued ? "Queued" : "FrameMio is creating your video"
+            )
+
+            Text(
+                "\(activeGeneration?.seconds ?? pendingDuration ?? duration.seconds)s · " +
+                "\(activeGeneration?.resolution ?? pendingResolution ?? resolution.rawValue) · " +
+                "\(activeGeneration?.aspectRatio ?? pendingAspectRatio ?? aspectRatio.rawValue)"
+            )
+                .font(FrameMioTypography.caption)
+                .foregroundStyle(FrameMioColors.secondaryInk)
+        }
+        .padding(FrameMioSpacing.lg)
+        .background(
+            FrameMioColors.surface.opacity(0.92),
+            in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous)
+                .stroke(FrameMioColors.accent.opacity(0.4), lineWidth: FrameMioMetrics.borderWidth)
         }
     }
 
@@ -127,13 +179,11 @@ struct TextToVideoView: View {
                     Text(option.title).tag(option)
                 }
             }
-
             settingPicker(title: "Resolution", selection: $resolution) {
                 ForEach(TextVideoResolutionOption.allCases) { option in
                     Text(option.title).tag(option)
                 }
             }
-
             settingPicker(title: "Aspect ratio", selection: $aspectRatio) {
                 ForEach(TextVideoAspectRatioOption.allCases) { option in
                     Text(option.title).tag(option)
@@ -161,9 +211,7 @@ struct TextToVideoView: View {
             Text(title)
                 .font(FrameMioTypography.body)
                 .foregroundStyle(FrameMioColors.ink)
-
             Spacer(minLength: FrameMioSpacing.sm)
-
             Picker(title, selection: selection, content: content)
                 .pickerStyle(.menu)
                 .tint(FrameMioColors.accent)
@@ -171,37 +219,36 @@ struct TextToVideoView: View {
         .frame(minHeight: FrameMioMetrics.minimumTouchTarget)
     }
 
-    private var generationStatusSection: some View {
-        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            if let statusText {
-                HStack(spacing: FrameMioSpacing.sm) {
-                    if isGenerating {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
-                    Text(statusText)
-                        .font(FrameMioTypography.footnote)
-                        .foregroundStyle(FrameMioColors.secondaryInk)
-                }
-            }
-        }
-        .onTapGesture(perform: dismissKeyboard)
-    }
-
     private var historySection: some View {
-        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            Text("Generated videos")
-                .font(FrameMioTypography.headline)
-                .foregroundStyle(FrameMioColors.ink)
+        let history = generations.filter { $0.status == .completed || $0.status == .failed }
 
-            if generations.isEmpty {
-                Text("Your generated videos will appear here.")
-                    .font(FrameMioTypography.footnote)
-                    .foregroundStyle(FrameMioColors.secondaryInk)
+        return VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            SectionHeader(
+                title: "Generated videos",
+                subtitle: history.isEmpty ? nil : "\(history.count) \(history.count == 1 ? "video" : "videos")"
+            )
+
+            if history.isEmpty {
+                EmptyState(
+                    systemImage: "film.stack",
+                    title: "No generated videos yet",
+                    message: "Your finished videos will appear here."
+                )
             } else {
                 LazyVStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-                    ForEach(generations) { generation in
-                        TextVideoGenerationRow(generation: generation, service: service)
+                    ForEach(history) { generation in
+                        NavigationLink {
+                            TextVideoDetailView(
+                                generation: generation,
+                                service: service,
+                                onDeleted: {
+                                    Task { await refreshGenerations() }
+                                }
+                            )
+                        } label: {
+                            TextVideoHistoryRow(generation: generation)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -241,13 +288,9 @@ struct TextToVideoView: View {
         guard let creditService else { return }
         do {
             let quote = try await creditService.quote(action: .createVideo, stats: CreditMediaStats())
-            await MainActor.run {
-                creditCost = quote.credits
-            }
+            await MainActor.run { creditCost = quote.credits }
         } catch is CancellationError {
-            // The initial quote is best-effort; the Generate action retries it before creating a video.
         } catch {
-            // Keep the configured default price visible when the quote service is temporarily unavailable.
         }
     }
 
@@ -283,21 +326,33 @@ struct TextToVideoView: View {
     private func generate() {
         guard !isGenerating else { return }
         isGenerating = true
+        isSubmittingGeneration = true
+        activeGeneration = nil
+        pendingPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        pendingDuration = duration.seconds
+        pendingResolution = resolution.rawValue
+        pendingAspectRatio = aspectRatio.rawValue
         errorMessage = nil
-        statusText = "Preparing your video..."
 
-        let requestPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requestPrompt = pendingPrompt ?? ""
+        let requestDuration = pendingDuration ?? duration.seconds
+        let requestResolution = pendingResolution ?? resolution.rawValue
+        let requestAspectRatio = pendingAspectRatio ?? aspectRatio.rawValue
         Task {
             do {
-                _ = try await service.create(
+                let created = try await service.create(
                     prompt: requestPrompt,
-                    duration: duration.seconds,
-                    resolution: resolution.rawValue,
-                    aspectRatio: aspectRatio.rawValue
+                    duration: requestDuration,
+                    resolution: requestResolution,
+                    aspectRatio: requestAspectRatio
                 )
                 await MainActor.run {
-                    statusText = "Your video is being generated. You can keep using this screen."
-                    isGenerating = false
+                    isSubmittingGeneration = false
+                    activeGeneration = created.status == .queued || created.status == .running ? created : nil
+                    isGenerating = created.status == .queued || created.status == .running
+                    if !isGenerating {
+                        clearPendingGeneration()
+                    }
                     onCreditsUpdated?()
                 }
                 await refreshGenerations()
@@ -306,13 +361,17 @@ struct TextToVideoView: View {
                 }
             } catch is CancellationError {
                 await MainActor.run {
+                    isSubmittingGeneration = false
                     isGenerating = false
-                    statusText = nil
+                    activeGeneration = nil
+                    clearPendingGeneration()
                 }
             } catch {
                 await MainActor.run {
+                    isSubmittingGeneration = false
                     isGenerating = false
-                    statusText = nil
+                    activeGeneration = nil
+                    clearPendingGeneration()
                     let appError = AppError.from(error)
                     if case .insufficientCredits = appError {
                         onOpenPricing(.insufficientCredits)
@@ -336,19 +395,17 @@ struct TextToVideoView: View {
             let latest = try await service.list()
             await MainActor.run {
                 generations = latest
-                if latest.contains(where: { $0.status == .queued || $0.status == .running }) {
-                    if !isGenerating {
-                        statusText = "Your video is being generated..."
-                    }
-                } else if !isGenerating &&
-                            (statusText == "Your video is being generated..." ||
-                             statusText == "Your video is being generated. You can keep using this screen.") {
-                    statusText = nil
+                if let active = latest.first(where: { $0.status == .queued || $0.status == .running }) {
+                    activeGeneration = active
+                    isGenerating = true
+                } else if !isSubmittingGeneration {
+                    activeGeneration = nil
+                    isGenerating = false
+                    clearPendingGeneration()
                 }
             }
         } catch is CancellationError {
         } catch {
-            // History refresh is best-effort while the view is open.
         }
     }
 
@@ -358,131 +415,179 @@ struct TextToVideoView: View {
             set: { if !$0 { errorMessage = nil } }
         )
     }
+
+    private func clearPendingGeneration() {
+        pendingPrompt = nil
+        pendingDuration = nil
+        pendingResolution = nil
+        pendingAspectRatio = nil
+    }
 }
 
-private struct TextVideoGenerationRow: View {
+private struct TextVideoHistoryRow: View {
     let generation: TextVideoGeneration
-    let service: TextToVideoService
-
-    @State private var playableURL: URL?
-    @State private var isLoadingContent = false
-    @State private var contentError: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            Text(generation.prompt)
-                .font(FrameMioTypography.body)
-                .foregroundStyle(FrameMioColors.ink)
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
-
-            switch generation.status {
-            case .queued, .running:
-                generationPlaceholder
-            case .completed:
-                if let playableURL {
-                    StoryVideoPlayer(
-                        url: playableURL,
-                        autoplays: false,
-                        accessibilityTitle: "Generated video"
-                    )
-                    .aspectRatio(videoAspectRatio, contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.medium, style: .continuous))
-                } else {
-                    generationPlaceholder
-                }
-            case .failed:
-                Label(
-                    generation.errorMessage ?? "Video generation failed.",
-                    systemImage: "exclamationmark.triangle"
-                )
-                .font(FrameMioTypography.footnote)
-                .foregroundStyle(FrameMioColors.secondaryInk)
+        HStack(spacing: FrameMioSpacing.md) {
+            ZStack {
+                RoundedRectangle(cornerRadius: FrameMioRadius.medium, style: .continuous)
+                    .fill(FrameMioColors.canvas)
+                Image(systemName: generation.status == .completed ? "play.fill" : "exclamationmark.triangle")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(generation.status == .failed ? .red : FrameMioColors.accent)
             }
+            .frame(width: 92, height: 116)
 
-            HStack(spacing: FrameMioSpacing.sm) {
-                Text(statusTitle)
+            VStack(alignment: .leading, spacing: FrameMioSpacing.xs) {
+                Text(generation.prompt)
+                    .font(FrameMioTypography.headline)
+                    .foregroundStyle(FrameMioColors.ink)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(generation.status == .completed ? "Ready to play" : "Generation failed")
                     .font(FrameMioTypography.footnote)
-                    .foregroundStyle(FrameMioColors.secondaryInk)
-
-                Spacer(minLength: FrameMioSpacing.sm)
-
+                    .foregroundStyle(generation.status == .failed ? .red : FrameMioColors.secondaryInk)
                 Text("\(generation.seconds)s · \(generation.resolution) · \(generation.aspectRatio)")
                     .font(FrameMioTypography.caption)
                     .foregroundStyle(FrameMioColors.secondaryInk)
                     .lineLimit(1)
+                Text(generation.createdAt.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))
+                    .font(FrameMioTypography.caption)
+                    .foregroundStyle(FrameMioColors.tertiaryInk)
+                    .lineLimit(1)
             }
+
+            Spacer(minLength: FrameMioSpacing.xs)
+            Image(systemName: "chevron.right")
+                .font(FrameMioTypography.caption.weight(.semibold))
+                .foregroundStyle(FrameMioColors.tertiaryInk)
         }
-        .padding(FrameMioSpacing.lg)
+        .padding(FrameMioSpacing.md)
         .background(
-            FrameMioColors.surface.opacity(0.9),
-            in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous)
+            FrameMioColors.surface.opacity(0.86),
+            in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
         )
         .overlay {
-            RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous)
-                .stroke(FrameMioColors.divider.opacity(0.72), lineWidth: FrameMioMetrics.borderWidth)
+            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
         }
-        .task(id: "\(generation.id)-\(generation.updatedAt.timeIntervalSince1970)-\(generation.status.rawValue)") {
+        .frameMioElevation(.subtle)
+    }
+}
+
+private struct TextVideoDetailView: View {
+    let generation: TextVideoGeneration
+    let service: TextToVideoService
+    let onDeleted: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var playableURL: URL?
+    @State private var isLoadingContent = false
+    @State private var errorMessage: String?
+    @State private var isShowingDeleteConfirmation = false
+    @State private var isDeleting = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: FrameMioSpacing.xl) {
+                if generation.status == .completed, let playableURL {
+                    StoryVideoPlayer(
+                        url: playableURL,
+                        autoplays: true,
+                        accessibilityTitle: "Generated video"
+                    )
+                    .aspectRatio(videoAspectRatio, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
+                } else {
+                    detailPlaceholder
+                }
+
+                VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+                    Text("Prompt")
+                        .font(FrameMioTypography.title)
+                        .foregroundStyle(FrameMioColors.ink)
+                    Text(generation.prompt)
+                        .font(FrameMioTypography.body)
+                        .foregroundStyle(FrameMioColors.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
+                    Text("Video settings")
+                        .font(FrameMioTypography.title)
+                        .foregroundStyle(FrameMioColors.ink)
+                    Text("\(generation.seconds) seconds · \(generation.resolution) · \(generation.aspectRatio)")
+                        .font(FrameMioTypography.body)
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                    Text("Created \(generation.createdAt.formatted(.dateTime.month(.wide).day().year().hour().minute()))")
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(FrameMioColors.tertiaryInk)
+                }
+
+                Button(role: .destructive) {
+                    isShowingDeleteConfirmation = true
+                } label: {
+                    Label(
+                        isDeleting ? "Deleting..." : "Delete video",
+                        systemImage: isDeleting ? "hourglass" : "trash"
+                    )
+                    .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.compactButtonHeight)
+                }
+                .buttonStyle(FrameMioPressButtonStyle())
+                .disabled(isDeleting)
+            }
+            .padding(.horizontal, FrameMioSpacing.lg)
+            .padding(.top, FrameMioSpacing.lg)
+            .padding(.bottom, FrameMioSpacing.xxxl)
+        }
+        .background(FrameMioColors.canvas.ignoresSafeArea())
+        .navigationTitle("Generated Video")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
             guard generation.status == .completed, playableURL == nil else { return }
             isLoadingContent = true
-            contentError = nil
             defer { isLoadingContent = false }
             do {
                 playableURL = try await service.downloadContent(for: generation.id)
             } catch is CancellationError {
             } catch {
-                contentError = AppError.from(error).localizedDescription
+                errorMessage = AppError.from(error).localizedDescription
             }
+        }
+        .alert("Couldn’t load video", isPresented: errorBinding) {
+            Button("Dismiss", role: .cancel) { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
+        .alert("Delete video?", isPresented: $isShowingDeleteConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                deleteVideo()
+            }
+        } message: {
+            Text("This permanently removes the generated video from FrameMio.")
         }
     }
 
-    private var generationPlaceholder: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: FrameMioRadius.medium, style: .continuous)
-                .fill(FrameMioColors.canvas)
-
-            VStack(spacing: FrameMioSpacing.sm) {
-                if isLoadingContent || generation.status == .queued || generation.status == .running {
-                    ProgressView(value: max(0, min(1, generation.progress)))
-                        .progressViewStyle(.circular)
-                }
-                Text(placeholderTitle)
-                    .font(FrameMioTypography.footnote)
-                    .foregroundStyle(FrameMioColors.secondaryInk)
-                if let contentError {
-                    Text(contentError)
-                        .font(FrameMioTypography.caption)
-                        .foregroundStyle(FrameMioColors.secondaryInk)
-                        .multilineTextAlignment(.center)
-                }
+    private var detailPlaceholder: some View {
+        VStack(spacing: FrameMioSpacing.md) {
+            if isLoadingContent {
+                ProgressView()
+            } else {
+                Image(systemName: generation.status == .failed ? "exclamationmark.triangle" : "film")
+                    .font(.title2)
+                    .foregroundStyle(generation.status == .failed ? .red : FrameMioColors.accent)
             }
-            .padding(FrameMioSpacing.lg)
+            Text(generation.status == .failed ? (generation.errorMessage ?? "Generation failed") : "Loading video...")
+                .font(FrameMioTypography.body)
+                .foregroundStyle(FrameMioColors.secondaryInk)
         }
+        .frame(maxWidth: .infinity)
         .aspectRatio(videoAspectRatio, contentMode: .fit)
-    }
-
-    private var placeholderTitle: String {
-        switch generation.status {
-        case .queued:
-            "Queued"
-        case .running:
-            generation.progress > 0
-                ? "Generating \(Int(generation.progress * 100))%"
-                : "Generating..."
-        case .completed:
-            "Loading video..."
-        case .failed:
-            "Generation failed"
-        }
-    }
-
-    private var statusTitle: String {
-        switch generation.status {
-        case .queued: "Queued"
-        case .running: "Generating"
-        case .completed: "Ready"
-        case .failed: "Failed"
-        }
+        .background(
+            FrameMioColors.surface,
+            in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+        )
     }
 
     private var videoAspectRatio: CGFloat {
@@ -495,6 +600,35 @@ private struct TextVideoGenerationRow: View {
             return 9.0 / 16.0
         }
         return width / height
+    }
+
+    private var errorBinding: Binding<Bool> {
+        Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )
+    }
+
+    private func deleteVideo() {
+        guard !isDeleting else { return }
+        isDeleting = true
+        Task {
+            do {
+                try await service.delete(generationID: generation.id)
+                await MainActor.run {
+                    FrameMioHaptics.success()
+                    onDeleted()
+                    dismiss()
+                }
+            } catch is CancellationError {
+                await MainActor.run { isDeleting = false }
+            } catch {
+                await MainActor.run {
+                    isDeleting = false
+                    errorMessage = AppError.from(error).localizedDescription
+                }
+            }
+        }
     }
 }
 
@@ -522,7 +656,6 @@ private struct TextToVideoSamplePromptsSheet: View {
                                 .padding(.vertical, FrameMioSpacing.lg)
                         }
                         .buttonStyle(.plain)
-
                         if index < prompts.count - 1 {
                             Divider()
                                 .overlay(FrameMioColors.divider.opacity(0.72))
@@ -536,9 +669,7 @@ private struct TextToVideoSamplePromptsSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
+                    Button("Cancel") { dismiss() }
                 }
             }
         }

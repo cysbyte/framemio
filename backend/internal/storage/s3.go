@@ -43,6 +43,7 @@ type ObjectStorage interface {
 	AbortUpload(ctx context.Context, session models.UploadSession) error
 	ObjectExists(ctx context.Context, key string) (bool, error)
 	PutObject(ctx context.Context, key, contentType string, data []byte) error
+	DeleteObject(ctx context.Context, key string) error
 	PresignedDownloadURL(ctx context.Context, key string, expiry time.Duration) (string, error)
 }
 
@@ -331,6 +332,20 @@ func (s *S3ObjectStorage) PutObject(ctx context.Context, key, contentType string
 	return nil
 }
 
+func (s *S3ObjectStorage) DeleteObject(ctx context.Context, key string) error {
+	if key == "" {
+		return nil
+	}
+	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return fmt.Errorf("delete s3 object: %w", err)
+	}
+	return nil
+}
+
 // PresignedDownloadURL grants temporary read access to one object. Rendered
 // films are played directly by the device, so the bytes never pass through the
 // API. When a CDN base URL is configured, the returned read URL uses that CDN
@@ -454,6 +469,10 @@ func (s StaticObjectStorage) ObjectExists(_ context.Context, _ string) (bool, er
 }
 
 func (s StaticObjectStorage) PutObject(_ context.Context, _ string, _ string, _ []byte) error {
+	return nil
+}
+
+func (s StaticObjectStorage) DeleteObject(_ context.Context, _ string) error {
 	return nil
 }
 

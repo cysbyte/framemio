@@ -621,7 +621,7 @@ func (s *MemoryStore) ListActiveTextVideoGenerations(_ context.Context, limit in
 	return generations, nil
 }
 
-func (s *MemoryStore) UpdateTextVideoGeneration(_ context.Context, generationID string, providerTaskID string, status models.TextVideoStatus, progress float64, videoURL, errorMessage string) (models.TextVideoGeneration, error) {
+func (s *MemoryStore) UpdateTextVideoGeneration(_ context.Context, generationID string, providerTaskID string, status models.TextVideoStatus, progress float64, videoURL, s3Key, errorMessage string) (models.TextVideoGeneration, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	generation, ok := s.textVideoGenerations[generationID]
@@ -642,6 +642,9 @@ func (s *MemoryStore) UpdateTextVideoGeneration(_ context.Context, generationID 
 	if videoURL != "" {
 		generation.VideoURL = videoURL
 	}
+	if s3Key != "" {
+		generation.S3Key = s3Key
+	}
 	generation.ErrorMessage = errorMessage
 	generation.UpdatedAt = now
 	generation.NextPollAt = now.Add(2 * time.Second)
@@ -654,6 +657,25 @@ func (s *MemoryStore) UpdateTextVideoGeneration(_ context.Context, generationID 
 	}
 	s.textVideoGenerations[generationID] = generation
 	return generation, nil
+}
+
+func (s *MemoryStore) DeleteTextVideoGeneration(_ context.Context, userID, generationID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	generation, ok := s.textVideoGenerations[generationID]
+	if !ok {
+		return ErrNotFound
+	}
+	if generation.UserID != userID {
+		return ErrInvalidOwner
+	}
+	delete(s.textVideoGenerations, generationID)
+	for key, existingID := range s.textVideoByIdem {
+		if existingID == generationID {
+			delete(s.textVideoByIdem, key)
+		}
+	}
+	return nil
 }
 
 func (s *MemoryStore) SaveAnalysis(_ context.Context, userID string, analysis models.MediaAnalysis) error {

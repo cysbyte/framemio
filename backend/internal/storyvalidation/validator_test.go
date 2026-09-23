@@ -44,6 +44,10 @@ func (s testObjectStorage) PutObject(context.Context, string, string, []byte) er
 	return nil
 }
 
+func (s testObjectStorage) DeleteObject(context.Context, string) error {
+	return nil
+}
+
 func TestValidateStoryPlanAcceptsValidPlan(t *testing.T) {
 	t.Parallel()
 	validator, plan := validStoryPlanFixture(t)

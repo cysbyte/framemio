@@ -198,6 +198,7 @@ protocol TextToVideoService: Sendable {
     ) async throws -> TextVideoGeneration
     func list() async throws -> [TextVideoGeneration]
     func downloadContent(for generationID: String) async throws -> URL
+    func delete(generationID: String) async throws
 }
 
 enum TextVideoGenerationStatus: String, Codable, Hashable, Sendable {

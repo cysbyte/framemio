@@ -201,6 +201,10 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 			s.getTextVideoContent(response, request, parts[2])
 			return
 		}
+		if len(parts) == 3 && request.Method == http.MethodDelete {
+			s.deleteTextVideo(response, request, parts[2])
+			return
+		}
 		if len(parts) == 3 && request.Method == http.MethodGet {
 			s.getTextVideo(response, request, parts[2])
 			return
