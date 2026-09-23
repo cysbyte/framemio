@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct TextToVideoView: View {
     let service: TextToVideoService
@@ -7,17 +8,23 @@ struct TextToVideoView: View {
     let onOpenPricing: (PricingEntryPoint) -> Void
     let onCreditsUpdated: (() -> Void)?
 
-    @Environment(\.openURL) private var openURL
     @State private var prompt = ""
     @State private var duration = TextVideoDurationOption.five
     @State private var resolution = TextVideoResolutionOption.sevenTwenty
     @State private var aspectRatio = TextVideoAspectRatioOption.nineSixteen
     @State private var isGenerating = false
     @State private var statusText: String?
-    @State private var generatedVideoURL: URL?
+    @State private var generations: [TextVideoGeneration] = []
     @State private var errorMessage: String?
     @State private var creditCost: Int
     @State private var isCheckingCredits = false
+    @State private var isShowingSamplePrompts = false
+
+    private let samplePrompts = [
+        "A cinematic vertical video of a small sailboat gliding across calm turquoise water at sunrise, soft golden light reflecting on the waves, gentle ocean mist, smooth aerial camera movement, realistic details, peaceful and inspiring mood, natural colors, no text or logos.",
+        "A cozy cabin in a snowy forest at blue hour, warm light glowing through the windows, smoke rising from the chimney, slow push-in camera movement, soft snowfall, cinematic realism, peaceful winter atmosphere, no text or logos.",
+        "A bustling night market in Tokyo after rain, colorful neon reflections on wet pavement, people moving through food stalls, smooth handheld camera movement, vibrant cinematic lighting, realistic details, no text or logos."
+    ]
 
     init(
         service: TextToVideoService,
@@ -31,6 +38,7 @@ struct TextToVideoView: View {
         self.promptTranscriptionService = promptTranscriptionService
         self.onOpenPricing = onOpenPricing
         self.onCreditsUpdated = onCreditsUpdated
+        _prompt = State(initialValue: "")
         _creditCost = State(initialValue: CreditPricing.price(for: .createVideo))
     }
 
@@ -43,38 +51,42 @@ struct TextToVideoView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: FrameMioSpacing.xl) {
-                header
                 promptSection
                 settingsSection
                 generationStatusSection
+                historySection
             }
             .padding(.horizontal, FrameMioSpacing.lg)
             .padding(.top, FrameMioSpacing.lg)
             .padding(.bottom, FrameMioSpacing.xxxl)
+            .background {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: dismissKeyboard)
+            }
         }
         .background(FrameMioColors.canvas.ignoresSafeArea())
         .navigationTitle("Text to Video")
         .navigationBarTitleDisplayMode(.inline)
-        .scrollDismissesKeyboard(.interactively)
+        .scrollDismissesKeyboard(.immediately)
         .safeAreaInset(edge: .bottom) {
             fixedGenerateButton
         }
         .task {
             await refreshCreditQuote()
+            await refreshGenerationHistoryLoop()
         }
         .alert("Couldn’t generate video", isPresented: errorBinding) {
             Button("Dismiss", role: .cancel) { errorMessage = nil }
         } message: {
             Text(errorMessage ?? "")
         }
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: FrameMioSpacing.xs) {
-            Text("Write a scene, mood, or story and FrameMio will turn it into a short video.")
-                .font(FrameMioTypography.body)
-                .foregroundStyle(FrameMioColors.secondaryInk)
-                .fixedSize(horizontal: false, vertical: true)
+        .sheet(isPresented: $isShowingSamplePrompts) {
+            TextToVideoSamplePromptsSheet(prompts: samplePrompts) { samplePrompt in
+                prompt = samplePrompt
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
     }
 
@@ -86,7 +98,21 @@ struct TextToVideoView: View {
             quickPrompts: [],
             prompt: $prompt,
             promptTranscriptionService: promptTranscriptionService,
-            transcriptLogContext: "text_to_video"
+            transcriptLogContext: "text_to_video",
+            showsHeader: false,
+            inputMinHeight: 180,
+            promptActions: AnyView(
+                Button {
+                    FrameMioHaptics.secondaryAction()
+                    dismissKeyboard()
+                    isShowingSamplePrompts = true
+                } label: {
+                    Label("Sample Prompt", systemImage: "text.quote")
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(FrameMioColors.accent)
+                }
+                .buttonStyle(.borderless)
+            )
         )
     }
 
@@ -114,6 +140,7 @@ struct TextToVideoView: View {
                 }
             }
         }
+        .onTapGesture(perform: dismissKeyboard)
         .padding(FrameMioSpacing.lg)
         .background(
             FrameMioColors.surface.opacity(0.9),
@@ -148,26 +175,38 @@ struct TextToVideoView: View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
             if let statusText {
                 HStack(spacing: FrameMioSpacing.sm) {
-                    ProgressView()
-                        .controlSize(.small)
+                    if isGenerating {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
                     Text(statusText)
                         .font(FrameMioTypography.footnote)
                         .foregroundStyle(FrameMioColors.secondaryInk)
                 }
             }
+        }
+        .onTapGesture(perform: dismissKeyboard)
+    }
 
-            if let generatedVideoURL {
-                Button {
-                    openURL(generatedVideoURL)
-                } label: {
-                    Label("Open generated video", systemImage: "play.rectangle")
-                        .font(FrameMioTypography.headline)
-                        .foregroundStyle(FrameMioColors.accent)
-                        .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.minimumTouchTarget)
+    private var historySection: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            Text("Generated videos")
+                .font(FrameMioTypography.headline)
+                .foregroundStyle(FrameMioColors.ink)
+
+            if generations.isEmpty {
+                Text("Your generated videos will appear here.")
+                    .font(FrameMioTypography.footnote)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+            } else {
+                LazyVStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+                    ForEach(generations) { generation in
+                        TextVideoGenerationRow(generation: generation, service: service)
+                    }
                 }
-                .buttonStyle(FrameMioPressButtonStyle())
             }
         }
+        .onTapGesture(perform: dismissKeyboard)
     }
 
     private var fixedGenerateButton: some View {
@@ -185,7 +224,17 @@ struct TextToVideoView: View {
             .padding(.top, FrameMioSpacing.md)
             .padding(.bottom, FrameMioSpacing.md)
             .background(FrameMioColors.canvas.opacity(0.96))
+            .onTapGesture(perform: dismissKeyboard)
         }
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
     }
 
     private func refreshCreditQuote() async {
@@ -195,12 +244,10 @@ struct TextToVideoView: View {
             await MainActor.run {
                 creditCost = quote.credits
             }
+        } catch is CancellationError {
+            // The initial quote is best-effort; the Generate action retries it before creating a video.
         } catch {
-            await MainActor.run {
-                if errorMessage == nil {
-                    errorMessage = AppError.from(error).localizedDescription
-                }
-            }
+            // Keep the configured default price visible when the quote service is temporarily unavailable.
         }
     }
 
@@ -236,30 +283,24 @@ struct TextToVideoView: View {
     private func generate() {
         guard !isGenerating else { return }
         isGenerating = true
-        generatedVideoURL = nil
         errorMessage = nil
         statusText = "Preparing your video..."
 
         let requestPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         Task {
             do {
-                let result = try await service.generate(
+                _ = try await service.create(
                     prompt: requestPrompt,
                     duration: duration.seconds,
                     resolution: resolution.rawValue,
-                    aspectRatio: aspectRatio.rawValue,
-                    progress: { update in
-                        Task { @MainActor in
-                            statusText = statusDescription(for: update)
-                        }
-                    }
+                    aspectRatio: aspectRatio.rawValue
                 )
                 await MainActor.run {
-                    generatedVideoURL = result.videoURL
-                    statusText = "Your video is ready."
+                    statusText = "Your video is being generated. You can keep using this screen."
                     isGenerating = false
                     onCreditsUpdated?()
                 }
+                await refreshGenerations()
                 if let creditService {
                     _ = try? await creditService.refreshBalance()
                 }
@@ -283,17 +324,31 @@ struct TextToVideoView: View {
         }
     }
 
-    private func statusDescription(for update: TextVideoGenerationStatus) -> String {
-        if let progress = update.progress, !progress.isEmpty {
-            return "Generating your video... \(progress)%"
+    private func refreshGenerationHistoryLoop() async {
+        while !Task.isCancelled {
+            await refreshGenerations()
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
         }
-        switch update.status {
-        case "queued", "pending":
-            return "Your video is queued..."
-        case "running", "processing", "in_progress":
-            return "Generating your video..."
-        default:
-            return "Checking video status..."
+    }
+
+    private func refreshGenerations() async {
+        do {
+            let latest = try await service.list()
+            await MainActor.run {
+                generations = latest
+                if latest.contains(where: { $0.status == .queued || $0.status == .running }) {
+                    if !isGenerating {
+                        statusText = "Your video is being generated..."
+                    }
+                } else if !isGenerating &&
+                            (statusText == "Your video is being generated..." ||
+                             statusText == "Your video is being generated. You can keep using this screen.") {
+                    statusText = nil
+                }
+            }
+        } catch is CancellationError {
+        } catch {
+            // History refresh is best-effort while the view is open.
         }
     }
 
@@ -302,6 +357,191 @@ struct TextToVideoView: View {
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
         )
+    }
+}
+
+private struct TextVideoGenerationRow: View {
+    let generation: TextVideoGeneration
+    let service: TextToVideoService
+
+    @State private var playableURL: URL?
+    @State private var isLoadingContent = false
+    @State private var contentError: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            Text(generation.prompt)
+                .font(FrameMioTypography.body)
+                .foregroundStyle(FrameMioColors.ink)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+
+            switch generation.status {
+            case .queued, .running:
+                generationPlaceholder
+            case .completed:
+                if let playableURL {
+                    StoryVideoPlayer(
+                        url: playableURL,
+                        autoplays: false,
+                        accessibilityTitle: "Generated video"
+                    )
+                    .aspectRatio(videoAspectRatio, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.medium, style: .continuous))
+                } else {
+                    generationPlaceholder
+                }
+            case .failed:
+                Label(
+                    generation.errorMessage ?? "Video generation failed.",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(FrameMioTypography.footnote)
+                .foregroundStyle(FrameMioColors.secondaryInk)
+            }
+
+            HStack(spacing: FrameMioSpacing.sm) {
+                Text(statusTitle)
+                    .font(FrameMioTypography.footnote)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+
+                Spacer(minLength: FrameMioSpacing.sm)
+
+                Text("\(generation.seconds)s · \(generation.resolution) · \(generation.aspectRatio)")
+                    .font(FrameMioTypography.caption)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+                    .lineLimit(1)
+            }
+        }
+        .padding(FrameMioSpacing.lg)
+        .background(
+            FrameMioColors.surface.opacity(0.9),
+            in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous)
+                .stroke(FrameMioColors.divider.opacity(0.72), lineWidth: FrameMioMetrics.borderWidth)
+        }
+        .task(id: "\(generation.id)-\(generation.updatedAt.timeIntervalSince1970)-\(generation.status.rawValue)") {
+            guard generation.status == .completed, playableURL == nil else { return }
+            isLoadingContent = true
+            contentError = nil
+            defer { isLoadingContent = false }
+            do {
+                playableURL = try await service.downloadContent(for: generation.id)
+            } catch is CancellationError {
+            } catch {
+                contentError = AppError.from(error).localizedDescription
+            }
+        }
+    }
+
+    private var generationPlaceholder: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: FrameMioRadius.medium, style: .continuous)
+                .fill(FrameMioColors.canvas)
+
+            VStack(spacing: FrameMioSpacing.sm) {
+                if isLoadingContent || generation.status == .queued || generation.status == .running {
+                    ProgressView(value: max(0, min(1, generation.progress)))
+                        .progressViewStyle(.circular)
+                }
+                Text(placeholderTitle)
+                    .font(FrameMioTypography.footnote)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
+                if let contentError {
+                    Text(contentError)
+                        .font(FrameMioTypography.caption)
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                        .multilineTextAlignment(.center)
+                }
+            }
+            .padding(FrameMioSpacing.lg)
+        }
+        .aspectRatio(videoAspectRatio, contentMode: .fit)
+    }
+
+    private var placeholderTitle: String {
+        switch generation.status {
+        case .queued:
+            "Queued"
+        case .running:
+            generation.progress > 0
+                ? "Generating \(Int(generation.progress * 100))%"
+                : "Generating..."
+        case .completed:
+            "Loading video..."
+        case .failed:
+            "Generation failed"
+        }
+    }
+
+    private var statusTitle: String {
+        switch generation.status {
+        case .queued: "Queued"
+        case .running: "Generating"
+        case .completed: "Ready"
+        case .failed: "Failed"
+        }
+    }
+
+    private var videoAspectRatio: CGFloat {
+        let parts = generation.aspectRatio.split(separator: ":")
+        guard parts.count == 2,
+              let width = Double(parts[0]),
+              let height = Double(parts[1]),
+              width > 0,
+              height > 0 else {
+            return 9.0 / 16.0
+        }
+        return width / height
+    }
+}
+
+private struct TextToVideoSamplePromptsSheet: View {
+    let prompts: [String]
+    let onSelect: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(prompts.enumerated()), id: \.element) { index, prompt in
+                        Button {
+                            onSelect(prompt)
+                            dismiss()
+                        } label: {
+                            Text(prompt)
+                                .font(FrameMioTypography.body)
+                                .foregroundStyle(FrameMioColors.ink)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, FrameMioSpacing.lg)
+                        }
+                        .buttonStyle(.plain)
+
+                        if index < prompts.count - 1 {
+                            Divider()
+                                .overlay(FrameMioColors.divider.opacity(0.72))
+                        }
+                    }
+                }
+                .padding(.horizontal, FrameMioSpacing.lg)
+            }
+            .background(FrameMioColors.canvas.ignoresSafeArea())
+            .navigationTitle("Sample Prompts")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
+        }
     }
 }
 

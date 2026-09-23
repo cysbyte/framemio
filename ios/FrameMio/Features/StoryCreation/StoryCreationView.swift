@@ -1,5 +1,6 @@
 import AVKit
 import SwiftUI
+import UIKit
 
 private func storyCreationViewDebugLog(_ message: @autoclosure () -> String) {
 #if DEBUG
@@ -511,6 +512,7 @@ struct StoryCreationView: View {
 }
 
 struct FrameMioPromptInputSection: View {
+    @Environment(\.openURL) private var openURL
     let title: String
     let subtitle: String
     let placeholder: String
@@ -518,26 +520,143 @@ struct FrameMioPromptInputSection: View {
     @Binding var prompt: String
     let promptTranscriptionService: PromptTranscriptionService?
     let transcriptLogContext: String
+    let showsHeader: Bool
+    let inputMinHeight: CGFloat?
+    let promptActions: AnyView?
+    @State private var isShowingMicrophoneSettingsAlert = false
     @StateObject private var voicePromptRecorder = VoicePromptRecorder()
 
-    private var promptGridColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: 140), spacing: FrameMioSpacing.sm, alignment: .leading)]
+    init(
+        title: String,
+        subtitle: String,
+        placeholder: String,
+        quickPrompts: [String],
+        prompt: Binding<String>,
+        promptTranscriptionService: PromptTranscriptionService?,
+        transcriptLogContext: String,
+        showsHeader: Bool = true,
+        inputMinHeight: CGFloat? = nil,
+        promptActions: AnyView? = nil
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.placeholder = placeholder
+        self.quickPrompts = quickPrompts
+        self._prompt = prompt
+        self.promptTranscriptionService = promptTranscriptionService
+        self.transcriptLogContext = transcriptLogContext
+        self.showsHeader = showsHeader
+        self.inputMinHeight = inputMinHeight
+        self.promptActions = promptActions
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            SectionHeader(title: title, subtitle: subtitle)
+            if showsHeader {
+                SectionHeader(title: title, subtitle: subtitle)
+            }
 
             if !quickPrompts.isEmpty {
-                LazyVGrid(columns: promptGridColumns, alignment: .leading, spacing: FrameMioSpacing.sm) {
+                VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
                     ForEach(quickPrompts, id: \.self) { suggestion in
                         suggestionChip(title: suggestion, isSelected: prompt == suggestion) {
                             prompt = suggestion
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             }
 
+            if let promptActions {
+                HStack(alignment: .center) {
+                    promptActions
+                    Spacer(minLength: FrameMioSpacing.sm)
+                    clearPromptButton
+                }
+            }
+
+            promptInput
+
+            if promptActions == nil {
+                HStack {
+                    Spacer()
+                    clearPromptButton
+                }
+            }
+
+            voicePromptControl
+                .onChange(of: voicePromptRecorder.currentTranscript) { _, transcript in
+                    let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        prompt = trimmed
+                        debugLog("voice prompt live transcript applied transcript_length=\(trimmed.count)")
+                    }
+            }
+        }
+        .overlay {
+            if voicePromptRecorder.isListening {
+                voicePromptListeningOverlay
+            }
+        }
+        .onChange(of: voicePromptRecorder.shouldOpenMicrophoneSettings) { _, shouldOpen in
+            guard shouldOpen else { return }
+            isShowingMicrophoneSettingsAlert = true
+            voicePromptRecorder.clearMicrophoneSettingsRequest()
+        }
+        .alert("Microphone Access Needed", isPresented: $isShowingMicrophoneSettingsAlert) {
+            Button("Open Settings") {
+                guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else { return }
+                openURL(settingsURL)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Microphone access is turned off for FrameMio. Enable it in Settings under Privacy & Security > Microphone.")
+        }
+        .onDisappear {
+            Task { await stopVoicePromptRecording() }
+        }
+    }
+
+    private var clearPromptButton: some View {
+        Button {
+            clearVoicePromptTranscript()
+        } label: {
+            Label("Clear prompt", systemImage: "trash")
+                .font(FrameMioTypography.footnote)
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(FrameMioColors.secondaryInk)
+        .disabled(isPromptClearDisabled)
+    }
+
+    @ViewBuilder
+    private var promptInput: some View {
+        if let inputMinHeight {
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $prompt)
+                    .font(FrameMioTypography.body)
+                    .foregroundStyle(FrameMioColors.ink)
+                    .scrollContentBackground(.hidden)
+                    .frame(maxWidth: .infinity, minHeight: inputMinHeight, alignment: .topLeading)
+                    .padding(FrameMioSpacing.md)
+
+                if prompt.isEmpty {
+                    Text(placeholder)
+                        .font(FrameMioTypography.body)
+                        .foregroundStyle(FrameMioColors.tertiaryInk)
+                        .padding(.horizontal, FrameMioSpacing.lg)
+                        .padding(.vertical, FrameMioSpacing.lg)
+                        .allowsHitTesting(false)
+                }
+            }
+            .frame(minHeight: inputMinHeight, alignment: .topLeading)
+            .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous)
+                    .stroke(FrameMioColors.divider.opacity(0.45), lineWidth: FrameMioMetrics.borderWidth)
+            }
+            .accessibilityLabel(title)
+        } else {
             TextField(placeholder, text: $prompt, axis: .vertical)
                 .lineLimit(2...4)
                 .font(FrameMioTypography.body)
@@ -548,36 +667,6 @@ struct FrameMioPromptInputSection: View {
                         .stroke(FrameMioColors.divider.opacity(0.45), lineWidth: FrameMioMetrics.borderWidth)
                 }
                 .accessibilityLabel(title)
-
-            HStack {
-                Spacer()
-                Button {
-                    clearVoicePromptTranscript()
-                } label: {
-                    Label("Clear transcript", systemImage: "trash")
-                        .font(FrameMioTypography.footnote)
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(FrameMioColors.secondaryInk)
-                .disabled(isPromptClearDisabled)
-            }
-
-            voicePromptControl
-                .onChange(of: voicePromptRecorder.currentTranscript) { _, transcript in
-                    let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmed.isEmpty {
-                        prompt = trimmed
-                        debugLog("voice prompt live transcript applied transcript_length=\(trimmed.count)")
-                    }
-                }
-        }
-        .overlay {
-            if voicePromptRecorder.isListening {
-                voicePromptListeningOverlay
-            }
-        }
-        .onDisappear {
-            Task { await stopVoicePromptRecording() }
         }
     }
 
@@ -589,7 +678,7 @@ struct FrameMioPromptInputSection: View {
             Text(title)
                 .font(FrameMioTypography.footnote)
                 .foregroundStyle(isSelected ? FrameMioColors.inverseInk : FrameMioColors.ink)
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(minHeight: FrameMioMetrics.compactButtonHeight)
                 .padding(.horizontal, FrameMioSpacing.sm)
                 .background(
@@ -829,16 +918,22 @@ private struct StoryGenerationOptionsSheet: View {
                     if supportsAny(["overlay_placement", "overlay_size", "overlay_opacity", "overlay_frame", "overlay_animation"]) {
                         overlaySection
                         optionDivider
-                    }
-
-                    promptSection
                 }
-                .padding(FrameMioSpacing.lg)
+
+                promptSection
             }
-            .background(FrameMioColors.canvas.ignoresSafeArea())
-            .navigationTitle(template.map { "Customize \($0.name)" } ?? "Customize Story")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
+            .padding(FrameMioSpacing.lg)
+            .background {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: dismissKeyboard)
+            }
+        }
+        .background(FrameMioColors.canvas.ignoresSafeArea())
+        .navigationTitle(template.map { "Customize \($0.name)" } ?? "Customize Story")
+        .navigationBarTitleDisplayMode(.inline)
+        .scrollDismissesKeyboard(.immediately)
+        .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         dismiss()
@@ -904,7 +999,17 @@ private struct StoryGenerationOptionsSheet: View {
                 set: { options.instruction = $0 }
             ),
             promptTranscriptionService: promptTranscriptionService,
-            transcriptLogContext: "StoryGenerationOptionsSheet"
+            transcriptLogContext: "StoryGenerationOptionsSheet",
+            inputMinHeight: 180
+        )
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
         )
     }
 

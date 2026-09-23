@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/framemio/backend/internal/credits"
@@ -46,6 +47,8 @@ type Server struct {
 	VideoProviderBaseURL    string
 	VideoProviderAPIKey     string
 	VideoProviderHTTPClient *http.Client
+	textVideoPollerOnce     sync.Once
+	textVideoPollerWake     chan struct{}
 }
 
 func NewServer(dependencies Server) *Server {
@@ -69,6 +72,9 @@ func NewServer(dependencies Server) *Server {
 	}
 	if dependencies.PromptTranscriber == nil {
 		dependencies.PromptTranscriber = NewDeepgramPromptTranscriberFromEnv()
+	}
+	if dependencies.textVideoPollerWake == nil {
+		dependencies.textVideoPollerWake = make(chan struct{}, 1)
 	}
 	return &dependencies
 }
@@ -173,6 +179,30 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 	if request.URL.Path == "/v1/videos" {
 		if request.Method == http.MethodPost {
 			s.createVideo(response, request)
+			return
+		}
+		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if request.URL.Path == "/v1/text-videos" {
+		switch request.Method {
+		case http.MethodPost:
+			s.createTextVideo(response, request)
+		case http.MethodGet:
+			s.listTextVideos(response, request)
+		default:
+			s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		}
+		return
+	}
+	if strings.HasPrefix(request.URL.Path, "/v1/text-videos/") {
+		parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
+		if len(parts) == 4 && parts[3] == "content" && request.Method == http.MethodGet {
+			s.getTextVideoContent(response, request, parts[2])
+			return
+		}
+		if len(parts) == 3 && request.Method == http.MethodGet {
+			s.getTextVideo(response, request, parts[2])
 			return
 		}
 		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")

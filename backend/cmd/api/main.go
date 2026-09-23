@@ -97,6 +97,7 @@ func main() {
 		VideoProviderAPIKey:  configuration.VideoProviderAPIKey,
 		Logger:               logger,
 	})
+	application.StartBackground(ctx)
 	httpServer := &http.Server{
 		Addr:              ":" + configuration.Port,
 		Handler:           application.Handler(),

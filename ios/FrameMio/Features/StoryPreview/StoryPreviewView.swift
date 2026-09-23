@@ -1054,6 +1054,7 @@ private struct MomentDetailSheet: View {
 
 private struct EditStorySheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     let story: Story
     let moments: [StoryMomentPresentation]
     let availableMoments: [StoryMomentPresentation]
@@ -1074,6 +1075,7 @@ private struct EditStorySheet: View {
     @State private var selectedMoment: StoryMomentPresentation?
     @State private var replacingMoment: StoryMomentPresentation?
     @State private var isShowingAddMoment = false
+    @State private var isShowingMicrophoneSettingsAlert = false
     @State private var importedMoments: [StoryMomentPresentation] = []
     @State private var draggedMomentAssetID: String?
     @StateObject private var voicePromptRecorder = VoicePromptRecorder()
@@ -1243,15 +1245,34 @@ private struct EditStorySheet: View {
                     timelineSection
                     addMomentButton
                     editorControlsSection
-                    aiActionSection
                 }
                 .padding(FrameMioSpacing.lg)
+                .background {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture(perform: dismissKeyboard)
+                }
             }
             .background(FrameMioColors.canvas.ignoresSafeArea())
+            .scrollDismissesKeyboard(.immediately)
+            .onChange(of: voicePromptRecorder.shouldOpenMicrophoneSettings) { _, shouldOpen in
+                guard shouldOpen else { return }
+                isShowingMicrophoneSettingsAlert = true
+                voicePromptRecorder.clearMicrophoneSettingsRequest()
+            }
             .overlay {
                 if voicePromptRecorder.isListening {
                     voicePromptListeningOverlay
                 }
+            }
+            .alert("Microphone Access Needed", isPresented: $isShowingMicrophoneSettingsAlert) {
+                Button("Open Settings") {
+                    guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else { return }
+                    openURL(settingsURL)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Microphone access is turned off for FrameMio. Enable it in Settings under Privacy & Security > Microphone.")
             }
             .navigationTitle(configuration.title)
             .navigationBarTitleDisplayMode(.inline)
@@ -1354,6 +1375,15 @@ private struct EditStorySheet: View {
                 .presentationDragIndicator(.visible)
             }
         }
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
     }
 
     private var failedState: some View {
@@ -1488,6 +1518,8 @@ private struct EditStorySheet: View {
     private var editorControlsSection: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
             SectionHeader(title: "Project settings", subtitle: settingsSubtitle)
+            aiPromptSection
+            editControlDivider
             styleSection
             if configuration.showsSceneDetailControl {
                 editControlDivider
@@ -1513,6 +1545,8 @@ private struct EditStorySheet: View {
             }
             editControlDivider
             lengthSection
+            editControlDivider
+            aiRegenerateButton
         }
         .padding(FrameMioSpacing.lg)
         .background(FrameMioColors.surface.opacity(0.54), in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
@@ -1730,7 +1764,7 @@ private struct EditStorySheet: View {
         }
     }
 
-    private var aiActionSection: some View {
+    private var aiPromptSection: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
             SectionHeader(title: configuration.aiSectionTitle, subtitle: configuration.aiSectionSubtitle)
             Text("This will use \(draft.regenerationCreditCost(for: configuration)) credits.")
@@ -1741,20 +1775,35 @@ private struct EditStorySheet: View {
                     .font(FrameMioTypography.footnote)
                     .foregroundStyle(FrameMioColors.secondaryInk)
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: FrameMioSpacing.sm)], spacing: FrameMioSpacing.sm) {
+            VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
                 ForEach(configuration.aiSuggestions, id: \.self) { prompt in
                     optionChip(title: prompt, isSelected: draft.instruction == prompt) {
                         draft.instruction = prompt
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            TextField(configuration.aiPromptPlaceholder, text: Binding(
-                get: { draft.instruction ?? "" },
-                set: { draft.instruction = $0 }
-            ), axis: .vertical)
-            .lineLimit(2...4)
-            .font(FrameMioTypography.body)
-            .padding(FrameMioSpacing.md)
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: Binding(
+                    get: { draft.instruction ?? "" },
+                    set: { draft.instruction = $0 }
+                ))
+                .font(FrameMioTypography.body)
+                .foregroundStyle(FrameMioColors.ink)
+                .scrollContentBackground(.hidden)
+                .frame(maxWidth: .infinity, minHeight: 180, alignment: .topLeading)
+                .padding(FrameMioSpacing.md)
+
+                if (draft.instruction ?? "").isEmpty {
+                    Text(configuration.aiPromptPlaceholder)
+                        .font(FrameMioTypography.body)
+                        .foregroundStyle(FrameMioColors.tertiaryInk)
+                        .padding(.horizontal, FrameMioSpacing.lg)
+                        .padding(.vertical, FrameMioSpacing.lg)
+                        .allowsHitTesting(false)
+                }
+            }
+            .frame(minHeight: 180, alignment: .topLeading)
             .background(FrameMioColors.surface.opacity(0.78), in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous))
             .accessibilityLabel("AI edit instruction")
             HStack {
@@ -1762,7 +1811,7 @@ private struct EditStorySheet: View {
                 Button {
                     clearVoicePromptTranscript()
                 } label: {
-                    Label("Clear transcript", systemImage: "trash")
+                    Label("Clear prompt", systemImage: "trash")
                         .font(FrameMioTypography.footnote)
                 }
                 .buttonStyle(.borderless)
@@ -1777,16 +1826,19 @@ private struct EditStorySheet: View {
                         storyPreviewUIDebugLog("voice prompt live transcript applied transcript_length=\(trimmed.count)")
                     }
             }
-            PrimaryButton(title: "\(configuration.primaryAIButtonTitle) (\(draft.regenerationCreditCost(for: configuration)) credits)", systemImage: "sparkles") {
-                let request = draft.request(for: configuration)
-                storyPreviewUIDebugLog("edit sheet regenerate tapped type=\(configuration.type.rawValue) has_changes=\(request.hasChanges) added=\(draft.addedMediaIDs.sorted().joined(separator: ",")) ordered=\(draft.orderedMediaIDs.joined(separator: ",")) visible=\(displayedMoments.map(\.assetID).joined(separator: ",")) scene_detail=\(draft.sceneDetailStyle ?? "balanced") required_credits=\(draft.regenerationCreditCost(for: configuration))")
-                Task {
-                    await stopVoicePromptRecording()
-                    onRegenerate(draft.request(for: configuration))
-                }
-            }
-            .disabled(isPerformingAction || !draft.hasChanges(for: configuration))
         }
+    }
+
+    private var aiRegenerateButton: some View {
+        PrimaryButton(title: "\(configuration.primaryAIButtonTitle) (\(draft.regenerationCreditCost(for: configuration)) credits)", systemImage: "sparkles") {
+            let request = draft.request(for: configuration)
+            storyPreviewUIDebugLog("edit sheet regenerate tapped type=\(configuration.type.rawValue) has_changes=\(request.hasChanges) added=\(draft.addedMediaIDs.sorted().joined(separator: ",")) ordered=\(draft.orderedMediaIDs.joined(separator: ",")) visible=\(displayedMoments.map(\.assetID).joined(separator: ",")) scene_detail=\(draft.sceneDetailStyle ?? "balanced") required_credits=\(draft.regenerationCreditCost(for: configuration))")
+            Task {
+                await stopVoicePromptRecording()
+                onRegenerate(draft.request(for: configuration))
+            }
+        }
+        .disabled(isPerformingAction || !draft.hasChanges(for: configuration))
     }
 
     private var voicePromptControl: some View {
@@ -3149,6 +3201,7 @@ final class VoicePromptRecorder: ObservableObject {
     @Published private(set) var isTranscribing = false
     @Published private(set) var currentTranscript = ""
     @Published private(set) var didAutoStopForSilence = false
+    @Published private(set) var shouldOpenMicrophoneSettings = false
 
     var isListening: Bool {
         isPreparing || isRecording
@@ -3170,6 +3223,7 @@ final class VoicePromptRecorder: ObservableObject {
     func startRecording(using service: PromptTranscriptionService) async {
         guard !isRecording, !isPreparing, !isTranscribing else { return }
         isPreparing = true
+        shouldOpenMicrophoneSettings = false
         stopRequestedAfterStart = false
         isEndingLiveTranscription = false
         errorMessage = nil
@@ -3179,7 +3233,7 @@ final class VoicePromptRecorder: ObservableObject {
         interimTranscript = ""
         guard await requestRecordPermission() else {
             isPreparing = false
-            errorMessage = "Microphone access is needed for voice prompts."
+            errorMessage = "Microphone access is turned off for voice prompts."
             return
         }
 
@@ -3265,6 +3319,10 @@ final class VoicePromptRecorder: ObservableObject {
         interimTranscript = ""
         errorMessage = nil
         didAutoStopForSilence = false
+    }
+
+    func clearMicrophoneSettingsRequest() {
+        shouldOpenMicrophoneSettings = false
     }
 
     private func cleanupActiveRecording() {
@@ -3389,7 +3447,22 @@ final class VoicePromptRecorder: ObservableObject {
     }
 
     private func requestRecordPermission() async -> Bool {
-        await AVAudioApplication.requestRecordPermission()
+        switch AVAudioApplication.shared.recordPermission {
+        case .granted:
+            return true
+        case .denied:
+            shouldOpenMicrophoneSettings = true
+            return false
+        case .undetermined:
+            let granted = await AVAudioApplication.requestRecordPermission()
+            if !granted {
+                shouldOpenMicrophoneSettings = true
+            }
+            return granted
+        @unknown default:
+            shouldOpenMicrophoneSettings = true
+            return false
+        }
     }
 
     nonisolated private static func linearPCMData(from buffer: AVAudioPCMBuffer) -> Data? {

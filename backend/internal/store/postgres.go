@@ -710,6 +710,151 @@ func (s *PostgresStore) ListProjectJobs(ctx context.Context, userID, projectID s
 	return jobs, rows.Err()
 }
 
+func (s *PostgresStore) CreateTextVideoGeneration(ctx context.Context, generation models.TextVideoGeneration, idempotencyKey string) (models.TextVideoGeneration, bool, error) {
+	if idempotencyKey != "" {
+		var existing models.TextVideoGeneration
+		if err := s.getByLogical(ctx, "text_video", generation.UserID, idempotencyKey, &existing); err == nil {
+			return existing, true, nil
+		}
+	}
+	inserted, err := s.put(ctx, "text_video", generation.ID, generation.UserID, "", "", idempotencyKey, generation)
+	if err != nil {
+		return models.TextVideoGeneration{}, false, err
+	}
+	if !inserted {
+		var existing models.TextVideoGeneration
+		if err := s.getByLogical(ctx, "text_video", generation.UserID, idempotencyKey, &existing); err == nil {
+			return existing, true, nil
+		}
+		return models.TextVideoGeneration{}, false, ErrConflict
+	}
+	return generation, false, nil
+}
+
+func (s *PostgresStore) GetTextVideoGenerationByIdempotency(ctx context.Context, userID, idempotencyKey string) (models.TextVideoGeneration, error) {
+	var generation models.TextVideoGeneration
+	if err := s.getByLogical(ctx, "text_video", userID, idempotencyKey, &generation); err != nil {
+		return models.TextVideoGeneration{}, err
+	}
+	return generation, nil
+}
+
+func (s *PostgresStore) GetTextVideoGeneration(ctx context.Context, userID, generationID string) (models.TextVideoGeneration, error) {
+	var generation models.TextVideoGeneration
+	if err := s.get(ctx, "text_video", userID, generationID, &generation); err != nil {
+		return models.TextVideoGeneration{}, err
+	}
+	return generation, nil
+}
+
+func (s *PostgresStore) ListTextVideoGenerations(ctx context.Context, userID string) ([]models.TextVideoGeneration, error) {
+	rows, err := s.pool.Query(ctx, `SELECT data FROM framemio_domain_records WHERE kind='text_video' AND user_id=$1 ORDER BY created_at DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list text video generations: %w", err)
+	}
+	defer rows.Close()
+	generations := make([]models.TextVideoGeneration, 0)
+	for rows.Next() {
+		var data []byte
+		if err := rows.Scan(&data); err != nil {
+			return nil, err
+		}
+		var generation models.TextVideoGeneration
+		if err := json.Unmarshal(data, &generation); err != nil {
+			return nil, err
+		}
+		generations = append(generations, generation)
+	}
+	return generations, rows.Err()
+}
+
+func (s *PostgresStore) ListActiveTextVideoGenerations(ctx context.Context, limit int) ([]models.TextVideoGeneration, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT data
+		FROM framemio_domain_records
+		WHERE kind='text_video'
+		  AND (data->>'status' IS NULL OR data->>'status' NOT IN ('completed', 'failed'))
+		  AND (NULLIF(data->>'next_poll_at', '') IS NULL OR (NULLIF(data->>'next_poll_at', ''))::timestamptz <= NOW())
+		ORDER BY created_at
+		LIMIT $1`, max(1, limit))
+	if err != nil {
+		return nil, fmt.Errorf("list active text video generations: %w", err)
+	}
+	defer rows.Close()
+	generations := make([]models.TextVideoGeneration, 0)
+	for rows.Next() {
+		var data []byte
+		if err := rows.Scan(&data); err != nil {
+			return nil, err
+		}
+		var generation models.TextVideoGeneration
+		if err := json.Unmarshal(data, &generation); err != nil {
+			return nil, err
+		}
+		generations = append(generations, generation)
+	}
+	return generations, rows.Err()
+}
+
+func (s *PostgresStore) UpdateTextVideoGeneration(ctx context.Context, generationID string, providerTaskID string, status models.TextVideoStatus, progress float64, videoURL, errorMessage string) (models.TextVideoGeneration, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return models.TextVideoGeneration{}, fmt.Errorf("begin text video update: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var generation models.TextVideoGeneration
+	var data []byte
+	if err := tx.QueryRow(ctx, `SELECT data FROM framemio_domain_records WHERE kind='text_video' AND id=$1 FOR UPDATE`, generationID).Scan(&data); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return models.TextVideoGeneration{}, ErrNotFound
+		}
+		return models.TextVideoGeneration{}, err
+	}
+	if err := json.Unmarshal(data, &generation); err != nil {
+		return models.TextVideoGeneration{}, err
+	}
+	if models.IsTerminalTextVideoStatus(generation.Status) {
+		return generation, nil
+	}
+	now := time.Now().UTC()
+	if providerTaskID != "" {
+		generation.ProviderTaskID = providerTaskID
+	}
+	if status != "" {
+		generation.Status = status
+	}
+	generation.Progress = max(generation.Progress, max(0, min(1, progress)))
+	if videoURL != "" {
+		generation.VideoURL = videoURL
+	}
+	generation.ErrorMessage = errorMessage
+	generation.UpdatedAt = now
+	generation.NextPollAt = now.Add(2 * time.Second)
+	if models.IsTerminalTextVideoStatus(generation.Status) {
+		generation.CompletedAt = &now
+		generation.NextPollAt = time.Time{}
+		if generation.Status == models.TextVideoStatusCompleted {
+			generation.Progress = 1
+		}
+	}
+	encoded, err := json.Marshal(generation)
+	if err != nil {
+		return models.TextVideoGeneration{}, err
+	}
+	result, err := tx.Exec(ctx, `UPDATE framemio_domain_records SET data=$1,updated_at=$2 WHERE kind='text_video' AND id=$3`, jsonbParam(encoded), now, generationID)
+	if err != nil {
+		return models.TextVideoGeneration{}, err
+	}
+	if result.RowsAffected() != 1 {
+		return models.TextVideoGeneration{}, ErrNotFound
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return models.TextVideoGeneration{}, fmt.Errorf("commit text video update: %w", err)
+	}
+	return generation, nil
+}
+
 const domainRecordsMigration = `
 CREATE TABLE IF NOT EXISTS framemio_domain_records (
     kind TEXT NOT NULL,

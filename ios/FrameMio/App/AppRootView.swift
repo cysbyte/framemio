@@ -1190,10 +1190,16 @@ private struct ProjectTemplateSettingsSheet: View {
                     promptSection
                 }
                 .padding(FrameMioSpacing.lg)
+                .background {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture(perform: dismissKeyboard)
+                }
             }
             .background(FrameMioColors.canvas.ignoresSafeArea())
             .navigationTitle("Customize \(template.name)")
             .navigationBarTitleDisplayMode(.inline)
+            .scrollDismissesKeyboard(.immediately)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
@@ -1424,7 +1430,17 @@ private struct ProjectTemplateSettingsSheet: View {
             quickPrompts: templatePromptSuggestions,
             prompt: $prompt,
             promptTranscriptionService: promptTranscriptionService,
-            transcriptLogContext: "ProjectTemplateSettingsSheet"
+            transcriptLogContext: "ProjectTemplateSettingsSheet",
+            inputMinHeight: 180
+        )
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
         )
     }
 

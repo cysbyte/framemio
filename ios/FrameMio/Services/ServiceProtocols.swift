@@ -190,25 +190,53 @@ protocol PromptTranscriptionService: Sendable {
 }
 
 protocol TextToVideoService: Sendable {
-    func generate(
+    func create(
         prompt: String,
         duration: Int,
         resolution: String,
-        aspectRatio: String,
-        progress: (@Sendable (TextVideoGenerationStatus) -> Void)?
-    ) async throws -> TextVideoGenerationResult
+        aspectRatio: String
+    ) async throws -> TextVideoGeneration
+    func list() async throws -> [TextVideoGeneration]
+    func downloadContent(for generationID: String) async throws -> URL
 }
 
-struct TextVideoGenerationStatus: Sendable, Hashable {
-    let taskID: String?
-    let status: String
-    let progress: String?
-    let videoURL: URL?
+enum TextVideoGenerationStatus: String, Codable, Hashable, Sendable {
+    case queued
+    case running
+    case completed
+    case failed
 }
 
-struct TextVideoGenerationResult: Sendable, Hashable {
-    let taskID: String
-    let videoURL: URL
+struct TextVideoGeneration: Codable, Identifiable, Hashable, Sendable {
+    let id: String
+    let providerTaskID: String?
+    let prompt: String
+    let seconds: Int
+    let resolution: String
+    let aspectRatio: String
+    let status: TextVideoGenerationStatus
+    let progress: Double
+    let videoURL: String?
+    let errorMessage: String?
+    let createdAt: Date
+    let updatedAt: Date
+    let completedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case providerTaskID = "provider_task_id"
+        case prompt
+        case seconds
+        case resolution
+        case aspectRatio = "aspect_ratio"
+        case status
+        case progress
+        case videoURL = "video_url"
+        case errorMessage = "error_message"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+        case completedAt = "completed_at"
+    }
 }
 
 enum CreditAction: String, Codable, Hashable, Sendable {

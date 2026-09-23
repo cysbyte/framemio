@@ -247,6 +247,10 @@ struct HomeView: View {
                 )
             }
 
+            Divider()
+                .overlay(FrameMioColors.secondaryInk.opacity(0.42))
+                .padding(.vertical, 2)
+
             ForEach(VideoProjectType.allCases, id: \.self) { type in
                 ProjectTypeAction(type: type) {
                     onCreateProject(draft(for: type))

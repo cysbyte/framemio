@@ -24,6 +24,8 @@ type MemoryStore struct {
 	analyses                     map[string]models.MediaAnalysis
 	videoAnalyses                map[string]models.VideoAnalysis
 	storyPlans                   map[string]models.StoryPlan
+	textVideoGenerations         map[string]models.TextVideoGeneration
+	textVideoByIdem              map[string]string
 	creditAccounts               map[string]models.CreditBalance
 	creditGrants                 map[string]models.CreditGrant
 	creditReservations           map[string]models.CreditReservation
@@ -34,17 +36,19 @@ type MemoryStore struct {
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		users:         make(map[string]models.User),
-		media:         make(map[string]models.MediaAsset),
-		uploads:       make(map[string]models.UploadSession),
-		uploadByIdem:  make(map[string]string),
-		projects:      make(map[string]models.VideoProject),
-		projectByIdem: make(map[string]string),
-		jobs:          make(map[string]models.ProcessingJob),
-		jobByIdem:     make(map[string]string),
-		analyses:      make(map[string]models.MediaAnalysis),
-		videoAnalyses: make(map[string]models.VideoAnalysis),
-		storyPlans:    make(map[string]models.StoryPlan),
+		users:                make(map[string]models.User),
+		media:                make(map[string]models.MediaAsset),
+		uploads:              make(map[string]models.UploadSession),
+		uploadByIdem:         make(map[string]string),
+		projects:             make(map[string]models.VideoProject),
+		projectByIdem:        make(map[string]string),
+		jobs:                 make(map[string]models.ProcessingJob),
+		jobByIdem:            make(map[string]string),
+		analyses:             make(map[string]models.MediaAnalysis),
+		videoAnalyses:        make(map[string]models.VideoAnalysis),
+		storyPlans:           make(map[string]models.StoryPlan),
+		textVideoGenerations: make(map[string]models.TextVideoGeneration),
+		textVideoByIdem:      make(map[string]string),
 	}
 }
 
@@ -534,6 +538,122 @@ func (s *MemoryStore) ListProjectJobs(_ context.Context, userID, projectID strin
 		return left.CreatedAt.Compare(right.CreatedAt)
 	})
 	return jobs, nil
+}
+
+func (s *MemoryStore) CreateTextVideoGeneration(_ context.Context, generation models.TextVideoGeneration, idempotencyKey string) (models.TextVideoGeneration, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := generation.UserID + "\x00" + idempotencyKey
+	if idempotencyKey != "" {
+		if existingID, ok := s.textVideoByIdem[key]; ok {
+			return s.textVideoGenerations[existingID], true, nil
+		}
+	}
+	if _, ok := s.textVideoGenerations[generation.ID]; ok {
+		return models.TextVideoGeneration{}, false, ErrConflict
+	}
+	s.textVideoGenerations[generation.ID] = generation
+	if idempotencyKey != "" {
+		s.textVideoByIdem[key] = generation.ID
+	}
+	return generation, false, nil
+}
+
+func (s *MemoryStore) GetTextVideoGenerationByIdempotency(_ context.Context, userID, idempotencyKey string) (models.TextVideoGeneration, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	id, ok := s.textVideoByIdem[userID+"\x00"+idempotencyKey]
+	if !ok {
+		return models.TextVideoGeneration{}, ErrNotFound
+	}
+	generation, ok := s.textVideoGenerations[id]
+	if !ok || generation.UserID != userID {
+		return models.TextVideoGeneration{}, ErrNotFound
+	}
+	return generation, nil
+}
+
+func (s *MemoryStore) GetTextVideoGeneration(_ context.Context, userID, generationID string) (models.TextVideoGeneration, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	generation, ok := s.textVideoGenerations[generationID]
+	if !ok {
+		return models.TextVideoGeneration{}, ErrNotFound
+	}
+	if generation.UserID != userID {
+		return models.TextVideoGeneration{}, ErrInvalidOwner
+	}
+	return generation, nil
+}
+
+func (s *MemoryStore) ListTextVideoGenerations(_ context.Context, userID string) ([]models.TextVideoGeneration, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	generations := make([]models.TextVideoGeneration, 0)
+	for _, generation := range s.textVideoGenerations {
+		if generation.UserID == userID {
+			generations = append(generations, generation)
+		}
+	}
+	slices.SortFunc(generations, func(left, right models.TextVideoGeneration) int {
+		return right.CreatedAt.Compare(left.CreatedAt)
+	})
+	return generations, nil
+}
+
+func (s *MemoryStore) ListActiveTextVideoGenerations(_ context.Context, limit int) ([]models.TextVideoGeneration, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	now := time.Now().UTC()
+	generations := make([]models.TextVideoGeneration, 0)
+	for _, generation := range s.textVideoGenerations {
+		if models.IsTerminalTextVideoStatus(generation.Status) || generation.NextPollAt.After(now) {
+			continue
+		}
+		generations = append(generations, generation)
+	}
+	slices.SortFunc(generations, func(left, right models.TextVideoGeneration) int {
+		return left.NextPollAt.Compare(right.NextPollAt)
+	})
+	if limit > 0 && len(generations) > limit {
+		generations = generations[:limit]
+	}
+	return generations, nil
+}
+
+func (s *MemoryStore) UpdateTextVideoGeneration(_ context.Context, generationID string, providerTaskID string, status models.TextVideoStatus, progress float64, videoURL, errorMessage string) (models.TextVideoGeneration, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	generation, ok := s.textVideoGenerations[generationID]
+	if !ok {
+		return models.TextVideoGeneration{}, ErrNotFound
+	}
+	if models.IsTerminalTextVideoStatus(generation.Status) {
+		return generation, nil
+	}
+	now := time.Now().UTC()
+	if providerTaskID != "" {
+		generation.ProviderTaskID = providerTaskID
+	}
+	if status != "" {
+		generation.Status = status
+	}
+	generation.Progress = max(generation.Progress, max(0, min(1, progress)))
+	if videoURL != "" {
+		generation.VideoURL = videoURL
+	}
+	generation.ErrorMessage = errorMessage
+	generation.UpdatedAt = now
+	generation.NextPollAt = now.Add(2 * time.Second)
+	if models.IsTerminalTextVideoStatus(generation.Status) {
+		generation.CompletedAt = &now
+		generation.NextPollAt = time.Time{}
+		if generation.Status == models.TextVideoStatusCompleted {
+			generation.Progress = 1
+		}
+	}
+	s.textVideoGenerations[generationID] = generation
+	return generation, nil
 }
 
 func (s *MemoryStore) SaveAnalysis(_ context.Context, userID string, analysis models.MediaAnalysis) error {

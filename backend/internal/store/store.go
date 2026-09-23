@@ -40,6 +40,12 @@ type Store interface {
 	UpdateJob(ctx context.Context, jobID string, status models.JobStatus, progress float64, errorCode, errorMessage, artifactS3Key, artifactType string) (models.ProcessingJob, error)
 	RetryJob(ctx context.Context, jobID string, nextRunAt time.Time, errorCode, errorMessage string) (models.ProcessingJob, error)
 	ListProjectJobs(ctx context.Context, userID, projectID string) ([]models.ProcessingJob, error)
+	CreateTextVideoGeneration(ctx context.Context, generation models.TextVideoGeneration, idempotencyKey string) (models.TextVideoGeneration, bool, error)
+	GetTextVideoGenerationByIdempotency(ctx context.Context, userID, idempotencyKey string) (models.TextVideoGeneration, error)
+	GetTextVideoGeneration(ctx context.Context, userID, generationID string) (models.TextVideoGeneration, error)
+	ListTextVideoGenerations(ctx context.Context, userID string) ([]models.TextVideoGeneration, error)
+	ListActiveTextVideoGenerations(ctx context.Context, limit int) ([]models.TextVideoGeneration, error)
+	UpdateTextVideoGeneration(ctx context.Context, generationID string, providerTaskID string, status models.TextVideoStatus, progress float64, videoURL, errorMessage string) (models.TextVideoGeneration, error)
 	SaveAnalysis(ctx context.Context, userID string, analysis models.MediaAnalysis) error
 	SaveVideoAnalysis(ctx context.Context, userID string, analysis models.VideoAnalysis) error
 	GetVideoAnalysis(ctx context.Context, userID, videoID, analysisVersion string) (models.VideoAnalysis, error)
