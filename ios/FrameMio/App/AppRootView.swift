@@ -12,7 +12,7 @@ struct AppRootView: View {
     let dependencies: AppDependencies
     @State private var homePath: [AppRoute] = []
     @State private var templatesPath: [AppRoute] = []
-    @State private var createPath: [AppRoute] = []
+    @State private var historyPath: [AppRoute] = []
     @State private var purchaseDestination: PurchaseDestination?
     @State private var selectedTab: RootTab = .home
     @StateObject private var homeViewModel: HomeViewModel
@@ -49,12 +49,12 @@ struct AppRootView: View {
                 .tag(RootTab.templates)
                 .accessibilityLabel("Templates")
 
-            createTab
+            historyTab
                 .tabItem {
-                    Label("Projects", systemImage: "folder")
+                    Label("History", systemImage: "clock.arrow.circlepath")
                 }
-                .tag(RootTab.create)
-                .accessibilityLabel("Projects")
+                .tag(RootTab.history)
+                .accessibilityLabel("History")
 
             NavigationStack {
                 ProfileView(creditStore: creditStore) {
@@ -111,18 +111,15 @@ struct AppRootView: View {
             HomeView(
                 viewModel: homeViewModel,
                 creditStore: creditStore,
-                onCreateStory: { context in
-                    homePath.append(.mediaPicker(draft: .story(context: context)))
-                },
-                onOpenCreate: {
-                    selectedTab = .create
+                onCreateProject: { draft in
+                    homePath.append(.mediaPicker(draft: draft))
                 },
                 onOpenStory: { story in
                     homePath.append(.storyPreview(story: story))
                 },
                 onOpenAllStories: {
-                    selectedTab = .create
-                    createPath.append(.allProjects)
+                    selectedTab = .history
+                    historyPath = [.allProjects]
                 },
                 onOpenPricing: openPricing
             )
@@ -147,19 +144,16 @@ struct AppRootView: View {
         }
     }
 
-    private var createTab: some View {
-        NavigationStack(path: $createPath) {
-            CreateView(
+    private var historyTab: some View {
+        NavigationStack(path: $historyPath) {
+            AllStoriesView(
                 viewModel: homeViewModel,
-                onSelect: { draft in
-                    createPath.append(.mediaPicker(draft: draft))
-                },
                 onOpenStory: { story in
-                    createPath.append(.storyPreview(story: story))
+                    historyPath.append(.storyPreview(story: story))
                 }
             )
             .navigationDestination(for: AppRoute.self) { route in
-                destination(for: route) { createPath.append($0) }
+                destination(for: route) { historyPath.append($0) }
             }
         }
     }
@@ -253,9 +247,6 @@ struct AppRootView: View {
         case .allProjects:
             AllStoriesView(
                 viewModel: homeViewModel,
-                onCreate: {
-                    selectedTab = .create
-                },
                 onOpenStory: { story in
                     appendRoute(.storyPreview(story: story))
                 }
@@ -335,8 +326,8 @@ struct AppRootView: View {
                 onOpenPricing: openPricing,
                 onClose: {
                     homeViewModel.load()
-                    createPath = []
-                    selectedTab = .create
+                    historyPath = []
+                    selectedTab = .history
                 }
             )
         case let .storyPreview(story):
@@ -361,114 +352,8 @@ struct AppRootView: View {
 private enum RootTab: Hashable {
     case home
     case templates
-    case create
+    case history
     case profile
-}
-
-struct CreateView: View {
-    @ObservedObject private var viewModel: HomeViewModel
-    let onSelect: (VideoProjectDraft) -> Void
-    let onOpenStory: (Story) -> Void
-
-    init(viewModel: HomeViewModel, onSelect: @escaping (VideoProjectDraft) -> Void, onOpenStory: @escaping (Story) -> Void) {
-        _viewModel = ObservedObject(wrappedValue: viewModel)
-        self.onSelect = onSelect
-        self.onOpenStory = onOpenStory
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
-                VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
-                    Text("New Project")
-                        .font(FrameMioTypography.title)
-                        .foregroundStyle(FrameMioColors.ink)
-
-                    Text("Start a new video, then review drafts, in-progress work, and completed projects below.")
-                        .font(FrameMioTypography.body)
-                        .foregroundStyle(FrameMioColors.secondaryInk)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.top, FrameMioSpacing.lg)
-
-                VStack(spacing: FrameMioSpacing.md) {
-                    creationOption(.story) {
-                        onSelect(.story())
-                    }
-                    creationOption(.promo) {
-                        onSelect(.promo())
-                    }
-                    creationOption(.reel) {
-                        onSelect(.reel())
-                    }
-                }
-
-                Divider()
-                    .overlay(FrameMioColors.divider)
-                    .padding(.vertical, FrameMioSpacing.xs)
-
-                ProjectsHistoryList(viewModel: viewModel, onCreate: nil, onOpenStory: onOpenStory)
-            }
-            .padding(.horizontal, FrameMioSpacing.lg)
-            .padding(.top, FrameMioSpacing.lg)
-            .padding(.bottom, FrameMioSpacing.xxxl)
-        }
-        .background(FrameMioColors.canvas.ignoresSafeArea())
-        .navigationTitle("Projects")
-        .navigationBarTitleDisplayMode(.inline)
-        .task {
-            viewModel.load()
-        }
-        .refreshable { viewModel.load() }
-    }
-
-    private func creationOption(_ type: VideoProjectType, action: @escaping () -> Void) -> some View {
-        Button {
-            FrameMioHaptics.primaryAction()
-            action()
-        } label: {
-            HStack(spacing: FrameMioSpacing.md) {
-                Image(systemName: type.icon)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(FrameMioColors.accent)
-                    .frame(width: 48, height: 48)
-                    .background(FrameMioColors.accentMuted.opacity(0.72), in: Circle())
-                    .accessibilityHidden(true)
-
-                VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
-                    Text(type.title)
-                        .font(FrameMioTypography.title)
-                        .foregroundStyle(FrameMioColors.ink)
-
-                    Text(type.description)
-                        .font(FrameMioTypography.body)
-                        .foregroundStyle(FrameMioColors.secondaryInk)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: FrameMioSpacing.sm)
-
-                Image(systemName: "chevron.right")
-                    .font(FrameMioTypography.headline)
-                    .foregroundStyle(FrameMioColors.tertiaryInk)
-                    .accessibilityHidden(true)
-            }
-            .padding(FrameMioSpacing.lg)
-            .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
-            .background(
-                FrameMioColors.surface.opacity(0.86),
-                in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
-                    .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
-            }
-            .frameMioElevation(.subtle)
-        }
-        .buttonStyle(FrameMioPressButtonStyle())
-        .accessibilityHint("Opens media selection for a \(type.title.lowercased()) project")
-        .accessibilityLabel("\(type.title). \(type.description)")
-    }
 }
 
 struct TemplatesView: View {

@@ -383,6 +383,7 @@ Keep durations positive, keep captions and B-roll attached to valid moments/medi
 If constraints.target_duration_fixed is false, the current StoryPlan duration and output.max_duration_seconds are context only, not a hard cap. You may choose a better total duration up to constraints.max_duration_ms when the instruction asks for longer, shorter, slower, faster, more detail, or more energy.
 If constraints.target_duration_fixed is true, treat constraints.max_duration_ms as the requested target ceiling.
 Apply the strategy implied by story.project_type: Story prioritizes personal coherence and natural pacing; Promo prioritizes hook, product visibility, benefits, proof/demo, clear messaging, CTA, and brand consistency; Reel prioritizes strong opening, concise storytelling, retention, captions, vertical framing, and clear ending.
+Preserve or improve revised_story_plan.title_text. For Promo and Reel projects, title_text must be a short human-friendly title based on the strongest supplied scene, media subject, location, or user instruction; never return a mode, platform, style, or placeholder label such as "Promo Draft" or "Social Reel".
 For incremental instructions, modify the relevant scene or section instead of rebuilding unrelated scenes. "Replace the opening" should change scene 1 when possible. "Make the CTA stronger" should primarily change CTA-related text/scenes.
 For Reel projects, optimize the revision for a strong hook, removal of boring footage, tight but natural pacing, clear story progression, readable captions, vertical framing, and a strong ending/CTA when appropriate. Do not blindly maximize cuts; keep context and natural pacing when needed. Keep Reel output 9:16 and fill-framed.
 If constraints.requested_visual_style is set, apply it to revised_story_plan.visual_style.
@@ -518,7 +519,7 @@ func normalizeStoryRevisionOutput(result *StoryRevisionResult, input StoryRevisi
 	if strings.TrimSpace(plan.UserInstructions) == "" {
 		plan.UserInstructions = strings.TrimSpace(input.UserInstruction)
 	}
-	if strings.TrimSpace(plan.TitleText) == "" {
+	if projectTitleIsGeneric(projectType, plan.TitleText) {
 		plan.TitleText = titleForProject(projectType, plan.StoryType, request, plan.Moments)
 	}
 	if strings.TrimSpace(plan.EndingText) == "" {

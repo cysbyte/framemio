@@ -162,6 +162,19 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		h.logger().Error("save story plan failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("caption_count", len(plan.Captions)), slog.Any("error", err))
 		return err
 	}
+	if title := strings.TrimSpace(plan.TitleText); title != "" {
+		currentProject, err := h.Store.GetProject(ctx, job.UserID, project.ID)
+		if err != nil {
+			return err
+		}
+		if currentProject.Title != title {
+			currentProject.Title = title
+			if _, err := h.Store.UpdateProject(ctx, currentProject); err != nil {
+				h.logger().Error("update project title failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("title", title), slog.Any("error", err))
+				return err
+			}
+		}
+	}
 	h.logger().Info("story plan saved", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("caption_count", len(plan.Captions)), slog.Int64("save_ms", time.Since(saveStarted).Milliseconds()), slog.Int64("elapsed_ms", time.Since(handlerStarted).Milliseconds()))
 	h.logger().Info("story_planner_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("story_plan_id", plan.ID), slog.Int("story_plan_version", plan.Version), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Int64("total_duration_ms", time.Since(handlerStarted).Milliseconds()), slog.Int("requested_duration_ms", plan.RequestedDurationMS), slog.Int("planned_duration_ms", plan.TotalDurationMS), slog.Int("output_max_duration_seconds", plan.Output.MaxDurationS), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)))
 	return nil
@@ -235,6 +248,18 @@ func (h StoryPlanHandler) handleStoryRevision(ctx context.Context, job models.Pr
 	if err := h.Store.SaveStoryPlan(ctx, job.UserID, plan); err != nil {
 		h.logger().Error("story_revision_failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("resulting_version", nextVersion), slog.String("failure_category", "persist"), slog.Any("error", err))
 		return err
+	}
+	if title := strings.TrimSpace(plan.TitleText); title != "" {
+		currentProject, err := h.Store.GetProject(ctx, job.UserID, project.ID)
+		if err != nil {
+			return err
+		}
+		if currentProject.Title != title {
+			currentProject.Title = title
+			if _, err := h.Store.UpdateProject(ctx, currentProject); err != nil {
+				return err
+			}
+		}
 	}
 	h.logger().Info("story_revision_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("base_version", baseVersion), slog.Int("resulting_version", nextVersion), slog.String("story_plan_id", plan.ID), slog.Int64("save_ms", time.Since(saveStarted).Milliseconds()), slog.Int64("total_duration_ms", time.Since(started).Milliseconds()), slog.String("revision_summary", result.RevisionSummary))
 	return nil

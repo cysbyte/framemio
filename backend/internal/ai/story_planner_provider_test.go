@@ -600,6 +600,57 @@ func TestOpenAICompatibleStoryPlannerPreservesPromoScenePlan(t *testing.T) {
 	}
 }
 
+func TestNormalizeStoryPlannerOutputReplacesGenericModeTitle(t *testing.T) {
+	t.Parallel()
+
+	request := Request{
+		ProjectID:   "project-generic-title",
+		Version:     1,
+		ProjectType: models.ProjectTypePromo,
+		ProjectConfiguration: models.VideoProjectConfiguration{
+			Promo: &models.PromoProjectConfiguration{
+				ProductInformation: "Product",
+			},
+		},
+		DesiredDuration:  4 * time.Second,
+		StoryType:        models.StoryTypeCustom,
+		VisualStyle:      models.VisualStyleCinematic,
+		SelectedMediaIDs: []string{"photo-1"},
+		PhotoAnalyses: []models.PhotoAnalysis{{
+			ID: "analysis-photo-1", PhotoID: "photo-1", ProjectID: "project-generic-title",
+			AnalysisVersion: "photo-v1", Caption: "A bright product launch",
+			MemoryValue: 0.9, EmotionalValue: 0.8, VisualQuality: 0.9, StoryRelevance: 0.9,
+			Selected: true,
+		}},
+	}
+	plan := models.StoryPlan{
+		SchemaVersion: models.StoryPlanSchemaVersionV1,
+		ProjectID:     request.ProjectID,
+		ProjectType:   models.ProjectTypePromo,
+		Version:       1,
+		TitleText:     "Product",
+		EndingText:    "Learn more",
+		Moments: []models.StoryMoment{{
+			MomentID:   "moment-1",
+			AssetID:    "photo-1",
+			MediaID:    "photo-1",
+			MediaType:  models.MediaTypePhoto,
+			Narrative:  "A bright product launch",
+			DurationMS: 4000,
+			CropIntent: "fit",
+		}},
+		Output:          models.StoryOutput{AspectRatio: "16:9", MaxDurationS: 4, Preset: "premium-memory"},
+		TotalDurationMS: 4000,
+	}
+
+	if err := normalizeStoryPlannerOutput(&plan, request); err != nil {
+		t.Fatal(err)
+	}
+	if plan.TitleText == "Product" || plan.TitleText == "" {
+		t.Fatalf("generic promo title was not replaced: %q", plan.TitleText)
+	}
+}
+
 func TestFallbackStoryPlannerUsesFallbackWhenPrimaryFails(t *testing.T) {
 	t.Parallel()
 	request := storyPlannerProviderRequest()

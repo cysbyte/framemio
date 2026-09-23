@@ -362,9 +362,9 @@ private struct GenericProjectCreateRequest: Encodable {
         case .story:
             draft.context.rawValue
         case .promo:
-            draft.promo?.prompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? "Promo Draft" : "\(draft.promo?.subject.title ?? "Product") Promo"
+            "Preparing Promo"
         case .reel:
-            "\(draft.reel?.platform.title ?? "Social") Reel"
+            "Preparing Reel"
         }
     }
 
@@ -660,7 +660,7 @@ final class MockStoryService: StoryService, @unchecked Sendable {
         let story = Story(
             id: UUID().uuidString,
             type: request.draft.type,
-            title: request.draft.type == .promo ? "Promo Draft" : "Social Reel",
+            title: request.draft.type == .promo ? "Preparing Promo" : "Preparing Reel",
             context: request.draft.context,
             createdAt: Date(),
             duration: request.draft.type == .promo

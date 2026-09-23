@@ -72,7 +72,7 @@ struct StoryPreviewView: View {
                     } label: {
                         Label("Back", systemImage: "chevron.left")
                     }
-                    .accessibilityLabel("Back to Projects")
+                    .accessibilityLabel("Back to History")
                 }
             }
         }

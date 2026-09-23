@@ -7,8 +7,7 @@ struct HomeView: View {
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var viewModel: HomeViewModel
     @ObservedObject private var creditStore: CreditBalanceStore
-    let onCreateStory: (MomentContext) -> Void
-    let onOpenCreate: () -> Void
+    let onCreateProject: (VideoProjectDraft) -> Void
     let onOpenStory: (Story) -> Void
     let onOpenAllStories: () -> Void
     let onOpenPricing: (PricingEntryPoint) -> Void
@@ -16,16 +15,14 @@ struct HomeView: View {
     init(
         viewModel: HomeViewModel,
         creditStore: CreditBalanceStore,
-        onCreateStory: @escaping (MomentContext) -> Void,
-        onOpenCreate: @escaping () -> Void,
+        onCreateProject: @escaping (VideoProjectDraft) -> Void,
         onOpenStory: @escaping (Story) -> Void,
         onOpenAllStories: @escaping () -> Void,
         onOpenPricing: @escaping (PricingEntryPoint) -> Void
     ) {
         _viewModel = ObservedObject(wrappedValue: viewModel)
         _creditStore = ObservedObject(wrappedValue: creditStore)
-        self.onCreateStory = onCreateStory
-        self.onOpenCreate = onOpenCreate
+        self.onCreateProject = onCreateProject
         self.onOpenStory = onOpenStory
         self.onOpenAllStories = onOpenAllStories
         self.onOpenPricing = onOpenPricing
@@ -44,7 +41,11 @@ struct HomeView: View {
                     .frame(maxWidth: .infinity)
                     .transition(FrameMioAnimation.transition(reduceMotion: reduceMotion))
                 } else if viewModel.stories.isEmpty {
-                    FirstVideoEmptyState(action: onOpenCreate)
+                    EmptyState(
+                        systemImage: "rectangle.stack.badge.play",
+                        title: "No projects yet",
+                        message: "Choose Story, Promo, or Reel above to get started."
+                    )
                     .frame(maxWidth: .infinity)
                     .transition(FrameMioAnimation.transition(reduceMotion: reduceMotion))
                 } else {
@@ -154,10 +155,7 @@ struct HomeView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            PrimaryButton(title: "Create", systemImage: "plus") {
-                onOpenCreate()
-            }
-            .accessibilityHint("Choose Story, Promo, or Reel")
+            projectTypeActions
 
             heroPreview
         }
@@ -175,7 +173,7 @@ struct HomeView: View {
                 .stroke(FrameMioColors.divider.opacity(0.58), lineWidth: FrameMioMetrics.borderWidth)
         }
         .frameMioElevation(.floating)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
     }
 
     private var heroPreview: some View {
@@ -220,6 +218,47 @@ struct HomeView: View {
         }
         .frame(height: 188)
         .accessibilityHidden(true)
+    }
+
+    private var projectTypeActions: some View {
+        VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
+            Text("Start a new video")
+                .font(FrameMioTypography.headline)
+                .foregroundStyle(FrameMioColors.ink)
+
+            HStack(spacing: FrameMioSpacing.sm) {
+                HomeCreationModeButton(
+                    title: "Text to Video",
+                    description: "Generate video from text",
+                    systemImage: "text.alignleft",
+                    background: FrameMioColors.accent.opacity(0.9)
+                )
+
+                HomeCreationModeButton(
+                    title: "Image to Video",
+                    description: "Generate video from image",
+                    systemImage: "photo.on.rectangle.angled",
+                    background: FrameMioColors.memoryLight.opacity(0.92)
+                )
+            }
+
+            ForEach(VideoProjectType.allCases, id: \.self) { type in
+                ProjectTypeAction(type: type) {
+                    onCreateProject(draft(for: type))
+                }
+            }
+        }
+    }
+
+    private func draft(for type: VideoProjectType) -> VideoProjectDraft {
+        switch type {
+        case .story:
+            .story()
+        case .promo:
+            .promo()
+        case .reel:
+            .reel()
+        }
     }
 
     private var recentStories: some View {
@@ -297,7 +336,7 @@ struct AllStoriesView: View {
             .padding(.bottom, FrameMioSpacing.xxxl)
         }
         .background(FrameMioColors.canvas.ignoresSafeArea())
-        .navigationTitle("Projects")
+        .navigationTitle("History")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { viewModel.load() }
     }
@@ -523,73 +562,107 @@ private enum ProjectFilter: Hashable, CaseIterable {
     }
 }
 
-private struct FirstVideoEmptyState: View {
+private struct ProjectTypeAction: View {
+    let type: VideoProjectType
     let action: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
-            VStack(alignment: .leading, spacing: FrameMioSpacing.xs) {
-                Image(systemName: "plus.rectangle.on.rectangle")
-                    .font(.title2.weight(.medium))
+        Button {
+            FrameMioHaptics.primaryAction()
+            action()
+        } label: {
+            HStack(spacing: FrameMioSpacing.md) {
+                Image(systemName: type.icon)
+                    .font(.title3.weight(.semibold))
                     .foregroundStyle(FrameMioColors.accent)
-                    .frame(width: 56, height: 56)
-                    .background(FrameMioColors.accentMuted.opacity(0.7), in: Circle())
+                    .frame(width: 42, height: 42)
+                    .background(FrameMioColors.accentMuted.opacity(0.72), in: Circle())
                     .accessibilityHidden(true)
 
-                Text("Create your first video")
-                    .font(FrameMioTypography.title)
-                    .foregroundStyle(FrameMioColors.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+                VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
+                    Text(type.title)
+                        .font(FrameMioTypography.headline)
+                        .foregroundStyle(FrameMioColors.ink)
 
-            VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-                EmptyProjectKindRow(type: .story, text: "Turn everyday moments into a story")
-                EmptyProjectKindRow(type: .promo, text: "Turn your footage into a product or business video")
-                EmptyProjectKindRow(type: .reel, text: "Create a short social video")
-            }
+                    Text(type.description)
+                        .font(FrameMioTypography.footnote)
+                        .foregroundStyle(FrameMioColors.secondaryInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
-            PrimaryButton(title: "Create", systemImage: "plus", action: action)
-                .frame(maxWidth: FrameMioMetrics.compactActionMaxWidth)
+                Spacer(minLength: FrameMioSpacing.sm)
+
+                Image(systemName: "chevron.right")
+                    .font(FrameMioTypography.headline)
+                    .foregroundStyle(FrameMioColors.tertiaryInk)
+                    .accessibilityHidden(true)
+            }
+            .padding(FrameMioSpacing.md)
+            .frame(
+                maxWidth: .infinity,
+                minHeight: 88,
+                maxHeight: 88,
+                alignment: .leading
+            )
+            .background(
+                FrameMioColors.surface.opacity(0.86),
+                in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                    .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+            }
+            .frameMioElevation(.subtle)
         }
-        .frame(maxWidth: FrameMioMetrics.emptyStateMaxWidth, alignment: .leading)
-        .padding(FrameMioSpacing.xl)
-        .background(
-            FrameMioColors.surface.opacity(0.78),
-            in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
-                .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
-        }
-        .frameMioElevation(.subtle)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Create your first video. Story, turn everyday moments into a story. Promo, turn your footage into a product or business video. Reel, create a short social video.")
+        .buttonStyle(FrameMioPressButtonStyle())
+        .accessibilityHint("Opens media selection for a \(type.title.lowercased()) project")
+        .accessibilityLabel("\(type.title). \(type.description)")
     }
 }
 
-private struct EmptyProjectKindRow: View {
-    let type: VideoProjectType
-    let text: String
+private struct HomeCreationModeButton: View {
+    let title: String
+    let description: String
+    let systemImage: String
+    let background: Color
 
     var body: some View {
-        HStack(alignment: .top, spacing: FrameMioSpacing.sm) {
-            Image(systemName: type.icon)
-                .font(FrameMioTypography.headline)
-                .foregroundStyle(FrameMioColors.accent)
-                .frame(width: 28, height: 28)
-                .accessibilityHidden(true)
+        Button(action: {}) {
+            HStack(alignment: .top, spacing: FrameMioSpacing.sm) {
+                Image(systemName: systemImage)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(FrameMioColors.inverseInk)
+                    .frame(width: 24, alignment: .leading)
+                    .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(type.title)
-                    .font(FrameMioTypography.headline)
-                    .foregroundStyle(FrameMioColors.ink)
-                Text(text)
-                    .font(FrameMioTypography.footnote)
-                    .foregroundStyle(FrameMioColors.secondaryInk)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
+                    Text(title)
+                        .font(FrameMioTypography.footnote.weight(.semibold))
+                        .foregroundStyle(FrameMioColors.inverseInk)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+
+                    Text(description)
+                        .font(FrameMioTypography.caption)
+                        .foregroundStyle(FrameMioColors.inverseInk.opacity(0.82))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+            .padding(.vertical, FrameMioSpacing.xs)
+            .padding(.horizontal, FrameMioSpacing.sm)
+            .background(
+                background,
+                in: RoundedRectangle(cornerRadius: FrameMioRadius.small, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: FrameMioRadius.small, style: .continuous)
+                    .stroke(FrameMioColors.accent.opacity(0.32), lineWidth: FrameMioMetrics.borderWidth)
             }
         }
-        .accessibilityElement(children: .combine)
+        .buttonStyle(FrameMioPressButtonStyle())
+        .accessibilityLabel("\(title). \(description)")
     }
 }
 

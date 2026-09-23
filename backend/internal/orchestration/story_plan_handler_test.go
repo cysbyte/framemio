@@ -241,6 +241,13 @@ func TestStoryPlanHandlerPersistsExternalPlannerOutput(t *testing.T) {
 	if latest.ID != "plan-external-valid" || latest.Version != 2 || len(latest.Captions) != 1 {
 		t.Fatalf("external planner output was not persisted: %+v", latest)
 	}
+	updatedProject, err := memoryStore.GetProject(ctx, project.UserID, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedProject.Title != "GPT Beach Story" {
+		t.Fatalf("project title = %q, want generated plan title", updatedProject.Title)
+	}
 }
 
 func TestStoryPlanHandlerMapsTemplateDefaultsToPlannerRequest(t *testing.T) {

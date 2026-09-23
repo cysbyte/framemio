@@ -1927,28 +1927,82 @@ func projectCallToAction(request Request) string {
 func titleForProject(projectType models.ProjectType, storyType models.StoryType, request Request, moments []models.StoryMoment) string {
 	switch projectType {
 	case models.ProjectTypePromo:
+		if title := titleFromMoments(request, moments); title != "" {
+			return title
+		}
 		if promo := request.ProjectConfiguration.Promo; promo != nil {
-			if hook := humanText(promo.Hook); hook != "" {
+			if hook := projectTitleText(promo.Hook, projectType); hook != "" {
 				return truncateText(toDisplayTitle(hook), 42)
 			}
-			if product := humanText(promo.ProductInformation); product != "" {
+			if product := projectTitleText(promo.ProductInformation, projectType); product != "" {
 				return truncateText(toDisplayTitle(product), 42)
 			}
 		}
+		if instruction := projectInstructionTitle(request.UserInstructions); instruction != "" {
+			return instruction
+		}
 		return "Product in Motion"
 	case models.ProjectTypeReel:
+		if title := titleFromMoments(request, moments); title != "" {
+			return title
+		}
 		if reel := request.ProjectConfiguration.Reel; reel != nil {
-			if hook := humanText(reel.HookPreference); hook != "" {
+			if hook := projectTitleText(reel.HookPreference, projectType); hook != "" {
 				return truncateText(toDisplayTitle(hook), 42)
 			}
-			if style := humanText(reel.Style); style != "" && !strings.EqualFold(style, "Auto") {
+			if style := projectTitleText(reel.Style, projectType); style != "" && !strings.EqualFold(style, "Auto") {
 				return truncateText(toDisplayTitle(style+" reel"), 42)
 			}
+		}
+		if instruction := projectInstructionTitle(request.UserInstructions); instruction != "" {
+			return instruction
 		}
 		return titleFor(models.StoryTypeCustom, request, moments)
 	default:
 		return titleFor(storyType, request, moments)
 	}
+}
+
+func projectTitleText(value string, projectType models.ProjectType) string {
+	text := humanText(value)
+	if text == "" {
+		return ""
+	}
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	switch projectType {
+	case models.ProjectTypePromo:
+		switch normalized {
+		case "product", "app", "business", "event", "other", "promo", "promo draft", "product promo",
+			"promo video", "product showcase":
+			return ""
+		}
+	case models.ProjectTypeReel:
+		switch normalized {
+		case "reel", "social reel", "instagram reel", "tiktok reel", "youtube shorts reel",
+			"strong opening hook", "cinematic opening", "clear opening context",
+			"lead with the strongest spoken line", "dynamic", "cinematic", "clean", "talking-head", "auto":
+			return ""
+		}
+	}
+	return text
+}
+
+func projectInstructionTitle(value string) string {
+	text := humanText(value)
+	if text == "" {
+		return ""
+	}
+	words := strings.Fields(text)
+	if len(words) > 1 {
+		switch strings.ToLower(strings.Trim(words[0], " .,;:!?")) {
+		case "create", "make", "build", "generate", "turn", "show", "promote", "use":
+			words = words[1:]
+		}
+	}
+	if len(words) == 0 {
+		return ""
+	}
+	return truncateText(toDisplayTitle(strings.Join(words, " ")), 42)
 }
 
 func endingForProject(projectType models.ProjectType, storyType models.StoryType, request Request, moments []models.StoryMoment) string {

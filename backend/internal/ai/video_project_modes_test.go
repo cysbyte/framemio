@@ -74,6 +74,9 @@ func TestPlannerGeneratesEditPlansForEveryProjectType(t *testing.T) {
 					t.Fatalf("promo CTA was not carried into the edit plan: %+v", plan)
 				}
 			}
+			if plan.TitleText == "" || plan.TitleText == "Product in Motion" || plan.TitleText == "Social Reel" {
+				t.Fatalf("mode-specific title was not generated: project_type=%q title=%q", plan.ProjectType, plan.TitleText)
+			}
 			if err := ValidateStoryPlan(plan); err != nil {
 				t.Fatal(err)
 			}
