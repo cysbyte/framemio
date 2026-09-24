@@ -1484,6 +1484,7 @@ private struct TextVideoDetailView: View {
                         autoplays: true,
                         accessibilityTitle: "Generated video"
                     )
+                    .frame(maxWidth: .infinity)
                     .aspectRatio(videoAspectRatio, contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
                 } else {
@@ -1531,6 +1532,16 @@ private struct TextVideoDetailView: View {
                             .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.compactButtonHeight)
                     }
                     .buttonStyle(FrameMioPressButtonStyle())
+                }
+
+                if let playableURL {
+                    ShareLink(item: playableURL) {
+                        Label("Share", systemImage: "square.and.arrow.up")
+                            .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.compactButtonHeight)
+                    }
+                    .buttonStyle(FrameMioPressButtonStyle())
+                    .disabled(isLoadingContent || isSaving || isDeleting)
+                    .accessibilityLabel("Share generated video")
                 }
 
                 Button {
@@ -1608,24 +1619,26 @@ private struct TextVideoDetailView: View {
     }
 
     private var detailPlaceholder: some View {
-        VStack(spacing: FrameMioSpacing.md) {
-            if isLoadingContent {
-                ProgressView()
-            } else {
-                Image(systemName: generation.status == .failed ? "exclamationmark.triangle" : "film")
-                    .font(.title2)
-                    .foregroundStyle(generation.status == .failed ? .red : FrameMioColors.accent)
+        ZStack {
+            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                .fill(FrameMioColors.surface)
+
+            VStack(spacing: FrameMioSpacing.md) {
+                if isLoadingContent {
+                    ProgressView()
+                } else {
+                    Image(systemName: generation.status == .failed ? "exclamationmark.triangle" : "film")
+                        .font(.title2)
+                        .foregroundStyle(generation.status == .failed ? .red : FrameMioColors.accent)
+                }
+                Text(generation.status == .failed ? (generation.errorMessage ?? "Generation failed") : "Loading video...")
+                    .font(FrameMioTypography.body)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
             }
-            Text(generation.status == .failed ? (generation.errorMessage ?? "Generation failed") : "Loading video...")
-                .font(FrameMioTypography.body)
-                .foregroundStyle(FrameMioColors.secondaryInk)
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(videoAspectRatio, contentMode: .fit)
-        .background(
-            FrameMioColors.surface,
-            in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
-        )
+        .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
     }
 
     private var videoAspectRatio: CGFloat {

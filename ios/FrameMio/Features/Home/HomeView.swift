@@ -151,7 +151,7 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.xl) {
             VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
                 Text("Create videos from your photos and footage.")
-                    .font(FrameMioTypography.display)
+                    .font(FrameMioTypography.title)
                     .foregroundStyle(FrameMioColors.ink)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -165,21 +165,6 @@ struct HomeView: View {
 
             heroPreview
         }
-        .padding(FrameMioSpacing.xl)
-        .background(
-            LinearGradient(
-                colors: [FrameMioColors.surface.opacity(0.94), FrameMioColors.accentMuted.opacity(0.58)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
-                .stroke(FrameMioColors.divider.opacity(0.58), lineWidth: FrameMioMetrics.borderWidth)
-        }
-        .frameMioElevation(.floating)
-        .accessibilityElement(children: .contain)
     }
 
     private var heroPreview: some View {
@@ -235,7 +220,7 @@ struct HomeView: View {
             HStack(spacing: FrameMioSpacing.sm) {
                 HomeCreationModeButton(
                     title: "Text to Video",
-                    description: "Generate video from text",
+                    description: "Turn a written idea into a new video",
                     systemImage: "text.alignleft",
                     background: FrameMioColors.accent.opacity(0.9),
                     action: onCreateTextVideo
@@ -243,7 +228,7 @@ struct HomeView: View {
 
                 HomeCreationModeButton(
                     title: "Image to Video",
-                    description: "Generate video from image",
+                    description: "Animate one image into a moving video",
                     systemImage: "photo.on.rectangle.angled",
                     background: FrameMioColors.selection.opacity(0.88),
                     action: onCreateImageVideo

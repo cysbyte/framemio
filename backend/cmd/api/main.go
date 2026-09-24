@@ -95,6 +95,7 @@ func main() {
 		InternalToken:        configuration.InternalAPIToken,
 		VideoProviderBaseURL: configuration.VideoProviderBaseURL,
 		VideoProviderAPIKey:  configuration.VideoProviderAPIKey,
+		VideoProviderModel:   configuration.VideoProviderModel,
 		Logger:               logger,
 	})
 	application.StartBackground(ctx)
@@ -167,6 +168,7 @@ type configuration struct {
 	StoryRevisionFallbackTimeout      time.Duration
 	VideoProviderBaseURL              string
 	VideoProviderAPIKey               string
+	VideoProviderModel                string
 	WorkerRunOnce                     bool
 	WorkerJobID                       string
 	WorkerWaitTimeout                 time.Duration
@@ -221,15 +223,19 @@ func loadConfiguration() (configuration, error) {
 		StoryRevisionTimeout:              environmentDuration("STORY_REVISION_TIMEOUT", 90*time.Second),
 		StoryRevisionFallbackTimeout:      environmentDuration("STORY_REVISION_FALLBACK_TIMEOUT", 45*time.Second),
 		VideoProviderBaseURL: environmentFirstOrDefault(
-			[]string{"GATEWAY_VIDEO_UPSTREAM_BASE_URL", "SEEDANCE_VIDEO_BASE_URL"},
-			"https://task-api-1-cn.65535.space",
+			[]string{"VIDEO_PROVIDER_BASE_URL", "GATEWAY_VIDEO_UPSTREAM_BASE_URL", "SEEDANCE_VIDEO_BASE_URL", "STORY_PLANNER_BASE_URL"},
+			"https://api.cheaperinference.com/v1",
 		),
 		VideoProviderAPIKey: environmentFirst([]string{
+			"VIDEO_PROVIDER_API_KEY",
 			"GATEWAY_VIDEO_UPSTREAM_API_KEY",
 			"SEEDANCE_VIDEO_API_KEY",
 			"GATEWAY_GROK_UPSTREAM_API_KEY",
 			"GATEWAY_UPSTREAM_API_KEY",
+			"STORY_PLANNER_API_KEY",
+			"OPENAI_API_KEY",
 		}),
+		VideoProviderModel:      environment("VIDEO_PROVIDER_MODEL", "model-imagine"),
 		WorkerRunOnce:           environmentBool("WORKER_RUN_ONCE", false),
 		WorkerJobID:             os.Getenv("JOB_ID"),
 		WorkerWaitTimeout:       environmentDuration("WORKER_RUN_ONCE_WAIT_TIMEOUT", 6*time.Minute),

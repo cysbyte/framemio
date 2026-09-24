@@ -55,7 +55,7 @@ struct StoryCreationView: View {
                 VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
                     Tag(viewModel.context.rawValue, systemImage: viewModel.context.icon)
                     Text("A cinematic story from \(viewModel.context.rawValue.lowercased()).")
-                        .font(FrameMioTypography.screenTitle)
+                        .font(FrameMioTypography.title)
                         .foregroundStyle(FrameMioColors.ink)
                         .fixedSize(horizontal: false, vertical: true)
                     Text("FrameMio will look for the feeling that connects these moments, then shape them into something worth revisiting.")

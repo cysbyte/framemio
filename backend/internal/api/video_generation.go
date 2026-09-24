@@ -157,7 +157,7 @@ func (s *Server) createTextVideo(response http.ResponseWriter, request *http.Req
 		Seconds:      input.Seconds,
 		Resolution:   input.Resolution,
 		AspectRatio:  input.AspectRatio,
-		Model:        videoModelForResolution(input.Resolution),
+		Model:        s.videoModel(),
 		Status:       models.TextVideoStatusQueued,
 		CreatedAt:    s.Now().UTC(),
 		UpdatedAt:    s.Now().UTC(),
@@ -519,11 +519,11 @@ func (s *Server) videoProviderRequestContext(ctx context.Context, method, endpoi
 	return client.Do(providerRequest)
 }
 
-func videoModelForResolution(resolution string) string {
-	if resolution == "1080p" {
-		return "grok-imagine-video-1.5-preview"
+func (s *Server) videoModel() string {
+	if model := strings.TrimSpace(s.VideoProviderModel); model != "" {
+		return model
 	}
-	return "grok-imagine-video"
+	return defaultVideoModel
 }
 
 func normalizeProviderVideoURL(baseURL, videoURL string) string {
@@ -612,7 +612,7 @@ func providerString(value any, keys map[string]struct{}) string {
 }
 
 const (
-	defaultVideoModel       = "grok-imagine-video"
+	defaultVideoModel       = "model-imagine"
 	defaultVideoSeconds     = 5
 	defaultVideoResolution  = "720p"
 	defaultVideoAspectRatio = "9:16"
@@ -653,9 +653,6 @@ func (input *videoGenerationRequest) normalize() {
 	input.Resolution = strings.TrimSpace(input.Resolution)
 	if input.Resolution == "" {
 		input.Resolution = defaultVideoResolution
-	}
-	if input.Resolution == "1080p" && input.Model == defaultVideoModel {
-		input.Model = "grok-imagine-video-1.5-preview"
 	}
 	input.AspectRatio = strings.TrimSpace(input.AspectRatio)
 	if input.AspectRatio == "" {
@@ -709,6 +706,7 @@ func (s *Server) createVideo(response http.ResponseWriter, request *http.Request
 		return
 	}
 	input.normalize()
+	input.Model = s.videoModel()
 	if message := input.validate(); message != "" {
 		s.writeError(response, http.StatusBadRequest, "invalid_video_request", message)
 		return

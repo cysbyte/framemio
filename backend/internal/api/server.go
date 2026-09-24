@@ -46,6 +46,7 @@ type Server struct {
 	PromptTranscriber       PromptTranscriber
 	VideoProviderBaseURL    string
 	VideoProviderAPIKey     string
+	VideoProviderModel      string
 	VideoProviderHTTPClient *http.Client
 	textVideoPollerOnce     sync.Once
 	textVideoPollerWake     chan struct{}

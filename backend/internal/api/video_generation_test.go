@@ -35,7 +35,8 @@ func TestVideoGenerationProxyForwardsCreateRequest(t *testing.T) {
 			t.Fatalf("decode provider payload: %v", err)
 		}
 		if payload["prompt"] != "A quiet ocean at sunset" || payload["seconds"] != float64(8) ||
-			payload["resolution"] != "720p" || payload["aspect_ratio"] != "16:9" {
+			payload["resolution"] != "720p" || payload["aspect_ratio"] != "16:9" ||
+			payload["model"] != "model-imagine" {
 			t.Fatalf("unexpected provider payload: %#v", payload)
 		}
 

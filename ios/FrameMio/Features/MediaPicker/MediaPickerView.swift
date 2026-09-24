@@ -129,7 +129,7 @@ struct MediaPickerView: View {
             Tag(viewModel.context.rawValue, systemImage: viewModel.context.icon)
 
             Text(pickerTitle)
-                .font(FrameMioTypography.screenTitle)
+                .font(FrameMioTypography.title)
                 .foregroundStyle(FrameMioColors.ink)
                 .fixedSize(horizontal: false, vertical: true)
 
