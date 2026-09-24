@@ -616,7 +616,7 @@ struct ProjectConfigurationView: View {
     @State private var reelDuration: ProjectDurationOption
     @State private var reelStyle: ReelStyle
     @State private var prompt: String
-    @State private var templates: [VideoTemplate] = []
+    @State private var templates: [VideoTemplate]
     @State private var selectedTemplateID: String?
     @State private var templateConfiguration: VideoTemplateConfiguration?
     @State private var isShowingCustomization = false
@@ -664,6 +664,7 @@ struct ProjectConfigurationView: View {
         _reelDuration = State(initialValue: draft.reel?.duration ?? .automatic)
         _reelStyle = State(initialValue: draft.reel?.style ?? .automatic)
         _prompt = State(initialValue: draft.prompt ?? "")
+        _templates = State(initialValue: VideoTemplate.localFallbackCatalog.filter { $0.supportedProjectTypes.contains(draft.type) })
         _selectedTemplateID = State(initialValue: draft.templateID)
         _templateConfiguration = State(initialValue: draft.templateConfiguration)
         _creditCost = State(initialValue: CreditPricing.price(for: .createStory, stats: Self.creditStats(for: assets)))
@@ -1122,19 +1123,19 @@ struct ProjectConfigurationView: View {
         do {
             let loaded = try await storyService.videoTemplates(for: draft.type)
             templates = loaded.isEmpty ? VideoTemplate.localFallbackCatalog.filter { $0.supportedProjectTypes.contains(draft.type) } : loaded
-            if selectedTemplateID == nil, let first = templates.first {
-                select(first)
-            } else if let selectedTemplate {
-                templateConfiguration = resolvedTemplateConfiguration?.sanitized(for: selectedTemplate)
-            }
+            reconcileTemplateSelection()
         } catch {
             templates = VideoTemplate.localFallbackCatalog.filter { $0.supportedProjectTypes.contains(draft.type) }
-            if selectedTemplateID == nil, let first = templates.first {
-                select(first)
-            } else if let selectedTemplate {
-                templateConfiguration = resolvedTemplateConfiguration?.sanitized(for: selectedTemplate)
-            }
+            reconcileTemplateSelection()
             purchaseRoutingDebugLog("template_catalog_fallback type=\(draft.type.rawValue) error=\(String(describing: error))")
+        }
+    }
+
+    private func reconcileTemplateSelection() {
+        if let selectedTemplate {
+            templateConfiguration = resolvedTemplateConfiguration?.sanitized(for: selectedTemplate)
+        } else if let first = templates.first {
+            select(first)
         }
     }
 

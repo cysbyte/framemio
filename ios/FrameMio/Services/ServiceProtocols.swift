@@ -489,6 +489,7 @@ struct FrameMioCreditPackCatalog {
 
 struct CreditPricing {
     static let createStory = 40
+    static let createVideo = 20
     static let regenerateStory = 40
     static let addMoment = 20
     static let aiEditStory = 20
@@ -506,7 +507,7 @@ struct CreditPricing {
         case .createStory:
             return createStory
         case .createVideo:
-            return createStory
+            return createVideo
         case .regenerateStory:
             return regenerateStory
         case .addMoment:

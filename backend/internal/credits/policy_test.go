@@ -51,6 +51,15 @@ func TestPolicyPriceUsesStaticFallbackWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestLoadPolicyFromEnvSetsVideoPrice(t *testing.T) {
+	t.Setenv("CREDIT_PRICE_CREATE_VIDEO", "20")
+
+	price, ok := LoadPolicyFromEnv().Price(models.CreditActionCreateVideo, StoryMediaStats{})
+	if !ok || price != 20 {
+		t.Fatalf("video price = %d ok=%v", price, ok)
+	}
+}
+
 func TestLoadPolicyFromEnvCanToggleDynamicStoryPricing(t *testing.T) {
 	t.Setenv("CREDIT_DYNAMIC_STORY_PRICING", "true")
 	policy := LoadPolicyFromEnv()

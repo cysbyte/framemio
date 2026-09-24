@@ -72,7 +72,7 @@ func TestVideoGenerationProxyForwardsCreateRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get credit balance: %v", err)
 	}
-	if balance.Available != 60 || balance.Reserved != 0 {
+	if balance.Available != 80 || balance.Reserved != 0 {
 		t.Fatalf("unexpected balance after video generation: %+v", balance)
 	}
 }

@@ -20,7 +20,7 @@ struct StoryCreationView: View {
     let hasTemplateAccess: Bool
     @State private var generationOptions = StoryGenerationOptions.automatic
     @State private var isShowingCustomization = false
-    @State private var templates: [VideoTemplate] = []
+    @State private var templates: [VideoTemplate]
     @State private var selectedTemplateID: String?
     @State private var templateConfiguration: VideoTemplateConfiguration?
     @State private var hasExplicitDurationSelection = false
@@ -39,6 +39,7 @@ struct StoryCreationView: View {
         self.draft = draft
         self.storyService = storyService
         _generationOptions = State(initialValue: draft.storyOptions)
+        _templates = State(initialValue: VideoTemplate.localFallbackCatalog.filter { $0.supportedProjectTypes.contains(.story) })
         _selectedTemplateID = State(initialValue: draft.templateID)
         _templateConfiguration = State(initialValue: draft.templateConfiguration)
         self.promptTranscriptionService = promptTranscriptionService
@@ -389,19 +390,19 @@ struct StoryCreationView: View {
             templates = loaded.isEmpty
                 ? VideoTemplate.localFallbackCatalog.filter { $0.supportedProjectTypes.contains(.story) }
                 : loaded
-            if selectedTemplateID == nil, let first = templates.first {
-                select(first)
-            } else if let selectedTemplate {
-                templateConfiguration = resolvedTemplateConfiguration?.sanitized(for: selectedTemplate)
-            }
+            reconcileTemplateSelection()
         } catch {
             templates = VideoTemplate.localFallbackCatalog.filter { $0.supportedProjectTypes.contains(.story) }
-            if selectedTemplateID == nil, let first = templates.first {
-                select(first)
-            } else if let selectedTemplate {
-                templateConfiguration = resolvedTemplateConfiguration?.sanitized(for: selectedTemplate)
-            }
+            reconcileTemplateSelection()
             storyCreationViewDebugLog("template_catalog_fallback error=\(String(describing: error))")
+        }
+    }
+
+    private func reconcileTemplateSelection() {
+        if let selectedTemplate {
+            templateConfiguration = resolvedTemplateConfiguration?.sanitized(for: selectedTemplate)
+        } else if let first = templates.first {
+            select(first)
         }
     }
 

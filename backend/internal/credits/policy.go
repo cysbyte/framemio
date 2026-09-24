@@ -50,7 +50,7 @@ func DefaultPolicy() Policy {
 	return Policy{
 		Prices: map[models.CreditAction]int{
 			models.CreditActionCreateStory:     40,
-			models.CreditActionCreateVideo:     40,
+			models.CreditActionCreateVideo:     20,
 			models.CreditActionRegenerateStory: 40,
 			models.CreditActionAddMoment:       20,
 			models.CreditActionAIEditStory:     20,
