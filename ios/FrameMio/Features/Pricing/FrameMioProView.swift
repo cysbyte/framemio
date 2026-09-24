@@ -11,11 +11,14 @@ private func storeKitTransactionKey(_ transaction: StoreKit.Transaction) -> Stri
 
 private enum StoreKitProductLoadError: LocalizedError {
     case timedOut(seconds: Int)
+    case incompleteProducts(requested: Int, returned: Int)
 
     var errorDescription: String? {
         switch self {
         case let .timedOut(seconds):
             return "StoreKit product loading timed out after \(seconds) seconds."
+        case let .incompleteProducts(requested, returned):
+            return "StoreKit returned \(returned) of \(requested) requested products."
         }
     }
 }
@@ -23,7 +26,12 @@ private enum StoreKitProductLoadError: LocalizedError {
 @MainActor
 private enum StoreKitProductLoader {
     private static var cachedProductsByID: [String: Product] = [:]
-    private static var inFlightProductLoads: [String: Task<[Product], Error>] = [:]
+    private struct InFlightProductLoad {
+        let task: Task<[Product], Error>
+        let token: UUID
+    }
+
+    private static var inFlightProductLoads: [String: InFlightProductLoad] = [:]
 
     static func cachedProducts(for productIDs: [String]) -> [String: Product] {
         let productIDSet = Set(productIDs)
@@ -47,17 +55,24 @@ private enum StoreKitProductLoader {
 
         let cacheKey = requestedProductIDs.joined(separator: "|")
         let loadTask: Task<[Product], Error>
+        let loadToken: UUID
         if let inFlightProductLoad = inFlightProductLoads[cacheKey] {
             pricingDebugLog("\(logPrefix)_storekit_products_request_joined ids=\(requestedProductIDs.joined(separator: ",")) timeout=\(timeoutSeconds)")
-            loadTask = inFlightProductLoad
+            loadTask = inFlightProductLoad.task
+            loadToken = inFlightProductLoad.token
         } else {
             pricingDebugLog("\(logPrefix)_storekit_products_request_started ids=\(requestedProductIDs.joined(separator: ",")) timeout=\(timeoutSeconds)")
             loadTask = Task {
                 try await Product.products(for: requestedProductIDs)
             }
-            inFlightProductLoads[cacheKey] = loadTask
+            loadToken = UUID()
+            inFlightProductLoads[cacheKey] = InFlightProductLoad(task: loadTask, token: loadToken)
             Task { @MainActor in
-                defer { inFlightProductLoads[cacheKey] = nil }
+                defer {
+                    if inFlightProductLoads[cacheKey]?.token == loadToken {
+                        inFlightProductLoads[cacheKey] = nil
+                    }
+                }
                 do {
                     let products = try await loadTask.value
                     cacheProducts(products)
@@ -68,7 +83,19 @@ private enum StoreKitProductLoader {
             }
         }
 
-        let products = try await value(of: loadTask, timeoutSeconds: timeoutSeconds)
+        let products: [Product]
+        do {
+            products = try await value(of: loadTask, timeoutSeconds: timeoutSeconds)
+        } catch {
+            if case StoreKitProductLoadError.timedOut = error {
+                // Do not let a suspended StoreKit request block all later retries.
+                if inFlightProductLoads[cacheKey]?.token == loadToken {
+                    inFlightProductLoads[cacheKey] = nil
+                }
+                loadTask.cancel()
+            }
+            throw error
+        }
         cacheProducts(products)
         pricingDebugLog("\(logPrefix)_storekit_products_request_finished returned=\(products.map(\.id).sorted().joined(separator: ",")) count=\(products.count)")
         return products
@@ -98,6 +125,60 @@ private func loadStoreKitProducts(productIDs: [String], timeoutSeconds: Int, log
     try await StoreKitProductLoader.products(productIDs: productIDs, timeoutSeconds: timeoutSeconds, logPrefix: logPrefix)
 }
 
+@MainActor
+private func loadStoreKitProductsWithRetry(
+    productIDs: [String],
+    logPrefix: String
+) async throws -> [Product] {
+    let requestedProductIDs = Array(Set(productIDs)).sorted()
+    var resolvedProducts: [String: Product] = [:]
+    var lastError: Error?
+    let timeoutSchedule = [5, 10, 20]
+
+    for (index, timeoutSeconds) in timeoutSchedule.enumerated() {
+        do {
+            let loadedProducts = try await loadStoreKitProducts(
+                productIDs: requestedProductIDs,
+                timeoutSeconds: timeoutSeconds,
+                logPrefix: "\(logPrefix)_attempt_\(index + 1)"
+            )
+            for product in loadedProducts {
+                resolvedProducts[product.id] = product
+            }
+
+            pricingDebugLog(
+                "\(logPrefix)_retry_progress returned=\(resolvedProducts.keys.sorted().joined(separator: ",")) " +
+                "count=\(resolvedProducts.count)/\(requestedProductIDs.count) attempt=\(index + 1)"
+            )
+
+            if resolvedProducts.count == requestedProductIDs.count {
+                break
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            lastError = error
+            pricingDebugLog(
+                "\(logPrefix)_retry_attempt_failed attempt=\(index + 1) error=\(error.localizedDescription)"
+            )
+        }
+
+        guard index < timeoutSchedule.count - 1 else { break }
+        try await Task.sleep(nanoseconds: UInt64(1 << min(index, 3)) * 1_000_000_000)
+    }
+
+    if resolvedProducts.count < requestedProductIDs.count {
+        if resolvedProducts.isEmpty, let lastError {
+            throw lastError
+        }
+        throw StoreKitProductLoadError.incompleteProducts(
+            requested: requestedProductIDs.count,
+            returned: resolvedProducts.count
+        )
+    }
+    return requestedProductIDs.compactMap { resolvedProducts[$0] }
+}
+
 
 @MainActor
 func warmStoreKitProductCaches() async {
@@ -105,12 +186,24 @@ func warmStoreKitProductCaches() async {
         ("pro", FrameMioProCatalog.productIDs),
         ("credit_packs", [FrameMioCreditPackCatalog.smallProductID, FrameMioCreditPackCatalog.mediumProductID, FrameMioCreditPackCatalog.largeProductID])
     ]
-    for group in productGroups {
-        do {
-            let products = try await loadStoreKitProducts(productIDs: group.productIDs, timeoutSeconds: 20, logPrefix: "warm_\(group.label)")
-            pricingDebugLog("warm_storekit_cache_loaded label=\(group.label) returned=\(products.map(\.id).sorted().joined(separator: ",")) count=\(products.count)")
-        } catch {
-            pricingDebugLog("warm_storekit_cache_failed label=\(group.label) error=\(error.localizedDescription)")
+    await withTaskGroup(of: Void.self) { group in
+        for productGroup in productGroups {
+            group.addTask {
+                do {
+                    let products = try await loadStoreKitProductsWithRetry(
+                        productIDs: productGroup.productIDs,
+                        logPrefix: "warm_\(productGroup.label)"
+                    )
+                    pricingDebugLog(
+                        "warm_storekit_cache_loaded label=\(productGroup.label) " +
+                        "returned=\(products.map(\.id).sorted().joined(separator: ",")) count=\(products.count)"
+                    )
+                } catch {
+                    pricingDebugLog(
+                        "warm_storekit_cache_failed label=\(productGroup.label) error=\(error.localizedDescription)"
+                    )
+                }
+            }
         }
     }
 }
@@ -1049,6 +1142,7 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
     @Published private(set) var products: [String: Product] = [:]
     @Published private(set) var balance: CreditBalance?
     @Published private(set) var isLoading = false
+    @Published private(set) var isLoadingProducts = false
     @Published private(set) var isPurchasing = false
     @Published var selectedPackID: String?
     @Published var statusMessage: String?
@@ -1089,8 +1183,10 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
     }
 
     var primaryButtonTitle: String {
-        guard let selectedPack else { return isLoading ? "Loading Credit Packs…" : "Retry Loading Credit Packs" }
-        if isLoading && !canPurchaseSelectedPack {
+        guard let selectedPack else {
+            return isLoading || isLoadingProducts ? "Loading Credit Packs…" : "Retry Loading Credit Packs"
+        }
+        if (isLoading || isLoadingProducts) && !canPurchaseSelectedPack {
             return "Loading Credit Packs…"
         }
         if !canPurchaseSelectedPack {
@@ -1105,20 +1201,20 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
     }
 
     var primaryButtonIsLoading: Bool {
-        isPurchasing || (isLoading && !canPurchaseSelectedPack)
+        isPurchasing || ((isLoading || isLoadingProducts) && !canPurchaseSelectedPack)
     }
 
     var primaryButtonIsDisabled: Bool {
-        isPurchasing || (isLoading && !canPurchaseSelectedPack)
+        isPurchasing || ((isLoading || isLoadingProducts) && !canPurchaseSelectedPack)
     }
 
     var primaryButtonDisabledReason: String {
         if isPurchasing { return "purchasing" }
         guard let selectedPack else {
-            return isLoading ? "loading_credit_packs" : "no_credit_pack_selected"
+            return isLoading || isLoadingProducts ? "loading_credit_packs" : "no_credit_pack_selected"
         }
         if canPurchaseSelectedPack { return "enabled" }
-        if isLoading { return "loading_storekit_products" }
+        if isLoading || isLoadingProducts { return "loading_storekit_products" }
         return "selected_\(selectedPack.id)_product_unavailable_retry_enabled"
     }
 
@@ -1126,13 +1222,16 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
         let selectedID = selectedPackID ?? "nil"
         let selectedProductID = selectedPack.flatMap { productID(for: $0) } ?? "nil"
         let productKeys = products.keys.sorted().joined(separator: ",")
-        return "selected_pack=\(selectedID) selected_product=\(selectedProductID) disabled=\(primaryButtonIsDisabled) reason=\(primaryButtonDisabledReason) loading=\(isLoading) purchasing=\(isPurchasing) packs=\(packs.count) products=\(products.count) product_ids=\(productKeys.isEmpty ? "none" : productKeys) simulate=\(shouldSimulatePurchaseSuccess)"
+        return "selected_pack=\(selectedID) selected_product=\(selectedProductID) disabled=\(primaryButtonIsDisabled) reason=\(primaryButtonDisabledReason) loading=\(isLoading) loading_products=\(isLoadingProducts) purchasing=\(isPurchasing) packs=\(packs.count) products=\(products.count) product_ids=\(productKeys.isEmpty ? "none" : productKeys) simulate=\(shouldSimulatePurchaseSuccess)"
     }
 
     func displayPrice(for pack: CreditPack) -> String {
         guard let productID = productID(for: pack), let product = products[productID] else {
             if shouldSimulatePurchaseSuccess {
                 return "Debug"
+            }
+            if isLoading || isLoadingProducts {
+                return "Loading…"
             }
             return "Unavailable"
         }
@@ -1156,21 +1255,44 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
         StoreKitProductLoader.cacheProducts(loadedProducts)
     }
 
+    private func applyProducts(_ loadedProducts: [Product]) {
+        guard !loadedProducts.isEmpty else { return }
+        var mergedProducts = products
+        for product in loadedProducts {
+            mergedProducts[product.id] = product
+        }
+        products = mergedProducts
+    }
+
+    private func hasAllProducts(for productIDs: [String]) -> Bool {
+        productIDs.allSatisfy { products[$0] != nil }
+    }
+
     private func continueLoadingStoreKitProducts(productIDs: [String]) {
         guard !productIDs.isEmpty else { return }
         productHydrationTask?.cancel()
+        isLoadingProducts = !hasAllProducts(for: productIDs)
+        guard isLoadingProducts else { return }
         productHydrationTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let loadedProducts = try await loadStoreKitProducts(productIDs: productIDs, timeoutSeconds: 120, logPrefix: "credit_packs_background")
+                let loadedProducts = try await loadStoreKitProductsWithRetry(
+                    productIDs: productIDs,
+                    logPrefix: "credit_packs_background"
+                )
                 guard !Task.isCancelled else { return }
-                let loadedProductsByID = Dictionary(uniqueKeysWithValues: loadedProducts.map { ($0.id, $0) })
-                guard !loadedProductsByID.isEmpty else { return }
-                products = loadedProductsByID
-                statusMessage = nil
-                errorMessage = nil
+                applyProducts(loadedProducts)
+                isLoadingProducts = !hasAllProducts(for: productIDs)
+                if !isLoadingProducts {
+                    statusMessage = nil
+                    errorMessage = nil
+                } else {
+                    statusMessage = "Some App Store prices are still loading. Retry in a moment."
+                }
                 pricingDebugLog("credit_packs_products_background_loaded returned=\(loadedProducts.map(\.id).sorted().joined(separator: ",")) count=\(loadedProducts.count) \(primaryButtonDebugState)")
+            } catch is CancellationError {
             } catch {
+                isLoadingProducts = false
                 pricingDebugLog("credit_packs_products_background_failed error=\(error.localizedDescription) \(primaryButtonDebugState)")
             }
         }
@@ -1183,6 +1305,7 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
         }
         loadTask?.cancel()
         productHydrationTask?.cancel()
+        isLoadingProducts = false
         loadTask = Task { [weak self] in
             guard let self else { return }
             var requestedProductIDs: [String] = []
@@ -1216,27 +1339,21 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
                     requestedProductIDs = productIDs
                     pricingDebugLog("credit_packs_products_requested ids=\(productIDs.joined(separator: ","))")
                     let cachedProducts = cachedProducts(for: productIDs)
-                    if cachedProducts.count == productIDs.count {
-                        products = cachedProducts
-                        pricingDebugLog("credit_packs_products_cache_applied returned=\(cachedProducts.keys.sorted().joined(separator: ",")) count=\(cachedProducts.count) skipped_storekit_fetch=true")
-                    } else {
-                        if !cachedProducts.isEmpty {
-                            products = cachedProducts
-                            pricingDebugLog("credit_packs_products_cache_applied returned=\(cachedProducts.keys.sorted().joined(separator: ",")) count=\(cachedProducts.count)")
-                        }
-                        let loadedProducts = try await loadStoreKitProducts(productIDs: productIDs, timeoutSeconds: 20, logPrefix: "credit_packs")
-                        products = Dictionary(uniqueKeysWithValues: loadedProducts.map { ($0.id, $0) })
-                        cacheProducts(loadedProducts)
-                        pricingDebugLog("credit_packs_products_loaded returned=\(loadedProducts.map(\.id).sorted().joined(separator: ",")) count=\(loadedProducts.count) \(primaryButtonDebugState)")
+                    if !cachedProducts.isEmpty {
+                        applyProducts(Array(cachedProducts.values))
+                        pricingDebugLog("credit_packs_products_cache_applied returned=\(cachedProducts.keys.sorted().joined(separator: ",")) count=\(cachedProducts.count)")
                     }
+                    continueLoadingStoreKitProducts(productIDs: productIDs)
                 }
                 errorMessage = nil
             } catch {
                 let appError = AppError.from(error).localizedDescription
-                if products.isEmpty {
+                if isLoadingProducts || products.isEmpty {
                     errorMessage = nil
                     statusMessage = "App Store credit packs are still loading. You can retry in a moment."
-                    continueLoadingStoreKitProducts(productIDs: requestedProductIDs)
+                    if !requestedProductIDs.isEmpty {
+                        continueLoadingStoreKitProducts(productIDs: requestedProductIDs)
+                    }
                     pricingDebugLog("credit_packs_load_failed error=\(error.localizedDescription) mapped=\(appError) using_cached_products=false \(primaryButtonDebugState)")
                 } else {
                     errorMessage = nil

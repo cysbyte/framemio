@@ -20,10 +20,11 @@ import (
 )
 
 type textVideoGenerationRequest struct {
-	Prompt      string `json:"prompt"`
-	Seconds     int    `json:"seconds"`
-	Resolution  string `json:"resolution"`
-	AspectRatio string `json:"aspect_ratio"`
+	Prompt       string `json:"prompt"`
+	ImageMediaID string `json:"image_media_id,omitempty"`
+	Seconds      int    `json:"seconds"`
+	Resolution   string `json:"resolution"`
+	AspectRatio  string `json:"aspect_ratio"`
 }
 
 type textVideoGenerationResponse struct {
@@ -43,6 +44,7 @@ type textVideoGenerationResponse struct {
 var textVideoPollerLock sync.Mutex
 
 const textVideoDownloadURLExpiry = 2 * time.Hour
+const textVideoImageURLExpiry = 2 * time.Hour
 
 func (s *Server) StartBackground(ctx context.Context) {
 	s.textVideoPollerOnce.Do(func() {
@@ -98,6 +100,7 @@ func (s *Server) createTextVideo(response http.ResponseWriter, request *http.Req
 		return
 	}
 	input.Prompt = strings.TrimSpace(input.Prompt)
+	input.ImageMediaID = strings.TrimSpace(input.ImageMediaID)
 	if input.Seconds == 0 {
 		input.Seconds = defaultVideoSeconds
 	}
@@ -119,6 +122,17 @@ func (s *Server) createTextVideo(response http.ResponseWriter, request *http.Req
 		s.writeError(response, http.StatusBadRequest, "invalid_text_video_request", "aspect ratio is invalid")
 		return
 	}
+	if input.ImageMediaID != "" {
+		if s.Store == nil || s.ObjectStorage == nil {
+			s.writeError(response, http.StatusServiceUnavailable, "image_video_not_configured", "image to video is not configured")
+			return
+		}
+		media, mediaErr := s.Store.GetMedia(request.Context(), user.ID, input.ImageMediaID)
+		if mediaErr != nil || media.Status != models.MediaStatusReady || media.Type != models.MediaTypePhoto || strings.TrimSpace(media.S3Key) == "" {
+			s.writeError(response, http.StatusBadRequest, "invalid_image_media", "a ready photo is required for image to video")
+			return
+		}
+	}
 	if s.Store != nil {
 		existing, existingErr := s.Store.GetTextVideoGenerationByIdempotency(request.Context(), user.ID, idempotencyKey)
 		if existingErr == nil {
@@ -136,17 +150,18 @@ func (s *Server) createTextVideo(response http.ResponseWriter, request *http.Req
 	}
 
 	generation := models.TextVideoGeneration{
-		ID:          models.NewID("text-video"),
-		UserID:      user.ID,
-		Prompt:      input.Prompt,
-		Seconds:     input.Seconds,
-		Resolution:  input.Resolution,
-		AspectRatio: input.AspectRatio,
-		Model:       videoModelForResolution(input.Resolution),
-		Status:      models.TextVideoStatusQueued,
-		CreatedAt:   s.Now().UTC(),
-		UpdatedAt:   s.Now().UTC(),
-		NextPollAt:  s.Now().UTC(),
+		ID:           models.NewID("text-video"),
+		UserID:       user.ID,
+		Prompt:       input.Prompt,
+		ImageMediaID: input.ImageMediaID,
+		Seconds:      input.Seconds,
+		Resolution:   input.Resolution,
+		AspectRatio:  input.AspectRatio,
+		Model:        videoModelForResolution(input.Resolution),
+		Status:       models.TextVideoStatusQueued,
+		CreatedAt:    s.Now().UTC(),
+		UpdatedAt:    s.Now().UTC(),
+		NextPollAt:   s.Now().UTC(),
 	}
 	_, _, _, err := s.Credits.ReserveWithCreation(
 		request.Context(),
@@ -258,9 +273,15 @@ func (s *Server) advanceTextVideo(ctx context.Context, generation models.TextVid
 	var data []byte
 	var endpoint string
 	if generation.ProviderTaskID == "" {
+		images, imageErr := s.textVideoProviderImages(ctx, generation)
+		if imageErr != nil {
+			_, _ = s.Store.UpdateTextVideoGeneration(ctx, generation.ID, "", models.TextVideoStatusFailed, generation.Progress, "", "", "source image could not be prepared")
+			_, _ = s.Credits.ReleaseByReference(ctx, generation.UserID, models.CreditActionCreateVideo, "text_video", generation.ID)
+			return nil
+		}
 		body, err := json.Marshal(videoGenerationRequest{
 			Model: generation.Model, Prompt: generation.Prompt, Seconds: generation.Seconds,
-			Resolution: generation.Resolution, AspectRatio: generation.AspectRatio, Images: []string{},
+			Resolution: generation.Resolution, AspectRatio: generation.AspectRatio, Images: images,
 		})
 		if err != nil {
 			return err
@@ -340,6 +361,27 @@ func (s *Server) advanceTextVideo(ctx context.Context, generation models.TextVid
 	}
 	_, err = s.Store.UpdateTextVideoGeneration(ctx, generation.ID, status.taskID, nextStatus, status.progress, "", "", "")
 	return err
+}
+
+func (s *Server) textVideoProviderImages(ctx context.Context, generation models.TextVideoGeneration) ([]string, error) {
+	if strings.TrimSpace(generation.ImageMediaID) == "" {
+		return []string{}, nil
+	}
+	if s.Store == nil || s.ObjectStorage == nil {
+		return nil, errors.New("image to video storage is not configured")
+	}
+	media, err := s.Store.GetMedia(ctx, generation.UserID, generation.ImageMediaID)
+	if err != nil {
+		return nil, err
+	}
+	if media.Status != models.MediaStatusReady || media.Type != models.MediaTypePhoto || strings.TrimSpace(media.S3Key) == "" {
+		return nil, errors.New("source image is not ready")
+	}
+	downloadURL, err := s.ObjectStorage.PresignedDownloadURL(ctx, media.S3Key, textVideoImageURLExpiry)
+	if err != nil {
+		return nil, err
+	}
+	return []string{downloadURL}, nil
 }
 
 func (s *Server) getTextVideoContent(response http.ResponseWriter, request *http.Request, generationID string) {

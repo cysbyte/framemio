@@ -20,6 +20,7 @@ type TextVideoGeneration struct {
 	UserID         string          `json:"user_id"`
 	ProviderTaskID string          `json:"provider_task_id,omitempty"`
 	Prompt         string          `json:"prompt"`
+	ImageMediaID   string          `json:"image_media_id,omitempty"`
 	Seconds        int             `json:"seconds"`
 	Resolution     string          `json:"resolution"`
 	AspectRatio    string          `json:"aspect_ratio"`

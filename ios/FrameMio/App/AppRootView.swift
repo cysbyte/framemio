@@ -124,6 +124,9 @@ struct AppRootView: View {
                 onOpenPricing: openPricing,
                 onCreateTextVideo: {
                     homePath.append(.textToVideo)
+                },
+                onCreateImageVideo: {
+                    homePath.append(.imageToVideo)
                 }
             )
             .navigationDestination(for: AppRoute.self) { route in
@@ -353,6 +356,17 @@ struct AppRootView: View {
                 service: dependencies.textToVideoService,
                 creditService: dependencies.creditService,
                 promptTranscriptionService: dependencies.promptTranscriptionService,
+                onOpenPricing: openPricing,
+                onCreditsUpdated: refreshCredits
+            )
+        case .imageToVideo:
+            TextToVideoView(
+                mode: .imageToVideo,
+                service: dependencies.textToVideoService,
+                creditService: dependencies.creditService,
+                promptTranscriptionService: dependencies.promptTranscriptionService,
+                photoLibrary: dependencies.photoLibrary,
+                mediaUploadService: dependencies.mediaUploadService,
                 onOpenPricing: openPricing,
                 onCreditsUpdated: refreshCredits
             )

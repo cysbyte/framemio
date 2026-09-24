@@ -84,6 +84,36 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(RetryURLProtocol.requestCount, 2)
     }
 
+    func testRetriesTransientServerResponseForIdempotentPost() async throws {
+        RetryURLProtocol.responses = [
+            .success(statusCode: 503, data: Data("service unavailable".utf8)),
+            .success(statusCode: 201, data: Data("{\"id\":\"generation-1\"}".utf8))
+        ]
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RetryURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let client = URLSessionAPIClient(
+            baseURL: URL(string: "https://api.framemio.test")!,
+            session: session,
+            tokenProvider: StaticAuthTokenProvider(token: "token"),
+            maxNetworkRetries: 0,
+            maxTransientStatusRetries: 1,
+            retryBaseDelayNanoseconds: 0
+        )
+
+        let data = try await client.data(
+            for: APIRequest(
+                method: .post,
+                path: "/v1/text-videos",
+                body: Data("{}".utf8),
+                headers: ["Idempotency-Key": "ios-text-video-test"]
+            )
+        )
+
+        XCTAssertEqual(String(data: data, encoding: .utf8), "{\"id\":\"generation-1\"}")
+        XCTAssertEqual(RetryURLProtocol.requestCount, 2)
+    }
+
     func testRetriesColdStartFailuresUntilBackendBecomesHealthy() async throws {
         RetryURLProtocol.responses = Array(
             repeating: .success(statusCode: 503, data: Data("service unavailable".utf8)),

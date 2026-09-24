@@ -15,19 +15,23 @@ final class RemoteTextToVideoService: TextToVideoService, @unchecked Sendable {
         prompt: String,
         duration: Int,
         resolution: String,
-        aspectRatio: String
+        aspectRatio: String,
+        idempotencyKey: String,
+        imageMediaID: String?
     ) async throws -> TextVideoGeneration {
         struct Request: Encodable {
             let prompt: String
             let seconds: Int
             let resolution: String
             let aspectRatio: String
+            let imageMediaID: String?
 
             enum CodingKeys: String, CodingKey {
                 case prompt
                 case seconds
                 case resolution
                 case aspectRatio = "aspect_ratio"
+                case imageMediaID = "image_media_id"
             }
         }
 
@@ -36,7 +40,8 @@ final class RemoteTextToVideoService: TextToVideoService, @unchecked Sendable {
                 prompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines),
                 seconds: duration,
                 resolution: resolution,
-                aspectRatio: aspectRatio
+                aspectRatio: aspectRatio,
+                imageMediaID: imageMediaID
             )
         )
         let data = try await apiClient.data(
@@ -44,7 +49,7 @@ final class RemoteTextToVideoService: TextToVideoService, @unchecked Sendable {
                 method: .post,
                 path: "/v1/text-videos",
                 body: body,
-                headers: ["Idempotency-Key": "ios-text-video-\(UUID().uuidString)"]
+                headers: ["Idempotency-Key": idempotencyKey]
             )
         )
         do {
@@ -104,13 +109,16 @@ final actor MockTextToVideoService: TextToVideoService {
         prompt: String,
         duration: Int,
         resolution: String,
-        aspectRatio: String
+        aspectRatio: String,
+        idempotencyKey _: String,
+        imageMediaID: String?
     ) async throws -> TextVideoGeneration {
         let now = Date()
         let generation = TextVideoGeneration(
             id: "preview-video-\(UUID().uuidString)",
             providerTaskID: "preview-video",
             prompt: prompt,
+            imageMediaID: imageMediaID,
             seconds: duration,
             resolution: resolution,
             aspectRatio: aspectRatio,

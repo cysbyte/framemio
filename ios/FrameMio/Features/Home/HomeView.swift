@@ -12,6 +12,7 @@ struct HomeView: View {
     let onOpenAllStories: () -> Void
     let onOpenPricing: (PricingEntryPoint) -> Void
     let onCreateTextVideo: () -> Void
+    let onCreateImageVideo: () -> Void
 
     init(
         viewModel: HomeViewModel,
@@ -20,7 +21,8 @@ struct HomeView: View {
         onOpenStory: @escaping (Story) -> Void,
         onOpenAllStories: @escaping () -> Void,
         onOpenPricing: @escaping (PricingEntryPoint) -> Void,
-        onCreateTextVideo: @escaping () -> Void
+        onCreateTextVideo: @escaping () -> Void,
+        onCreateImageVideo: @escaping () -> Void
     ) {
         _viewModel = ObservedObject(wrappedValue: viewModel)
         _creditStore = ObservedObject(wrappedValue: creditStore)
@@ -29,6 +31,7 @@ struct HomeView: View {
         self.onOpenAllStories = onOpenAllStories
         self.onOpenPricing = onOpenPricing
         self.onCreateTextVideo = onCreateTextVideo
+        self.onCreateImageVideo = onCreateImageVideo
     }
 
     var body: some View {
@@ -243,7 +246,7 @@ struct HomeView: View {
                     description: "Generate video from image",
                     systemImage: "photo.on.rectangle.angled",
                     background: FrameMioColors.selection.opacity(0.88),
-                    action: {}
+                    action: onCreateImageVideo
                 )
             }
 

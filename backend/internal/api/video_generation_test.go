@@ -273,6 +273,84 @@ func TestTextVideoCompletionPersistsProviderVideoToObjectStorage(t *testing.T) {
 	}
 }
 
+func TestImageToVideoResolvesOwnedMediaAndForwardsSignedImageURL(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	createReadyIOSMediaInStore(t, memoryStore, "source-photo", models.MediaTypePhoto, 1_024)
+	providerClient := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodPost || request.URL.Path != "/v1/videos" {
+			t.Fatalf("unexpected provider request: %s %s", request.Method, request.URL.Path)
+		}
+
+		var payload map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode provider payload: %v", err)
+		}
+		images, ok := payload["images"].([]any)
+		if !ok || len(images) != 1 || images[0] != "https://uploads.example.test/users/user-1/media/media-source-photo" {
+			t.Fatalf("unexpected provider images: %#v", payload["images"])
+		}
+		return jsonResponse(http.StatusOK, `{"id":"image-video-job","status":"queued"}`), nil
+	})
+
+	server := newTestServer(memoryStore, queue.NewMemoryPublisher())
+	server.VideoProviderBaseURL = "https://provider.example"
+	server.VideoProviderAPIKey = "provider-key"
+	server.VideoProviderHTTPClient = &http.Client{Transport: providerClient}
+
+	response := performJSON(
+		t,
+		server.Handler(),
+		http.MethodPost,
+		"/v1/text-videos",
+		map[string]any{
+			"prompt":         "Slowly push toward the subject and add gentle movement",
+			"image_media_id": "media-source-photo",
+		},
+		"image-video-request",
+		true,
+		nil,
+	)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("create status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	var generation models.TextVideoGeneration
+	decodeResponse(t, response, &generation)
+	if generation.ImageMediaID != "media-source-photo" {
+		t.Fatalf("image media id = %q", generation.ImageMediaID)
+	}
+	if err := server.advanceTextVideo(context.Background(), generation); err != nil {
+		t.Fatalf("advance image video: %v", err)
+	}
+}
+
+func TestImageToVideoRejectsMissingOrNonOwnedMedia(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(store.NewMemoryStore(), queue.NewMemoryPublisher())
+	response := performJSON(
+		t,
+		server.Handler(),
+		http.MethodPost,
+		"/v1/text-videos",
+		map[string]any{
+			"prompt":         "Animate this photo",
+			"image_media_id": "media-does-not-exist",
+		},
+		"image-video-invalid-media",
+		true,
+		nil,
+	)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"invalid_image_media"`) {
+		t.Fatalf("response = %s", response.Body.String())
+	}
+}
+
 type videoProviderTestServer struct {
 	server *http.Server
 	URL    string

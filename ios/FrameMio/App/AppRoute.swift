@@ -8,4 +8,5 @@ enum AppRoute: Hashable {
     case storyPreview(story: Story)
     case storyCreating(draft: VideoProjectDraft, assets: [MediaAsset], launchID: UUID)
     case textToVideo
+    case imageToVideo
 }

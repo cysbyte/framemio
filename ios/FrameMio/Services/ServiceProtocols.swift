@@ -194,7 +194,9 @@ protocol TextToVideoService: Sendable {
         prompt: String,
         duration: Int,
         resolution: String,
-        aspectRatio: String
+        aspectRatio: String,
+        idempotencyKey: String,
+        imageMediaID: String?
     ) async throws -> TextVideoGeneration
     func list() async throws -> [TextVideoGeneration]
     func downloadContent(for generationID: String) async throws -> URL
@@ -212,6 +214,7 @@ struct TextVideoGeneration: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let providerTaskID: String?
     let prompt: String
+    let imageMediaID: String?
     let seconds: Int
     let resolution: String
     let aspectRatio: String
@@ -227,6 +230,7 @@ struct TextVideoGeneration: Codable, Identifiable, Hashable, Sendable {
         case id
         case providerTaskID = "provider_task_id"
         case prompt
+        case imageMediaID = "image_media_id"
         case seconds
         case resolution
         case aspectRatio = "aspect_ratio"
