@@ -407,12 +407,14 @@ final class CreditBalanceModelTests: XCTestCase {
 @MainActor
 final class CreditBalanceStoreTests: XCTestCase {
     func testProfileCreditRefreshRetriesAfterTransientFailure() async throws {
+        let defaults = makeIsolatedDefaults()
         let service = RetryingCreditService(
             failuresBeforeSuccess: 1,
             balance: CreditBalance(available: 42, reserved: 0)
         )
         let store = CreditBalanceStore(
             creditService: service,
+            defaults: defaults,
             maxRefreshRetries: 1,
             refreshRetryBaseDelayNanoseconds: 0
         )
@@ -431,6 +433,157 @@ final class CreditBalanceStoreTests: XCTestCase {
         XCTAssertNil(store.errorMessage)
         let requestCount = await service.requestCount
         XCTAssertEqual(requestCount, 2)
+    }
+
+    func testCachedBalanceIsHydratedBeforeRefresh() async throws {
+        let defaults = makeIsolatedDefaults()
+        let expectedBalance = CreditBalance(available: 42, reserved: 3)
+        let initialService = RetryingCreditService(
+            failuresBeforeSuccess: 0,
+            balance: expectedBalance
+        )
+        let initialStore = CreditBalanceStore(
+            creditService: initialService,
+            defaults: defaults,
+            maxRefreshRetries: 0,
+            refreshRetryBaseDelayNanoseconds: 0
+        )
+
+        initialStore.refresh()
+        for _ in 0..<100 {
+            if initialStore.balance != nil {
+                break
+            }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+
+        XCTAssertEqual(initialStore.balance, expectedBalance)
+
+        let refreshedService = RetryingCreditService(
+            failuresBeforeSuccess: 1,
+            balance: CreditBalance(available: 100, reserved: 0)
+        )
+        let restoredStore = CreditBalanceStore(
+            creditService: refreshedService,
+            defaults: defaults,
+            maxRefreshRetries: 0,
+            refreshRetryBaseDelayNanoseconds: 0
+        )
+
+        XCTAssertEqual(restoredStore.balance, expectedBalance)
+        XCTAssertEqual(restoredStore.compactTitle, "✦ 42")
+        XCTAssertEqual(restoredStore.largeTitle, "✦ 42 Credits")
+        XCTAssertFalse(restoredStore.isLoading)
+
+        restoredStore.refresh()
+        try await Task.sleep(nanoseconds: 1_000_000)
+        XCTAssertEqual(restoredStore.balance, expectedBalance)
+        XCTAssertFalse(restoredStore.isLoading)
+    }
+
+    private func makeIsolatedDefaults() -> UserDefaults {
+        let suiteName = "CreditBalanceStoreTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        addTeardownBlock {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        return defaults
+    }
+}
+
+final class TextVideoPersistenceTests: XCTestCase {
+    func testGenerationsSurvivePersistenceReloadAndDeletion() async throws {
+        let suiteName = "TextVideoPersistenceTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        addTeardownBlock {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let now = Date()
+        let generation = TextVideoGeneration(
+            id: "generation-1",
+            providerTaskID: "provider-1",
+            prompt: "A slow cinematic camera move",
+            imageMediaID: "media-1",
+            seconds: 5,
+            resolution: "720p",
+            aspectRatio: "9:16",
+            status: .completed,
+            progress: 1,
+            videoURL: "https://cdn.example.com/video.mp4",
+            errorMessage: nil,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: now
+        )
+
+        let persistence = UserDefaultsTextVideoPersistence(defaults: defaults)
+        try await persistence.saveGenerations([generation])
+
+        let restored = UserDefaultsTextVideoPersistence(defaults: defaults)
+        let restoredGenerations = try await restored.loadGenerations()
+        XCTAssertEqual(restoredGenerations, [generation])
+
+        try await restored.removeGeneration(id: generation.id)
+        let remainingGenerations = try await restored.loadGenerations()
+        XCTAssertTrue(remainingGenerations.isEmpty)
+    }
+
+    func testEmptyRemoteListDoesNotEraseCachedGenerations() async throws {
+        let suiteName = "TextVideoPersistenceTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        addTeardownBlock {
+            defaults.removePersistentDomain(forName: suiteName)
+            RetryURLProtocol.reset()
+        }
+
+        let now = Date()
+        let generation = TextVideoGeneration(
+            id: "generation-1",
+            providerTaskID: "provider-1",
+            prompt: "A cached cinematic camera move",
+            imageMediaID: nil,
+            seconds: 5,
+            resolution: "720p",
+            aspectRatio: "9:16",
+            status: .completed,
+            progress: 1,
+            videoURL: "https://cdn.example.com/video.mp4",
+            errorMessage: nil,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: now
+        )
+
+        let persistence = UserDefaultsTextVideoPersistence(defaults: defaults)
+        try await persistence.saveGenerations([generation])
+
+        RetryURLProtocol.responses = [
+            .success(statusCode: 200, data: Data("[]".utf8))
+        ]
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RetryURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let apiClient = URLSessionAPIClient(
+            baseURL: URL(string: "https://api.framemio.test")!,
+            session: session,
+            tokenProvider: StaticAuthTokenProvider(token: "token"),
+            maxNetworkRetries: 0,
+            maxTransientStatusRetries: 0
+        )
+        let service = RemoteTextToVideoService(
+            apiClient: apiClient,
+            persistence: persistence
+        )
+
+        let listed = try await service.list()
+        let persisted = try await persistence.loadGenerations()
+
+        XCTAssertEqual(listed, [generation])
+        XCTAssertEqual(persisted, [generation])
     }
 }
 

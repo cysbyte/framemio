@@ -2,13 +2,19 @@ import Foundation
 
 final class RemoteTextToVideoService: TextToVideoService, @unchecked Sendable {
     private let apiClient: APIClient
+    private let persistence: TextVideoPersistence
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
-    init(apiClient: APIClient) {
+    init(apiClient: APIClient, persistence: TextVideoPersistence) {
         self.apiClient = apiClient
+        self.persistence = persistence
         self.encoder = FrameMioJSONCoding.apiEncoder()
         self.decoder = FrameMioJSONCoding.apiDecoder()
+    }
+
+    func cachedGenerations() async throws -> [TextVideoGeneration] {
+        try await persistence.loadGenerations()
     }
 
     func create(
@@ -53,20 +59,41 @@ final class RemoteTextToVideoService: TextToVideoService, @unchecked Sendable {
             )
         )
         do {
-            return try decoder.decode(TextVideoGeneration.self, from: data)
+            let generation = try decoder.decode(TextVideoGeneration.self, from: data)
+            let existing = try await persistence.loadGenerations()
+            try await persistence.saveGenerations(
+                [generation] + existing.filter { $0.id != generation.id }
+            )
+            return generation
         } catch {
+            if error is AppError {
+                throw error
+            }
             throw AppError.invalidResponse
         }
     }
 
     func list() async throws -> [TextVideoGeneration] {
-        let data = try await apiClient.data(
-            for: APIRequest(method: .get, path: "/v1/text-videos")
-        )
         do {
-            return try decoder.decode([TextVideoGeneration].self, from: data)
+            let data = try await apiClient.data(
+                for: APIRequest(method: .get, path: "/v1/text-videos")
+            )
+            let generations = try decoder.decode([TextVideoGeneration].self, from: data)
+            let cachedGenerations = try await persistence.loadGenerations()
+            if generations.isEmpty, !cachedGenerations.isEmpty {
+                return cachedGenerations
+            }
+            try await persistence.saveGenerations(generations)
+            return generations
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
-            throw AppError.invalidResponse
+            let cachedGenerations = try await persistence.loadGenerations()
+            let appError = AppError.from(error)
+            if !cachedGenerations.isEmpty || appError == .networkUnavailable || appError == .invalidConfiguration {
+                return cachedGenerations
+            }
+            throw appError
         }
     }
 
@@ -95,6 +122,7 @@ final class RemoteTextToVideoService: TextToVideoService, @unchecked Sendable {
                 path: "/v1/text-videos/\(Self.percentEncodedPathComponent(generationID))"
             )
         )
+        try await persistence.removeGeneration(id: generationID)
     }
 
     private static func percentEncodedPathComponent(_ value: String) -> String {
@@ -104,6 +132,18 @@ final class RemoteTextToVideoService: TextToVideoService, @unchecked Sendable {
 
 final actor MockTextToVideoService: TextToVideoService {
     private var generations: [TextVideoGeneration] = []
+    private let persistence: TextVideoPersistence?
+
+    init(persistence: TextVideoPersistence? = nil) {
+        self.persistence = persistence
+    }
+
+    func cachedGenerations() async throws -> [TextVideoGeneration] {
+        if let persistence {
+            return try await persistence.loadGenerations()
+        }
+        return generations
+    }
 
     func create(
         prompt: String,
@@ -131,10 +171,19 @@ final actor MockTextToVideoService: TextToVideoService {
             completedAt: now
         )
         generations.insert(generation, at: 0)
+        if let persistence {
+            let existing = try await persistence.loadGenerations()
+            try await persistence.saveGenerations(
+                [generation] + existing.filter { $0.id != generation.id }
+            )
+        }
         return generation
     }
 
     func list() async throws -> [TextVideoGeneration] {
+        if let persistence {
+            return try await persistence.loadGenerations()
+        }
         return generations
     }
 
@@ -148,5 +197,6 @@ final actor MockTextToVideoService: TextToVideoService {
 
     func delete(generationID: String) async throws {
         generations.removeAll { $0.id == generationID }
+        try await persistence?.removeGeneration(id: generationID)
     }
 }

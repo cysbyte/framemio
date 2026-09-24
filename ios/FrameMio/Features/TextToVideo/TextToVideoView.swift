@@ -1,7 +1,28 @@
 import AVFoundation
+import CryptoKit
 import PhotosUI
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
+
+private enum ImageToVideoPickerStager {
+    static func directory() throws -> URL {
+        let fileManager = FileManager.default
+        let directory = (fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fileManager.temporaryDirectory)
+            .appendingPathComponent("FrameMio", isDirectory: true)
+            .appendingPathComponent("ImageToVideoImports", isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    static func writeJPEG(_ data: Data, identifier: String) throws -> URL {
+        let fileName = "image-to-video-\(identifier).jpg"
+        let url = try directory().appendingPathComponent(fileName)
+        try data.write(to: url, options: .atomic)
+        return url
+    }
+}
 
 enum TextToVideoMode: Hashable, Sendable {
     case textToVideo
@@ -41,6 +62,7 @@ struct TextToVideoView: View {
     let creditService: CreditService?
     let promptTranscriptionService: PromptTranscriptionService?
     let photoLibrary: PhotoLibraryService?
+    let mediaUploadStore: MediaUploadStore?
     let mediaUploadService: MediaUploadService?
     let onOpenPricing: (PricingEntryPoint) -> Void
     let onCreditsUpdated: (() -> Void)?
@@ -84,6 +106,7 @@ struct TextToVideoView: View {
         creditService: CreditService? = nil,
         promptTranscriptionService: PromptTranscriptionService? = nil,
         photoLibrary: PhotoLibraryService? = nil,
+        mediaUploadStore: MediaUploadStore? = nil,
         mediaUploadService: MediaUploadService? = nil,
         onOpenPricing: @escaping (PricingEntryPoint) -> Void = { _ in },
         onCreditsUpdated: (() -> Void)? = nil
@@ -93,6 +116,7 @@ struct TextToVideoView: View {
         self.creditService = creditService
         self.promptTranscriptionService = promptTranscriptionService
         self.photoLibrary = photoLibrary
+        self.mediaUploadStore = mediaUploadStore
         self.mediaUploadService = mediaUploadService
         self.onOpenPricing = onOpenPricing
         self.onCreditsUpdated = onCreditsUpdated
@@ -149,6 +173,8 @@ struct TextToVideoView: View {
         }
         .task {
             await refreshCreditQuote()
+        }
+        .task {
             await refreshGenerationHistoryLoop()
         }
         .alert("Couldn’t generate video", isPresented: errorBinding) {
@@ -600,9 +626,21 @@ struct TextToVideoView: View {
     }
 
     private func refreshGenerationHistoryLoop() async {
+        await loadCachedGenerations()
         while !Task.isCancelled {
             await refreshGenerations()
             try? await Task.sleep(nanoseconds: 2_500_000_000)
+        }
+    }
+
+    private func loadCachedGenerations() async {
+        do {
+            let cached = try await service.cachedGenerations()
+            await MainActor.run {
+                applyGenerations(cached)
+            }
+        } catch is CancellationError {
+        } catch {
         }
     }
 
@@ -610,29 +648,34 @@ struct TextToVideoView: View {
         do {
             let latest = try await service.list()
             await MainActor.run {
-                generations = latest
-                if let active = latest.first(where: { $0.status == .queued || $0.status == .running }) {
-                    activeGeneration = active
-                    isGenerating = true
-                    recentlyCompletedGeneration = nil
-                } else if let submittedGenerationID,
-                          let completed = latest.first(where: {
-                              $0.id == submittedGenerationID && $0.status == .completed
-                          }) {
-                    activeGeneration = nil
-                    isGenerating = false
-                    recentlyCompletedGeneration = completed
-                    clearPendingGeneration()
-                } else if !isSubmittingGeneration {
-                    activeGeneration = nil
-                    isGenerating = false
-                    if errorMessage == nil {
-                        clearPendingGeneration()
-                    }
-                }
+                applyGenerations(latest)
             }
         } catch is CancellationError {
         } catch {
+        }
+    }
+
+    @MainActor
+    private func applyGenerations(_ latest: [TextVideoGeneration]) {
+        generations = latest
+        if let active = latest.first(where: { $0.status == .queued || $0.status == .running }) {
+            activeGeneration = active
+            isGenerating = true
+            recentlyCompletedGeneration = nil
+        } else if let submittedGenerationID,
+                  let completed = latest.first(where: {
+                      $0.id == submittedGenerationID && $0.status == .completed
+                  }) {
+            activeGeneration = nil
+            isGenerating = false
+            recentlyCompletedGeneration = completed
+            clearPendingGeneration()
+        } else if !isSubmittingGeneration {
+            activeGeneration = nil
+            isGenerating = false
+            if errorMessage == nil {
+                clearPendingGeneration()
+            }
         }
     }
 
@@ -659,29 +702,36 @@ struct TextToVideoView: View {
         pendingImageMediaID = nil
         Task { @MainActor in
             defer { isResolvingImage = false }
-            guard let photoLibrary else {
-                errorMessage = "Photo access is not configured for this environment."
-                return
-            }
-            guard let identifier = item.itemIdentifier, !identifier.isEmpty else {
-                errorMessage = "This photo could not be linked to your library. Try selecting it again."
-                selectedPhotoItem = nil
-                return
-            }
             do {
-                let assets = try await photoLibrary.resolveAssets(localIdentifiers: [identifier])
-                guard let asset = assets.first, asset.kind == .image else {
-                    throw AppError.unsupportedMedia
+                guard let data = try await item.loadTransferable(type: Data.self),
+                      let image = UIImage(data: data),
+                      let jpegData = image.jpegData(compressionQuality: 0.92) else {
+                    throw AppError.message("We couldn't read that photo. Try selecting it again.")
                 }
-                let thumbnailData = try await photoLibrary.requestThumbnail(
-                    for: asset,
-                    targetSize: CGSize(width: 900, height: 900)
+
+                let sourceIdentifier = item.itemIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let fingerprint = Self.sha256Hex(for: jpegData).prefix(32)
+                let assetID = sourceIdentifier.flatMap { $0.isEmpty ? nil : $0 }
+                    ?? "picker-photo-\(fingerprint)"
+                let pixelWidth = image.cgImage?.width ?? Int(image.size.width.rounded())
+                let pixelHeight = image.cgImage?.height ?? Int(image.size.height.rounded())
+                let asset = MediaAsset(
+                    id: assetID,
+                    localIdentifier: sourceIdentifier,
+                    kind: .image,
+                    creationDate: nil,
+                    duration: 0,
+                    pixelWidth: pixelWidth,
+                    pixelHeight: pixelHeight
                 )
-                guard let thumbnail = UIImage(data: thumbnailData) else {
-                    throw AppError.invalidResponse
-                }
+
+                try await stagePickedImage(
+                    jpegData: jpegData,
+                    asset: asset,
+                    sourceIdentifier: sourceIdentifier
+                )
                 selectedImageAsset = asset
-                selectedImageThumbnail = thumbnail
+                selectedImageThumbnail = image
             } catch {
                 selectedPhotoItem = nil
                 selectedImageAsset = nil
@@ -689,6 +739,57 @@ struct TextToVideoView: View {
                 errorMessage = AppError.from(error).localizedDescription
             }
         }
+    }
+
+    private func stagePickedImage(
+        jpegData: Data,
+        asset: MediaAsset,
+        sourceIdentifier: String?
+    ) async throws {
+        guard let mediaUploadStore else {
+            throw AppError.message("Image uploads are not configured for this environment.")
+        }
+
+        let uploadID = MediaUpload.makeID(for: asset.id, optimization: .original)
+        if let existing = try await mediaUploadStore.upload(for: uploadID),
+           existing.status == .completed,
+           existing.mediaID != nil {
+            return
+        }
+
+        let fingerprint = Self.sha256Hex(for: jpegData).prefix(32)
+        let fileURL = try ImageToVideoPickerStager.writeJPEG(jpegData, identifier: String(fingerprint))
+        let file = MediaUpload(
+            id: uploadID,
+            assetID: asset.id,
+            localIdentifier: sourceIdentifier,
+            mediaID: nil,
+            mediaType: .photo,
+            fileName: fileURL.lastPathComponent,
+            contentType: UTType.jpeg.preferredMIMEType ?? "image/jpeg",
+            fileSizeBytes: Int64(jpegData.count),
+            duration: nil,
+            creationDate: nil,
+            pixelWidth: asset.pixelWidth,
+            pixelHeight: asset.pixelHeight,
+            orientation: .from(pixelWidth: asset.pixelWidth, pixelHeight: asset.pixelHeight),
+            optimization: .original,
+            status: .queued,
+            uploadedBytes: 0,
+            authorizationIdempotencyKey: MediaUpload.makeAuthorizationID(
+                for: uploadID,
+                fileSizeBytes: Int64(jpegData.count)
+            ),
+            session: nil,
+            stagedFileURL: fileURL,
+            lastError: nil,
+            updatedAt: Date()
+        )
+        try await mediaUploadStore.save(file)
+    }
+
+    private static func sha256Hex(for data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     private func uploadSourceImageIfNeeded(existingMediaID: String?) async throws -> String? {

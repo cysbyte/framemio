@@ -190,6 +190,7 @@ protocol PromptTranscriptionService: Sendable {
 }
 
 protocol TextToVideoService: Sendable {
+    func cachedGenerations() async throws -> [TextVideoGeneration]
     func create(
         prompt: String,
         duration: Int,
@@ -596,19 +597,32 @@ final class CreditBalanceStore: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
 
+    private static let cachedBalanceKey = "framemio.credit-balance.v1"
     private let creditService: CreditService?
+    private let defaults: UserDefaults
+    private let encoder: JSONEncoder
+    private let decoder: JSONDecoder
     private var refreshTask: Task<Void, Never>?
     private let maxRefreshRetries: Int
     private let refreshRetryBaseDelayNanoseconds: UInt64
 
     init(
         creditService: CreditService?,
+        defaults: UserDefaults = .standard,
         maxRefreshRetries: Int = 2,
         refreshRetryBaseDelayNanoseconds: UInt64 = 2_000_000_000
     ) {
         self.creditService = creditService
+        self.defaults = defaults
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        self.encoder = encoder
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        self.decoder = decoder
         self.maxRefreshRetries = max(0, maxRefreshRetries)
         self.refreshRetryBaseDelayNanoseconds = refreshRetryBaseDelayNanoseconds
+        balance = Self.loadCachedBalance(defaults: defaults, decoder: decoder)
     }
 
     var availableCredits: Int? {
@@ -672,6 +686,7 @@ final class CreditBalanceStore: ObservableObject {
                 if balance != latestBalance {
                     balance = latestBalance
                 }
+                Self.saveCachedBalance(latestBalance, defaults: defaults, encoder: encoder)
                 if errorMessage != nil {
                     errorMessage = nil
                 }
@@ -683,6 +698,25 @@ final class CreditBalanceStore: ObservableObject {
                 }
             }
         }
+    }
+
+    private static func loadCachedBalance(
+        defaults: UserDefaults,
+        decoder: JSONDecoder
+    ) -> CreditBalance? {
+        guard let data = defaults.data(forKey: cachedBalanceKey) else {
+            return nil
+        }
+        return try? decoder.decode(CreditBalance.self, from: data)
+    }
+
+    private static func saveCachedBalance(
+        _ balance: CreditBalance,
+        defaults: UserDefaults,
+        encoder: JSONEncoder
+    ) {
+        guard let data = try? encoder.encode(balance) else { return }
+        defaults.set(data, forKey: cachedBalanceKey)
     }
 
     private func loadBalanceWithRetry(force: Bool, creditService: CreditService) async throws -> CreditBalance {
@@ -748,6 +782,12 @@ protocol StoryPersistence: Sendable {
     func loadStories() async throws -> [Story]
     func saveStories(_ stories: [Story]) async throws
     func removeStory(id: String) async throws
+}
+
+protocol TextVideoPersistence: Sendable {
+    func loadGenerations() async throws -> [TextVideoGeneration]
+    func saveGenerations(_ generations: [TextVideoGeneration]) async throws
+    func removeGeneration(id: String) async throws
 }
 
 protocol MediaUploadStore: Sendable {

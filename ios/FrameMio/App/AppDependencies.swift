@@ -11,6 +11,7 @@ struct AppDependencies {
     let apiClient: APIClient
     let storyService: StoryService
     let storyPersistence: StoryPersistence
+    let textVideoPersistence: TextVideoPersistence
     let originalMediaSource: OriginalMediaSource
     let mediaUploadStore: MediaUploadStore
     let mediaUploadAuthorizer: MediaUploadAuthorizer
@@ -25,6 +26,7 @@ struct AppDependencies {
         print("[FrameMio][Config] bundle_path=\(Bundle.main.bundlePath)")
         print("[FrameMio][Config] deepgram_api_key_configured=\(AppConfiguration.deepgramAPIKey != nil) deepgram_language=\(deepgramLanguageLogValue) source=\(AppConfiguration.deepgramAPIKeySource)")
         let persistence = UserDefaultsStoryPersistence()
+        let textVideoPersistence = UserDefaultsTextVideoPersistence()
         let apiSession = URLSession(configuration: AppConfiguration.apiSessionConfiguration)
         let tokenProvider = KeychainAuthTokenProvider(baseURL: AppConfiguration.apiBaseURL, session: apiSession)
         let photoLibrary = PhotoKitPhotoLibraryService()
@@ -55,6 +57,7 @@ struct AppDependencies {
             apiClient: apiClient,
             storyService: RemoteStoryService(apiClient: apiClient, persistence: persistence),
             storyPersistence: persistence,
+            textVideoPersistence: textVideoPersistence,
             originalMediaSource: photoLibrary,
             mediaUploadStore: uploadStore,
             mediaUploadAuthorizer: uploadAuthorizer,
@@ -62,12 +65,16 @@ struct AppDependencies {
             mediaUploadService: uploadService,
             creditService: RemoteCreditService(apiClient: apiClient),
             promptTranscriptionService: RemotePromptTranscriptionService(apiClient: apiClient),
-            textToVideoService: RemoteTextToVideoService(apiClient: apiClient)
+            textToVideoService: RemoteTextToVideoService(
+                apiClient: apiClient,
+                persistence: textVideoPersistence
+            )
         )
     }
 
     static func preview() -> AppDependencies {
         let persistence = MockStoryPersistence()
+        let textVideoPersistence = MockTextVideoPersistence()
         let mediaIntelligenceStore = MockMediaIntelligenceStore()
         let storyService = MockStoryService(persistence: persistence)
         let mediaSelection = MockMediaSelectionService()
@@ -92,6 +99,7 @@ struct AppDependencies {
             apiClient: MockAPIClient(),
             storyService: storyService,
             storyPersistence: persistence,
+            textVideoPersistence: textVideoPersistence,
             originalMediaSource: originalMediaSource,
             mediaUploadStore: uploadStore,
             mediaUploadAuthorizer: uploadAuthorizer,
@@ -99,7 +107,7 @@ struct AppDependencies {
             mediaUploadService: uploadService,
             creditService: MockCreditService(),
             promptTranscriptionService: MockPromptTranscriptionService(),
-            textToVideoService: MockTextToVideoService()
+            textToVideoService: MockTextToVideoService(persistence: textVideoPersistence)
         )
     }
 }

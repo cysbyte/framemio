@@ -58,3 +58,62 @@ actor MockStoryPersistence: StoryPersistence {
         stories.removeAll { $0.id == id }
     }
 }
+
+actor UserDefaultsTextVideoPersistence: TextVideoPersistence {
+    private let defaults: UserDefaults
+    private let storageKey = "framemio.text-video-generations"
+    private let encoder: JSONEncoder
+    private let decoder: JSONDecoder
+
+    init() {
+        self.defaults = .standard
+        self.encoder = FrameMioJSONCoding.apiEncoder()
+        self.decoder = FrameMioJSONCoding.apiDecoder()
+    }
+
+    init(defaults: UserDefaults) {
+        self.defaults = defaults
+        self.encoder = FrameMioJSONCoding.apiEncoder()
+        self.decoder = FrameMioJSONCoding.apiDecoder()
+    }
+
+    func loadGenerations() async throws -> [TextVideoGeneration] {
+        guard let data = defaults.data(forKey: storageKey) else {
+            return []
+        }
+        do {
+            return try decoder.decode([TextVideoGeneration].self, from: data)
+        } catch {
+            throw AppError.persistenceFailure
+        }
+    }
+
+    func saveGenerations(_ generations: [TextVideoGeneration]) async throws {
+        do {
+            defaults.set(try encoder.encode(generations), forKey: storageKey)
+        } catch {
+            throw AppError.persistenceFailure
+        }
+    }
+
+    func removeGeneration(id: String) async throws {
+        let generations = try await loadGenerations().filter { $0.id != id }
+        try await saveGenerations(generations)
+    }
+}
+
+actor MockTextVideoPersistence: TextVideoPersistence {
+    private var generations: [TextVideoGeneration] = []
+
+    func loadGenerations() async throws -> [TextVideoGeneration] {
+        generations
+    }
+
+    func saveGenerations(_ generations: [TextVideoGeneration]) async throws {
+        self.generations = generations
+    }
+
+    func removeGeneration(id: String) async throws {
+        generations.removeAll { $0.id == id }
+    }
+}

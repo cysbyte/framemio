@@ -366,6 +366,7 @@ struct AppRootView: View {
                 creditService: dependencies.creditService,
                 promptTranscriptionService: dependencies.promptTranscriptionService,
                 photoLibrary: dependencies.photoLibrary,
+                mediaUploadStore: dependencies.mediaUploadStore,
                 mediaUploadService: dependencies.mediaUploadService,
                 onOpenPricing: openPricing,
                 onCreditsUpdated: refreshCredits
@@ -387,9 +388,10 @@ struct TemplatesView: View {
     let onOpenPricing: (PricingEntryPoint) -> Void
     let onUseTemplate: (VideoTemplate, VideoProjectType) -> Void
     @State private var selectedProjectType: VideoProjectType = .story
-    @State private var templates: [VideoTemplate] = []
-    @State private var selectedTemplateID: String?
+    @State private var templates: [VideoTemplate] = VideoTemplate.localFallbackCatalog
+    @State private var selectedTemplateID: String? = VideoTemplate.localFallbackCatalog.first?.id
     @State private var isLoading = false
+    @State private var hasAttemptedRemoteLoad = false
 
     private var visibleTemplates: [VideoTemplate] {
         templates.filter { $0.supportedProjectTypes.contains(selectedProjectType) }
@@ -522,59 +524,22 @@ struct TemplatesView: View {
     }
 
     private func loadTemplates(force: Bool = false) async {
-        guard force || templates.isEmpty else { return }
+        guard force || !hasAttemptedRemoteLoad else { return }
         isLoading = true
         defer { isLoading = false }
 
         do {
-            let loaded = try await loadTemplateCatalogWithRetry()
+            let loaded = try await storyService.videoTemplates(for: nil)
             templates = loaded.isEmpty ? VideoTemplate.localFallbackCatalog : loaded
+            hasAttemptedRemoteLoad = true
         } catch is CancellationError {
             return
         } catch {
             purchaseRoutingDebugLog("templates_tab_catalog_fallback error=\(String(describing: error))")
-            if templates.isEmpty {
-                templates = VideoTemplate.localFallbackCatalog
-            }
+            hasAttemptedRemoteLoad = true
         }
-        selectedTemplateID = visibleTemplates.first?.id
-    }
-
-    private func loadTemplateCatalogWithRetry() async throws -> [VideoTemplate] {
-        let maxRetries = 2
-        let retryBaseDelayNanoseconds: UInt64 = 2_000_000_000
-        var retryCount = 0
-
-        while true {
-            do {
-                return try await storyService.videoTemplates(for: nil)
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                guard retryCount < maxRetries, Self.isRetryableTemplateLoadError(error) else {
-                    throw error
-                }
-
-                retryCount += 1
-                purchaseRoutingDebugLog("templates_tab_catalog_retry attempt=\(retryCount) error=\(String(describing: error))")
-                let delay = retryBaseDelayNanoseconds * UInt64(1 << min(retryCount - 1, 3))
-                try await Task.sleep(nanoseconds: delay)
-            }
-        }
-    }
-
-    private static func isRetryableTemplateLoadError(_ error: Error) -> Bool {
-        if case let APIClientError.server(statusCode, _) = error {
-            return statusCode == 408 || statusCode == 425 || statusCode == 429 || (500...599).contains(statusCode)
-        }
-
-        switch AppError.from(error) {
-        case .networkUnavailable:
-            return true
-        case let .server(statusCode):
-            return statusCode == 408 || statusCode == 425 || statusCode == 429 || (500...599).contains(statusCode)
-        default:
-            return false
+        if !visibleTemplates.contains(where: { $0.id == selectedTemplateID }) {
+            selectedTemplateID = visibleTemplates.first?.id
         }
     }
 }
