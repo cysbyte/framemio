@@ -17,6 +17,24 @@ final class RemoteTextToVideoService: TextToVideoService, @unchecked Sendable {
         try await persistence.loadGenerations()
     }
 
+    func sourceImageURL(for mediaID: String) async throws -> URL {
+        struct Response: Decodable {
+            let url: URL
+        }
+
+        let data = try await apiClient.data(
+            for: APIRequest(
+                method: .get,
+                path: "/v1/media/\(Self.percentEncodedPathComponent(mediaID))/content"
+            )
+        )
+        do {
+            return try decoder.decode(Response.self, from: data).url
+        } catch {
+            throw AppError.invalidResponse
+        }
+    }
+
     func create(
         prompt: String,
         duration: Int,
@@ -43,7 +61,7 @@ final class RemoteTextToVideoService: TextToVideoService, @unchecked Sendable {
 
         let body = try encoder.encode(
             Request(
-                prompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines),
+                prompt: normalizedPrompt(prompt, imageMediaID: imageMediaID),
                 seconds: duration,
                 resolution: resolution,
                 aspectRatio: aspectRatio,
@@ -71,6 +89,14 @@ final class RemoteTextToVideoService: TextToVideoService, @unchecked Sendable {
             }
             throw AppError.invalidResponse
         }
+    }
+
+    private func normalizedPrompt(_ prompt: String, imageMediaID: String?) -> String {
+        let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedPrompt.isEmpty, imageMediaID != nil else {
+            return trimmedPrompt
+        }
+        return TextVideoPromptDefaults.imageToVideo
     }
 
     func list() async throws -> [TextVideoGeneration] {
@@ -143,6 +169,10 @@ final actor MockTextToVideoService: TextToVideoService {
             return try await persistence.loadGenerations()
         }
         return generations
+    }
+
+    func sourceImageURL(for mediaID: String) async throws -> URL {
+        URL(string: "https://example.invalid/media/\(mediaID)")!
     }
 
     func create(

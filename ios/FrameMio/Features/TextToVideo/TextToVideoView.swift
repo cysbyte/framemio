@@ -1,5 +1,6 @@
 import AVFoundation
 import CryptoKit
+import Photos
 import PhotosUI
 import SwiftUI
 import UIKit
@@ -24,6 +25,29 @@ private enum ImageToVideoPickerStager {
     }
 }
 
+private enum TextVideoPhotoSaver {
+    static func saveVideo(at url: URL) async throws {
+        let authorization = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        guard authorization == .authorized || authorization == .limited else {
+            throw AppError.message("Allow FrameMio to add videos to Photos to save this video.")
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+            } completionHandler: { success, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if success {
+                    continuation.resume(returning: ())
+                } else {
+                    continuation.resume(throwing: AppError.persistenceFailure)
+                }
+            }
+        }
+    }
+}
+
 enum TextToVideoMode: Hashable, Sendable {
     case textToVideo
     case imageToVideo
@@ -42,7 +66,7 @@ enum TextToVideoMode: Hashable, Sendable {
         case .textToVideo:
             "Example: A cinematic golden-hour walk along the coast..."
         case .imageToVideo:
-            "Example: Gently move the camera forward while the light flickers..."
+            "Optional: Gently move the camera forward while the light flickers..."
         }
     }
 
@@ -51,13 +75,23 @@ enum TextToVideoMode: Hashable, Sendable {
         case .textToVideo:
             "Describe the scene, mood, or story you want to generate."
         case .imageToVideo:
-            "Describe the motion, camera movement, or visual changes for this image."
+            "Add motion instructions, or leave this blank for natural cinematic motion."
+        }
+    }
+
+    var promptTitle: String {
+        switch self {
+        case .textToVideo:
+            "Prompt"
+        case .imageToVideo:
+            "Motion prompt (optional)"
         }
     }
 }
 
 struct TextToVideoView: View {
     let mode: TextToVideoMode
+    let regeneration: TextVideoGeneration?
     let service: TextToVideoService
     let creditService: CreditService?
     let promptTranscriptionService: PromptTranscriptionService?
@@ -66,6 +100,7 @@ struct TextToVideoView: View {
     let mediaUploadService: MediaUploadService?
     let onOpenPricing: (PricingEntryPoint) -> Void
     let onCreditsUpdated: (() -> Void)?
+    let onRegenerate: ((TextVideoGeneration) -> Void)?
 
     @State private var prompt = ""
     @State private var duration = TextVideoDurationOption.five
@@ -102,6 +137,7 @@ struct TextToVideoView: View {
 
     init(
         mode: TextToVideoMode = .textToVideo,
+        regeneration: TextVideoGeneration? = nil,
         service: TextToVideoService,
         creditService: CreditService? = nil,
         promptTranscriptionService: PromptTranscriptionService? = nil,
@@ -109,9 +145,11 @@ struct TextToVideoView: View {
         mediaUploadStore: MediaUploadStore? = nil,
         mediaUploadService: MediaUploadService? = nil,
         onOpenPricing: @escaping (PricingEntryPoint) -> Void = { _ in },
-        onCreditsUpdated: (() -> Void)? = nil
+        onCreditsUpdated: (() -> Void)? = nil,
+        onRegenerate: ((TextVideoGeneration) -> Void)? = nil
     ) {
         self.mode = mode
+        self.regeneration = regeneration
         self.service = service
         self.creditService = creditService
         self.promptTranscriptionService = promptTranscriptionService
@@ -120,20 +158,33 @@ struct TextToVideoView: View {
         self.mediaUploadService = mediaUploadService
         self.onOpenPricing = onOpenPricing
         self.onCreditsUpdated = onCreditsUpdated
+        self.onRegenerate = onRegenerate
+        _prompt = State(initialValue: regeneration?.prompt ?? "")
+        _duration = State(
+            initialValue: regeneration.flatMap { TextVideoDurationOption(rawValue: $0.seconds) } ?? .five
+        )
+        _resolution = State(
+            initialValue: regeneration.flatMap { TextVideoResolutionOption(rawValue: $0.resolution) } ?? .sevenTwenty
+        )
+        _aspectRatio = State(
+            initialValue: regeneration.flatMap { TextVideoAspectRatioOption(rawValue: $0.aspectRatio) } ?? .nineSixteen
+        )
+        _pendingImageMediaID = State(initialValue: regeneration?.imageMediaID)
         _creditCost = State(initialValue: CreditPricing.price(for: .createVideo))
     }
 
     private var canGenerate: Bool {
-        !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            (mode == .textToVideo || selectedImageAsset != nil) &&
-            !isGenerating &&
-            !isCheckingCredits
+        let hasPrompt = !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasRequiredInput = mode == .textToVideo
+            ? hasPrompt
+            : selectedImageAsset != nil || !(pendingImageMediaID ?? "").isEmpty
+        return hasRequiredInput && !isGenerating && !isCheckingCredits
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: FrameMioSpacing.xl) {
-                if isGenerating {
+                if isGenerating || isCheckingCredits {
                     generatingVideoSection
                 }
                 if let recentlyCompletedGeneration {
@@ -163,9 +214,12 @@ struct TextToVideoView: View {
             TextVideoHistoryView(
                 generations: historyGenerations,
                 service: service,
+                photoLibrary: photoLibrary,
+                mediaUploadStore: mediaUploadStore,
                 onDeleted: {
                     Task { await refreshGenerations() }
-                }
+                },
+                onRegenerate: onRegenerate
             )
         }
         .safeAreaInset(edge: .bottom) {
@@ -176,6 +230,9 @@ struct TextToVideoView: View {
         }
         .task {
             await refreshGenerationHistoryLoop()
+        }
+        .task {
+            await loadRegenerationSourceImage()
         }
         .alert("Couldn’t generate video", isPresented: errorBinding) {
             Button("Try Again") {
@@ -204,7 +261,7 @@ struct TextToVideoView: View {
             HStack(spacing: FrameMioSpacing.sm) {
                 ProgressView()
                     .controlSize(.small)
-                Text(isUploadingSourceImage ? "Uploading image" : "Generating video")
+                Text(generationProgressTitle)
                     .font(FrameMioTypography.headline)
                     .foregroundStyle(FrameMioColors.ink)
                 Spacer(minLength: FrameMioSpacing.sm)
@@ -214,12 +271,8 @@ struct TextToVideoView: View {
             }
 
             FrameMioProgressView(
-                value: progress,
-                title: isUploadingSourceImage
-                    ? "Preparing your image"
-                    : activeGeneration?.status == .queued
-                        ? "Queued"
-                        : "FrameMio is creating your video"
+                value: isCheckingCredits ? nil : progress,
+                title: generationProgressSubtitle
             )
 
             Text(
@@ -239,6 +292,29 @@ struct TextToVideoView: View {
             RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous)
                 .stroke(FrameMioColors.accent.opacity(0.4), lineWidth: FrameMioMetrics.borderWidth)
         }
+    }
+
+    private var generationProgressTitle: String {
+        if isCheckingCredits {
+            return "Checking credits"
+        }
+        if isUploadingSourceImage {
+            return "Uploading image"
+        }
+        return "Generating video"
+    }
+
+    private var generationProgressSubtitle: String {
+        if isCheckingCredits {
+            return "Checking your available credits"
+        }
+        if isUploadingSourceImage {
+            return "Preparing your image"
+        }
+        if activeGeneration?.status == .queued {
+            return "Queued"
+        }
+        return "FrameMio is creating your video"
     }
 
     private var imageSourceSection: some View {
@@ -324,29 +400,8 @@ struct TextToVideoView: View {
                     .foregroundStyle(FrameMioColors.accent)
             }
 
-            TextVideoThumbnail(generation: generation, service: service)
+            TextVideoInlinePlayer(generation: generation, service: service)
                 .frame(maxWidth: .infinity)
-
-            NavigationLink {
-                TextVideoDetailView(
-                    generation: generation,
-                    service: service,
-                    onDeleted: {
-                        recentlyCompletedGeneration = nil
-                        Task { await refreshGenerations() }
-                    }
-                )
-            } label: {
-                Label("Play video", systemImage: "play.fill")
-                    .font(FrameMioTypography.headline)
-                    .foregroundStyle(FrameMioColors.inverseInk)
-                    .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.compactButtonHeight)
-                    .background(
-                        FrameMioColors.accent,
-                        in: RoundedRectangle(cornerRadius: FrameMioRadius.control, style: .continuous)
-                    )
-            }
-            .buttonStyle(FrameMioPressButtonStyle())
         }
         .padding(FrameMioSpacing.lg)
         .background(
@@ -361,7 +416,7 @@ struct TextToVideoView: View {
 
     private var promptSection: some View {
         FrameMioPromptInputSection(
-            title: "Prompt",
+            title: mode.promptTitle,
             subtitle: mode.promptSubtitle,
             placeholder: mode.promptPlaceholder,
             quickPrompts: [],
@@ -461,9 +516,12 @@ struct TextToVideoView: View {
                             TextVideoDetailView(
                                 generation: generation,
                                 service: service,
+                                photoLibrary: photoLibrary,
+                                mediaUploadStore: mediaUploadStore,
                                 onDeleted: {
                                     Task { await refreshGenerations() }
-                                }
+                                },
+                                onRegenerate: onRegenerate
                             )
                         } label: {
                             TextVideoHistoryRow(generation: generation, service: service)
@@ -492,8 +550,8 @@ struct TextToVideoView: View {
             Divider()
                 .overlay(FrameMioColors.divider.opacity(0.7))
             PrimaryButton(
-                title: "Generate Video (\(creditCost) credits)",
-                systemImage: "wand.and.stars",
+                title: "\(regeneration != nil || recentlyCompletedGeneration != nil ? "Regenerate" : "Generate") Video (\(creditCost) credits)",
+                systemImage: regeneration != nil || recentlyCompletedGeneration != nil ? "arrow.clockwise" : "wand.and.stars",
                 action: requestGenerate,
                 isDisabled: !canGenerate,
                 isLoading: isCheckingCredits || isGenerating
@@ -569,7 +627,7 @@ struct TextToVideoView: View {
         }
         errorMessage = nil
 
-        let requestPrompt = pendingPrompt ?? ""
+        let requestPrompt = normalizedPrompt(pendingPrompt ?? "")
         let requestDuration = pendingDuration ?? duration.seconds
         let requestResolution = pendingResolution ?? resolution.rawValue
         let requestAspectRatio = pendingAspectRatio ?? aspectRatio.rawValue
@@ -623,6 +681,14 @@ struct TextToVideoView: View {
                 }
             }
         }
+    }
+
+    private func normalizedPrompt(_ value: String) -> String {
+        let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard mode == .imageToVideo, trimmedValue.isEmpty else {
+            return trimmedValue
+        }
+        return TextVideoPromptDefaults.imageToVideo
     }
 
     private func refreshGenerationHistoryLoop() async {
@@ -741,6 +807,81 @@ struct TextToVideoView: View {
         }
     }
 
+    private func loadRegenerationSourceImage() async {
+        guard mode == .imageToVideo,
+              selectedImageAsset == nil,
+              let mediaID = pendingImageMediaID,
+              !mediaID.isEmpty else {
+            return
+        }
+
+        do {
+            let sourceURL = try await service.sourceImageURL(for: mediaID)
+            let (data, response) = try await URLSession.shared.data(from: sourceURL)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200..<300).contains(httpResponse.statusCode) else {
+                throw AppError.invalidResponse
+            }
+            guard let image = UIImage(data: data), !Task.isCancelled else {
+                throw AppError.invalidResponse
+            }
+
+            await MainActor.run {
+                selectedImageThumbnail = image
+            }
+        } catch is CancellationError {
+        } catch {
+            await loadRegenerationSourceImageFromPhotos(
+                mediaID: mediaID,
+                mediaUploadStore: mediaUploadStore,
+                photoLibrary: photoLibrary
+            )
+        }
+    }
+
+    private func loadRegenerationSourceImageFromPhotos(
+        mediaID: String,
+        mediaUploadStore: MediaUploadStore?,
+        photoLibrary: PhotoLibraryService?
+    ) async {
+        guard let mediaUploadStore, let photoLibrary else { return }
+
+        do {
+            let uploads = try await mediaUploadStore.allUploads()
+            guard let upload = uploads.first(where: {
+                $0.mediaID == mediaID && $0.mediaType == .photo
+            }),
+            let localIdentifier = upload.localIdentifier,
+            !localIdentifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return
+            }
+
+            let asset = MediaAsset(
+                id: upload.assetID,
+                localIdentifier: localIdentifier,
+                kind: .image,
+                creationDate: upload.creationDate,
+                duration: 0,
+                pixelWidth: upload.pixelWidth,
+                pixelHeight: upload.pixelHeight
+            )
+            let data = try await photoLibrary.requestThumbnail(
+                for: asset,
+                targetSize: CGSize(width: 1_200, height: 1_200)
+            )
+            guard let image = UIImage(data: data), !Task.isCancelled else {
+                return
+            }
+
+            await MainActor.run {
+                selectedImageAsset = asset
+                selectedImageThumbnail = image
+            }
+        } catch is CancellationError {
+        } catch {
+        }
+    }
+
     private func stagePickedImage(
         jpegData: Data,
         asset: MediaAsset,
@@ -834,12 +975,80 @@ struct TextToVideoView: View {
     }
 }
 
+private enum TextVideoThumbnailCache {
+    private static let cacheDirectoryName = "text-video-thumbnails-v1"
+    private static let memoryCache = NSCache<NSString, UIImage>()
+
+    static func load(generationID: String) -> UIImage? {
+        let key = cacheKey(for: generationID)
+        if let image = memoryCache.object(forKey: key as NSString) {
+            return image
+        }
+
+        let fileURL = cacheFileURL(for: generationID)
+        guard let data = try? Data(contentsOf: fileURL),
+              let image = UIImage(data: data) else {
+            return nil
+        }
+
+        memoryCache.setObject(image, forKey: key as NSString)
+        return image
+    }
+
+    static func save(_ image: UIImage, generationID: String) {
+        let key = cacheKey(for: generationID)
+        memoryCache.setObject(image, forKey: key as NSString)
+
+        guard let data = image.jpegData(compressionQuality: 0.82) else {
+            return
+        }
+
+        do {
+            try FileManager.default.createDirectory(
+                at: cacheDirectory,
+                withIntermediateDirectories: true
+            )
+            try data.write(to: cacheFileURL(for: generationID), options: .atomic)
+        } catch {
+        }
+    }
+
+    private static var cacheDirectory: URL {
+        let baseURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return baseURL
+            .appendingPathComponent("FrameMio", isDirectory: true)
+            .appendingPathComponent(cacheDirectoryName, isDirectory: true)
+    }
+
+    private static func cacheFileURL(for generationID: String) -> URL {
+        cacheDirectory.appendingPathComponent("\(safeCacheComponent(generationID)).jpg")
+    }
+
+    private static func cacheKey(for generationID: String) -> String {
+        "text-video-thumbnail-\(generationID)"
+    }
+
+    private static func safeCacheComponent(_ value: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let scalars = value.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" }
+        let sanitized = String(scalars)
+        return sanitized.isEmpty ? "generation" : sanitized
+    }
+}
+
 private struct TextVideoThumbnail: View {
     let generation: TextVideoGeneration
     let service: TextToVideoService
 
-    @State private var image: Image?
+    @State private var image: UIImage?
     @State private var isLoading = false
+
+    init(generation: TextVideoGeneration, service: TextToVideoService) {
+        self.generation = generation
+        self.service = service
+        _image = State(initialValue: TextVideoThumbnailCache.load(generationID: generation.id))
+    }
 
     var body: some View {
         ZStack {
@@ -847,7 +1056,7 @@ private struct TextVideoThumbnail: View {
                 .fill(FrameMioColors.canvas)
 
             if let image {
-                image
+                Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
             } else if isLoading {
@@ -865,6 +1074,17 @@ private struct TextVideoThumbnail: View {
                     .foregroundStyle(FrameMioColors.inverseInk)
                     .frame(width: 32, height: 32)
                     .background(FrameMioColors.mediaScrim, in: Circle())
+            }
+
+            if generation.imageMediaID?.isEmpty == false {
+                Image(systemName: "photo.fill")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(FrameMioColors.inverseInk)
+                    .frame(width: 24, height: 24)
+                    .background(FrameMioColors.mediaScrim, in: Circle())
+                    .padding(FrameMioSpacing.xs)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .accessibilityLabel("Generated from source image")
             }
         }
         .aspectRatio(videoAspectRatio, contentMode: .fit)
@@ -906,10 +1126,94 @@ private struct TextVideoThumbnail: View {
             generator.appliesPreferredTrackTransform = true
             let result = try await generator.image(at: .zero)
             guard !Task.isCancelled else { return }
-            image = Image(uiImage: UIImage(cgImage: result.image))
+            let thumbnail = UIImage(cgImage: result.image)
+            TextVideoThumbnailCache.save(thumbnail, generationID: generation.id)
+            image = thumbnail
         } catch is CancellationError {
         } catch {
         }
+    }
+}
+
+private struct TextVideoInlinePlayer: View {
+    let generation: TextVideoGeneration
+    let service: TextToVideoService
+
+    @State private var playableURL: URL?
+    @State private var isLoading = false
+
+    var body: some View {
+        Group {
+            if let playableURL {
+                StoryVideoPlayer(
+                    url: playableURL,
+                    autoplays: true,
+                    accessibilityTitle: "Generated video"
+                )
+                .aspectRatio(videoAspectRatio, contentMode: .fit)
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: FrameMioRadius.medium, style: .continuous)
+                        .fill(FrameMioColors.canvas)
+
+                    if isLoading {
+                        ProgressView("Loading video...")
+                            .tint(FrameMioColors.accent)
+                    } else {
+                        Image(systemName: "film")
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(FrameMioColors.accent)
+                    }
+                }
+                .aspectRatio(videoAspectRatio, contentMode: .fit)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.medium, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.medium, style: .continuous)
+                .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
+        }
+        .task(id: generation.id) {
+            await loadVideo()
+        }
+        .onDisappear {
+            removeDownloadedVideo()
+        }
+    }
+
+    private var videoAspectRatio: CGFloat {
+        let parts = generation.aspectRatio.split(separator: ":")
+        guard parts.count == 2,
+              let width = Double(parts[0]),
+              let height = Double(parts[1]),
+              width > 0,
+              height > 0 else {
+            return 9.0 / 16.0
+        }
+        return width / height
+    }
+
+    private func loadVideo() async {
+        guard generation.status == .completed, playableURL == nil, !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            let videoURL = try await service.downloadContent(for: generation.id)
+            guard !Task.isCancelled else {
+                try? FileManager.default.removeItem(at: videoURL)
+                return
+            }
+            playableURL = videoURL
+        } catch is CancellationError {
+        } catch {
+        }
+    }
+
+    private func removeDownloadedVideo() {
+        guard let playableURL else { return }
+        try? FileManager.default.removeItem(at: playableURL)
+        self.playableURL = nil
     }
 }
 
@@ -962,11 +1266,33 @@ private struct TextVideoHistoryRow: View {
 private struct TextVideoHistoryView: View {
     let generations: [TextVideoGeneration]
     let service: TextToVideoService
+    let photoLibrary: PhotoLibraryService?
+    let mediaUploadStore: MediaUploadStore?
     let onDeleted: () -> Void
+    let onRegenerate: ((TextVideoGeneration) -> Void)?
+    let showsNavigationTitle: Bool
 
     @State private var pageIndex = 0
 
     private let pageSize = 10
+
+    init(
+        generations: [TextVideoGeneration],
+        service: TextToVideoService,
+        photoLibrary: PhotoLibraryService?,
+        mediaUploadStore: MediaUploadStore?,
+        onDeleted: @escaping () -> Void,
+        onRegenerate: ((TextVideoGeneration) -> Void)? = nil,
+        showsNavigationTitle: Bool = true
+    ) {
+        self.generations = generations
+        self.service = service
+        self.photoLibrary = photoLibrary
+        self.mediaUploadStore = mediaUploadStore
+        self.onDeleted = onDeleted
+        self.onRegenerate = onRegenerate
+        self.showsNavigationTitle = showsNavigationTitle
+    }
 
     var body: some View {
         ScrollView {
@@ -989,7 +1315,10 @@ private struct TextVideoHistoryView: View {
                                 TextVideoDetailView(
                                     generation: generation,
                                     service: service,
-                                    onDeleted: onDeleted
+                                    photoLibrary: photoLibrary,
+                                    mediaUploadStore: mediaUploadStore,
+                                    onDeleted: onDeleted,
+                                    onRegenerate: onRegenerate
                                 )
                             } label: {
                                 TextVideoHistoryRow(generation: generation, service: service)
@@ -1008,7 +1337,7 @@ private struct TextVideoHistoryView: View {
             .padding(.bottom, FrameMioSpacing.xxxl)
         }
         .background(FrameMioColors.canvas.ignoresSafeArea())
-        .navigationTitle("Video History")
+        .navigationTitle(showsNavigationTitle ? "Video History" : "History")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: generations.count) { _, _ in
             pageIndex = min(pageIndex, max(pageCount - 1, 0))
@@ -1070,16 +1399,80 @@ private struct TextVideoHistoryView: View {
     }
 }
 
+struct GeneratedVideoHistoryView: View {
+    let service: TextToVideoService
+    let photoLibrary: PhotoLibraryService?
+    let mediaUploadStore: MediaUploadStore?
+    let onDeleted: () -> Void
+    let onRegenerate: (TextVideoGeneration) -> Void
+
+    @State private var generations: [TextVideoGeneration] = []
+
+    var body: some View {
+        TextVideoHistoryView(
+            generations: generations,
+            service: service,
+            photoLibrary: photoLibrary,
+            mediaUploadStore: mediaUploadStore,
+            onDeleted: {
+                onDeleted()
+                Task { await refreshGenerations() }
+            },
+            onRegenerate: onRegenerate,
+            showsNavigationTitle: false
+        )
+        .task {
+            await refreshGenerationHistoryLoop()
+        }
+    }
+
+    private func refreshGenerationHistoryLoop() async {
+        await loadCachedGenerations()
+        while !Task.isCancelled {
+            await refreshGenerations()
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+        }
+    }
+
+    private func loadCachedGenerations() async {
+        do {
+            let cached = try await service.cachedGenerations()
+            await MainActor.run {
+                generations = cached
+            }
+        } catch is CancellationError {
+        } catch {
+        }
+    }
+
+    private func refreshGenerations() async {
+        do {
+            let latest = try await service.list()
+            await MainActor.run {
+                generations = latest
+            }
+        } catch is CancellationError {
+        } catch {
+        }
+    }
+}
+
 private struct TextVideoDetailView: View {
     let generation: TextVideoGeneration
     let service: TextToVideoService
+    let photoLibrary: PhotoLibraryService?
+    let mediaUploadStore: MediaUploadStore?
     let onDeleted: () -> Void
+    let onRegenerate: ((TextVideoGeneration) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @State private var playableURL: URL?
     @State private var isLoadingContent = false
     @State private var errorMessage: String?
+    @State private var saveVideoState: StoryPreviewSaveVideoState?
+    @State private var isShowingSourceImage = false
     @State private var isShowingDeleteConfirmation = false
+    @State private var isSaving = false
     @State private var isDeleting = false
 
     var body: some View {
@@ -1119,6 +1512,39 @@ private struct TextVideoDetailView: View {
                         .foregroundStyle(FrameMioColors.tertiaryInk)
                 }
 
+                if let onRegenerate {
+                    PrimaryButton(
+                        title: "Edit video",
+                        systemImage: "pencil",
+                        action: {
+                            onRegenerate(generation)
+                        },
+                        isDisabled: isSaving || isDeleting
+                    )
+                }
+
+                if generation.imageMediaID?.isEmpty == false {
+                    Button {
+                        isShowingSourceImage = true
+                    } label: {
+                        Label("View source image", systemImage: "photo")
+                            .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.compactButtonHeight)
+                    }
+                    .buttonStyle(FrameMioPressButtonStyle())
+                }
+
+                Button {
+                    saveVideoToPhotos()
+                } label: {
+                    Label(
+                        isSaving ? "Saving..." : "Save to Photos",
+                        systemImage: isSaving ? "hourglass" : "arrow.down.circle"
+                    )
+                    .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.compactButtonHeight)
+                }
+                .buttonStyle(FrameMioPressButtonStyle())
+                .disabled(playableURL == nil || isLoadingContent || isSaving || isDeleting)
+
                 Button(role: .destructive) {
                     isShowingDeleteConfirmation = true
                 } label: {
@@ -1129,7 +1555,7 @@ private struct TextVideoDetailView: View {
                     .frame(maxWidth: .infinity, minHeight: FrameMioMetrics.compactButtonHeight)
                 }
                 .buttonStyle(FrameMioPressButtonStyle())
-                .disabled(isDeleting)
+                .disabled(isDeleting || isSaving)
             }
             .padding(.horizontal, FrameMioSpacing.lg)
             .padding(.top, FrameMioSpacing.lg)
@@ -1138,6 +1564,23 @@ private struct TextVideoDetailView: View {
         .background(FrameMioColors.canvas.ignoresSafeArea())
         .navigationTitle("Generated Video")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $isShowingSourceImage) {
+            if let imageMediaID = generation.imageMediaID {
+                TextVideoSourceImageView(
+                    mediaID: imageMediaID,
+                    service: service,
+                    photoLibrary: photoLibrary,
+                    mediaUploadStore: mediaUploadStore
+                )
+            }
+        }
+        .overlay {
+            if let saveVideoState {
+                VideoSaveProgressOverlay(state: saveVideoState, mediaDescription: "generated video") {
+                    self.saveVideoState = nil
+                }
+            }
+        }
         .task {
             guard generation.status == .completed, playableURL == nil else { return }
             isLoadingContent = true
@@ -1204,8 +1647,29 @@ private struct TextVideoDetailView: View {
         )
     }
 
+    private func saveVideoToPhotos() {
+        guard let playableURL, !isSaving else { return }
+        isSaving = true
+        saveVideoState = .downloading(progress: nil)
+        Task { @MainActor in
+            defer { isSaving = false }
+            do {
+                try await TextVideoPhotoSaver.saveVideo(at: playableURL)
+                FrameMioHaptics.success()
+                saveVideoState = .completed(
+                    message: "Saved to your Photos library. Open Photos to find it in Recents."
+                )
+            } catch is CancellationError {
+                saveVideoState = nil
+            } catch {
+                saveVideoState = nil
+                errorMessage = AppError.from(error).localizedDescription
+            }
+        }
+    }
+
     private func deleteVideo() {
-        guard !isDeleting else { return }
+        guard !isDeleting, !isSaving else { return }
         isDeleting = true
         Task {
             do {
@@ -1223,6 +1687,126 @@ private struct TextVideoDetailView: View {
                     errorMessage = AppError.from(error).localizedDescription
                 }
             }
+        }
+    }
+}
+
+private struct TextVideoSourceImageView: View {
+    let mediaID: String
+    let service: TextToVideoService
+    let photoLibrary: PhotoLibraryService?
+    let mediaUploadStore: MediaUploadStore?
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var image: UIImage?
+    @State private var errorMessage: String?
+    @State private var isLoading = false
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let image {
+                    ScrollView {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .clipShape(
+                                RoundedRectangle(
+                                    cornerRadius: FrameMioRadius.container,
+                                    style: .continuous
+                                )
+                            )
+                            .padding(FrameMioSpacing.lg)
+                    }
+                } else if isLoading {
+                    ProgressView("Loading source image...")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    EmptyState(
+                        systemImage: "photo",
+                        title: "Source image unavailable",
+                        message: errorMessage ?? "The original image is no longer available in Photos."
+                    )
+                    .padding(FrameMioSpacing.lg)
+                }
+            }
+            .background(FrameMioColors.canvas.ignoresSafeArea())
+            .navigationTitle("Source Image")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+            .task {
+                await loadImage()
+            }
+        }
+    }
+
+    private func loadImage() async {
+        guard image == nil, !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            let sourceURL = try await service.sourceImageURL(for: mediaID)
+            let (data, response) = try await URLSession.shared.data(from: sourceURL)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200..<300).contains(httpResponse.statusCode) else {
+                throw AppError.invalidResponse
+            }
+            guard let image = UIImage(data: data) else {
+                throw AppError.message("The source image could not be displayed.")
+            }
+            guard !Task.isCancelled else { return }
+            self.image = image
+        } catch is CancellationError {
+        } catch {
+            await loadLocalImage(fallbackError: error)
+        }
+    }
+
+    private func loadLocalImage(fallbackError: Error) async {
+        guard let mediaUploadStore, let photoLibrary else {
+            errorMessage = AppError.from(fallbackError).localizedDescription
+            return
+        }
+
+        do {
+            let uploads = try await mediaUploadStore.allUploads()
+            guard let upload = uploads.first(where: {
+                $0.mediaID == mediaID && $0.mediaType == .photo
+            }) else {
+                throw AppError.message("The uploaded source image could not be found.")
+            }
+            guard let localIdentifier = upload.localIdentifier,
+                  !localIdentifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw AppError.message("The source image is no longer linked to Photos.")
+            }
+
+            let asset = MediaAsset(
+                id: upload.assetID,
+                localIdentifier: localIdentifier,
+                kind: .image,
+                creationDate: upload.creationDate,
+                duration: 0,
+                pixelWidth: upload.pixelWidth,
+                pixelHeight: upload.pixelHeight
+            )
+            let data = try await photoLibrary.requestThumbnail(
+                for: asset,
+                targetSize: CGSize(width: 1_200, height: 1_200)
+            )
+            guard let image = UIImage(data: data), !Task.isCancelled else {
+                return
+            }
+            self.image = image
+        } catch is CancellationError {
+        } catch {
+            errorMessage = AppError.from(error).localizedDescription
         }
     }
 }

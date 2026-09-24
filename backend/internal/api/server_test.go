@@ -1961,6 +1961,96 @@ func TestIOSStoryPresentationSuppressesGenericNames(t *testing.T) {
 	}
 }
 
+func TestMediaContentURLRequiresOwnershipAndUsesConfiguredDownloadBaseURL(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	server := newTestServerWithStorage(
+		memoryStore,
+		queue.NewMemoryPublisher(),
+		storage.StaticObjectStorage{
+			BaseURL:            "https://cdn.example.test",
+			PartSizeBytes:      5 * 1024 * 1024,
+			MultipartThreshold: 10 * 1024 * 1024,
+		},
+	)
+	server.Authenticator = multiTokenAuthenticator{
+		"test-token":  {ID: "user-1", Email: "user@example.com"},
+		"other-token": {ID: "user-2", Email: "other@example.com"},
+	}
+	media := models.MediaAsset{
+		ID:            "photo-content-1",
+		UserID:        "user-1",
+		Type:          models.MediaTypePhoto,
+		Status:        models.MediaStatusReady,
+		S3Key:         "users/user-1/media/photo-content-1/source.jpg",
+		UploadID:      "upload-photo-content-1",
+		FileName:      "source.jpg",
+		ContentType:   "image/jpeg",
+		FileSizeBytes: 12,
+		CreatedAt:     time.Now().UTC(),
+		UpdatedAt:     time.Now().UTC(),
+	}
+	session := models.UploadSession{
+		ID:        media.UploadID,
+		UserID:    media.UserID,
+		MediaID:   media.ID,
+		S3Key:     media.S3Key,
+		Strategy:  models.UploadStrategySingle,
+		CreatedAt: media.CreatedAt,
+	}
+	if err := memoryStore.CreateMediaUpload(context.Background(), media, session); err != nil {
+		t.Fatal(err)
+	}
+
+	response := performJSON(
+		t,
+		server.Handler(),
+		http.MethodGet,
+		"/v1/media/"+media.ID+"/content",
+		nil,
+		"",
+		true,
+		nil,
+	)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var payload mediaContentURLResponse
+	decodeResponse(t, response, &payload)
+	if payload.URL != "https://cdn.example.test/"+media.S3Key {
+		t.Fatalf("url = %q", payload.URL)
+	}
+
+	otherUserResponse := performJSON(
+		t,
+		server.Handler(),
+		http.MethodGet,
+		"/v1/media/"+media.ID+"/content",
+		nil,
+		"",
+		false,
+		map[string]string{"Authorization": "Bearer other-token"},
+	)
+	if otherUserResponse.Code != http.StatusNotFound {
+		t.Fatalf("other user status = %d, body = %s", otherUserResponse.Code, otherUserResponse.Body.String())
+	}
+}
+
+type multiTokenAuthenticator map[string]models.User
+
+func (a multiTokenAuthenticator) Authenticate(_ context.Context, request *http.Request) (models.User, error) {
+	prefix, token, ok := strings.Cut(request.Header.Get("Authorization"), " ")
+	if !ok || !strings.EqualFold(prefix, "Bearer") || token == "" {
+		return models.User{}, ErrUnauthenticated
+	}
+	user, ok := a[token]
+	if !ok || user.ID == "" {
+		return models.User{}, ErrUnauthenticated
+	}
+	return user, nil
+}
+
 func assertSmallIdentifierOnlyMessage(t *testing.T, message queue.JobMessage) {
 	t.Helper()
 	encoded, err := json.Marshal(message)

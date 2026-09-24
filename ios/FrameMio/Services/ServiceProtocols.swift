@@ -191,6 +191,7 @@ protocol PromptTranscriptionService: Sendable {
 
 protocol TextToVideoService: Sendable {
     func cachedGenerations() async throws -> [TextVideoGeneration]
+    func sourceImageURL(for mediaID: String) async throws -> URL
     func create(
         prompt: String,
         duration: Int,
@@ -202,6 +203,10 @@ protocol TextToVideoService: Sendable {
     func list() async throws -> [TextVideoGeneration]
     func downloadContent(for generationID: String) async throws -> URL
     func delete(generationID: String) async throws
+}
+
+enum TextVideoPromptDefaults {
+    static let imageToVideo = "Create a natural cinematic animation with subtle camera movement and realistic motion."
 }
 
 enum TextVideoGenerationStatus: String, Codable, Hashable, Sendable {

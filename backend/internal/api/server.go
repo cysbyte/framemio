@@ -168,6 +168,15 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
+	if strings.HasPrefix(request.URL.Path, "/v1/media/") && strings.HasSuffix(request.URL.Path, "/content") {
+		parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
+		if request.Method == http.MethodGet && len(parts) == 4 && parts[0] == "v1" && parts[1] == "media" {
+			s.getMediaContentURL(response, request, parts[2])
+			return
+		}
+		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
 	if request.URL.Path == "/v1/transcriptions/token" {
 		s.grantPromptTranscriptionToken(response, request)
 		return
@@ -543,6 +552,46 @@ func (s *Server) getMedia(response http.ResponseWriter, request *http.Request, m
 		return
 	}
 	s.writeJSON(response, http.StatusOK, media)
+}
+
+type mediaContentURLResponse struct {
+	URL string `json:"url"`
+}
+
+func (s *Server) getMediaContentURL(response http.ResponseWriter, request *http.Request, mediaID string) {
+	user, ok := s.authenticate(response, request)
+	if !ok {
+		return
+	}
+	if mediaID == "" {
+		s.writeError(response, http.StatusBadRequest, "invalid_media_id", "media id is required")
+		return
+	}
+	if s.Store == nil || s.ObjectStorage == nil {
+		s.writeError(response, http.StatusServiceUnavailable, "media_content_unavailable", "media content is not configured")
+		return
+	}
+
+	media, err := s.Store.GetMedia(request.Context(), user.ID, mediaID)
+	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	if media.Status != models.MediaStatusReady || media.Type != models.MediaTypePhoto || strings.TrimSpace(media.S3Key) == "" {
+		s.writeError(response, http.StatusConflict, "media_not_ready", "the source image is not ready")
+		return
+	}
+
+	contentURL, err := s.ObjectStorage.PresignedDownloadURL(
+		request.Context(),
+		media.S3Key,
+		textVideoImageURLExpiry,
+	)
+	if err != nil {
+		s.internalError(response, err, "presign media content")
+		return
+	}
+	s.writeJSON(response, http.StatusOK, mediaContentURLResponse{URL: contentURL})
 }
 
 type createProjectRequest struct {

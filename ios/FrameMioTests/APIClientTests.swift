@@ -585,6 +585,63 @@ final class TextVideoPersistenceTests: XCTestCase {
         XCTAssertEqual(listed, [generation])
         XCTAssertEqual(persisted, [generation])
     }
+
+    func testImageToVideoUsesDefaultPromptWhenPromptIsEmpty() async throws {
+        let now = Date()
+        let generation = TextVideoGeneration(
+            id: "generation-1",
+            providerTaskID: "provider-1",
+            prompt: TextVideoPromptDefaults.imageToVideo,
+            imageMediaID: "media-1",
+            seconds: 5,
+            resolution: "720p",
+            aspectRatio: "9:16",
+            status: .queued,
+            progress: 0,
+            videoURL: nil,
+            errorMessage: nil,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: nil
+        )
+        let response = try FrameMioJSONCoding.apiEncoder().encode(generation)
+        let apiClient = CapturingTextVideoAPIClient(response: response)
+        let service = RemoteTextToVideoService(
+            apiClient: apiClient,
+            persistence: MockTextVideoPersistence()
+        )
+
+        _ = try await service.create(
+            prompt: "   ",
+            duration: 5,
+            resolution: "720p",
+            aspectRatio: "9:16",
+            idempotencyKey: "test-image-to-video",
+            imageMediaID: "media-1"
+        )
+
+        let request = await apiClient.lastRequest
+        let body = try XCTUnwrap(request?.body)
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: body) as? [String: Any]
+        )
+        XCTAssertEqual(payload["prompt"] as? String, TextVideoPromptDefaults.imageToVideo)
+        XCTAssertEqual(payload["image_media_id"] as? String, "media-1")
+    }
+}
+
+private actor CapturingTextVideoAPIClient: APIClient {
+    let response: Data
+    private(set) var lastRequest: APIRequest?
+
+    init(response: Data) {
+        self.response = response
+    }
+
+    func data(for request: APIRequest) async throws -> Data {
+        lastRequest = request
+        return response
+    }
 }
 
 private actor RetryingCreditService: CreditService {

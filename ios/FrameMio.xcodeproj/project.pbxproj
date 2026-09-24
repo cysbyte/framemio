@@ -20,7 +20,6 @@
 		A1000000000000000000001A /* StoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002A /* StoryView.swift */; };
 		A1000000000000000000001B /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002B /* ProfileView.swift */; };
 		A1000000000000000000001C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002C /* Assets.xcassets */; };
-		E90000000000000000000001 /* FrameMio.env in Resources */ = {isa = PBXBuildFile; fileRef = E90000000000000000000002 /* FrameMio.env */; };
 		A10000000000000000000050 /* FrameMioSpacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000070 /* FrameMioSpacing.swift */; };
 		A10000000000000000000051 /* FrameMioRadius.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000071 /* FrameMioRadius.swift */; };
 		A10000000000000000000052 /* FrameMioMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000072 /* FrameMioMetrics.swift */; };
@@ -79,8 +78,6 @@
 		C70000000000000000000105 /* DirectObjectStorageClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70000000000000000000005 /* DirectObjectStorageClient.swift */; };
 		C70000000000000000000106 /* MediaUploadStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70000000000000000000006 /* MediaUploadStore.swift */; };
 		C70000000000000000000107 /* MediaUploadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70000000000000000000007 /* MediaUploadTests.swift */; };
-		E10000000000000000000001 /* TextToVideoService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000002 /* TextToVideoService.swift */; };
-		E10000000000000000000003 /* TextToVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000004 /* TextToVideoView.swift */; };
 		D80000000000000000000001 /* HomeHeroPreview.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D80000000000000000000002 /* HomeHeroPreview.mp4 */; };
 		D80000000000000000000003 /* full-screen-cinematic-cutaways.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D80000000000000000000004 /* full-screen-cinematic-cutaways.mp4 */; };
 		D80000000000000000000005 /* photo-over-video.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D80000000000000000000006 /* photo-over-video.mp4 */; };
@@ -102,6 +99,9 @@
 		D80000000000000000000025 /* cinematic-reel-cutaways.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D80000000000000000000026 /* cinematic-reel-cutaways.mp4 */; };
 		D80000000000000000000027 /* talking-head-reel.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D80000000000000000000028 /* talking-head-reel.mp4 */; };
 		D80000000000000000000029 /* travel-highlight-reel.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D8000000000000000000002A /* travel-highlight-reel.mp4 */; };
+		E10000000000000000000001 /* TextToVideoService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000002 /* TextToVideoService.swift */; };
+		E10000000000000000000003 /* TextToVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000004 /* TextToVideoView.swift */; };
+		E90000000000000000000001 /* FrameMio.env in Resources */ = {isa = PBXBuildFile; fileRef = E90000000000000000000002 /* FrameMio.env */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -128,7 +128,6 @@
 		A1000000000000000000002A /* StoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoryView.swift; sourceTree = "<group>"; };
 		A1000000000000000000002B /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
 		A1000000000000000000002C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		E90000000000000000000002 /* FrameMio.env */ = {isa = PBXFileReference; lastKnownFileType = text; path = FrameMio.env; sourceTree = "<group>"; };
 		A1000000000000000000002D /* FrameMio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FrameMio.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000070 /* FrameMioSpacing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameMioSpacing.swift; sourceTree = "<group>"; };
 		A10000000000000000000071 /* FrameMioRadius.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameMioRadius.swift; sourceTree = "<group>"; };
@@ -189,8 +188,6 @@
 		C70000000000000000000005 /* DirectObjectStorageClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectObjectStorageClient.swift; sourceTree = "<group>"; };
 		C70000000000000000000006 /* MediaUploadStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaUploadStore.swift; sourceTree = "<group>"; };
 		C70000000000000000000007 /* MediaUploadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaUploadTests.swift; sourceTree = "<group>"; };
-		E10000000000000000000002 /* TextToVideoService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextToVideoService.swift; sourceTree = "<group>"; };
-		E10000000000000000000004 /* TextToVideoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextToVideoView.swift; sourceTree = "<group>"; };
 		D80000000000000000000002 /* HomeHeroPreview.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = HomeHeroPreview.mp4; sourceTree = "<group>"; };
 		D80000000000000000000004 /* full-screen-cinematic-cutaways.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "full-screen-cinematic-cutaways.mp4"; sourceTree = "<group>"; };
 		D80000000000000000000006 /* photo-over-video.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "photo-over-video.mp4"; sourceTree = "<group>"; };
@@ -212,6 +209,9 @@
 		D80000000000000000000026 /* cinematic-reel-cutaways.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "cinematic-reel-cutaways.mp4"; sourceTree = "<group>"; };
 		D80000000000000000000028 /* talking-head-reel.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "talking-head-reel.mp4"; sourceTree = "<group>"; };
 		D8000000000000000000002A /* travel-highlight-reel.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "travel-highlight-reel.mp4"; sourceTree = "<group>"; };
+		E10000000000000000000002 /* TextToVideoService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextToVideoService.swift; sourceTree = "<group>"; };
+		E10000000000000000000004 /* TextToVideoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextToVideoView.swift; sourceTree = "<group>"; };
+		E90000000000000000000002 /* FrameMio.env */ = {isa = PBXFileReference; lastKnownFileType = text; path = FrameMio.env; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -548,14 +548,6 @@
 			path = Pricing;
 			sourceTree = "<group>";
 		};
-		E10000000000000000000005 /* TextToVideo */ = {
-			isa = PBXGroup;
-			children = (
-				E10000000000000000000004 /* TextToVideoView.swift */,
-			);
-			path = TextToVideo;
-			sourceTree = "<group>";
-		};
 		B60000000000000000000020 /* FrameMioTests */ = {
 			isa = PBXGroup;
 			children = (
@@ -565,6 +557,14 @@
 				C70000000000000000000007 /* MediaUploadTests.swift */,
 			);
 			path = FrameMioTests;
+			sourceTree = "<group>";
+		};
+		E10000000000000000000005 /* TextToVideo */ = {
+			isa = PBXGroup;
+			children = (
+				E10000000000000000000004 /* TextToVideoView.swift */,
+			);
+			path = TextToVideo;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -776,8 +776,9 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = RAXZ4685K6;
@@ -792,6 +793,7 @@
 				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.framemio.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -808,8 +810,9 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = RAXZ4685K6;
@@ -823,6 +826,7 @@
 				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.framemio.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;

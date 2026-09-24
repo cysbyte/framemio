@@ -153,7 +153,9 @@ struct StoryPreviewView: View {
         }
         .overlay {
             if let saveState = viewModel.saveVideoState {
-                saveVideoModal(state: saveState)
+                VideoSaveProgressOverlay(state: saveState, mediaDescription: "story video") {
+                    viewModel.dismissSaveVideoState()
+                }
             }
         }
         .alert("Couldn’t update story", isPresented: errorBinding) {
@@ -668,8 +670,14 @@ struct StoryPreviewView: View {
         )
     }
 
-    @ViewBuilder
-    private func saveVideoModal(state: StoryPreviewSaveVideoState) -> some View {
+}
+
+struct VideoSaveProgressOverlay: View {
+    let state: StoryPreviewSaveVideoState
+    let mediaDescription: String
+    let onDismiss: () -> Void
+
+    var body: some View {
         ZStack {
             Color.black.opacity(0.28)
                 .ignoresSafeArea()
@@ -685,7 +693,11 @@ struct StoryPreviewView: View {
                         Text(state.title)
                             .font(FrameMioTypography.headline)
                             .foregroundStyle(FrameMioColors.ink)
-                        Text(state.showsDoneButton ? "Your story video is ready." : "Saving your story video to Photos.")
+                        Text(
+                            state.showsDoneButton
+                                ? "Your \(mediaDescription) is ready."
+                                : "Saving your \(mediaDescription) to Photos."
+                        )
                             .font(FrameMioTypography.footnote)
                             .foregroundStyle(FrameMioColors.secondaryInk)
                     }
@@ -709,7 +721,7 @@ struct StoryPreviewView: View {
 
                 if state.showsDoneButton {
                     PrimaryButton(title: "Done", systemImage: "checkmark") {
-                        viewModel.dismissSaveVideoState()
+                        onDismiss()
                     }
                 }
             }

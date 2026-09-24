@@ -13,6 +13,7 @@ struct AppRootView: View {
     @State private var homePath: [AppRoute] = []
     @State private var templatesPath: [AppRoute] = []
     @State private var historyPath: [AppRoute] = []
+    @State private var historyMode: HistoryMode = .projects
     @State private var purchaseDestination: PurchaseDestination?
     @State private var selectedTab: RootTab = .home
     @StateObject private var homeViewModel: HomeViewModel
@@ -123,10 +124,10 @@ struct AppRootView: View {
                 },
                 onOpenPricing: openPricing,
                 onCreateTextVideo: {
-                    homePath.append(.textToVideo)
+                    homePath.append(.textToVideo(regeneration: nil))
                 },
                 onCreateImageVideo: {
-                    homePath.append(.imageToVideo)
+                    homePath.append(.imageToVideo(regeneration: nil))
                 }
             )
             .navigationDestination(for: AppRoute.self) { route in
@@ -152,12 +153,41 @@ struct AppRootView: View {
 
     private var historyTab: some View {
         NavigationStack(path: $historyPath) {
-            AllStoriesView(
-                viewModel: homeViewModel,
-                onOpenStory: { story in
-                    historyPath.append(.storyPreview(story: story))
+            VStack(spacing: 0) {
+                Picker("History type", selection: $historyMode) {
+                    ForEach(HistoryMode.allCases, id: \.self) { mode in
+                        Text(mode.title).tag(mode)
+                    }
                 }
-            )
+                .pickerStyle(.segmented)
+                .padding(.horizontal, FrameMioSpacing.lg)
+                .padding(.top, FrameMioSpacing.md)
+                .padding(.bottom, FrameMioSpacing.sm)
+
+                switch historyMode {
+                case .projects:
+                    AllStoriesView(
+                        viewModel: homeViewModel,
+                        onOpenStory: { story in
+                            historyPath.append(.storyPreview(story: story))
+                        }
+                    )
+                case .generatedVideos:
+                    GeneratedVideoHistoryView(
+                        service: dependencies.textToVideoService,
+                        photoLibrary: dependencies.photoLibrary,
+                        mediaUploadStore: dependencies.mediaUploadStore,
+                        onDeleted: {},
+                        onRegenerate: { generation in
+                            if generation.imageMediaID?.isEmpty == false {
+                                historyPath.append(.imageToVideo(regeneration: generation))
+                            } else {
+                                historyPath.append(.textToVideo(regeneration: generation))
+                            }
+                        }
+                    )
+                }
+            }
             .navigationDestination(for: AppRoute.self) { route in
                 destination(for: route) { historyPath.append($0) }
             }
@@ -351,17 +381,9 @@ struct AppRootView: View {
                 ),
                 onOpenPricing: openPricing
             )
-        case .textToVideo:
+        case let .textToVideo(regeneration):
             TextToVideoView(
-                service: dependencies.textToVideoService,
-                creditService: dependencies.creditService,
-                promptTranscriptionService: dependencies.promptTranscriptionService,
-                onOpenPricing: openPricing,
-                onCreditsUpdated: refreshCredits
-            )
-        case .imageToVideo:
-            TextToVideoView(
-                mode: .imageToVideo,
+                regeneration: regeneration,
                 service: dependencies.textToVideoService,
                 creditService: dependencies.creditService,
                 promptTranscriptionService: dependencies.promptTranscriptionService,
@@ -369,7 +391,34 @@ struct AppRootView: View {
                 mediaUploadStore: dependencies.mediaUploadStore,
                 mediaUploadService: dependencies.mediaUploadService,
                 onOpenPricing: openPricing,
-                onCreditsUpdated: refreshCredits
+                onCreditsUpdated: refreshCredits,
+                onRegenerate: { generation in
+                    if generation.imageMediaID?.isEmpty == false {
+                        appendRoute(.imageToVideo(regeneration: generation))
+                    } else {
+                        appendRoute(.textToVideo(regeneration: generation))
+                    }
+                }
+            )
+        case let .imageToVideo(regeneration):
+            TextToVideoView(
+                mode: .imageToVideo,
+                regeneration: regeneration,
+                service: dependencies.textToVideoService,
+                creditService: dependencies.creditService,
+                promptTranscriptionService: dependencies.promptTranscriptionService,
+                photoLibrary: dependencies.photoLibrary,
+                mediaUploadStore: dependencies.mediaUploadStore,
+                mediaUploadService: dependencies.mediaUploadService,
+                onOpenPricing: openPricing,
+                onCreditsUpdated: refreshCredits,
+                onRegenerate: { generation in
+                    if generation.imageMediaID?.isEmpty == false {
+                        appendRoute(.imageToVideo(regeneration: generation))
+                    } else {
+                        appendRoute(.textToVideo(regeneration: generation))
+                    }
+                }
             )
         }
     }
@@ -380,6 +429,20 @@ private enum RootTab: Hashable {
     case templates
     case history
     case profile
+}
+
+private enum HistoryMode: String, CaseIterable, Hashable {
+    case projects
+    case generatedVideos
+
+    var title: String {
+        switch self {
+        case .projects:
+            "Projects"
+        case .generatedVideos:
+            "Generated Videos"
+        }
+    }
 }
 
 struct TemplatesView: View {
