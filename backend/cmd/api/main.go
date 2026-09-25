@@ -224,7 +224,7 @@ func loadConfiguration() (configuration, error) {
 		StoryRevisionFallbackTimeout:      environmentDuration("STORY_REVISION_FALLBACK_TIMEOUT", 45*time.Second),
 		VideoProviderBaseURL: environmentFirstOrDefault(
 			[]string{"VIDEO_PROVIDER_BASE_URL", "GATEWAY_VIDEO_UPSTREAM_BASE_URL", "SEEDANCE_VIDEO_BASE_URL"},
-			"https://sub-proxy-us.65535.space",
+			"https://task-api-1.65535.space",
 		),
 		VideoProviderAPIKey: environmentFirst([]string{
 			"VIDEO_PROVIDER_API_KEY",
