@@ -220,7 +220,7 @@ struct StoryPreviewView: View {
                 .accessibilityHidden(true)
 
             Text(storyDisplayTitle(story))
-                .font(FrameMioTypography.display)
+                .font(FrameMioTypography.headline)
                 .foregroundStyle(FrameMioColors.ink)
                 .lineLimit(2)
                 .minimumScaleFactor(0.86)

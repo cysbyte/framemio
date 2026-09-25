@@ -883,10 +883,10 @@ struct FrameMioProView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: FrameMioSpacing.xl) {
                     creditsCard
+                    CreationShortcutGrid()
                     plansSection(cardWidth: cardWidth)
                     primaryActionSection
-                    restoreAction
-                    footer
+                    purchaseFooter
                 }
                 .padding(.vertical, FrameMioSpacing.lg)
                 .padding(.bottom, FrameMioSpacing.xxxl)
@@ -1082,24 +1082,37 @@ struct FrameMioProView: View {
         }
     }
 
-    private var restoreAction: some View {
-        SecondaryButton(title: viewModel.isRestoring ? "Restoring…" : "Restore Purchases", systemImage: "arrow.clockwise") {
-            viewModel.restorePurchases()
-        }
-        .disabled(viewModel.isRestoring || viewModel.isPurchasing)
-    }
+    private var purchaseFooter: some View {
+        VStack(spacing: FrameMioSpacing.md) {
+            SecondaryButton(
+                title: viewModel.isRestoring ? "Restoring…" : "Restore Purchases",
+                systemImage: "arrow.clockwise"
+            ) {
+                FrameMioHaptics.secondaryAction()
+                viewModel.restorePurchases()
+            }
+            .disabled(viewModel.isRestoring || viewModel.isPurchasing)
+            .accessibilityLabel("Restore Purchases")
 
-    private var footer: some View {
-        VStack(alignment: .leading, spacing: FrameMioSpacing.xs) {
-            Text("Terms of Use · Privacy Policy")
-                .font(FrameMioTypography.footnote)
-                .foregroundStyle(FrameMioColors.secondaryInk)
             if let errorMessage = viewModel.errorMessage {
                 Text(errorMessage)
                     .font(FrameMioTypography.footnote)
                     .foregroundStyle(FrameMioColors.accent)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
             }
+
+            HStack(spacing: FrameMioSpacing.sm) {
+                Link("Terms of Service", destination: AppConfiguration.termsOfServiceURL)
+                Text("·")
+                    .accessibilityHidden(true)
+                Link("Privacy Policy", destination: AppConfiguration.privacyPolicyURL)
+            }
+            .font(FrameMioTypography.footnote)
+            .foregroundStyle(FrameMioColors.secondaryInk)
+            .frame(maxWidth: .infinity)
         }
+        .padding(.top, FrameMioSpacing.sm)
     }
 
     private var errorBinding: Binding<Bool> {
@@ -1144,6 +1157,7 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var isLoadingProducts = false
     @Published private(set) var isPurchasing = false
+    @Published private(set) var isRestoring = false
     @Published var selectedPackID: String?
     @Published var statusMessage: String?
     @Published var errorMessage: String?
@@ -1451,6 +1465,38 @@ final class FrameMioCreditPacksViewModel: ObservableObject {
         }
     }
 
+    func restorePurchases() {
+        guard !isRestoring, !isPurchasing else { return }
+        isRestoring = true
+        errorMessage = nil
+        statusMessage = "Syncing purchases..."
+        pricingDebugLog("credit_pack_restore_tapped")
+
+        Task { [weak self] in
+            guard let self else { return }
+            defer { isRestoring = false }
+
+            do {
+                // Credit packs are consumables, so restore the App Store state and
+                // refresh the server-backed balance instead of replaying purchases.
+                try await AppStore.sync()
+                if let creditService {
+                    balance = try await creditService.balance()
+                }
+                onBalanceUpdated()
+                statusMessage = "Purchases synced. Your credits are up to date."
+                pricingDebugLog("credit_pack_restore_complete balance=\(balance?.available.description ?? "nil")")
+            } catch is CancellationError {
+                statusMessage = nil
+                pricingDebugLog("credit_pack_restore_cancelled")
+            } catch {
+                statusMessage = nil
+                errorMessage = AppError.from(error).localizedDescription
+                pricingDebugLog("credit_pack_restore_failed error=\(error.localizedDescription) mapped=\(AppError.from(error).localizedDescription)")
+            }
+        }
+    }
+
     private func startTransactionUpdates() {
         updatesTask?.cancel()
         updatesTask = Task { [weak self] in
@@ -1528,6 +1574,7 @@ struct FrameMioCreditPacksView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
                 balanceCard
+                CreationShortcutGrid()
                 packsSection
                 PrimaryButton(
                     title: viewModel.primaryButtonTitle,
@@ -1556,6 +1603,8 @@ struct FrameMioCreditPacksView: View {
                         .foregroundStyle(.red)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
+
+                purchaseFooter
             }
             .padding(.horizontal, FrameMioSpacing.lg)
             .padding(.top, 0)
@@ -1583,6 +1632,32 @@ struct FrameMioCreditPacksView: View {
         .task { viewModel.load() }
         .refreshable { viewModel.load() }
     }
+
+    private var purchaseFooter: some View {
+        VStack(spacing: FrameMioSpacing.md) {
+            SecondaryButton(
+                title: viewModel.isRestoring ? "Restoring…" : "Restore Purchases",
+                systemImage: "arrow.clockwise"
+            ) {
+                FrameMioHaptics.secondaryAction()
+                viewModel.restorePurchases()
+            }
+            .disabled(viewModel.isRestoring || viewModel.isPurchasing)
+            .accessibilityLabel("Restore Purchases")
+
+            HStack(spacing: FrameMioSpacing.sm) {
+                Link("Terms of Service", destination: AppConfiguration.termsOfServiceURL)
+                Text("·")
+                    .accessibilityHidden(true)
+                Link("Privacy Policy", destination: AppConfiguration.privacyPolicyURL)
+            }
+            .font(FrameMioTypography.footnote)
+            .foregroundStyle(FrameMioColors.secondaryInk)
+            .frame(maxWidth: .infinity)
+        }
+        .padding(.top, FrameMioSpacing.sm)
+    }
+
     private var balanceCard: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.xs) {
             Text("Available Credits")
@@ -1598,11 +1673,6 @@ struct FrameMioCreditPacksView: View {
             }
             .font(FrameMioTypography.footnote)
             .foregroundStyle(FrameMioColors.secondaryInk)
-            if let reserved = viewModel.balance?.displayReservedCredits, reserved > 0 {
-                Text("\(reserved.formatted()) credits reserved for stories in progress.")
-                    .font(FrameMioTypography.footnote)
-                    .foregroundStyle(FrameMioColors.secondaryInk)
-            }
         }
         .padding(FrameMioSpacing.lg)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1617,7 +1687,6 @@ struct FrameMioCreditPacksView: View {
 
     private var packsSection: some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
-            SectionHeader(title: "Credit Packs", subtitle: "One-time credits for more stories")
             if viewModel.isLoading && viewModel.packs.isEmpty {
                 ProgressView()
                     .frame(maxWidth: .infinity)
@@ -1669,5 +1738,118 @@ struct FrameMioCreditPacksView: View {
         }
         .buttonStyle(FrameMioPressButtonStyle())
         .accessibilityLabel("\(pack.title), \(pack.credits) purchased credits")
+    }
+}
+
+private struct CreationShortcutGrid: View {
+    var body: some View {
+        LazyVGrid(
+            columns: Array(
+                repeating: GridItem(.flexible(minimum: 0), spacing: FrameMioSpacing.xxs),
+                count: 5
+            ),
+            spacing: FrameMioSpacing.xxs
+        ) {
+            CreditCreationShortcut(
+                title: "Text to Video",
+                systemImage: "text.alignleft",
+                tint: FrameMioColors.accent,
+                iconColor: FrameMioColors.accent
+            )
+            CreditCreationShortcut(
+                title: "Image to Video",
+                systemImage: "photo.on.rectangle.angled",
+                tint: FrameMioColors.selection,
+                iconColor: FrameMioColors.selection
+            )
+            CreditCreationShortcut(
+                title: "Create Story",
+                systemImage: VideoProjectType.story.icon,
+                tint: FrameMioColors.memoryLight,
+                iconColor: FrameMioColors.memoryLight
+            )
+            CreditCreationShortcut(
+                title: "Create Promo",
+                systemImage: VideoProjectType.promo.icon,
+                tint: FrameMioColors.memoryEarth,
+                iconColor: FrameMioColors.memoryEarth
+            )
+            CreditCreationShortcut(
+                title: "Create\nReel",
+                systemImage: VideoProjectType.reel.icon,
+                tint: FrameMioColors.selection,
+                iconColor: FrameMioColors.memoryEarth
+            )
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+private struct CreditCreationShortcut: View {
+    let title: String
+    let systemImage: String
+    let tint: Color
+    let iconColor: Color
+
+    var body: some View {
+        VStack(spacing: FrameMioSpacing.xs) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                tint.opacity(0.34),
+                                tint.opacity(0.12)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+
+                Image(systemName: systemImage)
+                    .font(.headline.weight(.semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(iconColor)
+            }
+            .frame(width: 32, height: 32)
+            .overlay {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .stroke(tint.opacity(0.34), lineWidth: FrameMioMetrics.borderWidth)
+            }
+            .shadow(color: tint.opacity(0.16), radius: 6, x: 0, y: 3)
+            .accessibilityHidden(true)
+
+            Text(title)
+                .font(FrameMioTypography.eyebrow)
+                .foregroundStyle(FrameMioColors.ink)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity)
+                .frame(height: 32, alignment: .center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 2)
+        .padding(.vertical, FrameMioSpacing.xs)
+        .frame(maxWidth: .infinity)
+        .frame(height: 88, alignment: .top)
+        .background(
+            LinearGradient(
+                colors: [
+                    FrameMioColors.surface.opacity(0.94),
+                    tint.opacity(0.13)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: FrameMioRadius.medium, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: FrameMioRadius.medium, style: .continuous)
+                .stroke(tint.opacity(0.3), lineWidth: FrameMioMetrics.borderWidth)
+        }
+        .frameMioElevation(.subtle)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title.replacingOccurrences(of: "\n", with: " "))
     }
 }

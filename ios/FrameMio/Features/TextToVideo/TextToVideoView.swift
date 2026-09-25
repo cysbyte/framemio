@@ -178,7 +178,37 @@ struct TextToVideoView: View {
         let hasRequiredInput = mode == .textToVideo
             ? hasPrompt
             : selectedImageAsset != nil || !(pendingImageMediaID ?? "").isEmpty
-        return hasRequiredInput && !isGenerating && !isCheckingCredits
+        let hasChangedInput = completedGeneration.map { generationInputsChanged(from: $0) } ?? true
+        return hasRequiredInput && hasChangedInput && !isGenerating && !isCheckingCredits
+    }
+
+    private var completedGeneration: TextVideoGeneration? {
+        if let recentlyCompletedGeneration {
+            return recentlyCompletedGeneration
+        }
+        guard regeneration?.status == .completed else {
+            return nil
+        }
+        return regeneration
+    }
+
+    private func generationInputsChanged(from generation: TextVideoGeneration) -> Bool {
+        let currentPrompt = normalizedPrompt(prompt)
+        let savedPrompt = normalizedPrompt(generation.prompt)
+        let currentImageMediaID = normalizedMediaID(pendingImageMediaID)
+        let savedImageMediaID = normalizedMediaID(generation.imageMediaID)
+
+        return currentPrompt != savedPrompt ||
+            duration.seconds != generation.seconds ||
+            resolution.rawValue != generation.resolution ||
+            aspectRatio.rawValue != generation.aspectRatio ||
+            currentImageMediaID != savedImageMediaID
+    }
+
+    private func normalizedMediaID(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     var body: some View {
@@ -757,7 +787,6 @@ struct TextToVideoView: View {
         pendingDuration = nil
         pendingResolution = nil
         pendingAspectRatio = nil
-        pendingImageMediaID = nil
         pendingIdempotencyKey = nil
     }
 

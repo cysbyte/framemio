@@ -125,6 +125,14 @@ enum AppConfiguration {
         return URL(string: configuredValue ?? "https://framemio.com")!
     }
 
+    static var privacyPolicyURL: URL {
+        templateDemoBaseURL.appendingPathComponent("privacy")
+    }
+
+    static var termsOfServiceURL: URL {
+        templateDemoBaseURL.appendingPathComponent("terms")
+    }
+
     static var deepgramAPIKey: String? {
         let value = stringConfigurationValue(infoKey: "FrameMioDeepgramAPIKey", environmentKey: "DEEPGRAM_API_KEY")
         if value == "dg-mock-replace-with-real-key" {

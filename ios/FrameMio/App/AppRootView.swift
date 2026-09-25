@@ -277,6 +277,13 @@ struct AppRootView: View {
         purchaseDestination = nil
     }
 
+    private func openCreationFromPurchase(_ route: AppRoute, source: String) {
+        purchaseRoutingDebugLog("\(source) route=\(String(describing: route))")
+        purchaseDestination = nil
+        selectedTab = .home
+        homePath.append(route)
+    }
+
     @ViewBuilder
     private func destination(for route: AppRoute, appendRoute: @escaping (AppRoute) -> Void) -> some View {
         switch route {
@@ -1008,7 +1015,7 @@ struct ProjectConfigurationView: View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
             Tag(draft.type.title, systemImage: draft.type.icon)
             Text(draft.type == .promo ? "Configure the promotion." : "Choose the social format.")
-                .font(FrameMioTypography.screenTitle)
+                .font(FrameMioTypography.headline)
                 .foregroundStyle(FrameMioColors.ink)
             Text(draft.type == .promo ? "Keep the brief simple. Detailed editing comes after FrameMio creates the first draft." : "Pick the platform and style. FrameMio will handle the first short-form edit.")
                 .font(FrameMioTypography.body)
@@ -1016,6 +1023,7 @@ struct ProjectConfigurationView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(FrameMioSpacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(FrameMioColors.surface.opacity(0.86), in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
