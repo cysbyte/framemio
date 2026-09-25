@@ -36,7 +36,7 @@ func TestVideoGenerationProxyForwardsCreateRequest(t *testing.T) {
 		}
 		if payload["prompt"] != "A quiet ocean at sunset" || payload["seconds"] != float64(8) ||
 			payload["resolution"] != "720p" || payload["aspect_ratio"] != "16:9" ||
-			payload["model"] != "model-imagine" {
+			payload["model"] != "grok-imagine-video" {
 			t.Fatalf("unexpected provider payload: %#v", payload)
 		}
 

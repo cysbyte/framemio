@@ -157,7 +157,7 @@ func (s *Server) createTextVideo(response http.ResponseWriter, request *http.Req
 		Seconds:      input.Seconds,
 		Resolution:   input.Resolution,
 		AspectRatio:  input.AspectRatio,
-		Model:        s.videoModel(),
+		Model:        s.videoModelForResolution(input.Resolution),
 		Status:       models.TextVideoStatusQueued,
 		CreatedAt:    s.Now().UTC(),
 		UpdatedAt:    s.Now().UTC(),
@@ -526,6 +526,14 @@ func (s *Server) videoModel() string {
 	return defaultVideoModel
 }
 
+func (s *Server) videoModelForResolution(resolution string) string {
+	model := s.videoModel()
+	if resolution == "1080p" && model == defaultVideoModel {
+		return "grok-imagine-video-1.5-preview"
+	}
+	return model
+}
+
 func normalizeProviderVideoURL(baseURL, videoURL string) string {
 	resolved, err := resolveProviderVideoURL(baseURL, videoURL)
 	if err != nil {
@@ -612,7 +620,7 @@ func providerString(value any, keys map[string]struct{}) string {
 }
 
 const (
-	defaultVideoModel       = "model-imagine"
+	defaultVideoModel       = "grok-imagine-video"
 	defaultVideoSeconds     = 5
 	defaultVideoResolution  = "720p"
 	defaultVideoAspectRatio = "9:16"
@@ -706,7 +714,7 @@ func (s *Server) createVideo(response http.ResponseWriter, request *http.Request
 		return
 	}
 	input.normalize()
-	input.Model = s.videoModel()
+	input.Model = s.videoModelForResolution(input.Resolution)
 	if message := input.validate(); message != "" {
 		s.writeError(response, http.StatusBadRequest, "invalid_video_request", message)
 		return

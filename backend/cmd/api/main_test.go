@@ -198,6 +198,8 @@ func TestLoadConfigurationLoadsVideoProviderSettings(t *testing.T) {
 	t.Setenv("SQS_PROCESSING_QUEUE_URL", "queue")
 	t.Setenv("AUTH_HMAC_SECRET", "12345678901234567890123456789012")
 	t.Setenv("INTERNAL_API_TOKEN", "12345678901234567890123456789012")
+	t.Setenv("VIDEO_PROVIDER_BASE_URL", "https://video.example/v1")
+	t.Setenv("VIDEO_PROVIDER_API_KEY", "video-key")
 	t.Setenv("STORY_PLANNER_BASE_URL", "https://planner.example/v1")
 	t.Setenv("STORY_PLANNER_API_KEY", "planner-key")
 
@@ -205,9 +207,9 @@ func TestLoadConfigurationLoadsVideoProviderSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.VideoProviderBaseURL != "https://planner.example/v1" ||
-		config.VideoProviderAPIKey != "planner-key" ||
-		config.VideoProviderModel != "model-imagine" {
+	if config.VideoProviderBaseURL != "https://video.example/v1" ||
+		config.VideoProviderAPIKey != "video-key" ||
+		config.VideoProviderModel != "grok-imagine-video" {
 		t.Fatalf("unexpected video provider config: %+v", config)
 	}
 }

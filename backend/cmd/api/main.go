@@ -223,8 +223,8 @@ func loadConfiguration() (configuration, error) {
 		StoryRevisionTimeout:              environmentDuration("STORY_REVISION_TIMEOUT", 90*time.Second),
 		StoryRevisionFallbackTimeout:      environmentDuration("STORY_REVISION_FALLBACK_TIMEOUT", 45*time.Second),
 		VideoProviderBaseURL: environmentFirstOrDefault(
-			[]string{"VIDEO_PROVIDER_BASE_URL", "GATEWAY_VIDEO_UPSTREAM_BASE_URL", "SEEDANCE_VIDEO_BASE_URL", "STORY_PLANNER_BASE_URL"},
-			"https://api.cheaperinference.com/v1",
+			[]string{"VIDEO_PROVIDER_BASE_URL", "GATEWAY_VIDEO_UPSTREAM_BASE_URL", "SEEDANCE_VIDEO_BASE_URL"},
+			"https://sub-proxy-us.65535.space",
 		),
 		VideoProviderAPIKey: environmentFirst([]string{
 			"VIDEO_PROVIDER_API_KEY",
@@ -235,7 +235,7 @@ func loadConfiguration() (configuration, error) {
 			"STORY_PLANNER_API_KEY",
 			"OPENAI_API_KEY",
 		}),
-		VideoProviderModel:      environment("VIDEO_PROVIDER_MODEL", "model-imagine"),
+		VideoProviderModel:      environment("VIDEO_PROVIDER_MODEL", "grok-imagine-video"),
 		WorkerRunOnce:           environmentBool("WORKER_RUN_ONCE", false),
 		WorkerJobID:             os.Getenv("JOB_ID"),
 		WorkerWaitTimeout:       environmentDuration("WORKER_RUN_ONCE_WAIT_TIMEOUT", 6*time.Minute),
