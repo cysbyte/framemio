@@ -20,6 +20,7 @@ struct AppDependencies {
     let creditService: CreditService
     let promptTranscriptionService: PromptTranscriptionService
     let textToVideoService: TextToVideoService
+    let localReelRenderer: LocalReelRendering
 
     static func live() -> AppDependencies {
         let deepgramLanguageLogValue = AppConfiguration.deepgramLanguage ?? "nil"
@@ -68,7 +69,8 @@ struct AppDependencies {
             textToVideoService: RemoteTextToVideoService(
                 apiClient: apiClient,
                 persistence: textVideoPersistence
-            )
+            ),
+            localReelRenderer: AVFoundationLocalReelRenderer(source: photoLibrary)
         )
     }
 
@@ -107,7 +109,8 @@ struct AppDependencies {
             mediaUploadService: uploadService,
             creditService: MockCreditService(),
             promptTranscriptionService: MockPromptTranscriptionService(),
-            textToVideoService: MockTextToVideoService(persistence: textVideoPersistence)
+            textToVideoService: MockTextToVideoService(persistence: textVideoPersistence),
+            localReelRenderer: MockLocalReelRenderer()
         )
     }
 }

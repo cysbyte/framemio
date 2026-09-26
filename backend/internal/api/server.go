@@ -292,6 +292,14 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 			return
 		}
 	}
+	if request.URL.Path == "/v1/stories/local" {
+		if request.Method == http.MethodPost {
+			s.createLocalIOSReel(response, request)
+			return
+		}
+		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
 	if strings.HasPrefix(request.URL.Path, "/v1/stories/") {
 		parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
 		if len(parts) == 3 {

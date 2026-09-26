@@ -74,6 +74,103 @@ type iosCreateStoryRequest struct {
 	TemplateConfig   models.VideoTemplateConfiguration `json:"template_configuration,omitempty"`
 }
 
+type iosCreateLocalReelRequest struct {
+	Context               string                            `json:"context"`
+	Title                 string                            `json:"title"`
+	MediaID               string                            `json:"media_id"`
+	Duration              float64                           `json:"duration"`
+	TemplateID            string                            `json:"template_id,omitempty"`
+	TemplateVersion       int                               `json:"template_version,omitempty"`
+	TemplateConfiguration models.VideoTemplateConfiguration `json:"template_configuration,omitempty"`
+}
+
+func (s *Server) createLocalIOSReel(response http.ResponseWriter, request *http.Request) {
+	user, ok := s.authenticate(response, request)
+	if !ok {
+		return
+	}
+	var input iosCreateLocalReelRequest
+	if !s.decodeJSON(response, request, &input) {
+		return
+	}
+	input.Context = strings.TrimSpace(sanitizeIOSStoryText(input.Context))
+	input.Title = strings.TrimSpace(sanitizeIOSStoryText(input.Title))
+	input.MediaID = strings.TrimSpace(input.MediaID)
+	idempotencyKey := strings.TrimSpace(request.Header.Get("Idempotency-Key"))
+	if input.Context == "" || input.Title == "" || input.MediaID == "" || input.Duration <= 0 || input.Duration > 120 || idempotencyKey == "" {
+		s.writeError(response, http.StatusBadRequest, "invalid_local_reel", "context, title, media_id, duration, and idempotency key are required")
+		return
+	}
+
+	media, err := s.Store.GetMedia(request.Context(), user.ID, input.MediaID)
+	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	if media.Status != models.MediaStatusReady || media.Type != models.MediaTypeVideo || strings.TrimSpace(media.S3Key) == "" {
+		s.writeError(response, http.StatusConflict, "media_not_ready", "the generated reel upload is not ready")
+		return
+	}
+
+	projectID := stableIOSProjectID(user.ID, idempotencyKey)
+	now := s.Now().UTC()
+	project := models.VideoProject{
+		ID:        projectID,
+		UserID:    user.ID,
+		Type:      models.ProjectTypeReel,
+		Title:     input.Title,
+		Context:   input.Context,
+		MediaIDs:  []string{input.MediaID},
+		Status:    models.ProjectStatusReady,
+		CreatedAt: now,
+		UpdatedAt: now,
+		Configuration: models.VideoProjectConfiguration{
+			TemplateID:            strings.TrimSpace(input.TemplateID),
+			TemplateVersion:       input.TemplateVersion,
+			TemplateConfiguration: input.TemplateConfiguration,
+			Reel: &models.ReelProjectConfiguration{
+				SocialPlatform:     "other",
+				TargetDurationSecs: int(input.Duration + 0.5),
+				DurationMode:       models.DurationModeFixed,
+			},
+			Composition: models.CompositionConfiguration{AspectRatio: "9:16", FPS: 24, Preset: "local"},
+		},
+	}
+	created, existing, err := s.Store.CreateProject(request.Context(), project, idempotencyKey)
+	if err != nil {
+		s.mapStoreError(response, err)
+		return
+	}
+	if existing {
+		s.writeJSON(response, http.StatusOK, s.makeIOSStory(request, user.ID, created))
+		return
+	}
+
+	now = s.Now().UTC()
+	job := models.ProcessingJob{
+		ID:            models.NewID("job"),
+		UserID:        user.ID,
+		ProjectID:     created.ID,
+		ProjectType:   models.ProjectTypeReel,
+		MediaID:       input.MediaID,
+		Type:          models.JobTypeVideoRender,
+		Status:        models.JobStatusCompleted,
+		Progress:      1,
+		Configuration: map[string]string{"source": "ios_local_reel", "template_id": input.TemplateID},
+		ArtifactS3Key: media.S3Key,
+		ArtifactType:  "video/mp4",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		CompletedAt:   &now,
+	}
+	if _, _, err := s.Store.CreateJob(request.Context(), job, idempotencyKey+":local-render"); err != nil {
+		_ = s.Store.DeleteProject(request.Context(), user.ID, created.ID)
+		s.mapStoreError(response, err)
+		return
+	}
+	s.writeJSON(response, http.StatusCreated, s.makeIOSStory(request, user.ID, created))
+}
+
 type iosStoryEditRequest struct {
 	RemoveMomentIDs  []string                `json:"removeMomentIds,omitempty"`
 	RemoveMediaIDs   []string                `json:"removeMediaIds,omitempty"`

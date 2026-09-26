@@ -99,8 +99,10 @@
 		D80000000000000000000025 /* cinematic-reel-cutaways.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D80000000000000000000026 /* cinematic-reel-cutaways.mp4 */; };
 		D80000000000000000000027 /* talking-head-reel.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D80000000000000000000028 /* talking-head-reel.mp4 */; };
 		D80000000000000000000029 /* travel-highlight-reel.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D8000000000000000000002A /* travel-highlight-reel.mp4 */; };
+		D90000000000000000000001 /* Music in Resources */ = {isa = PBXBuildFile; fileRef = D90000000000000000000002 /* Music */; };
 		E10000000000000000000001 /* TextToVideoService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000002 /* TextToVideoService.swift */; };
 		E10000000000000000000003 /* TextToVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000004 /* TextToVideoView.swift */; };
+		E10000000000000000000007 /* LocalReelRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000006 /* LocalReelRenderer.swift */; };
 		E90000000000000000000001 /* FrameMio.env in Resources */ = {isa = PBXBuildFile; fileRef = E90000000000000000000002 /* FrameMio.env */; };
 /* End PBXBuildFile section */
 
@@ -209,8 +211,10 @@
 		D80000000000000000000026 /* cinematic-reel-cutaways.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "cinematic-reel-cutaways.mp4"; sourceTree = "<group>"; };
 		D80000000000000000000028 /* talking-head-reel.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "talking-head-reel.mp4"; sourceTree = "<group>"; };
 		D8000000000000000000002A /* travel-highlight-reel.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "travel-highlight-reel.mp4"; sourceTree = "<group>"; };
+		D90000000000000000000002 /* Music */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Music; sourceTree = "<group>"; };
 		E10000000000000000000002 /* TextToVideoService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextToVideoService.swift; sourceTree = "<group>"; };
 		E10000000000000000000004 /* TextToVideoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextToVideoView.swift; sourceTree = "<group>"; };
+		E10000000000000000000006 /* LocalReelRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalReelRenderer.swift; sourceTree = "<group>"; };
 		E90000000000000000000002 /* FrameMio.env */ = {isa = PBXFileReference; lastKnownFileType = text; path = FrameMio.env; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -319,6 +323,7 @@
 				D80000000000000000000026 /* cinematic-reel-cutaways.mp4 */,
 				D80000000000000000000028 /* talking-head-reel.mp4 */,
 				D8000000000000000000002A /* travel-highlight-reel.mp4 */,
+				D90000000000000000000002 /* Music */,
 				E90000000000000000000002 /* FrameMio.env */,
 			);
 			path = Resources;
@@ -442,6 +447,7 @@
 			children = (
 				A10000000000000000000105 /* ServiceProtocols.swift */,
 				E10000000000000000000002 /* TextToVideoService.swift */,
+				E10000000000000000000006 /* LocalReelRenderer.swift */,
 				C70000000000000000000002 /* MediaUploadService.swift */,
 				C70000000000000000000003 /* MediaUploadMocks.swift */,
 			);
@@ -660,6 +666,7 @@
 				D80000000000000000000025 /* cinematic-reel-cutaways.mp4 in Resources */,
 				D80000000000000000000027 /* talking-head-reel.mp4 in Resources */,
 				D80000000000000000000029 /* travel-highlight-reel.mp4 in Resources */,
+				D90000000000000000000001 /* Music in Resources */,
 				E90000000000000000000001 /* FrameMio.env in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -746,6 +753,7 @@
 				C70000000000000000000106 /* MediaUploadStore.swift in Sources */,
 				E10000000000000000000001 /* TextToVideoService.swift in Sources */,
 				E10000000000000000000003 /* TextToVideoView.swift in Sources */,
+				E10000000000000000000007 /* LocalReelRenderer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

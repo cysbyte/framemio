@@ -417,7 +417,9 @@ struct VideoProjectDraft: Codable, Hashable, Sendable {
         }
         draft.templateID = template.id
         draft.templateVersion = template.version
-        draft.templateConfiguration = projectType == .story ? template.defaults : template.defaults.withAutomaticCreationDuration()
+        draft.templateConfiguration = projectType == .story
+            ? template.defaults
+            : template.defaults.withAutomaticCreationDuration()
         return draft
     }
 
@@ -473,6 +475,16 @@ extension VideoTemplateConfiguration {
         configuration.durationMode = .auto
         configuration.durationSeconds = nil
         configuration.removeFillerAndPauses = false
+        return configuration
+    }
+
+    func withLocalReelCreationDefaults() -> VideoTemplateConfiguration {
+        var configuration = self
+        let defaultSeconds = configuration.durationSeconds ?? 15
+        configuration.durationMode = .fixed
+        configuration.durationSeconds = defaultSeconds > 20 ? 15 : max(1, defaultSeconds)
+        configuration.removeFillerAndPauses = false
+        configuration.captionsEnabled = false
         return configuration
     }
 
@@ -550,7 +562,7 @@ struct VideoTemplate: Codable, Hashable, Identifiable, Sendable {
         .fallbackSplit(id: "split-screen-offer", type: .promo, name: "Split-screen offer", description: "Compare two product moments in a balanced promotional frame.", demo: "/videos/templates/split-screen-offer.mp4", duration: 30, style: "minimal", captions: false, captionStyle: "clean_minimal", sceneDetail: "balanced"),
         .fallbackMontage(id: "fast-social-ad", type: .promo, name: "Fast social ad", description: "A high-energy promo sequence for quick attention.", demo: "/videos/templates/fast-social-ad.mp4", duration: 15, style: "playful", captions: true, captionStyle: "bold_social", sceneDetail: "more"),
         .fallbackFullFrame(id: "premium-brand-story", type: .promo, name: "Premium brand story", description: "A polished brand edit with calm full-frame visuals.", demo: "/videos/templates/premium-brand-story.mp4", duration: 30, style: "elegant", captions: true, captionStyle: "cinematic_subtitle", sceneDetail: "balanced"),
-        .fallbackMontage(id: "fast-montage", type: .reel, name: "Fast montage", description: "Build a lively sequence of short, high-energy moments.", demo: "/videos/templates/fast-montage.mp4", duration: 15, style: "playful", captions: true, captionStyle: "bold_social", sceneDetail: "more"),
+        .fallbackMontage(id: "fast-montage", type: .reel, name: "Four-panel reveal", description: "Reveal four moving moments one by one, then close them in reverse order.", demo: "/videos/templates/fast-montage.mp4", duration: 15, style: "playful", captions: false, captionStyle: "bold_social", sceneDetail: "more"),
         .fallbackPIP(id: "reel-picture-in-picture", type: .reel, name: "Reel picture-in-picture", description: "Layer a secondary moment over the main vertical clip.", demo: "/videos/templates/reel-picture-in-picture.mp4", duration: 15, style: "cinematic", captions: true, captionStyle: "bold_social", sceneDetail: "more", placement: "top_right", size: "small", animation: "subtle_scale"),
         .fallbackSplit(id: "before-after-split", type: .reel, name: "Before/after split", description: "Show two related moments side by side for comparison.", demo: "/videos/templates/before-after-split.mp4", duration: 15, style: "minimal", captions: true, captionStyle: "bold_social", sceneDetail: "balanced"),
         .fallbackFullFrame(id: "cinematic-reel-cutaways", type: .reel, name: "Cinematic reel cutaways", description: "A vertical reel with full-frame cinematic inserts.", demo: "/videos/templates/cinematic-reel-cutaways.mp4", duration: 30, style: "cinematic", captions: true, captionStyle: "cinematic_subtitle", sceneDetail: "balanced"),
@@ -872,6 +884,26 @@ struct Story: Identifiable, Codable, Hashable, Sendable {
         try container.encodeIfPresent(storyPlanVersion, forKey: .storyPlanVersion)
         try container.encodeIfPresent(moments, forKey: .moments)
         try container.encodeIfPresent(availableMoments, forKey: .availableMoments)
+    }
+}
+
+struct LocalReelPublishRequest: Codable, Hashable, Sendable {
+    let context: String
+    let title: String
+    let mediaID: String
+    let duration: TimeInterval
+    let templateID: String?
+    let templateVersion: Int?
+    let templateConfiguration: VideoTemplateConfiguration?
+
+    enum CodingKeys: String, CodingKey {
+        case context
+        case title
+        case mediaID = "media_id"
+        case duration
+        case templateID = "template_id"
+        case templateVersion = "template_version"
+        case templateConfiguration = "template_configuration"
     }
 }
 

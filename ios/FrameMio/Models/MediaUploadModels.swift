@@ -214,6 +214,21 @@ struct MediaUploadMetadata: Codable, Hashable, Sendable {
     }
 }
 
+struct GeneratedVideoUploadRequest: Sendable {
+    let fileURL: URL
+    let fileName: String
+    let contentType: String
+    let duration: TimeInterval
+    let pixelWidth: Int
+    let pixelHeight: Int
+}
+
+struct GeneratedVideoUploadResult: Sendable {
+    let mediaID: String
+    let s3Key: String
+    let fileSizeBytes: Int64
+}
+
 struct UploadCompletionNotification: Codable, Hashable, Sendable {
     let mediaId: String
     let uploadId: String

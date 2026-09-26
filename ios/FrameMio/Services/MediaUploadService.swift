@@ -28,6 +28,116 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
         self.store = store
     }
 
+    func uploadGeneratedVideo(
+        _ request: GeneratedVideoUploadRequest,
+        progress: @escaping @Sendable (Double) -> Void = { _ in }
+    ) async throws -> GeneratedVideoUploadResult {
+        let fileSizeBytes = try fileSize(at: request.fileURL)
+        guard fileSizeBytes > 0 else {
+            throw AppError.unsupportedMedia
+        }
+
+        let assetID = "generated-reel-\(UUID().uuidString)"
+        let uploadID = MediaUpload.makeID(for: assetID, optimization: .original)
+        let options = MediaUploadOptions()
+        var record = MediaUpload(
+            id: uploadID,
+            assetID: assetID,
+            localIdentifier: assetID,
+            mediaID: nil,
+            mediaType: .video,
+            fileName: request.fileName,
+            contentType: request.contentType,
+            fileSizeBytes: fileSizeBytes,
+            duration: request.duration,
+            creationDate: Date(),
+            pixelWidth: request.pixelWidth,
+            pixelHeight: request.pixelHeight,
+            orientation: .portrait,
+            optimization: .original,
+            status: .authorizing,
+            uploadedBytes: 0,
+            authorizationIdempotencyKey: MediaUpload.makeAuthorizationID(for: uploadID, fileSizeBytes: fileSizeBytes),
+            session: nil,
+            stagedFileURL: request.fileURL,
+            lastError: nil,
+            updatedAt: Date()
+        )
+
+        let session = try await authorizer.createUploadSession(
+            metadata: MediaUploadMetadata(
+                assetID: assetID,
+                sourceAssetID: assetID,
+                mediaType: .video,
+                contentType: request.contentType,
+                fileName: request.fileName,
+                fileSizeBytes: fileSizeBytes,
+                duration: request.duration,
+                creationDate: record.creationDate,
+                pixelWidth: request.pixelWidth,
+                pixelHeight: request.pixelHeight,
+                orientation: .portrait,
+                optimization: .original,
+                preferredPartSizeBytes: options.partSizeBytes
+            ),
+            idempotencyKey: record.effectiveAuthorizationIdempotencyKey
+        )
+        record.session = session
+        record.mediaID = session.mediaID
+        try await store.save(record)
+
+        do {
+            var mutableSession = session
+            record.status = .uploading
+            try await store.save(record)
+            let aggregator = MediaUploadProgressAggregator(records: [record])
+            try await uploadParts(
+                session: &mutableSession,
+                record: &record,
+                options: options,
+                totalUploads: 1,
+                progressAggregator: aggregator,
+                progress: { uploadProgress in
+                    progress(uploadProgress.fractionCompleted)
+                }
+            )
+
+            if mutableSession.strategy == .multipart {
+                let parts = mutableSession.parts.compactMap { part -> MultipartPartCompletion? in
+                    guard let eTag = part.eTag else { return nil }
+                    return MultipartPartCompletion(partNumber: part.partNumber, eTag: eTag)
+                }
+                guard parts.count == mutableSession.parts.count else {
+                    throw AppError.invalidResponse
+                }
+                try await authorizer.completeMultipartUpload(session: mutableSession, parts: parts)
+            }
+
+            try await authorizer.notifyUploadCompleted(
+                UploadCompletionNotification(
+                    mediaId: mutableSession.mediaID,
+                    uploadId: mutableSession.uploadID,
+                    s3Key: mutableSession.s3Key,
+                    mediaType: .video,
+                    duration: request.duration
+                )
+            )
+            try? await store.remove(uploadID: uploadID)
+            progress(1)
+            return GeneratedVideoUploadResult(
+                mediaID: mutableSession.mediaID,
+                s3Key: mutableSession.s3Key,
+                fileSizeBytes: fileSizeBytes
+            )
+        } catch {
+            record.status = error is CancellationError ? .paused : .failed
+            record.lastError = error.localizedDescription
+            record.updatedAt = Date()
+            try? await store.save(record)
+            throw error
+        }
+    }
+
     func upload(
         selection: MediaSelection,
         assets: [MediaAsset],
@@ -726,6 +836,13 @@ final class MediaUploadCoordinator: MediaUploadService, @unchecked Sendable {
 
     private func materializedFileSize(at url: URL) -> Int64? {
         (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value
+    }
+
+    private func fileSize(at url: URL) throws -> Int64 {
+        guard let value = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber else {
+            throw AppError.persistenceFailure
+        }
+        return value.int64Value
     }
 
     private func makePartFileIfNeeded(

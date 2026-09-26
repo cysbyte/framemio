@@ -33,12 +33,47 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
         try await persistence.loadStories()
     }
 
+    func saveLocalStory(_ story: Story) async throws {
+        let existing = try await persistence.loadStories()
+        try await persistence.saveStories([story] + existing.filter { $0.id != story.id })
+    }
+
+    func createLocalReel(request: LocalReelPublishRequest) async throws -> Story {
+        let body: Data
+        do {
+            body = try encoder.encode(request)
+        } catch {
+            throw AppError.invalidResponse
+        }
+        let data = try await apiClient.data(
+            for: APIRequest(
+                method: .post,
+                path: "/v1/stories/local",
+                body: body,
+                headers: ["Idempotency-Key": "ios-local-reel-\(request.mediaID)"]
+            )
+        )
+        do {
+            let story = try decoder.decode(Story.self, from: data)
+            let existing = try await persistence.loadStories()
+            try await persistence.saveStories([story] + existing.filter { $0.id != story.id })
+            return story
+        } catch {
+            throw AppError.invalidResponse
+        }
+    }
+
     func listStories() async throws -> [Story] {
         do {
             let data = try await apiClient.data(for: APIRequest(method: .get, path: "/v1/stories"))
             let stories = try decoder.decode([Story].self, from: data)
-            try await persistence.saveStories(stories)
-            return stories
+            let existing = try await persistence.loadStories()
+            let localStories = existing.filter(Self.isLocalOnlyStory)
+            let mergedStories = stories + localStories.filter { localStory in
+                !stories.contains { $0.id == localStory.id }
+            }
+            try await persistence.saveStories(mergedStories)
+            return mergedStories
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -52,11 +87,21 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
     }
 
     func story(id: String) async throws -> Story {
+        if Self.isLocalOnlyStoryID(id) {
+            guard let story = try await persistence.loadStories().first(where: { $0.id == id }) else {
+                throw AppError.invalidResponse
+            }
+            return story
+        }
+
         do {
             let data = try await apiClient.data(for: APIRequest(method: .get, path: "/v1/stories/\(id)"))
             let story = try decoder.decode(Story.self, from: data)
             let existing = try await persistence.loadStories()
-            try await persistence.saveStories([story] + existing.filter { $0.id != story.id })
+            let preserved = existing.filter { cached in
+                cached.id != story.id && Self.isLocalOnlyStory(cached)
+            }
+            try await persistence.saveStories([story] + preserved)
             return story
         } catch is CancellationError {
             throw CancellationError()
@@ -214,6 +259,10 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
     }
 
     func deleteStory(id: String) async throws {
+        if Self.isLocalOnlyStoryID(id) {
+            try await persistence.removeStory(id: id)
+            return
+        }
         _ = try await apiClient.data(for: APIRequest(method: .delete, path: "/v1/stories/\(id)"))
         try await persistence.removeStory(id: id)
     }
@@ -270,6 +319,14 @@ final class RemoteStoryService: StoryService, @unchecked Sendable {
     private func deduplicated(_ assetIDs: [String]) -> [String] {
         var seen = Set<String>()
         return assetIDs.filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    private static func isLocalOnlyStory(_ story: Story) -> Bool {
+        isLocalOnlyStoryID(story.id)
+    }
+
+    private static func isLocalOnlyStoryID(_ id: String) -> Bool {
+        id.hasPrefix("local-reel-")
     }
 }
 
@@ -593,6 +650,28 @@ final class MockStoryService: StoryService, @unchecked Sendable {
 
     func cachedStories() async throws -> [Story] {
         try await persistence.loadStories()
+    }
+
+    func saveLocalStory(_ story: Story) async throws {
+        let existing = try await persistence.loadStories()
+        try await persistence.saveStories([story] + existing.filter { $0.id != story.id })
+    }
+
+    func createLocalReel(request: LocalReelPublishRequest) async throws -> Story {
+        let story = Story(
+            id: "preview-local-reel-\(UUID().uuidString)",
+            type: .reel,
+            title: request.title,
+            context: .specialMoments,
+            createdAt: Date(),
+            duration: request.duration,
+            assetIDs: [request.mediaID],
+            status: .ready,
+            videoURL: nil
+        )
+        let existing = try await persistence.loadStories()
+        try await persistence.saveStories([story] + existing.filter { $0.id != story.id })
+        return story
     }
 
     func listStories() async throws -> [Story] {

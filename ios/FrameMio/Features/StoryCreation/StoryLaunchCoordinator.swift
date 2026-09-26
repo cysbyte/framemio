@@ -81,6 +81,7 @@ final class StoryLaunchCoordinator: ObservableObject {
     private let mediaUploadService: MediaUploadService
     private let storyService: StoryService
     private let creditService: CreditService?
+    private let localReelRenderer: LocalReelRendering
     private var launchTask: Task<Void, Never>?
     private var activeLaunchID: UUID?
 
@@ -88,12 +89,14 @@ final class StoryLaunchCoordinator: ObservableObject {
         analysisService: MediaAnalysisService,
         mediaUploadService: MediaUploadService,
         storyService: StoryService,
-        creditService: CreditService? = nil
+        creditService: CreditService? = nil,
+        localReelRenderer: LocalReelRendering
     ) {
         self.analysisService = analysisService
         self.mediaUploadService = mediaUploadService
         self.storyService = storyService
         self.creditService = creditService
+        self.localReelRenderer = localReelRenderer
     }
 
     func start(
@@ -138,6 +141,60 @@ final class StoryLaunchCoordinator: ObservableObject {
             defer { isPreparing = false }
 
             do {
+                if LocalReelPolicy.shouldRenderLocally(draft: draft, assets: assets) {
+                    phaseTitle = "Creating your reel on this iPhone..."
+                    phaseDetail = "Using the selected template without uploading media."
+                    progress = 0.12
+                    storyLaunchDebugLog("phase=local_reel_start assets=\(assets.count) template_id=\(draft.templateID ?? "none")")
+                    let rendered = try await localReelRenderer.renderReel(
+                        draft: draft,
+                        assets: assets,
+                        progress: { [weak self] value in
+                            Task { @MainActor [weak self] in
+                                self?.progress = max(self?.progress ?? 0, value)
+                            }
+                        }
+                    )
+                    phaseTitle = "Saving your reel securely..."
+                    phaseDetail = "Uploading the finished video to your private cloud storage."
+                    let uploaded = try await mediaUploadService.uploadGeneratedVideo(
+                        GeneratedVideoUploadRequest(
+                            fileURL: rendered.videoURL,
+                            fileName: "framemio-\(UUID().uuidString).mp4",
+                            contentType: "video/mp4",
+                            duration: rendered.duration,
+                            pixelWidth: 540,
+                            pixelHeight: 960
+                        ),
+                        progress: { [weak self] value in
+                            Task { @MainActor [weak self] in
+                                self?.progress = max(self?.progress ?? 0, 0.42 + value * 0.42)
+                            }
+                        }
+                    )
+                    phaseTitle = "Finalizing your reel..."
+                    phaseDetail = "Preparing a secure download link."
+                    let story = try await storyService.createLocalReel(
+                        request: LocalReelPublishRequest(
+                            context: draft.context.rawValue,
+                            title: rendered.templateName,
+                            mediaID: uploaded.mediaID,
+                            duration: rendered.duration,
+                            templateID: draft.templateID,
+                            templateVersion: draft.templateVersion,
+                            templateConfiguration: draft.templateConfiguration
+                        )
+                    )
+                    try? FileManager.default.removeItem(at: rendered.videoURL)
+                    storyID = story.id
+                    progress = 1
+                    phaseTitle = "Reel ready."
+                    phaseDetail = "Saved securely and ready to download."
+                    storyLaunchDebugLog("phase=local_reel_complete story=\(story.id) media=\(uploaded.mediaID) local_file_removed=true")
+                    FrameMioHaptics.success()
+                    return
+                }
+
                 try await verifyCredits(for: .createStory, assets: assets)
                 let selection = MediaSelection(explicitlySelectedAssetIDs: assets.map(\.id))
                 phaseTitle = "Uploading your photos and videos..."

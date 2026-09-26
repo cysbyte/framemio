@@ -770,6 +770,8 @@ final class CreditBalanceStore: ObservableObject {
 
 protocol StoryService: Sendable {
     func cachedStories() async throws -> [Story]
+    func saveLocalStory(_ story: Story) async throws
+    func createLocalReel(request: LocalReelPublishRequest) async throws -> Story
     func listStories() async throws -> [Story]
     func story(id: String) async throws -> Story
     func createStory(request: CreateStoryRequest) async throws -> Story
@@ -831,6 +833,10 @@ protocol DirectObjectStorageClient: Sendable {
 }
 
 protocol MediaUploadService: Sendable {
+    func uploadGeneratedVideo(
+        _ request: GeneratedVideoUploadRequest,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> GeneratedVideoUploadResult
     func upload(
         selection: MediaSelection,
         assets: [MediaAsset],

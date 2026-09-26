@@ -28,7 +28,8 @@ struct AppRootView: View {
                 analysisService: dependencies.mediaAnalysis,
                 mediaUploadService: dependencies.mediaUploadService,
                 storyService: dependencies.storyService,
-                creditService: dependencies.creditService
+                creditService: dependencies.creditService,
+                localReelRenderer: dependencies.localReelRenderer
             )
         )
         _creditStore = StateObject(wrappedValue: CreditBalanceStore(creditService: dependencies.creditService))
@@ -727,7 +728,7 @@ struct ProjectConfigurationView: View {
                 ProjectTemplateSettingsSheet(
                     template: template,
                     configuration: Binding(
-                        get: { resolvedTemplateConfiguration ?? template.defaults.withAutomaticCreationDuration().sanitized(for: template) },
+                        get: { resolvedTemplateConfiguration ?? creationDefaults(for: template).sanitized(for: template) },
                         set: { templateConfiguration = $0.sanitized(for: template) }
                     ),
                     projectDuration: draft.type == .promo ? $promoDuration : $reelDuration,
@@ -743,8 +744,8 @@ struct ProjectConfigurationView: View {
             Divider()
                 .overlay(FrameMioColors.divider.opacity(0.7))
             PrimaryButton(
-                title: "\(createButtonTitle) (\(creditCost) credits)",
-                systemImage: "sparkles",
+                title: fixedGenerateButtonTitle,
+                systemImage: shouldCreateLocally ? "play.rectangle.fill" : "sparkles",
                 action: requestContinue,
                 isDisabled: isCheckingCredits,
                 isLoading: isCheckingCredits
@@ -758,6 +759,10 @@ struct ProjectConfigurationView: View {
 
     private var createButtonTitle: String {
         draft.type == .promo ? "Create Promo" : "Create Reel"
+    }
+
+    private var fixedGenerateButtonTitle: String {
+        shouldCreateLocally ? "Create Reel Locally" : "\(createButtonTitle) (\(creditCost) credits)"
     }
 
     private func refreshCreditQuote() {
@@ -780,6 +785,10 @@ struct ProjectConfigurationView: View {
 
     private func requestContinue() {
         guard !isCheckingCredits else { return }
+        if shouldCreateLocally {
+            onContinue(configuredDraft)
+            return
+        }
         guard let creditService else {
             onContinue(configuredDraft)
             return
@@ -979,8 +988,11 @@ struct ProjectConfigurationView: View {
 
     private var templateConfigurationSummary: String {
         guard let template = selectedTemplate else { return "Select a template first" }
-        let configuration = resolvedTemplateConfiguration ?? template.defaults.withAutomaticCreationDuration().sanitized(for: template)
+        let configuration = resolvedTemplateConfiguration ?? creationDefaults(for: template).sanitized(for: template)
         var values = [template.name]
+        if draft.type == .reel && LocalReelPolicy.shouldRenderLocally(draft: configuredDraft, assets: assets) {
+            values.append("Local render")
+        }
         if template.editableOptions.contains("duration_seconds") {
             switch selectedProjectDuration {
             case .fullSource:
@@ -1113,6 +1125,10 @@ struct ProjectConfigurationView: View {
         return configured
     }
 
+    private var shouldCreateLocally: Bool {
+        LocalReelPolicy.shouldRenderLocally(draft: configuredDraft, assets: assets)
+    }
+
     private var selectedTemplate: VideoTemplate? {
         templates.first(where: { $0.id == selectedTemplateID })
     }
@@ -1123,8 +1139,19 @@ struct ProjectConfigurationView: View {
 
     private var resolvedTemplateConfiguration: VideoTemplateConfiguration? {
         guard let template = selectedTemplate else { return templateConfiguration }
-        return (templateConfiguration ?? template.defaults.withAutomaticCreationDuration())
+        return (templateConfiguration ?? creationDefaults(for: template))
             .sanitized(for: template)
+    }
+
+    private func creationDefaults(for template: VideoTemplate) -> VideoTemplateConfiguration {
+        switch draft.type {
+        case .story:
+            return template.defaults.withAutomaticCreationDuration()
+        case .promo:
+            return template.defaults.withAutomaticCreationDuration()
+        case .reel:
+            return template.defaults.withLocalReelCreationDefaults()
+        }
     }
 
     private func loadTemplates() async {
@@ -1158,7 +1185,9 @@ struct ProjectConfigurationView: View {
     }
 
     private func compatibleConfiguration(_ previous: VideoTemplateConfiguration?, with template: VideoTemplate) -> VideoTemplateConfiguration {
-        var resolved = draft.type == .story ? template.defaults : template.defaults.withAutomaticCreationDuration()
+        var resolved = draft.type == .story
+            ? template.defaults
+            : creationDefaults(for: template)
         guard let previous else { return resolved }
         if template.editableOptions.contains("duration_seconds") { resolved.durationSeconds = previous.durationSeconds }
         if template.supportsFullSourceDuration && template.editableOptions.contains("duration_mode") {
