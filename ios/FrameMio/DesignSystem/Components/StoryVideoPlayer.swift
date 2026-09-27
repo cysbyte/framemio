@@ -17,6 +17,7 @@ struct StoryVideoPlayer: View {
     let url: URL
     let autoplays: Bool
     let isPlaybackEnabled: Bool
+    let posterImage: Image?
     let accessibilityTitle: String
 
     @StateObject private var controller: StoryVideoPlayerController
@@ -25,32 +26,46 @@ struct StoryVideoPlayer: View {
         url: URL,
         autoplays: Bool = true,
         isPlaybackEnabled: Bool = true,
+        posterImage: Image? = nil,
         accessibilityTitle: String = "Your film"
     ) {
         self.url = url
         self.autoplays = autoplays
         self.isPlaybackEnabled = isPlaybackEnabled
+        self.posterImage = posterImage
         self.accessibilityTitle = accessibilityTitle
         _controller = StateObject(wrappedValue: StoryVideoPlayerController(url: url))
     }
 
     var body: some View {
-        VideoPlayer(player: controller.player)
-            .onAppear { controller.setPlaybackEnabled(isPlaybackEnabled, autoplays: autoplays) }
-            .onDisappear { controller.pause() }
-            .onChange(of: url) { _, newURL in
-                controller.replace(url: newURL, autoplays: autoplays && isPlaybackEnabled)
+        ZStack {
+            VideoPlayer(player: controller.player)
+
+            if let posterImage, !controller.isReady {
+                posterImage
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+                    .allowsHitTesting(false)
             }
-            .onChange(of: isPlaybackEnabled) { _, enabled in
-                controller.setPlaybackEnabled(enabled, autoplays: autoplays)
-            }
-            .accessibilityLabel(accessibilityTitle)
+        }
+        .onAppear { controller.setPlaybackEnabled(isPlaybackEnabled, autoplays: autoplays) }
+        .onDisappear { controller.pause() }
+        .onChange(of: url) { _, newURL in
+            controller.replace(url: newURL, autoplays: autoplays && isPlaybackEnabled)
+        }
+        .onChange(of: isPlaybackEnabled) { _, enabled in
+            controller.setPlaybackEnabled(enabled, autoplays: autoplays)
+        }
+        .accessibilityLabel(accessibilityTitle)
     }
 }
 
 @MainActor
 final class StoryVideoPlayerController: ObservableObject {
     let player = AVPlayer()
+    @Published private(set) var isReady = false
 
     private var currentURL: URL?
     private var endObserver: NSObjectProtocol?
@@ -102,6 +117,7 @@ final class StoryVideoPlayerController: ObservableObject {
 
     private func load(url: URL) {
         currentURL = url
+        isReady = false
         let urlDescription = Self.redactedURL(url)
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
@@ -155,6 +171,9 @@ final class StoryVideoPlayerController: ObservableObject {
             let durationSeconds = item.duration.seconds
             let durationDescription = durationSeconds.isFinite ? String(format: "%.3f", durationSeconds) : "unknown"
             storyVideoPlayerDebugLog("item status changed url=\(urlDescription) status=\(String(describing: item.status)) duration=\(durationDescription) error=\(item.error?.localizedDescription ?? "nil")")
+            Task { @MainActor [weak self] in
+                self?.isReady = item.status == .readyToPlay
+            }
         }
         currentItemErrorObserver = item.observe(\.error, options: [.initial, .new]) { item, _ in
             if let error = item.error {

@@ -285,6 +285,24 @@ final class StoryPreviewViewModel: ObservableObject {
         isPlayingVideo = true
     }
 
+    func reelThumbnailMoment(for story: Story) -> StoryMoment? {
+        guard story.projectType == .reel else { return nil }
+        let moments = story.moments ?? []
+        return moments.first(where: { moment in
+            moment.type == .photo || moment.type == .livePhoto
+        }) ?? moments.first
+    }
+
+    func loadReelThumbnail(for story: Story, targetSize: CGSize) {
+        guard let moment = reelThumbnailMoment(for: story) else { return }
+        loadThumbnail(forStoryAssetID: moment.mediaID, targetSize: targetSize)
+    }
+
+    func reelThumbnail(for story: Story) -> Image? {
+        guard let moment = reelThumbnailMoment(for: story) else { return nil }
+        return image(forStoryAssetID: moment.mediaID)
+    }
+
     func momentAsset(for storyAssetID: String) -> MediaAsset? {
         momentAssets[storyAssetID] ?? launchAssets.first { $0.id == storyAssetID }
     }

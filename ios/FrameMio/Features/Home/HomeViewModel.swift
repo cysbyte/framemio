@@ -25,14 +25,21 @@ final class HomeViewModel: ObservableObject {
     private static let coverCacheDirectoryName = "StoryCovers"
 
     private let storyService: StoryService
+    private let photoLibrary: PhotoLibraryService
     private let creditService: CreditService?
     private let mockState: HomeMockState?
     private var loadTask: Task<Void, Never>?
     private var creditTask: Task<Void, Never>?
     private var coverTasks: [String: Task<Void, Never>] = [:]
 
-    init(storyService: StoryService, creditService: CreditService? = nil, mockState: HomeMockState? = nil) {
+    init(
+        storyService: StoryService,
+        photoLibrary: PhotoLibraryService,
+        creditService: CreditService? = nil,
+        mockState: HomeMockState? = nil
+    ) {
         self.storyService = storyService
+        self.photoLibrary = photoLibrary
         self.creditService = creditService
         self.mockState = mockState
     }
@@ -149,33 +156,114 @@ final class HomeViewModel: ObservableObject {
             guard let videoURL = story.videoURL else { continue }
             let storyID = story.id
 
-            if let cachedImage = Self.cachedVideoCover(storyID: storyID, videoURL: videoURL) {
+            let source = story.projectType == .reel ? thumbnailSource(for: story) : nil
+            let sourceCacheKey = source.map { thumbnailCacheKey(for: $0) }
+            if let sourceCacheKey,
+               let cachedImage = Self.cachedSourceCover(storyID: storyID, sourceKey: sourceCacheKey) {
+                covers[storyID] = cachedImage
+                loadingCoverIDs.remove(storyID)
+                continue
+            }
+            if source == nil,
+               let cachedImage = Self.cachedVideoCover(storyID: storyID, videoURL: videoURL) {
                 covers[storyID] = cachedImage
                 loadingCoverIDs.remove(storyID)
                 continue
             }
 
             loadingCoverIDs.insert(storyID)
-            coverTasks[storyID] = Task { [weak self] in
-                let image = await Self.generateVideoCover(from: videoURL)
+            coverTasks[storyID] = Task { [weak self, photoLibrary] in
+                let sourceImage: UIImage?
+                if let source {
+                    sourceImage = await Self.generateSourceCover(
+                        from: source,
+                        photoLibrary: photoLibrary
+                    )
+                } else {
+                    sourceImage = nil
+                }
+                let image: UIImage?
+                let usedSourceCover: Bool
+                if let sourceImage {
+                    image = sourceImage
+                    usedSourceCover = true
+                } else {
+                    image = await Self.generateVideoCover(from: videoURL)
+                    usedSourceCover = false
+                }
                 guard !Task.isCancelled else { return }
-                self?.finishGeneratedVideoCover(storyID: storyID, videoURL: videoURL, image: image)
+                self?.finishGeneratedVideoCover(
+                    storyID: storyID,
+                    videoURL: videoURL,
+                    sourceKey: usedSourceCover ? sourceCacheKey : nil,
+                    image: image
+                )
             }
         }
     }
 
-    private func finishGeneratedVideoCover(storyID: String, videoURL: URL, image: UIImage?) {
+    private func finishGeneratedVideoCover(
+        storyID: String,
+        videoURL: URL,
+        sourceKey: String?,
+        image: UIImage?
+    ) {
         coverTasks[storyID] = nil
         loadingCoverIDs.remove(storyID)
         guard allStories.contains(where: { $0.id == storyID }) else { return }
         if let image {
             covers[storyID] = image
-            Self.saveVideoCover(image, storyID: storyID, videoURL: videoURL)
+            if let sourceKey {
+                Self.saveSourceCover(image, storyID: storyID, sourceKey: sourceKey)
+            } else {
+                Self.saveVideoCover(image, storyID: storyID, videoURL: videoURL)
+            }
+        }
+    }
+
+    private func thumbnailSource(for story: Story) -> StoryMoment? {
+        let moments = story.moments ?? []
+        return moments.first(where: { moment in
+            moment.type == .photo || moment.type == .livePhoto
+        }) ?? moments.first
+    }
+
+    private func thumbnailCacheKey(for moment: StoryMoment) -> String {
+        let sourceID = moment.sourceAssetID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return sourceID.isEmpty ? moment.mediaID : sourceID
+    }
+
+    private nonisolated static func generateSourceCover(
+        from moment: StoryMoment,
+        photoLibrary: PhotoLibraryService
+    ) async -> UIImage? {
+        let sourceValue = moment.sourceAssetID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let sourceID = sourceValue.isEmpty ? moment.mediaID : sourceValue
+        guard !sourceID.isEmpty else { return nil }
+
+        do {
+            let assets = try await photoLibrary.resolveAssets(localIdentifiers: [sourceID])
+            guard let asset = assets.first else { return nil }
+            let data = try await photoLibrary.requestThumbnail(
+                for: asset,
+                targetSize: CGSize(width: 900, height: 560)
+            )
+            return UIImage(data: data)
+        } catch is CancellationError {
+            return nil
+        } catch {
+            return nil
         }
     }
 
     private nonisolated static func cachedVideoCover(storyID: String, videoURL: URL) -> UIImage? {
         let fileURL = coverCacheFileURL(storyID: storyID, videoURL: videoURL)
+        guard let data = try? Data(contentsOf: fileURL) else { return nil }
+        return UIImage(data: data)
+    }
+
+    private nonisolated static func cachedSourceCover(storyID: String, sourceKey: String) -> UIImage? {
+        let fileURL = sourceCoverCacheFileURL(storyID: storyID, sourceKey: sourceKey)
         guard let data = try? Data(contentsOf: fileURL) else { return nil }
         return UIImage(data: data)
     }
@@ -186,6 +274,19 @@ final class HomeViewModel: ObservableObject {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try data.write(to: coverCacheFileURL(storyID: storyID, videoURL: videoURL), options: .atomic)
+        } catch {
+        }
+    }
+
+    private nonisolated static func saveSourceCover(_ image: UIImage, storyID: String, sourceKey: String) {
+        guard let data = image.jpegData(compressionQuality: 0.82) else { return }
+        let directory = coverCacheDirectory
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try data.write(
+                to: sourceCoverCacheFileURL(storyID: storyID, sourceKey: sourceKey),
+                options: .atomic
+            )
         } catch {
         }
     }
@@ -207,7 +308,15 @@ final class HomeViewModel: ObservableObject {
 
     private nonisolated static func coverCacheFileURL(storyID: String, videoURL: URL) -> URL {
         let artifactKey = videoURL.path.isEmpty ? videoURL.absoluteString : videoURL.path
-        let fileName = "\(safeCacheComponent(storyID))-\(fnv1a64Hex(artifactKey)).jpg"
+        return coverCacheFileURL(storyID: storyID, cacheKey: "video-\(artifactKey)")
+    }
+
+    private nonisolated static func sourceCoverCacheFileURL(storyID: String, sourceKey: String) -> URL {
+        coverCacheFileURL(storyID: storyID, cacheKey: "source-\(sourceKey)")
+    }
+
+    private nonisolated static func coverCacheFileURL(storyID: String, cacheKey: String) -> URL {
+        let fileName = "\(safeCacheComponent(storyID))-\(fnv1a64Hex(cacheKey)).jpg"
         return coverCacheDirectory.appendingPathComponent(fileName, isDirectory: false)
     }
 

@@ -234,13 +234,16 @@ struct StoryPreviewView: View {
     }
 
     private func generatedVideoHero(_ story: Story) -> some View {
-        VStack(spacing: FrameMioSpacing.md) {
+        let reelPoster = viewModel.reelThumbnail(for: story)
+
+        return VStack(spacing: FrameMioSpacing.md) {
             ZStack(alignment: .topTrailing) {
                 if let videoURL = story.videoURL, story.status == .ready {
                     StoryVideoPlayer(
                         url: videoURL,
                         autoplays: true,
                         isPlaybackEnabled: fullScreenVideo == nil && !isShowingEditStory,
+                        posterImage: reelPoster,
                         accessibilityTitle: "Play \(storyDisplayTitle(story))"
                     )
                     .aspectRatio(generatedVideoAspectRatio, contentMode: .fit)
@@ -261,6 +264,12 @@ struct StoryPreviewView: View {
             .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
             .frameMioElevation(.floating)
             .accessibilityElement(children: .combine)
+            .onAppear {
+                viewModel.loadReelThumbnail(
+                    for: story,
+                    targetSize: CGSize(width: 900, height: 560)
+                )
+            }
         }
     }
 

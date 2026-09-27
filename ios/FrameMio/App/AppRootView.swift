@@ -22,7 +22,14 @@ struct AppRootView: View {
 
     init(dependencies: AppDependencies = .preview(), homeMockState: HomeMockState? = nil) {
         self.dependencies = dependencies
-        _homeViewModel = StateObject(wrappedValue: HomeViewModel(storyService: dependencies.storyService, creditService: dependencies.creditService, mockState: homeMockState))
+        _homeViewModel = StateObject(
+            wrappedValue: HomeViewModel(
+                storyService: dependencies.storyService,
+                photoLibrary: dependencies.photoLibrary,
+                creditService: dependencies.creditService,
+                mockState: homeMockState
+            )
+        )
         _storyLaunchCoordinator = StateObject(
             wrappedValue: StoryLaunchCoordinator(
                 analysisService: dependencies.mediaAnalysis,
