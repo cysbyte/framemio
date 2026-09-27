@@ -182,7 +182,18 @@ final class StoryLaunchCoordinator: ObservableObject {
                             duration: rendered.duration,
                             templateID: draft.templateID,
                             templateVersion: draft.templateVersion,
-                            templateConfiguration: draft.templateConfiguration
+                            templateConfiguration: draft.templateConfiguration,
+                            sourceAssets: assets.map {
+                                LocalReelSourceAsset(
+                                    assetID: $0.id,
+                                    sourceAssetID: $0.localIdentifier ?? $0.id,
+                                    kind: $0.kind.rawValue,
+                                    duration: $0.duration,
+                                    creationDate: $0.creationDate,
+                                    pixelWidth: $0.pixelWidth,
+                                    pixelHeight: $0.pixelHeight
+                                )
+                            }
                         )
                     )
                     try? FileManager.default.removeItem(at: rendered.videoURL)

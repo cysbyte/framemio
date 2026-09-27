@@ -185,6 +185,16 @@ type ReelProjectConfiguration struct {
 	AspectRatio           string       `json:"aspect_ratio,omitempty"`
 }
 
+type LocalReelSourceAsset struct {
+	AssetID       string     `json:"asset_id"`
+	SourceAssetID string     `json:"source_asset_id,omitempty"`
+	Kind          string     `json:"kind,omitempty"`
+	Duration      float64    `json:"duration,omitempty"`
+	CreationDate  *time.Time `json:"creation_date,omitempty"`
+	PixelWidth    int        `json:"pixel_width,omitempty"`
+	PixelHeight   int        `json:"pixel_height,omitempty"`
+}
+
 type BrandConfiguration struct {
 	Name           string `json:"name,omitempty"`
 	PrimaryColor   string `json:"primary_color,omitempty"`
@@ -225,6 +235,7 @@ type VideoProjectConfiguration struct {
 	TemplateID            string                     `json:"template_id,omitempty"`
 	TemplateVersion       int                        `json:"template_version,omitempty"`
 	TemplateConfiguration VideoTemplateConfiguration `json:"template_configuration,omitempty"`
+	LocalReelSources      []LocalReelSourceAsset     `json:"local_reel_sources,omitempty"`
 }
 
 // VideoProject is the shared durable project record for every creation mode.

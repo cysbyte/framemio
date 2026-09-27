@@ -658,6 +658,17 @@ final class MockStoryService: StoryService, @unchecked Sendable {
     }
 
     func createLocalReel(request: LocalReelPublishRequest) async throws -> Story {
+        let sourceAssets = request.sourceAssets.isEmpty
+            ? [LocalReelSourceAsset(
+                assetID: request.mediaID,
+                sourceAssetID: nil,
+                kind: MediaKind.video.rawValue,
+                duration: request.duration,
+                creationDate: nil,
+                pixelWidth: 540,
+                pixelHeight: 960
+            )]
+            : request.sourceAssets
         let story = Story(
             id: "preview-local-reel-\(UUID().uuidString)",
             type: .reel,
@@ -665,9 +676,30 @@ final class MockStoryService: StoryService, @unchecked Sendable {
             context: .specialMoments,
             createdAt: Date(),
             duration: request.duration,
-            assetIDs: [request.mediaID],
+            assetIDs: sourceAssets.map(\.assetID),
             status: .ready,
-            videoURL: nil
+            videoURL: nil,
+            moments: sourceAssets.enumerated().map { index, source in
+                let type: StoryMomentType = {
+                    switch source.kind {
+                    case MediaKind.video.rawValue:
+                        return .video
+                    case MediaKind.livePhoto.rawValue:
+                        return .livePhoto
+                    default:
+                        return .photo
+                    }
+                }()
+                return StoryMoment(
+                    id: source.assetID,
+                    mediaID: source.assetID,
+                    sourceAssetID: source.sourceAssetID,
+                    type: type,
+                    title: "Clip \(index + 1)",
+                    creationDate: source.creationDate,
+                    isSelected: true
+                )
+            }
         )
         let existing = try await persistence.loadStories()
         try await persistence.saveStories([story] + existing.filter { $0.id != story.id })

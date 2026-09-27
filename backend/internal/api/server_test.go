@@ -1961,6 +1961,76 @@ func TestIOSStoryPresentationSuppressesGenericNames(t *testing.T) {
 	}
 }
 
+func TestCreateLocalIOSReelExposesSelectedSourceAssets(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := store.NewMemoryStore()
+	handler := newTestServer(memoryStore, queue.NewMemoryPublisher()).Handler()
+	generated := createReadyIOSMediaWithIdempotency(
+		t,
+		handler,
+		"generated-reel",
+		models.MediaTypeVideo,
+		4*1024*1024,
+		"media-upload-generated-reel",
+	)
+
+	response := performJSON(t, handler, http.MethodPost, "/v1/stories/local", map[string]any{
+		"context":  "Special moments",
+		"title":    "Four panel reveal",
+		"media_id": generated.MediaID,
+		"duration": 15,
+		"source_assets": []map[string]any{
+			{
+				"asset_id":        "photo-asset",
+				"source_asset_id": "photo-source",
+				"kind":            "image",
+				"creation_date":   "2026-08-19T10:00:00Z",
+				"pixel_width":     3024,
+				"pixel_height":    4032,
+			},
+			{
+				"asset_id":        "video-asset",
+				"source_asset_id": "video-source",
+				"kind":            "video",
+				"duration":        68.4,
+				"creation_date":   "2026-08-19T10:01:00Z",
+				"pixel_width":     1920,
+				"pixel_height":    1080,
+			},
+		},
+	}, "local-reel-key", true, nil)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create local reel status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	var story iosStory
+	decodeResponse(t, response, &story)
+	if len(story.Moments) != 2 {
+		t.Fatalf("local reel moments = %+v, want two source clips", story.Moments)
+	}
+	if story.Moments[0].MediaID != "photo-asset" || story.Moments[0].SourceAssetID != "photo-source" || story.Moments[0].Type != "photo" {
+		t.Fatalf("first local reel clip = %+v", story.Moments[0])
+	}
+	if story.Moments[1].MediaID != "video-asset" || story.Moments[1].SourceAssetID != "video-source" || story.Moments[1].Type != "video" {
+		t.Fatalf("second local reel clip = %+v", story.Moments[1])
+	}
+	if len(story.AssetIDs) != 2 || story.AssetIDs[0] != "photo-asset" || story.AssetIDs[1] != "video-asset" {
+		t.Fatalf("local reel asset ids = %+v", story.AssetIDs)
+	}
+	if story.VideoURL == nil {
+		t.Fatal("local reel did not retain the generated video artifact URL")
+	}
+
+	project, err := memoryStore.GetProject(context.Background(), "user-1", story.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(project.Configuration.LocalReelSources) != 2 {
+		t.Fatalf("stored local reel sources = %+v", project.Configuration.LocalReelSources)
+	}
+}
+
 func TestMediaContentURLRequiresOwnershipAndUsesConfiguredDownloadBaseURL(t *testing.T) {
 	t.Parallel()
 

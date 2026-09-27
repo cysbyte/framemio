@@ -82,6 +82,7 @@ type iosCreateLocalReelRequest struct {
 	TemplateID            string                            `json:"template_id,omitempty"`
 	TemplateVersion       int                               `json:"template_version,omitempty"`
 	TemplateConfiguration models.VideoTemplateConfiguration `json:"template_configuration,omitempty"`
+	SourceAssets          []models.LocalReelSourceAsset     `json:"source_assets,omitempty"`
 }
 
 func (s *Server) createLocalIOSReel(response http.ResponseWriter, request *http.Request) {
@@ -96,6 +97,7 @@ func (s *Server) createLocalIOSReel(response http.ResponseWriter, request *http.
 	input.Context = strings.TrimSpace(sanitizeIOSStoryText(input.Context))
 	input.Title = strings.TrimSpace(sanitizeIOSStoryText(input.Title))
 	input.MediaID = strings.TrimSpace(input.MediaID)
+	input.SourceAssets = normalizeIOSLocalReelSourceAssets(input.SourceAssets)
 	idempotencyKey := strings.TrimSpace(request.Header.Get("Idempotency-Key"))
 	if input.Context == "" || input.Title == "" || input.MediaID == "" || input.Duration <= 0 || input.Duration > 120 || idempotencyKey == "" {
 		s.writeError(response, http.StatusBadRequest, "invalid_local_reel", "context, title, media_id, duration, and idempotency key are required")
@@ -133,7 +135,8 @@ func (s *Server) createLocalIOSReel(response http.ResponseWriter, request *http.
 				TargetDurationSecs: int(input.Duration + 0.5),
 				DurationMode:       models.DurationModeFixed,
 			},
-			Composition: models.CompositionConfiguration{AspectRatio: "9:16", FPS: 24, Preset: "local"},
+			Composition:      models.CompositionConfiguration{AspectRatio: "9:16", FPS: 24, Preset: "local"},
+			LocalReelSources: input.SourceAssets,
 		},
 	}
 	created, existing, err := s.Store.CreateProject(request.Context(), project, idempotencyKey)
@@ -1672,12 +1675,87 @@ func (s *Server) makeIOSStory(request *http.Request, userID string, project mode
 		}
 	}
 	story.AvailableMoments = s.iosAvailableMoments(request, project, mediaByID, story.Moments, videoAnalysesByMediaID)
+	if project.Type == models.ProjectTypeReel && len(project.Configuration.LocalReelSources) > 0 {
+		story.Moments = iosLocalReelMoments(project.Configuration.LocalReelSources)
+		story.AvailableMoments = nil
+		story.AssetIDs = localReelSourceAssetIDs(project.Configuration.LocalReelSources)
+	}
 	story.Title = iosDisplayStoryTitle(story.Title, story.Moments, project.Context)
 	if story.Duration <= 0 {
 		story.Duration = float64(max(8, len(project.MediaIDs)*4))
 	}
 	story.VideoURL = s.iosStoryVideoURL(request, userID, project)
 	return story
+}
+
+func normalizeIOSLocalReelSourceAssets(sources []models.LocalReelSourceAsset) []models.LocalReelSourceAsset {
+	normalized := make([]models.LocalReelSourceAsset, 0, len(sources))
+	seen := make(map[string]struct{}, len(sources))
+	for _, source := range sources {
+		source.AssetID = strings.TrimSpace(sanitizeIOSStoryText(source.AssetID))
+		if source.AssetID == "" {
+			continue
+		}
+		if _, exists := seen[source.AssetID]; exists {
+			continue
+		}
+		seen[source.AssetID] = struct{}{}
+		source.SourceAssetID = strings.TrimSpace(sanitizeIOSStoryText(source.SourceAssetID))
+		source.Kind = normalizeIOSLocalReelSourceKind(source.Kind)
+		if source.Duration < 0 {
+			source.Duration = 0
+		}
+		if source.PixelWidth < 0 {
+			source.PixelWidth = 0
+		}
+		if source.PixelHeight < 0 {
+			source.PixelHeight = 0
+		}
+		normalized = append(normalized, source)
+	}
+	return normalized
+}
+
+func normalizeIOSLocalReelSourceKind(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "video":
+		return string(models.MediaTypeVideo)
+	case "live_photo", "livephoto":
+		return string(models.MediaTypeLivePhoto)
+	default:
+		return string(models.MediaTypePhoto)
+	}
+}
+
+func localReelSourceAssetIDs(sources []models.LocalReelSourceAsset) []string {
+	assetIDs := make([]string, 0, len(sources))
+	for _, source := range sources {
+		if assetID := strings.TrimSpace(source.AssetID); assetID != "" {
+			assetIDs = append(assetIDs, assetID)
+		}
+	}
+	return assetIDs
+}
+
+func iosLocalReelMoments(sources []models.LocalReelSourceAsset) []iosStoryMoment {
+	moments := make([]iosStoryMoment, 0, len(sources))
+	for index, source := range sources {
+		assetID := strings.TrimSpace(source.AssetID)
+		if assetID == "" {
+			continue
+		}
+		moments = append(moments, iosStoryMoment{
+			ID:            assetID,
+			MomentID:      assetID,
+			MediaID:       assetID,
+			SourceAssetID: strings.TrimSpace(source.SourceAssetID),
+			Type:          normalizeIOSLocalReelSourceKind(source.Kind),
+			Title:         fmt.Sprintf("Clip %d", index+1),
+			CreationDate:  source.CreationDate,
+			Selected:      true,
+		})
+	}
+	return moments
 }
 
 func iosStoryDescription(plan models.StoryPlan) string {

@@ -229,23 +229,48 @@ final class HomeViewModel: ObservableObject {
 
     private nonisolated static func generateVideoCover(from url: URL) async -> UIImage? {
         await Task.detached(priority: .utility) {
-            autoreleasepool {
-                let asset = AVURLAsset(url: url)
+            let asset = AVURLAsset(url: url)
+
+            do {
+                // Remote presigned assets are not ready for synchronous frame extraction.
+                // Load their metadata first so AVFoundation can issue the required range
+                // requests before asking for a frame.
+                let duration = try await asset.load(.duration)
+                let tracks = try await asset.load(.tracks)
+                guard tracks.contains(where: { $0.mediaType == .video }) else {
+                    return nil
+                }
+
                 let generator = AVAssetImageGenerator(asset: asset)
                 generator.appliesPreferredTrackTransform = true
                 generator.maximumSize = CGSize(width: 900, height: 560)
 
-                for seconds in [0.2, 0, 1.0] {
+                let durationSeconds = duration.seconds
+                let candidateSeconds: [Double]
+                if durationSeconds.isFinite, durationSeconds > 0 {
+                    candidateSeconds = [0.2, 0, 1.0]
+                        .filter { $0 < durationSeconds || $0 == 0 }
+                } else {
+                    candidateSeconds = [0.2, 0, 1.0]
+                }
+
+                for seconds in candidateSeconds {
+                    try Task.checkCancellation()
                     do {
                         let time = CMTime(seconds: seconds, preferredTimescale: 600)
-                        let image = try generator.copyCGImage(at: time, actualTime: nil)
-                        return UIImage(cgImage: image)
+                        let result = try await generator.image(at: time)
+                        return UIImage(cgImage: result.image)
                     } catch {
                         continue
                     }
                 }
+            } catch is CancellationError {
+                return nil
+            } catch {
                 return nil
             }
+
+            return nil
         }.value
     }
 

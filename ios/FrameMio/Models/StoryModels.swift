@@ -887,6 +887,26 @@ struct Story: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+struct LocalReelSourceAsset: Codable, Hashable, Sendable {
+    let assetID: String
+    let sourceAssetID: String?
+    let kind: String
+    let duration: TimeInterval
+    let creationDate: Date?
+    let pixelWidth: Int
+    let pixelHeight: Int
+
+    enum CodingKeys: String, CodingKey {
+        case assetID = "asset_id"
+        case sourceAssetID = "source_asset_id"
+        case kind
+        case duration
+        case creationDate = "creation_date"
+        case pixelWidth = "pixel_width"
+        case pixelHeight = "pixel_height"
+    }
+}
+
 struct LocalReelPublishRequest: Codable, Hashable, Sendable {
     let context: String
     let title: String
@@ -895,6 +915,7 @@ struct LocalReelPublishRequest: Codable, Hashable, Sendable {
     let templateID: String?
     let templateVersion: Int?
     let templateConfiguration: VideoTemplateConfiguration?
+    let sourceAssets: [LocalReelSourceAsset]
 
     enum CodingKeys: String, CodingKey {
         case context
@@ -904,6 +925,7 @@ struct LocalReelPublishRequest: Codable, Hashable, Sendable {
         case templateID = "template_id"
         case templateVersion = "template_version"
         case templateConfiguration = "template_configuration"
+        case sourceAssets = "source_assets"
     }
 }
 
