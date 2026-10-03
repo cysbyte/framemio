@@ -21,7 +21,7 @@ func TestVideoTemplateCatalogAPI(t *testing.T) {
 	}
 	var all []models.VideoTemplate
 	decodeResponse(t, allResponse, &all)
-	if len(all) != 18 {
+	if len(all) != 22 {
 		t.Fatalf("expected curated templates, got %d: %+v", len(all), all)
 	}
 

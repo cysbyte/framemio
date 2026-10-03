@@ -292,6 +292,14 @@ struct AppRootView: View {
         homePath.append(route)
     }
 
+    private func closeCreatedProjectPreview() {
+        homeViewModel.load()
+        homePath.removeAll()
+        templatesPath.removeAll()
+        historyPath.removeAll()
+        selectedTab = .home
+    }
+
     @ViewBuilder
     private func destination(for route: AppRoute, appendRoute: @escaping (AppRoute) -> Void) -> some View {
         switch route {
@@ -375,11 +383,7 @@ struct AppRootView: View {
                     onCreditsUpdated: refreshCredits
                 ),
                 onOpenPricing: openPricing,
-                onClose: {
-                    homeViewModel.load()
-                    historyPath = []
-                    selectedTab = .history
-                }
+                onClose: closeCreatedProjectPreview
             )
         case let .storyPreview(story):
             StoryPreviewView(

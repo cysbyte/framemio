@@ -36,7 +36,7 @@ struct HomeView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: FrameMioSpacing.xxl) {
+            VStack(alignment: .leading, spacing: FrameMioSpacing.xl) {
                 hero
 
                 if viewModel.isLoading && viewModel.stories.isEmpty {
@@ -60,13 +60,17 @@ struct HomeView: View {
                 }
             }
             .padding(.horizontal, FrameMioSpacing.lg)
-            .padding(.top, FrameMioSpacing.xs)
+            .padding(.top, FrameMioSpacing.sm)
             .padding(.bottom, FrameMioSpacing.xxxl)
         }
         .background {
             LinearGradient(
-                colors: [FrameMioColors.canvas, FrameMioColors.accentMuted.opacity(0.34)],
-                startPoint: .topLeading,
+                colors: [
+                    FrameMioColors.canvas,
+                    FrameMioColors.surface.opacity(0.82),
+                    FrameMioColors.accentMuted.opacity(0.42)
+                ],
+                startPoint: .top,
                 endPoint: .bottomTrailing
             )
             .ignoresSafeArea()
@@ -148,29 +152,19 @@ struct HomeView: View {
     }
 
     private var hero: some View {
-        VStack(alignment: .leading, spacing: FrameMioSpacing.xl) {
-            VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
-                Text("Create videos from your photos and footage.")
-                    .font(FrameMioTypography.title)
-                    .foregroundStyle(FrameMioColors.ink)
-                    .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: FrameMioSpacing.lg) {
+            heroPreview
 
-                Text("FrameMio helps turn raw media into finished stories, promos, and reels.")
-                    .font(FrameMioTypography.body)
-                    .foregroundStyle(FrameMioColors.secondaryInk)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            quickCreationActions
 
             projectTypeActions
-
-            heroPreview
         }
     }
 
     private var heroPreview: some View {
         ZStack(alignment: .bottomLeading) {
             LoopingVideoPreview(resourceName: "HomeHeroPreview", isPlaying: !reduceMotion)
-                .frame(height: 188)
+                .frame(height: 318)
                 .background(
                     LinearGradient(
                         colors: [FrameMioColors.memoryLight, FrameMioColors.accent, FrameMioColors.memoryEarth],
@@ -178,72 +172,85 @@ struct HomeView: View {
                         endPoint: .bottomTrailing
                     )
                 )
-                .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
 
             LinearGradient(
-                colors: [FrameMioColors.ink.opacity(0.06), FrameMioColors.ink.opacity(0.48)],
+                stops: [
+                    .init(color: FrameMioColors.ink.opacity(0.02), location: 0.0),
+                    .init(color: FrameMioColors.ink.opacity(0.18), location: 0.42),
+                    .init(color: FrameMioColors.ink.opacity(0.78), location: 1.0)
+                ],
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous))
+
+            HStack(spacing: FrameMioSpacing.xs) {
+                HeroPill(title: "Story", systemImage: "sparkles")
+                HeroPill(title: "Promo", systemImage: "megaphone.fill")
+                HeroPill(title: "Reel", systemImage: "play.rectangle.fill")
+            }
+            .padding(FrameMioSpacing.md)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
             VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
-                HStack(spacing: FrameMioSpacing.xs) {
-                    Image(systemName: "sparkles")
-                        .accessibilityHidden(true)
-                    Text("AI-assisted video")
-                }
-                .font(FrameMioTypography.caption)
-                .foregroundStyle(FrameMioColors.inverseInk)
-                .padding(.horizontal, FrameMioSpacing.sm)
-                .frame(minHeight: FrameMioMetrics.tagHeight)
-                .background(FrameMioColors.mediaScrim, in: Capsule())
-
-                Text("Your photos and footage, shaped into a finished video.")
-                    .font(FrameMioTypography.headline)
+                Text("Create videos from your photos and footage.")
+                    .font(FrameMioTypography.display)
                     .foregroundStyle(FrameMioColors.inverseInk)
                     .fixedSize(horizontal: false, vertical: true)
                     .shadow(color: FrameMioColors.ink.opacity(0.28), radius: 14, x: 0, y: 8)
+
+                Text("AI helps shape raw media into finished stories, promos, and reels.")
+                    .font(FrameMioTypography.callout)
+                    .foregroundStyle(FrameMioColors.inverseInk.opacity(0.86))
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(FrameMioSpacing.md)
+            .padding(FrameMioSpacing.lg)
         }
-        .frame(height: 188)
-        .accessibilityHidden(true)
+        .frame(height: 318)
+        .frameMioElevation(.floating)
+        .accessibilityElement(children: .combine)
     }
 
     private var projectTypeActions: some View {
-        VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
-            Text("Start a new video")
-                .font(FrameMioTypography.headline)
-                .foregroundStyle(FrameMioColors.ink)
+        VStack(alignment: .leading, spacing: FrameMioSpacing.md) {
+            VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
+                Text("Choose a format")
+                    .font(FrameMioTypography.headline)
+                    .foregroundStyle(FrameMioColors.ink)
 
-            HStack(spacing: FrameMioSpacing.sm) {
-                HomeCreationModeButton(
-                    title: "Text to Video",
-                    description: "Turn a written idea into a new video",
-                    systemImage: "text.alignleft",
-                    background: FrameMioColors.accent.opacity(0.9),
-                    action: onCreateTextVideo
-                )
-
-                HomeCreationModeButton(
-                    title: "Image to Video",
-                    description: "Animate one image into a moving video",
-                    systemImage: "photo.on.rectangle.angled",
-                    background: FrameMioColors.selection.opacity(0.88),
-                    action: onCreateImageVideo
-                )
+                Text("Pick the output you want before selecting media.")
+                    .font(FrameMioTypography.footnote)
+                    .foregroundStyle(FrameMioColors.secondaryInk)
             }
 
-            Divider()
-                .overlay(FrameMioColors.secondaryInk.opacity(0.42))
-                .padding(.vertical, 2)
-
-            ForEach(VideoProjectType.allCases, id: \.self) { type in
-                ProjectTypeAction(type: type) {
-                    onCreateProject(draft(for: type))
+            VStack(spacing: FrameMioSpacing.sm) {
+                ForEach(VideoProjectType.allCases, id: \.self) { type in
+                    ProjectTypeAction(type: type) {
+                        onCreateProject(draft(for: type))
+                    }
                 }
             }
+        }
+    }
+
+    private var quickCreationActions: some View {
+        HStack(spacing: FrameMioSpacing.md) {
+            HomeCreationModeButton(
+                title: "Text to Video",
+                description: "Turn a written idea into a new video",
+                systemImage: "text.alignleft",
+                background: FrameMioColors.accent,
+                action: onCreateTextVideo
+            )
+
+            HomeCreationModeButton(
+                title: "Image to Video",
+                description: "Animate one image into motion",
+                systemImage: "photo.on.rectangle.angled",
+                background: FrameMioColors.selection,
+                action: onCreateImageVideo
+            )
         }
     }
 
@@ -568,52 +575,92 @@ private struct ProjectTypeAction: View {
             FrameMioHaptics.primaryAction()
             action()
         } label: {
-            HStack(spacing: FrameMioSpacing.md) {
-                Image(systemName: type.icon)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(FrameMioColors.accent)
-                    .frame(width: 42, height: 42)
-                    .background(FrameMioColors.accentMuted.opacity(0.72), in: Circle())
-                    .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
+                HStack(alignment: .top, spacing: FrameMioSpacing.md) {
+                    Image(systemName: type.icon)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(FrameMioColors.inverseInk)
+                        .frame(width: 44, height: 44)
+                        .background(type.accentGradient, in: RoundedRectangle(cornerRadius: FrameMioRadius.small, style: .continuous))
+                        .accessibilityHidden(true)
 
-                VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
-                    Text(type.title)
-                        .font(FrameMioTypography.headline)
-                        .foregroundStyle(FrameMioColors.ink)
+                    VStack(alignment: .leading, spacing: FrameMioSpacing.xxs) {
+                        Text(type.title)
+                            .font(FrameMioTypography.headline)
+                            .foregroundStyle(FrameMioColors.ink)
 
-                    Text(type.description)
-                        .font(FrameMioTypography.footnote)
-                        .foregroundStyle(FrameMioColors.secondaryInk)
-                        .fixedSize(horizontal: false, vertical: true)
+                        Text(type.description)
+                            .font(FrameMioTypography.footnote)
+                            .foregroundStyle(FrameMioColors.secondaryInk)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
-                Spacer(minLength: FrameMioSpacing.sm)
+                Spacer(minLength: 0)
 
-                Image(systemName: "chevron.right")
-                    .font(FrameMioTypography.headline)
-                    .foregroundStyle(FrameMioColors.tertiaryInk)
-                    .accessibilityHidden(true)
+                HStack(spacing: FrameMioSpacing.xxs) {
+                    Text(type.actionTitle)
+                        .font(FrameMioTypography.caption.weight(.bold))
+                        .foregroundStyle(FrameMioColors.accent)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+
+                    Image(systemName: "chevron.right")
+                        .font(FrameMioTypography.caption.weight(.bold))
+                        .foregroundStyle(FrameMioColors.accent)
+                        .accessibilityHidden(true)
+                }
+                .padding(.horizontal, FrameMioSpacing.sm)
+                .frame(minHeight: 34)
+                .background(FrameMioColors.accentMuted.opacity(0.68), in: Capsule())
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .padding(FrameMioSpacing.md)
             .frame(
                 maxWidth: .infinity,
-                minHeight: 88,
-                maxHeight: 88,
+                minHeight: 132,
                 alignment: .leading
             )
             .background(
-                FrameMioColors.surface.opacity(0.86),
-                in: RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                LinearGradient(
+                    colors: [
+                        FrameMioColors.elevatedSurface.opacity(0.96),
+                        FrameMioColors.surface.opacity(0.86)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                in: RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous)
             )
             .overlay {
-                RoundedRectangle(cornerRadius: FrameMioRadius.container, style: .continuous)
+                RoundedRectangle(cornerRadius: FrameMioRadius.large, style: .continuous)
                     .stroke(FrameMioColors.divider.opacity(0.62), lineWidth: FrameMioMetrics.borderWidth)
             }
             .frameMioElevation(.subtle)
         }
         .buttonStyle(FrameMioPressButtonStyle())
         .accessibilityHint("Opens media selection for a \(type.title.lowercased()) project")
-        .accessibilityLabel("\(type.title). \(type.description)")
+        .accessibilityLabel("\(type.title). \(type.description). \(type.actionTitle)")
+    }
+}
+
+private struct HeroPill: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: FrameMioSpacing.xxs) {
+            Image(systemName: systemImage)
+                .font(FrameMioTypography.eyebrow)
+                .accessibilityHidden(true)
+
+            Text(title)
+                .font(FrameMioTypography.caption)
+        }
+        .foregroundStyle(FrameMioColors.inverseInk)
+        .padding(.horizontal, FrameMioSpacing.sm)
+        .frame(minHeight: FrameMioMetrics.tagHeight)
+        .background(.ultraThinMaterial, in: Capsule())
     }
 }
 
@@ -661,6 +708,31 @@ private struct HomeCreationModeButton: View {
         }
         .buttonStyle(FrameMioPressButtonStyle())
         .accessibilityLabel("\(title). \(description)")
+    }
+}
+
+private extension VideoProjectType {
+    var accentGradient: LinearGradient {
+        switch self {
+        case .story:
+            LinearGradient(
+                colors: [FrameMioColors.accent, FrameMioColors.memoryLight],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        case .promo:
+            LinearGradient(
+                colors: [FrameMioColors.selection, FrameMioColors.accent],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        case .reel:
+            LinearGradient(
+                colors: [FrameMioColors.memoryEarth, FrameMioColors.selection],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
     }
 }
 

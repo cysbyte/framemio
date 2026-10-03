@@ -367,6 +367,30 @@ final class AVFoundationLocalReelRenderer: LocalReelRendering, @unchecked Sendab
                 background: background,
                 sampleRate: template.sourceFrameSampleRate
             )
+        case .verticalTrio:
+            return try verticalStackFrame(
+                at: seconds,
+                panelCount: 3,
+                providers: providers,
+                background: background,
+                sampleRate: template.sourceFrameSampleRate
+            )
+        case .verticalQuad:
+            return try verticalStackFrame(
+                at: seconds,
+                panelCount: 4,
+                providers: providers,
+                background: background,
+                sampleRate: template.sourceFrameSampleRate
+            )
+        case .transitionMontage:
+            return try transitionMontageFrame(
+                at: seconds,
+                duration: duration,
+                providers: providers,
+                background: background,
+                sampleRate: template.sourceFrameSampleRate
+            )
         case .montage:
             return try montageFrame(at: seconds, duration: duration, providers: providers, background: background, sampleRate: template.sourceFrameSampleRate)
         }
@@ -425,9 +449,9 @@ final class AVFoundationLocalReelRenderer: LocalReelRendering, @unchecked Sendab
             CGRect(x: 0, y: 0, width: width, height: height),
             CGRect(x: width, y: 0, width: width, height: height)
         ]
-        // Reveal panels in visual reading order: top-left, top-right,
-        // bottom-left, bottom-right. The closing sequence is reversed.
-        let visualOrder = [2, 3, 0, 1]
+        // Reveal from top-left to top-right, then bottom-right and bottom-left.
+        // The closing sequence is handled by panelIsVisible in reverse.
+        let visualOrder = [2, 3, 1, 0]
         for index in 0..<4 {
             guard panelIsVisible(
                 index: index,
@@ -443,6 +467,98 @@ final class AVFoundationLocalReelRenderer: LocalReelRendering, @unchecked Sendab
             output = composite(frame, in: frames[index], over: output)
         }
         return output
+    }
+
+    private func verticalStackFrame(
+        at seconds: TimeInterval,
+        panelCount: Int,
+        providers: [LocalFrameProvider],
+        background: CIImage,
+        sampleRate: Double
+    ) throws -> CIImage {
+        var output = background
+        let rowHeight = canvasSize.height / CGFloat(panelCount)
+        let frames = (0..<panelCount).map { index in
+            CGRect(
+                x: 0,
+                y: rowHeight * CGFloat(panelCount - 1 - index),
+                width: canvasSize.width,
+                height: rowHeight
+            )
+        }
+
+        for index in 0..<panelCount {
+            let provider = providers[index % providers.count]
+            let frame = try provider.image(
+                at: loopedTime(seconds + Double(index) * 0.25, duration: provider.duration),
+                sampleRate: sampleRate
+            )
+            output = composite(frame, in: frames[index], over: output)
+        }
+        return output
+    }
+
+    private func transitionMontageFrame(
+        at seconds: TimeInterval,
+        duration: TimeInterval,
+        providers: [LocalFrameProvider],
+        background: CIImage,
+        sampleRate: Double
+    ) throws -> CIImage {
+        let slotDuration = max(0.85, duration / Double(providers.count))
+        let transitionDuration = min(0.28, max(0.16, slotDuration * 0.14))
+        let currentIndex = min(providers.count - 1, max(0, Int(seconds / slotDuration)))
+        let localSeconds = seconds - Double(currentIndex) * slotDuration
+        let currentProvider = providers[currentIndex]
+        let currentTime = localSourceTime(seconds: localSeconds, slotDuration: slotDuration, provider: currentProvider)
+        let currentFrame = try currentProvider.image(at: currentTime, sampleRate: sampleRate)
+
+        guard currentIndex < providers.count - 1,
+              localSeconds >= slotDuration - transitionDuration else {
+            return composite(currentFrame, in: CGRect(origin: .zero, size: canvasSize), over: background)
+        }
+
+        let progress = min(1, max(0, (localSeconds - (slotDuration - transitionDuration)) / transitionDuration))
+        let eased = easeOutCubic(progress)
+        return transitionComposite(
+            currentFrame,
+            in: CGRect(origin: .zero, size: canvasSize),
+            over: background,
+            scale: 1 + CGFloat(eased) * 0.32,
+            blurRadius: CGFloat(eased) * 8,
+            opacity: 1
+        )
+    }
+
+    private func transitionComposite(
+        _ image: CIImage,
+        in rect: CGRect,
+        over background: CIImage,
+        scale: CGFloat,
+        blurRadius: CGFloat,
+        opacity: CGFloat
+    ) -> CIImage {
+        var scaled = aspectFill(image, in: rect.size)
+        if scale != 1 {
+            let center = CGPoint(x: rect.width / 2, y: rect.height / 2)
+            scaled = scaled
+                .transformed(by: CGAffineTransform(translationX: -center.x, y: -center.y))
+                .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+                .transformed(by: CGAffineTransform(translationX: center.x, y: center.y))
+                .cropped(to: CGRect(origin: .zero, size: rect.size))
+        }
+        if blurRadius > 0.1 {
+            scaled = scaled
+                .clampedToExtent()
+                .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: blurRadius])
+                .cropped(to: CGRect(origin: .zero, size: rect.size))
+        }
+        let translated = scaled.transformed(by: CGAffineTransform(translationX: rect.minX, y: rect.minY))
+        return translated
+            .applyingFilter("CIColorMatrix", parameters: [
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: min(1, max(0, opacity)))
+            ])
+            .composited(over: background)
     }
 
     private func panelIsVisible(
@@ -503,6 +619,16 @@ final class AVFoundationLocalReelRenderer: LocalReelRendering, @unchecked Sendab
     private func loopedTime(_ seconds: TimeInterval, duration: TimeInterval) -> TimeInterval {
         guard duration > 0.1 else { return 0 }
         return min(duration - 0.05, seconds.truncatingRemainder(dividingBy: duration))
+    }
+
+    private func easeInOut(_ value: Double) -> Double {
+        let clamped = min(1, max(0, value))
+        return clamped * clamped * (3 - 2 * clamped)
+    }
+
+    private func easeOutCubic(_ value: Double) -> Double {
+        let clamped = min(1, max(0, value))
+        return 1 - pow(1 - clamped, 3)
     }
 
     private static func makePixelBuffer(from pool: CVPixelBufferPool) -> CVPixelBuffer? {
@@ -568,8 +694,16 @@ final class AVFoundationLocalReelRenderer: LocalReelRendering, @unchecked Sendab
         let templateID = draft.templateID ?? "fast-montage"
         let name = VideoTemplate.localFallbackCatalog.first { $0.id == templateID }?.name ?? "Local Reel"
         let layout = switch templateID {
+        case "regular-reel":
+            LocalReelTemplate.Layout.montage
+        case "dynamic-transition-reel":
+            LocalReelTemplate.Layout.transitionMontage
         case "fast-montage", "reel-picture-in-picture":
             LocalReelTemplate.Layout.grid
+        case "vertical-trio-reel":
+            LocalReelTemplate.Layout.verticalTrio
+        case "vertical-quad-reel":
+            LocalReelTemplate.Layout.verticalQuad
         case "before-after-split":
             LocalReelTemplate.Layout.split
         default:
@@ -581,12 +715,21 @@ final class AVFoundationLocalReelRenderer: LocalReelRendering, @unchecked Sendab
     private static func musicURL(for draft: VideoProjectDraft) -> URL? {
         let templateID = draft.templateID ?? "fast-montage"
         let trackName = switch templateID {
+        case "vertical-trio-reel", "vertical-quad-reel":
+            "vertical-trio"
+        case "regular-reel", "dynamic-transition-reel":
+            "city-loop"
         case "fast-montage", "travel-highlight-reel", "reel-picture-in-picture":
             "free-fall"
         default:
             "city-loop"
         }
-        return Bundle.main.url(forResource: trackName, withExtension: "mp3", subdirectory: "Music")
+        for fileExtension in ["mp3", "wav", "m4a", "aac"] {
+            if let url = Bundle.main.url(forResource: trackName, withExtension: fileExtension, subdirectory: "Music") {
+                return url
+            }
+        }
+        return nil
     }
 
     private static func mixBackgroundMusic(
@@ -708,6 +851,9 @@ private struct LocalReelTemplate {
         case montage
         case split
         case grid
+        case verticalTrio
+        case verticalQuad
+        case transitionMontage
     }
 
     let name: String
@@ -721,6 +867,12 @@ private struct LocalReelTemplate {
             "split"
         case .grid:
             "four_panel_reveal"
+        case .verticalTrio:
+            "vertical_trio"
+        case .verticalQuad:
+            "vertical_quad"
+        case .transitionMontage:
+            "transition_montage"
         }
     }
 
@@ -731,7 +883,9 @@ private struct LocalReelTemplate {
         case .split:
             [0, 1]
         case .grid:
-            [2, 3, 0, 1]
+            [2, 3, 1, 0]
+        case .verticalTrio, .verticalQuad, .transitionMontage:
+            nil
         }
     }
 
@@ -743,7 +897,7 @@ private struct LocalReelTemplate {
         switch layout {
         case .montage:
             24
-        case .split, .grid:
+        case .split, .grid, .verticalTrio, .verticalQuad, .transitionMontage:
             24
         }
     }
@@ -752,8 +906,10 @@ private struct LocalReelTemplate {
         switch layout {
         case .montage:
             2_400_000
-        case .split, .grid:
+        case .split, .grid, .verticalTrio, .verticalQuad:
             2_000_000
+        case .transitionMontage:
+            2_400_000
         }
     }
 

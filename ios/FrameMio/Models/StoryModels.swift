@@ -15,9 +15,17 @@ enum VideoProjectType: String, Codable, CaseIterable, Hashable, Sendable {
 
     var description: String {
         switch self {
-        case .story: "For trips, memories and everyday moments"
-        case .promo: "For products, apps and businesses"
-        case .reel: "For short-form social content"
+        case .story: "AI finds the feeling in your photos and videos, then shapes a cinematic memory story"
+        case .promo: "AI turns product, app, or business media into a polished promo with text and CTA"
+        case .reel: "AI cuts highlights into a short social edit with pacing, captions, and framing"
+        }
+    }
+
+    var actionTitle: String {
+        switch self {
+        case .story: "Create Story"
+        case .promo: "Generate Promo"
+        case .reel: "Make Reel"
         }
     }
 
@@ -562,7 +570,11 @@ struct VideoTemplate: Codable, Hashable, Identifiable, Sendable {
         .fallbackSplit(id: "split-screen-offer", type: .promo, name: "Split-screen offer", description: "Compare two product moments in a balanced promotional frame.", demo: "/videos/templates/split-screen-offer.mp4", duration: 30, style: "minimal", captions: false, captionStyle: "clean_minimal", sceneDetail: "balanced"),
         .fallbackMontage(id: "fast-social-ad", type: .promo, name: "Fast social ad", description: "A high-energy promo sequence for quick attention.", demo: "/videos/templates/fast-social-ad.mp4", duration: 15, style: "playful", captions: true, captionStyle: "bold_social", sceneDetail: "more"),
         .fallbackFullFrame(id: "premium-brand-story", type: .promo, name: "Premium brand story", description: "A polished brand edit with calm full-frame visuals.", demo: "/videos/templates/premium-brand-story.mp4", duration: 30, style: "elegant", captions: true, captionStyle: "cinematic_subtitle", sceneDetail: "balanced"),
+        .fallbackMontage(id: "regular-reel", type: .reel, name: "Regular reel", description: "Play selected moments one by one as a clean full-screen reel.", demo: "/videos/templates/regular-reel.mp4", duration: 15, style: "warm", captions: false, captionStyle: "bold_social", sceneDetail: "balanced"),
+        .fallbackMontage(id: "dynamic-transition-reel", type: .reel, name: "Dynamic transitions", description: "Move between scenes with zoom, blur, and sliding motion.", demo: "/videos/templates/dynamic-transition-reel.mp4", duration: 15, style: "playful", captions: false, captionStyle: "bold_social", sceneDetail: "more"),
         .fallbackMontage(id: "fast-montage", type: .reel, name: "Four-panel reveal", description: "Reveal four moving moments one by one, then close them in reverse order.", demo: "/videos/templates/fast-montage.mp4", duration: 15, style: "playful", captions: false, captionStyle: "bold_social", sceneDetail: "more"),
+        .fallbackMontage(id: "vertical-trio-reel", type: .reel, name: "Vertical trio", description: "Stack three moving scenes vertically in one reel.", demo: "/videos/templates/vertical-trio-reel.mp4", duration: 15, style: "playful", captions: false, captionStyle: "bold_social", sceneDetail: "more"),
+        .fallbackMontage(id: "vertical-quad-reel", type: .reel, name: "Vertical quad", description: "Stack four moving scenes vertically in one reel.", demo: "/videos/templates/vertical-quad-reel.mp4", duration: 15, style: "playful", captions: false, captionStyle: "bold_social", sceneDetail: "more"),
         .fallbackPIP(id: "reel-picture-in-picture", type: .reel, name: "Reel picture-in-picture", description: "Layer a secondary moment over the main vertical clip.", demo: "/videos/templates/reel-picture-in-picture.mp4", duration: 15, style: "cinematic", captions: true, captionStyle: "bold_social", sceneDetail: "more", placement: "top_right", size: "small", animation: "subtle_scale"),
         .fallbackSplit(id: "before-after-split", type: .reel, name: "Before/after split", description: "Show two related moments side by side for comparison.", demo: "/videos/templates/before-after-split.mp4", duration: 15, style: "minimal", captions: true, captionStyle: "bold_social", sceneDetail: "balanced"),
         .fallbackFullFrame(id: "cinematic-reel-cutaways", type: .reel, name: "Cinematic reel cutaways", description: "A vertical reel with full-frame cinematic inserts.", demo: "/videos/templates/cinematic-reel-cutaways.mp4", duration: 30, style: "cinematic", captions: true, captionStyle: "cinematic_subtitle", sceneDetail: "balanced"),

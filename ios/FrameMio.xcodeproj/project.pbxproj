@@ -99,6 +99,10 @@
 		D80000000000000000000025 /* cinematic-reel-cutaways.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D80000000000000000000026 /* cinematic-reel-cutaways.mp4 */; };
 		D80000000000000000000027 /* talking-head-reel.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D80000000000000000000028 /* talking-head-reel.mp4 */; };
 		D80000000000000000000029 /* travel-highlight-reel.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D8000000000000000000002A /* travel-highlight-reel.mp4 */; };
+		D8000000000000000000002B /* vertical-trio-reel.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D8000000000000000000002C /* vertical-trio-reel.mp4 */; };
+		D8000000000000000000002D /* vertical-quad-reel.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D8000000000000000000002E /* vertical-quad-reel.mp4 */; };
+		D8000000000000000000002F /* regular-reel.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D80000000000000000000030 /* regular-reel.mp4 */; };
+		D80000000000000000000031 /* dynamic-transition-reel.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = D80000000000000000000032 /* dynamic-transition-reel.mp4 */; };
 		D90000000000000000000001 /* Music in Resources */ = {isa = PBXBuildFile; fileRef = D90000000000000000000002 /* Music */; };
 		E10000000000000000000001 /* TextToVideoService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000002 /* TextToVideoService.swift */; };
 		E10000000000000000000003 /* TextToVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000004 /* TextToVideoView.swift */; };
@@ -211,6 +215,10 @@
 		D80000000000000000000026 /* cinematic-reel-cutaways.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "cinematic-reel-cutaways.mp4"; sourceTree = "<group>"; };
 		D80000000000000000000028 /* talking-head-reel.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "talking-head-reel.mp4"; sourceTree = "<group>"; };
 		D8000000000000000000002A /* travel-highlight-reel.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "travel-highlight-reel.mp4"; sourceTree = "<group>"; };
+		D8000000000000000000002C /* vertical-trio-reel.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "vertical-trio-reel.mp4"; sourceTree = "<group>"; };
+		D8000000000000000000002E /* vertical-quad-reel.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "vertical-quad-reel.mp4"; sourceTree = "<group>"; };
+		D80000000000000000000030 /* regular-reel.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "regular-reel.mp4"; sourceTree = "<group>"; };
+		D80000000000000000000032 /* dynamic-transition-reel.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "dynamic-transition-reel.mp4"; sourceTree = "<group>"; };
 		D90000000000000000000002 /* Music */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Music; sourceTree = "<group>"; };
 		E10000000000000000000002 /* TextToVideoService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextToVideoService.swift; sourceTree = "<group>"; };
 		E10000000000000000000004 /* TextToVideoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextToVideoView.swift; sourceTree = "<group>"; };
@@ -323,6 +331,10 @@
 				D80000000000000000000026 /* cinematic-reel-cutaways.mp4 */,
 				D80000000000000000000028 /* talking-head-reel.mp4 */,
 				D8000000000000000000002A /* travel-highlight-reel.mp4 */,
+				D8000000000000000000002C /* vertical-trio-reel.mp4 */,
+				D8000000000000000000002E /* vertical-quad-reel.mp4 */,
+				D80000000000000000000030 /* regular-reel.mp4 */,
+				D80000000000000000000032 /* dynamic-transition-reel.mp4 */,
 				D90000000000000000000002 /* Music */,
 				E90000000000000000000002 /* FrameMio.env */,
 			);
@@ -666,6 +678,10 @@
 				D80000000000000000000025 /* cinematic-reel-cutaways.mp4 in Resources */,
 				D80000000000000000000027 /* talking-head-reel.mp4 in Resources */,
 				D80000000000000000000029 /* travel-highlight-reel.mp4 in Resources */,
+				D8000000000000000000002B /* vertical-trio-reel.mp4 in Resources */,
+				D8000000000000000000002D /* vertical-quad-reel.mp4 in Resources */,
+				D8000000000000000000002F /* regular-reel.mp4 in Resources */,
+				D80000000000000000000031 /* dynamic-transition-reel.mp4 in Resources */,
 				D90000000000000000000001 /* Music in Resources */,
 				E90000000000000000000001 /* FrameMio.env in Resources */,
 			);

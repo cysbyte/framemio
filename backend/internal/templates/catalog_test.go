@@ -22,7 +22,11 @@ func TestCatalogContainsVersionedInitialTemplates(t *testing.T) {
 		"split-screen-offer":             {},
 		"fast-social-ad":                 {},
 		"premium-brand-story":            {},
+		"regular-reel":                   {},
+		"dynamic-transition-reel":        {},
 		"fast-montage":                   {},
+		"vertical-trio-reel":             {},
+		"vertical-quad-reel":             {},
 		"reel-picture-in-picture":        {},
 		"before-after-split":             {},
 		"cinematic-reel-cutaways":        {},
@@ -46,13 +50,17 @@ func TestCatalogContainsVersionedInitialTemplates(t *testing.T) {
 	}
 }
 
-func TestCatalogHasSixTemplatesPerProjectType(t *testing.T) {
+func TestCatalogHasExpectedTemplateCountsPerProjectType(t *testing.T) {
 	t.Parallel()
-	tests := []models.ProjectType{models.ProjectTypeStory, models.ProjectTypePromo, models.ProjectTypeReel}
-	for _, projectType := range tests {
+	tests := map[models.ProjectType]int{
+		models.ProjectTypeStory: 6,
+		models.ProjectTypePromo: 6,
+		models.ProjectTypeReel:  10,
+	}
+	for projectType, expectedCount := range tests {
 		templates := CatalogForProjectType(projectType)
-		if len(templates) != 6 {
-			t.Fatalf("%s templates = %d, want 6: %+v", projectType, len(templates), templates)
+		if len(templates) != expectedCount {
+			t.Fatalf("%s templates = %d, want %d: %+v", projectType, len(templates), expectedCount, templates)
 		}
 	}
 	if _, ok := Find("photo-over-video", 1, models.ProjectTypePromo); ok {
