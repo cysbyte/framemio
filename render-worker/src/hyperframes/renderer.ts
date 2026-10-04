@@ -199,6 +199,7 @@ function hyperframesHtml(request: HyperframesOverlayRequest): string {
   const animationName = request.kind === 'caption_overlay' ? captionAnimationName(request.preset) : cardAnimationName(request.preset);
   const duration = Math.max(250, Math.round(request.duration_ms));
   const durationSeconds = (duration / 1000).toFixed(3);
+  const clipId = htmlEscape(`${request.id}-clip`);
   const captionText = htmlEscape(payload.caption?.text?.trim() ?? '');
   const title = htmlEscape(payload.typography?.title?.trim() ?? '');
   const subtitle = htmlEscape(payload.typography?.subtitle?.trim() ?? '');
@@ -309,8 +310,8 @@ function hyperframesHtml(request: HyperframesOverlayRequest): string {
   </style>
 </head>
 <body>
-  <div id="root" data-composition-id="main" data-duration="${durationSeconds}">
-    ${request.kind === 'caption_overlay' ? `<div class="caption">${captionText}</div>` : `<div class="card"><div class="card-title">${title}</div>${subtitle ? `<div class="card-subtitle">${subtitle}</div>` : ''}</div>`}
+  <div id="root" data-composition-id="main" data-start="0" data-duration="${durationSeconds}" data-width="${request.width}" data-height="${request.height}" data-fps="${request.fps}" data-no-timeline="true">
+    ${request.kind === 'caption_overlay' ? `<div id="${clipId}" class="caption clip" data-start="0" data-duration="${durationSeconds}" data-track-index="0">${captionText}</div>` : `<div id="${clipId}" class="card clip" data-start="0" data-duration="${durationSeconds}" data-track-index="0"><div class="card-title">${title}</div>${subtitle ? `<div class="card-subtitle">${subtitle}</div>` : ''}</div>`}
   </div>
 </body>
 </html>`;
