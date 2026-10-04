@@ -210,6 +210,75 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
   }
 });
 
+test('ffmpeg fallback renderer preserves hyperframes overlay alpha', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'framemio-hyperframes-alpha-render-test-'));
+  const fakeFfmpeg = path.join(root, 'fake-ffmpeg.cjs');
+  const argsPath = path.join(root, 'ffmpeg-args.json');
+  const outputPath = path.join(root, 'story.mp4');
+  const overlayPath = path.join(root, 'caption-overlay.webm');
+  await writeFile(fakeFfmpeg, `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.writeFileSync(process.env.FRAMEMIO_FFMPEG_ARGS_PATH, JSON.stringify(args));
+fs.writeFileSync(args[args.length - 1], 'fake mp4');
+`, 'utf8');
+  await chmod(fakeFfmpeg, 0o755);
+  await writeFile(overlayPath, 'fake hyperframes webm');
+
+  const previousArgsPath = process.env.FRAMEMIO_FFMPEG_ARGS_PATH;
+  process.env.FRAMEMIO_FFMPEG_ARGS_PATH = argsPath;
+  try {
+    const assets = fixtureMediaAssets();
+    const assetPaths = new Map(assets.map((asset) => [asset.id, `/asset/${asset.file_name}`]));
+    const composition = buildComposition(fixtureStoryPlan({broll: []}), assets, assetPaths, new Map(), {
+      work_dir: root,
+      assets_dir: path.join(root, 'assets'),
+      clips_dir: path.join(root, 'clips'),
+      output_file: outputPath,
+      composition_file: path.join(root, 'composition.json'),
+    });
+    composition.captions = [];
+    composition.broll.push({
+      broll_id: 'hf-caption-0',
+      asset_id: 'hf-caption-0',
+      media_type: 'video',
+      source_path: overlayPath,
+      prepared_path: overlayPath,
+      start_frame: 12,
+      duration_frames: 30,
+      duration_ms: 1000,
+      crop_intent: 'fit',
+      transform: {kind: 'video', crop: 'fit', scale: 1},
+      presentation: 'full_frame',
+      placement: 'center',
+      size: 'large',
+      opacity: 1,
+      frame: 'none',
+      animation: 'none',
+      z_index: 8,
+      generated_by: 'hyperframes',
+    });
+
+    await new FfmpegCompositionRenderer({ffmpegBinary: fakeFfmpeg}).renderComposition(composition, outputPath);
+
+    const args = JSON.parse(await readFile(argsPath, 'utf8')) as string[];
+    const overlayInputIndex = args.findIndex((arg) => arg === overlayPath);
+    assert.ok(overlayInputIndex > 2);
+    assert.equal(args[overlayInputIndex - 3], '-c:v');
+    assert.equal(args[overlayInputIndex - 2], 'libvpx-vp9');
+    assert.equal(args[overlayInputIndex - 1], '-i');
+    const filterComplex = args[args.indexOf('-filter_complex') + 1];
+    assert.match(filterComplex, /format=rgba/);
+    assert.match(filterComplex, /\[basev\]\[bv0\]overlay=0:0:enable='between\(t,0\.400,1\.400\)'/);
+  } finally {
+    if (previousArgsPath === undefined) {
+      delete process.env.FRAMEMIO_FFMPEG_ARGS_PATH;
+    } else {
+      process.env.FRAMEMIO_FFMPEG_ARGS_PATH = previousArgsPath;
+    }
+  }
+});
+
 test('ffmpeg fallback renderer applies caption motion presets', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'framemio-caption-motion-render-test-'));
   const fakeFfmpeg = path.join(root, 'fake-ffmpeg.cjs');

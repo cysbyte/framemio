@@ -1007,6 +1007,9 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
       if (overlay.media_type !== 'video') {
         args.push('-loop', '1', '-t', brollDurationSeconds(overlay));
       }
+      if (overlay.generated_by === 'hyperframes') {
+        args.push('-c:v', 'libvpx-vp9');
+      }
       args.push('-i', inputPath);
     }
     const captions = await this.prepareCaptionOverlays(composition, outputPath);

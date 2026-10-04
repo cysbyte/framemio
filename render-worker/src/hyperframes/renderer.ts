@@ -79,6 +79,8 @@ export class HyperframesCliRenderer implements HyperframesRenderer {
       projectDir,
       '-c',
       'index.html',
+      '--format',
+      'webm',
       '-o',
       outputPath,
     ], this.timeoutMs, this.options.browserPath);
