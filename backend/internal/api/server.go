@@ -1575,6 +1575,7 @@ func (s *Server) getRenderInput(response http.ResponseWriter, request *http.Requ
 		slog.Int("media_asset_count", len(assets)),
 		slog.String("caption_style_preset", storyPlanCaptionStylePreset(plan)),
 		slog.String("caption_style_presentation", storyPlanCaptionStylePresentation(plan)),
+		slog.String("caption_style_motion_preset", storyPlanCaptionStyleMotionPreset(plan)),
 		slog.String("audio_source", storyPlanAudioSource(plan)),
 		slog.String("audio_original_audio", storyPlanOriginalAudio(plan)),
 		slog.Float64("audio_original_volume", storyPlanOriginalVolume(plan)),
@@ -1633,6 +1634,13 @@ func storyPlanCaptionStylePresentation(plan models.StoryPlan) string {
 		return "unset"
 	}
 	return renderValueOrUnset(plan.CaptionStyle.Presentation)
+}
+
+func storyPlanCaptionStyleMotionPreset(plan models.StoryPlan) string {
+	if plan.CaptionStyle == nil {
+		return "unset"
+	}
+	return renderValueOrUnset(plan.CaptionStyle.MotionPreset)
 }
 
 func storyPlanAudioSource(plan models.StoryPlan) string {

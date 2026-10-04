@@ -1962,6 +1962,7 @@ func normalizeStoryPlannerOutput(plan *models.StoryPlan, request Request) error 
 		templates.ApplyPlanDefaults(plan, request.TemplateConfiguration)
 	}
 	applyCaptionColorInstruction(plan, request.UserInstructions)
+	ensureRendererCaptionStyleDefaults(plan)
 	return nil
 }
 

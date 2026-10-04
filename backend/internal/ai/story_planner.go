@@ -220,6 +220,7 @@ func (p *Planner) Plan(ctx context.Context, request Request) (models.StoryPlan, 
 	templates.ApplyPlanDefaults(&plan, request.TemplateConfiguration)
 	EnforceSceneTransitions(&plan, request.VideoAnalyses, visualStyle)
 	applyCaptionColorInstruction(&plan, request.UserInstructions)
+	ensureRendererCaptionStyleDefaults(&plan)
 	if p != nil && p.Logger != nil {
 		p.Logger.Info("story_planner_local_selection",
 			slog.String("project_id", request.ProjectID),
@@ -643,6 +644,54 @@ func captionStylePresetForProject(preset string, projectType models.ProjectType,
 		}
 	default:
 		return captionStyleForProject(projectType, storyType, visualStyle)
+	}
+}
+
+func ensureRendererCaptionStyleDefaults(plan *models.StoryPlan) {
+	if plan == nil {
+		return
+	}
+	if plan.CaptionStyle == nil {
+		plan.CaptionStyle = captionStyleForProject(plan.ProjectType, plan.StoryType, plan.VisualStyle)
+	}
+	if plan.CaptionStyle == nil {
+		plan.CaptionStyle = &models.CaptionStyle{Preset: "clean_minimal"}
+	}
+	style := plan.CaptionStyle
+	preset := sanitizeStoryPlannerCaptionPreset(style.Preset, style.Preset)
+	if plan.ProjectType == models.ProjectTypeStory && preset == "cinematic_subtitle" {
+		preset = "bold_social"
+	}
+	style.Preset = preset
+	if style.Preset == "bold_social" || style.Preset == "playful_pop" || (plan.ProjectType == models.ProjectTypeReel && style.Preset != "clean_minimal") {
+		style.Presentation = "word_by_word"
+		if sanitizeStoryPlannerCaptionMotionPreset(style.MotionPreset) == "" {
+			style.MotionPreset = "word_pop"
+		}
+	}
+	if sanitizedMotion := sanitizeStoryPlannerCaptionMotionPreset(style.MotionPreset); sanitizedMotion != style.MotionPreset {
+		style.MotionPreset = sanitizedMotion
+	}
+	if strings.TrimSpace(style.FontFamily) == "" {
+		style.FontFamily = "inter-bold"
+	}
+	if style.FontSize <= 0 {
+		style.FontSize = 72
+	}
+	if strings.TrimSpace(style.TextColor) == "" {
+		style.TextColor = "#FFFFFF"
+	}
+	if strings.TrimSpace(style.StrokeColor) == "" {
+		style.StrokeColor = "#000000"
+	}
+	if strings.TrimSpace(style.Position) == "" {
+		style.Position = "bottom"
+	}
+	if style.MaxLines <= 0 {
+		style.MaxLines = 2
+	}
+	if style.MaxCharactersPerLine <= 0 {
+		style.MaxCharactersPerLine = 24
 	}
 }
 

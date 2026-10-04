@@ -119,7 +119,7 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 	templates.ApplyPlanDefaults(&plan, request.TemplateConfiguration)
 	ai.EnforceSceneTransitions(&plan, videoAnalyses, request.VisualStyle)
 	if plannerProvider != "local" {
-		h.logger().Info("story_planner_ai_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("story_plan_version", plan.Version), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Int("requested_duration_ms", plan.RequestedDurationMS), slog.Int("planned_duration_ms", plan.TotalDurationMS), slog.Int("output_max_duration_seconds", plan.Output.MaxDurationS), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)))
+		h.logger().Info("story_planner_ai_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("story_plan_version", plan.Version), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Int("requested_duration_ms", plan.RequestedDurationMS), slog.Int("planned_duration_ms", plan.TotalDurationMS), slog.Int("output_max_duration_seconds", plan.Output.MaxDurationS), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)), slog.String("caption_style_preset", storyPlanCaptionStylePreset(plan)), slog.String("caption_style_presentation", storyPlanCaptionStylePresentation(plan)), slog.String("caption_style_motion_preset", storyPlanCaptionStyleMotionPreset(plan)))
 		if validationErr := ai.ValidateStoryPlan(plan); validationErr != nil {
 			h.logger().Warn("story_planner_validation_failed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.String("provider", plannerProvider), slog.String("model", plannerModel), slog.String("failure_category", "schema"), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Any("error", validationErr))
 			return validationErr
@@ -145,6 +145,7 @@ func (h StoryPlanHandler) HandleJob(ctx context.Context, job models.ProcessingJo
 		slog.Int("video_moment_count", videoMomentCount(plan.Moments)),
 		slog.String("caption_style_preset", storyPlanCaptionStylePreset(plan)),
 		slog.String("caption_style_presentation", storyPlanCaptionStylePresentation(plan)),
+		slog.String("caption_style_motion_preset", storyPlanCaptionStyleMotionPreset(plan)),
 		slog.String("audio_source", storyPlanAudioSource(plan)),
 		slog.String("audio_original_audio", storyPlanOriginalAudio(plan)),
 		slog.Float64("audio_original_volume", storyPlanOriginalVolume(plan)),
@@ -235,7 +236,7 @@ func (h StoryPlanHandler) handleStoryRevision(ctx context.Context, job models.Pr
 	ai.EnforceStoryRevisionPreferences(&plan, input)
 	ai.SanitizeStoryPlanTransitions(&plan)
 	ai.EnforceSceneTransitions(&plan, videoAnalyses, plan.VisualStyle)
-	h.logger().Info("story_revision_ai_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("base_version", baseVersion), slog.Int("resulting_version", nextVersion), slog.String("provider", revisionProvider), slog.String("model", revisionModel), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Int("change_count", len(result.Changes)), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)))
+	h.logger().Info("story_revision_ai_completed", slog.String("job_id", job.ID), slog.String("project_id", project.ID), slog.Int("base_version", baseVersion), slog.Int("resulting_version", nextVersion), slog.String("provider", revisionProvider), slog.String("model", revisionModel), slog.Int64("latency_ms", time.Since(started).Milliseconds()), slog.Int("change_count", len(result.Changes)), slog.Int("moment_count", len(plan.Moments)), slog.Int("broll_count", len(plan.BRoll)), slog.Int("caption_count", len(plan.Captions)), slog.String("caption_style_preset", storyPlanCaptionStylePreset(plan)), slog.String("caption_style_presentation", storyPlanCaptionStylePresentation(plan)), slog.String("caption_style_motion_preset", storyPlanCaptionStyleMotionPreset(plan)))
 	if h.Validator != nil {
 		validationStarted := time.Now()
 		if validationErr := h.Validator.Validate(ctx, job.UserID, plan); validationErr != nil {
@@ -665,6 +666,13 @@ func storyPlanCaptionStylePresentation(plan models.StoryPlan) string {
 		return "unset"
 	}
 	return valueOrUnset(plan.CaptionStyle.Presentation)
+}
+
+func storyPlanCaptionStyleMotionPreset(plan models.StoryPlan) string {
+	if plan.CaptionStyle == nil {
+		return "unset"
+	}
+	return valueOrUnset(plan.CaptionStyle.MotionPreset)
 }
 
 func storyPlanAudioSource(plan models.StoryPlan) string {

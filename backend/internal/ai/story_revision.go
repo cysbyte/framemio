@@ -571,6 +571,7 @@ func EnforceStoryRevisionPreferences(plan *models.StoryPlan, input StoryRevision
 	}
 	applyRevisionCaptionPreferences(plan, input)
 	applyRevisionBRollPreferences(plan, input)
+	ensureRendererCaptionStyleDefaults(plan)
 }
 
 func validateRevisionOutputMediaReferences(plan models.StoryPlan, input StoryRevisionInput) error {

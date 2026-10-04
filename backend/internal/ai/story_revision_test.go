@@ -134,6 +134,40 @@ func TestHeuristicStoryRevisionAppliesSubtitleColor(t *testing.T) {
 	}
 }
 
+func TestStoryRevisionPreferencesCompleteAnimatedCaptionStyle(t *testing.T) {
+	t.Parallel()
+	input := revisionFixtureInput("Keep the same story.")
+	plan := input.CurrentStoryPlan
+	plan.ProjectType = models.ProjectTypeStory
+	plan.CaptionStyle = &models.CaptionStyle{Preset: "bold_social"}
+
+	EnforceStoryRevisionPreferences(&plan, input)
+
+	if plan.CaptionStyle == nil ||
+		plan.CaptionStyle.Preset != "bold_social" ||
+		plan.CaptionStyle.Presentation != "word_by_word" ||
+		plan.CaptionStyle.MotionPreset != "word_pop" {
+		t.Fatalf("revision caption style was not made renderer-ready: %+v", plan.CaptionStyle)
+	}
+}
+
+func TestStoryRevisionPreferencesAddsMotionToPlayfulStoryCaptions(t *testing.T) {
+	t.Parallel()
+	input := revisionFixtureInput("Keep the same story.")
+	plan := input.CurrentStoryPlan
+	plan.ProjectType = models.ProjectTypeStory
+	plan.CaptionStyle = &models.CaptionStyle{Preset: "playful_pop", FontFamily: "inter-bold", FontSize: 56, TextColor: "#FFFFFF"}
+
+	EnforceStoryRevisionPreferences(&plan, input)
+
+	if plan.CaptionStyle == nil ||
+		plan.CaptionStyle.Preset != "playful_pop" ||
+		plan.CaptionStyle.Presentation != "word_by_word" ||
+		plan.CaptionStyle.MotionPreset != "word_pop" {
+		t.Fatalf("playful revision caption style was not made HyperFrames-ready: %+v", plan.CaptionStyle)
+	}
+}
+
 func TestHeuristicStoryRevisionAddsBeachBRollFromExistingMedia(t *testing.T) {
 	t.Parallel()
 	input := revisionFixtureInput("Add more beach B-roll.")
