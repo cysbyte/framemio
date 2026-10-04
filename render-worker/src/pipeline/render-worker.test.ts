@@ -112,11 +112,13 @@ test('renders requested caption motion through hyperframes overlays before remot
     }),
   }));
 
-  assert.equal(harness.hyperframes.rendered.length, 1);
+  assert.equal(harness.hyperframes.rendered.length, 2);
   assert.equal(harness.hyperframes.rendered[0].kind, 'caption_overlay');
   assert.equal(harness.hyperframes.rendered[0].preset, 'word_pop');
+  assert.equal(harness.hyperframes.rendered[0].caption?.text, 'The biggest lesson I');
+  assert.equal(harness.hyperframes.rendered[1].caption?.text, 'learned');
   assert.equal(harness.remotion.rendered[0].captions.length, 0);
-  assert.equal(harness.remotion.rendered[0].hyperframes?.overlays.length, 1);
+  assert.equal(harness.remotion.rendered[0].hyperframes?.overlays.length, 2);
   assert.equal(harness.remotion.rendered[0].broll.some((overlay) => overlay.generated_by === 'hyperframes'), true);
 });
 
@@ -159,9 +161,9 @@ test('logs hyperframes overlay plan when hyperframes is disabled', async () => {
     }
   }).find((entry) => entry.msg === 'hyperframes overlay plan skipped');
   assert.equal(log?.hyperframes_enabled, false);
-  assert.equal(log?.request_count, 1);
-  assert.equal(log?.caption_request_count, 1);
-  assert.equal(log?.presets, 'caption_overlay:word_pop');
+  assert.equal(log?.request_count, 2);
+  assert.equal(log?.caption_request_count, 2);
+  assert.equal(log?.presets, 'caption_overlay:word_pop,caption_overlay:word_pop');
 });
 
 test('ffmpeg fallback renderer overlays b-roll before captions', async () => {

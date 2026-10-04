@@ -21,6 +21,7 @@ export interface HyperframesOverlayRequest {
   start_ms: number;
   duration_ms: number;
   caption?: StoryCaption;
+  source_caption?: StoryCaption;
   caption_style?: CaptionStyle;
   typography?: TextOverlay;
 }
@@ -119,7 +120,10 @@ export function applyHyperframesOverlays(
       ...composition.broll,
       ...overlays.map((overlay) => hyperframesOverlayToBRoll(composition, overlay)),
     ],
-    captions: composition.captions.filter((caption) => !overlays.some((overlay) => overlay.request.kind === 'caption_overlay' && overlay.request.caption?.moment_id === caption.moment_id && overlay.request.caption?.start_ms === caption.start_ms && overlay.request.caption?.end_ms === caption.end_ms && overlay.request.caption?.text === caption.text)),
+    captions: composition.captions.filter((caption) => !overlays.some((overlay) => {
+      const sourceCaption = overlay.request.source_caption ?? overlay.request.caption;
+      return overlay.request.kind === 'caption_overlay' && sourceCaption?.moment_id === caption.moment_id && sourceCaption?.start_ms === caption.start_ms && sourceCaption?.end_ms === caption.end_ms && sourceCaption?.text === caption.text;
+    })),
     hyperframes: {
       enabled: true,
       overlays: overlays.map((overlay) => hyperframesOverlayMetadata(overlay)),
@@ -136,18 +140,28 @@ export function hyperframesOverlayRequests(composition: CompositionSpec): Hyperf
       if (!timing) {
         continue;
       }
-      requests.push({
-        id: `hf-caption-${index}`,
-        kind: 'caption_overlay',
-        preset: captionMotion,
-        width: composition.resolution.width,
-        height: composition.resolution.height,
-        fps: composition.fps,
-        start_ms: timing.startMs,
-        duration_ms: timing.endMs - timing.startMs,
-        caption,
-        caption_style: composition.caption_style,
-      });
+      const chunks = captionPhraseChunks(caption.text);
+      const totalDurationMs = timing.endMs - timing.startMs;
+      for (const [chunkIndex, chunk] of chunks.entries()) {
+        const chunkStartMs = timing.startMs + Math.round((totalDurationMs * chunkIndex) / chunks.length);
+        const chunkEndMs = timing.startMs + Math.round((totalDurationMs * (chunkIndex + 1)) / chunks.length);
+        if (chunkEndMs - chunkStartMs < 250) {
+          continue;
+        }
+        requests.push({
+          id: chunks.length === 1 ? `hf-caption-${index}` : `hf-caption-${index}-${chunkIndex}`,
+          kind: 'caption_overlay',
+          preset: captionMotion,
+          width: composition.resolution.width,
+          height: composition.resolution.height,
+          fps: composition.fps,
+          start_ms: chunkStartMs,
+          duration_ms: chunkEndMs - chunkStartMs,
+          caption: {...caption, text: chunk.join(' '), start_ms: chunkStartMs, end_ms: chunkEndMs},
+          source_caption: caption,
+          caption_style: composition.caption_style,
+        });
+      }
     }
   }
   for (const clip of composition.clips) {
@@ -202,11 +216,11 @@ function hyperframesHtml(request: HyperframesOverlayRequest): string {
   const duration = Math.max(250, Math.round(request.duration_ms));
   const durationSeconds = (duration / 1000).toFixed(3);
   const clipId = htmlEscape(`${request.id}-clip`);
-  const captionText = htmlEscape(payload.caption?.text?.trim() ?? '');
+  const captionText = captionHtml(payload.caption?.text?.trim() ?? '');
   const title = htmlEscape(payload.typography?.title?.trim() ?? '');
   const subtitle = htmlEscape(payload.typography?.subtitle?.trim() ?? '');
   const backgroundOpacity = clampNumber(style.background_opacity ?? 0.24, 0, 1);
-  const background = style.background_enabled === false ? 'transparent' : `rgba(0,0,0,${backgroundOpacity.toFixed(3)})`;
+  const captionBackground = style.background_enabled === true ? `rgba(0,0,0,${backgroundOpacity.toFixed(3)})` : 'transparent';
   return `<!doctype html>
 <html>
 <head>
@@ -233,8 +247,8 @@ function hyperframesHtml(request: HyperframesOverlayRequest): string {
       position: absolute;
       left: 50%;
       bottom: ${clampNumber(style.bottom_offset ?? 170, 40, 420)}px;
-      max-width: 92%;
-      padding: 10px 20px;
+      max-width: 86%;
+      padding: ${style.background_enabled === true ? '10px 20px' : '0'};
       transform: translateX(-50%);
       opacity: 0;
       color: ${cssColor(style.text_color, '#FFD60A')};
@@ -245,10 +259,14 @@ function hyperframesHtml(request: HyperframesOverlayRequest): string {
       text-transform: uppercase;
       -webkit-text-stroke: ${clampNumber(style.stroke_width ?? 4, 0, 8)}px ${cssColor(style.stroke_color, '#000000')};
       text-shadow: 0 3px 12px rgba(0,0,0,0.55);
-      background: ${background};
+      background: ${captionBackground};
       border-radius: 16px;
       white-space: pre-wrap;
       animation: ${animationName} ${duration}ms linear both;
+    }
+    .emphasis {
+      color: ${cssColor(style.highlight_color, '#FF3B30')};
+      -webkit-text-stroke-color: ${cssColor(style.stroke_color, '#000000')};
     }
     .card {
       position: absolute;
@@ -339,6 +357,51 @@ function cardAnimationName(preset: string): string {
   }
   return 'cardRise';
 }
+
+function captionPhraseChunks(text: string, maxWords = 4): string[][] {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) {
+    return [];
+  }
+  const chunks: string[][] = [];
+  for (let index = 0; index < words.length; index += maxWords) {
+    chunks.push(words.slice(index, index + maxWords));
+  }
+  return chunks;
+}
+
+function captionHtml(text: string): string {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) {
+    return '';
+  }
+  const highlightIndex = emphasisWordIndex(words);
+  return words.map((word, index) => {
+    const escaped = htmlEscape(word);
+    return index === highlightIndex ? `<span class="emphasis">${escaped}</span>` : escaped;
+  }).join(' ');
+}
+
+function emphasisWordIndex(words: string[]): number {
+  let bestIndex = -1;
+  let bestScore = -1;
+  for (const [index, word] of words.entries()) {
+    const normalized = word.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!normalized || CAPTION_STOP_WORDS.has(normalized)) {
+      continue;
+    }
+    const score = normalized.length + (/[!?]$/.test(word) ? 3 : 0) + (index === words.length - 1 ? 1 : 0);
+    if (score > bestScore) {
+      bestIndex = index;
+      bestScore = score;
+    }
+  }
+  return bestIndex;
+}
+
+const CAPTION_STOP_WORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'but', 'by', 'for', 'from', 'i', 'in', 'is', 'it', 'its', 'let', 'lets', 'of', 'on', 'or', 'our', 'the', 'to', 'was', 'we', 'when', 'with', 'you', 'your',
+]);
 
 function cssColor(value: unknown, fallback: string): string {
   return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value.trim()) ? value.trim() : fallback;

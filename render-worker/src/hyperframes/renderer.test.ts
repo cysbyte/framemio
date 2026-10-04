@@ -53,6 +53,22 @@ test('builds hyperframes requests only for whitelisted caption motion presets', 
   assert.equal(requests[0].duration_ms, 1400);
 });
 
+test('splits long hyperframes captions into short phrase overlays', () => {
+  const requests = hyperframesOverlayRequests(composition({
+    caption_style: {preset: 'bold_social', presentation: 'word_by_word', motion_preset: 'word_pop'},
+    captions: [{moment_id: 'moment-1', text: 'Remember when the strawberries spilled on the picnic blanket', start_ms: 1000, end_ms: 3400}],
+  }));
+
+  assert.equal(requests.length, 3);
+  assert.deepEqual(requests.map((request) => request.caption?.text), [
+    'Remember when the strawberries',
+    'spilled on the picnic',
+    'blanket',
+  ]);
+  assert.deepEqual(requests.map((request) => request.duration_ms), [800, 800, 800]);
+  assert.equal(requests.every((request) => request.source_caption?.text === 'Remember when the strawberries spilled on the picnic blanket'), true);
+});
+
 test('renders hyperframes overlays through generated project and webm output', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'framemio-hyperframes-cli-test-'));
   const fakeHyperframes = path.join(root, 'fake-hyperframes.cjs');
@@ -67,7 +83,7 @@ fs.writeFileSync(output, 'fake webm');
   await chmod(fakeHyperframes, 0o755);
 
   const results = await renderHyperframesOverlays(
-    composition({caption_style: {preset: 'bold_social', presentation: 'word_by_word', motion_preset: 'word_pop'}}),
+    composition({caption_style: {preset: 'bold_social', presentation: 'word_by_word', motion_preset: 'word_pop', highlight_color: '#FF3B30'}}),
     new HyperframesCliRenderer({binary: fakeHyperframes, timeoutMs: 5000, browserPath: '/usr/bin/chromium'}),
     root,
   );
@@ -96,7 +112,10 @@ fs.writeFileSync(output, 'fake webm');
   assert.match(html, /data-no-timeline="true"/);
   assert.match(html, /class="caption clip"/);
   assert.match(html, /data-track-index="0"/);
+  assert.match(html, /background: transparent/);
+  assert.match(html, /\.emphasis/);
+  assert.match(html, /#FF3B30/);
   assert.match(html, /animation: wordPop 1400ms linear both/);
   assert.doesNotMatch(html, /gsap\.timeline/);
-  assert.match(html, /The biggest lesson/);
+  assert.match(html, /The <span class="emphasis">biggest<\/span> lesson/);
 });
