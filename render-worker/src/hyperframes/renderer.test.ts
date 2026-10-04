@@ -60,7 +60,7 @@ test('renders hyperframes overlays through generated project and webm output', a
   await writeFile(fakeHyperframes, `#!/usr/bin/env node
 const fs = require('node:fs');
 const args = process.argv.slice(2);
-fs.writeFileSync(${JSON.stringify(argsPath)}, JSON.stringify(args));
+fs.writeFileSync(${JSON.stringify(argsPath)}, JSON.stringify({args, browserPath: process.env.HYPERFRAMES_BROWSER_PATH}));
 const output = args[args.indexOf('-o') + 1];
 fs.writeFileSync(output, 'fake webm');
 `, 'utf8');
@@ -68,13 +68,15 @@ fs.writeFileSync(output, 'fake webm');
 
   const results = await renderHyperframesOverlays(
     composition({caption_style: {preset: 'bold_social', presentation: 'word_by_word', motion_preset: 'word_pop'}}),
-    new HyperframesCliRenderer({binary: fakeHyperframes, timeoutMs: 5000}),
+    new HyperframesCliRenderer({binary: fakeHyperframes, timeoutMs: 5000, browserPath: '/usr/bin/chromium'}),
     root,
   );
 
   assert.equal(results.length, 1);
   assert.match(results[0].outputPath, /\.webm$/);
-  const args = JSON.parse(await readFile(argsPath, 'utf8')) as string[];
+  const cliRun = JSON.parse(await readFile(argsPath, 'utf8')) as {args: string[]; browserPath?: string};
+  const {args} = cliRun;
+  assert.equal(cliRun.browserPath, '/usr/bin/chromium');
   assert.equal(args[0], 'render');
   assert.match(args[1], /hf-caption-0-.*-project$/);
   assert.equal(args[2], '-c');

@@ -93,7 +93,7 @@ struct VideoProjectEditorConfiguration: Hashable, Sendable {
                 type: type,
                 terminology: terminology,
                 title: "Edit Story",
-                eyebrow: "YOUR STORY",
+                eyebrow: "MY STORY",
                 editButtonTitle: "Edit Story",
                 deleteButtonTitle: "Remove Story",
                 addItemTitle: "Add Moment",

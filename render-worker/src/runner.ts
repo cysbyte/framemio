@@ -32,6 +32,7 @@ export interface RunnerConfig {
   remotionEntryPoint: string;
   hyperframesEnabled: boolean;
   hyperframesBinary?: string;
+  hyperframesBrowserPath?: string;
   hyperframesTimeoutMs: number;
 }
 
@@ -45,7 +46,7 @@ export async function runRenderWorker(config = loadConfig()): Promise<void> {
       ? new RemotionCliRenderer({entryPoint: config.remotionEntryPoint})
       : new FfmpegCompositionRenderer(),
     hyperframes: config.hyperframesEnabled && config.hyperframesBinary
-      ? new HyperframesCliRenderer({binary: config.hyperframesBinary, timeoutMs: config.hyperframesTimeoutMs})
+      ? new HyperframesCliRenderer({binary: config.hyperframesBinary, timeoutMs: config.hyperframesTimeoutMs, browserPath: config.hyperframesBrowserPath})
       : undefined,
     workRoot: config.workRoot,
     compositionOutputIsFinal: config.rendererMode === 'ffmpeg',
@@ -290,6 +291,7 @@ export function loadConfig(environment = process.env): RunnerConfig {
     remotionEntryPoint: environment.REMOTION_ENTRY_POINT ?? path.join(process.cwd(), 'src/remotion/entry.tsx'),
     hyperframesEnabled: bool(environment.HYPERFRAMES_ENABLED, false),
     hyperframesBinary: first(environment.HYPERFRAMES_BINARY, environment.HYPERFRAMES_CLI),
+    hyperframesBrowserPath: environment.HYPERFRAMES_BROWSER_PATH ?? '/usr/bin/chromium',
     hyperframesTimeoutMs: durationMs(environment.HYPERFRAMES_TIMEOUT, 5 * 60 * 1000),
   };
 }

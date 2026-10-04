@@ -60,6 +60,7 @@ export class FixtureHyperframesRenderer implements HyperframesRenderer {
 export interface HyperframesCliRendererOptions {
   binary: string;
   timeoutMs?: number;
+  browserPath?: string;
 }
 
 export class HyperframesCliRenderer implements HyperframesRenderer {
@@ -80,7 +81,7 @@ export class HyperframesCliRenderer implements HyperframesRenderer {
       path.join(projectDir, 'index.html'),
       '-o',
       outputPath,
-    ], this.timeoutMs);
+    ], this.timeoutMs, this.options.browserPath);
   }
 }
 
@@ -418,9 +419,10 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-async function run(command: string, args: string[], timeoutMs: number): Promise<void> {
+async function run(command: string, args: string[], timeoutMs: number, browserPath?: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, {stdio: ['ignore', 'pipe', 'pipe']});
+    const env = browserPath ? {...process.env, HYPERFRAMES_BROWSER_PATH: browserPath} : process.env;
+    const child = spawn(command, args, {stdio: ['ignore', 'pipe', 'pipe'], env});
     let stderr = '';
     let settled = false;
     const timeout = setTimeout(() => {
