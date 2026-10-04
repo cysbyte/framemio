@@ -16,6 +16,7 @@ export interface RenderWorkerDependencies {
   ffmpeg: FfmpegClient;
   remotion: RemotionRenderer;
   hyperframes?: HyperframesRenderer;
+  hyperframesConcurrency?: number;
   workRoot: string;
   compositionOutputIsFinal?: boolean;
   now?: () => Date;
@@ -69,7 +70,10 @@ export class DeterministicRenderWorker {
     }));
     if (this.dependencies.hyperframes) {
       const hyperframesStartedAt = Date.now();
-      const overlays = await renderHyperframesOverlays(composition, this.dependencies.hyperframes, path.join(paths.work_dir, 'hyperframes'));
+      const overlays = await renderHyperframesOverlays(composition, this.dependencies.hyperframes, path.join(paths.work_dir, 'hyperframes'), {
+        concurrency: this.dependencies.hyperframesConcurrency,
+        logContext: {job_id: input.job_id, project_id: input.project_id},
+      });
       composition = applyHyperframesOverlays(composition, overlays);
       console.info(JSON.stringify({
         level: 'info',
@@ -77,6 +81,7 @@ export class DeterministicRenderWorker {
         job_id: input.job_id,
         project_id: input.project_id,
         overlay_count: overlays.length,
+        concurrency: this.dependencies.hyperframesConcurrency ?? 1,
         presets: overlays.map((overlay) => `${overlay.request.kind}:${overlay.request.preset}`).join(','),
         caption_count_after_apply: composition.captions.length,
         broll_count_after_apply: composition.broll.length,

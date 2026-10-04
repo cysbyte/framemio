@@ -300,6 +300,11 @@ struct AppRootView: View {
         selectedTab = .home
     }
 
+    private func handleProjectDeleted(_ storyID: String) {
+        homeViewModel.removeStory(id: storyID)
+        homeViewModel.load()
+    }
+
     @ViewBuilder
     private func destination(for route: AppRoute, appendRoute: @escaping (AppRoute) -> Void) -> some View {
         switch route {
@@ -383,7 +388,8 @@ struct AppRootView: View {
                     onCreditsUpdated: refreshCredits
                 ),
                 onOpenPricing: openPricing,
-                onClose: closeCreatedProjectPreview
+                onClose: closeCreatedProjectPreview,
+                onDeleted: handleProjectDeleted
             )
         case let .storyPreview(story):
             StoryPreviewView(
@@ -398,7 +404,8 @@ struct AppRootView: View {
                     promptTranscriptionService: dependencies.promptTranscriptionService,
                     onCreditsUpdated: refreshCredits
                 ),
-                onOpenPricing: openPricing
+                onOpenPricing: openPricing,
+                onDeleted: handleProjectDeleted
             )
         case let .textToVideo(regeneration):
             TextToVideoView(

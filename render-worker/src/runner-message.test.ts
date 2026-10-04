@@ -20,6 +20,7 @@ const baseConfig: RunnerConfig = {
   remotionEntryPoint: 'entry.tsx',
   hyperframesEnabled: false,
   hyperframesTimeoutMs: 300000,
+  hyperframesConcurrency: 1,
 };
 
 test('deletes terminal render queue messages before rendering', async () => {

@@ -122,3 +122,35 @@ fs.writeFileSync(output, 'fake webm');
   assert.doesNotMatch(html, /gsap\.timeline/);
   assert.match(html, /The <span class="emphasis">biggest<\/span> lesson/);
 });
+
+test('renders hyperframes overlays with bounded concurrency', async () => {
+  let activeCount = 0;
+  let peakActiveCount = 0;
+  const rendered: string[] = [];
+  const results = await renderHyperframesOverlays(
+    composition({
+      caption_style: {preset: 'bold_social', presentation: 'word_by_word', motion_preset: 'word_pop'},
+      captions: [
+        {moment_id: 'moment-1', text: 'First caption phrase', start_ms: 0, end_ms: 1000},
+        {moment_id: 'moment-1', text: 'Second caption phrase', start_ms: 1000, end_ms: 2000},
+        {moment_id: 'moment-1', text: 'Third caption phrase', start_ms: 2000, end_ms: 3000},
+      ],
+    }),
+    {
+      async renderOverlay(request, outputPath) {
+        activeCount += 1;
+        peakActiveCount = Math.max(peakActiveCount, activeCount);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        rendered.push(request.id);
+        await writeFile(outputPath, 'fake webm', 'utf8');
+        activeCount -= 1;
+      },
+    },
+    await mkdtemp(path.join(tmpdir(), 'framemio-hyperframes-concurrency-test-')),
+    {concurrency: 2},
+  );
+
+  assert.equal(peakActiveCount, 2);
+  assert.equal(rendered.length, 3);
+  assert.deepEqual(results.map((result) => result.request.id), ['hf-caption-0', 'hf-caption-1', 'hf-caption-2']);
+});

@@ -85,6 +85,7 @@ final class StoryPreviewViewModel: ObservableObject {
     @Published private(set) var creditBalance: Int?
 
     private var storyID: String?
+    var currentStoryID: String? { storyID }
     private let launchContext: MomentContext?
     private let launchDraft: VideoProjectDraft?
     private let launchAssets: [MediaAsset]

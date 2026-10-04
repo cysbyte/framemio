@@ -28,6 +28,7 @@ test('loads render worker production config from render queue env', () => {
   assert.equal(config.rendererMode, 'ffmpeg');
   assert.equal(config.remotionEntryPoint, path.join(process.cwd(), 'src/remotion/entry.tsx'));
   assert.equal(config.hyperframesBrowserPath, '/usr/bin/chromium');
+  assert.equal(config.hyperframesConcurrency, 1);
 });
 
 test('falls back to shared processing queue env for render worker config', () => {
@@ -66,11 +67,13 @@ test('loads hyperframes binary and browser path config', () => {
     HYPERFRAMES_ENABLED: 'true',
     HYPERFRAMES_BINARY: '/app/node_modules/.bin/hyperframes',
     HYPERFRAMES_BROWSER_PATH: '/custom/chromium',
+    HYPERFRAMES_CONCURRENCY: '2',
   });
 
   assert.equal(config.hyperframesEnabled, true);
   assert.equal(config.hyperframesBinary, '/app/node_modules/.bin/hyperframes');
   assert.equal(config.hyperframesBrowserPath, '/custom/chromium');
+  assert.equal(config.hyperframesConcurrency, 2);
 });
 
 test('requires backend callback config', () => {

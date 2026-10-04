@@ -124,6 +124,11 @@ final class HomeViewModel: ObservableObject {
         loadGeneratedVideoCovers(for: stories)
     }
 
+    func removeStory(id: String) {
+        let updatedStories = allStories.filter { $0.id != id }
+        updateStories(updatedStories)
+    }
+
     private func updateStories(_ loadedStories: [Story]) {
         allStories = loadedStories
         stories = latestHomeStories(loadedStories)

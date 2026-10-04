@@ -42,6 +42,14 @@ export interface HyperframesOverlayPlan {
   presets: string;
 }
 
+export interface RenderHyperframesOverlaysOptions {
+  concurrency?: number;
+  logContext?: {
+    job_id?: string;
+    project_id?: string;
+  };
+}
+
 export class DisabledHyperframesRenderer implements HyperframesRenderer {
   async renderOverlay(): Promise<void> {
     throw new Error('HyperFrames renderer is disabled');
@@ -92,18 +100,44 @@ export async function renderHyperframesOverlays(
   composition: CompositionSpec,
   renderer: HyperframesRenderer,
   outputDir: string,
+  options: RenderHyperframesOverlaysOptions = {},
 ): Promise<HyperframesOverlayResult[]> {
   const requests = hyperframesOverlayRequests(composition);
-  const results: HyperframesOverlayResult[] = [];
+  const results: HyperframesOverlayResult[] = new Array(requests.length);
   if (requests.length === 0) {
     return results;
   }
   await mkdir(outputDir, {recursive: true});
-  for (const request of requests) {
+  const concurrency = clamp(Math.floor(options.concurrency ?? 1), 1, requests.length);
+  await mapWithConcurrency(requests, concurrency, async (request, index) => {
     const outputPath = path.join(outputDir, `${request.id}-${stableHash(request).slice(0, 12)}.webm`);
+    const startedAt = Date.now();
+    console.info(JSON.stringify({
+      level: 'info',
+      msg: 'hyperframes overlay render started',
+      job_id: options.logContext?.job_id ?? '',
+      project_id: options.logContext?.project_id ?? '',
+      overlay_id: request.id,
+      overlay_kind: request.kind,
+      preset: request.preset,
+      start_ms: request.start_ms,
+      duration_ms: request.duration_ms,
+      concurrency,
+    }));
     await renderer.renderOverlay(request, outputPath);
-    results.push({request, outputPath});
-  }
+    results[index] = {request, outputPath};
+    console.info(JSON.stringify({
+      level: 'info',
+      msg: 'hyperframes overlay render completed',
+      job_id: options.logContext?.job_id ?? '',
+      project_id: options.logContext?.project_id ?? '',
+      overlay_id: request.id,
+      overlay_kind: request.kind,
+      preset: request.preset,
+      elapsed_ms: Date.now() - startedAt,
+      concurrency,
+    }));
+  });
   return results;
 }
 
@@ -491,6 +525,22 @@ function clamp(value: number, min: number, max: number): number {
     return min;
   }
   return Math.max(min, Math.min(max, value));
+}
+
+async function mapWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  handler: (item: T, index: number) => Promise<void>,
+): Promise<void> {
+  let nextIndex = 0;
+  const workers = Array.from({length: concurrency}, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      await handler(items[index], index);
+    }
+  });
+  await Promise.all(workers);
 }
 
 async function run(command: string, args: string[], timeoutMs: number, browserPath?: string): Promise<void> {

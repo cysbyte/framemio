@@ -21,6 +21,7 @@ struct StoryPreviewView: View {
     private let generatedVideoAspectRatio: CGFloat = 9.0 / 16.0
     private let onOpenPricing: (PricingEntryPoint) -> Void
     private let onClose: (() -> Void)?
+    private let onDeleted: (String) -> Void
 
     private var editorConfiguration: VideoProjectEditorConfiguration {
         viewModel.editorConfiguration
@@ -29,11 +30,13 @@ struct StoryPreviewView: View {
     init(
         viewModel: StoryPreviewViewModel,
         onOpenPricing: @escaping (PricingEntryPoint) -> Void,
-        onClose: (() -> Void)? = nil
+        onClose: (() -> Void)? = nil,
+        onDeleted: @escaping (String) -> Void = { _ in }
     ) {
         _viewModel = StateObject(wrappedValue: viewModel)
         self.onOpenPricing = onOpenPricing
         self.onClose = onClose
+        self.onDeleted = onDeleted
     }
 
     var body: some View {
@@ -82,6 +85,9 @@ struct StoryPreviewView: View {
         }
         .onChange(of: viewModel.didDeleteStory) { _, didDelete in
             if didDelete {
+                if let storyID = viewModel.currentStoryID {
+                    onDeleted(storyID)
+                }
                 dismiss()
             }
         }
@@ -163,13 +169,13 @@ struct StoryPreviewView: View {
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
-        .alert("Remove Story?", isPresented: $isShowingDeleteConfirmation) {
+        .alert("Remove \(editorConfiguration.terminology.projectName)?", isPresented: $isShowingDeleteConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Remove", role: .destructive) {
                 viewModel.deleteStory()
             }
         } message: {
-            Text("This removes the story from FrameMio. Your original photos and videos stay in Photos.")
+            Text("This removes the \(editorConfiguration.terminology.projectName.lowercased()) from FrameMio. Your original photos and videos stay in Photos.")
         }
     }
 
@@ -213,12 +219,6 @@ struct StoryPreviewView: View {
 
     private func storyHeader(_ story: Story) -> some View {
         VStack(alignment: .leading, spacing: FrameMioSpacing.sm) {
-            Text(editorConfiguration.eyebrow)
-                .font(FrameMioTypography.eyebrow)
-                .foregroundStyle(FrameMioColors.accent)
-                .textCase(.uppercase)
-                .accessibilityHidden(true)
-
             Text(storyDisplayTitle(story))
                 .font(FrameMioTypography.headline)
                 .foregroundStyle(FrameMioColors.ink)

@@ -34,6 +34,7 @@ export interface RunnerConfig {
   hyperframesBinary?: string;
   hyperframesBrowserPath?: string;
   hyperframesTimeoutMs: number;
+  hyperframesConcurrency: number;
 }
 
 export async function runRenderWorker(config = loadConfig()): Promise<void> {
@@ -48,6 +49,7 @@ export async function runRenderWorker(config = loadConfig()): Promise<void> {
     hyperframes: config.hyperframesEnabled && config.hyperframesBinary
       ? new HyperframesCliRenderer({binary: config.hyperframesBinary, timeoutMs: config.hyperframesTimeoutMs, browserPath: config.hyperframesBrowserPath})
       : undefined,
+    hyperframesConcurrency: config.hyperframesConcurrency,
     workRoot: config.workRoot,
     compositionOutputIsFinal: config.rendererMode === 'ffmpeg',
   });
@@ -71,7 +73,7 @@ export async function runRenderWorker(config = loadConfig()): Promise<void> {
         console.error(JSON.stringify({level: 'error', msg: 'render worker shutdown active message release failed', signal, job_id: message.message.jobId, project_id: message.message.projectId, error: error instanceof Error ? error.message : String(error)}));
       });
   });
-  console.info(JSON.stringify({level: 'info', msg: 'render worker started', run_once: config.runOnce, job_id: config.jobID ?? '', renderer_mode: config.rendererMode, hyperframes_enabled: config.hyperframesEnabled && Boolean(config.hyperframesBinary), queue_name: queueName(config.queueURL), visibility_timeout_seconds: config.visibilityTimeoutSeconds, shutdown_release_visibility_seconds: config.shutdownReleaseVisibilitySeconds}));
+  console.info(JSON.stringify({level: 'info', msg: 'render worker started', run_once: config.runOnce, job_id: config.jobID ?? '', renderer_mode: config.rendererMode, hyperframes_enabled: config.hyperframesEnabled && Boolean(config.hyperframesBinary), hyperframes_concurrency: config.hyperframesConcurrency, queue_name: queueName(config.queueURL), visibility_timeout_seconds: config.visibilityTimeoutSeconds, shutdown_release_visibility_seconds: config.shutdownReleaseVisibilitySeconds}));
 
   try {
     do {
@@ -293,6 +295,7 @@ export function loadConfig(environment = process.env): RunnerConfig {
     hyperframesBinary: first(environment.HYPERFRAMES_BINARY, environment.HYPERFRAMES_CLI),
     hyperframesBrowserPath: environment.HYPERFRAMES_BROWSER_PATH ?? '/usr/bin/chromium',
     hyperframesTimeoutMs: durationMs(environment.HYPERFRAMES_TIMEOUT, 5 * 60 * 1000),
+    hyperframesConcurrency: number(environment.HYPERFRAMES_CONCURRENCY, 1),
   };
 }
 
