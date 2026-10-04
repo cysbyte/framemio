@@ -10,6 +10,7 @@ export type VideoTemplatePlacement = 'top_left' | 'top_right' | 'bottom_left' | 
 export type VideoTemplateSize = 'small' | 'medium' | 'large' | 'half';
 export type VideoTemplateFrame = 'none' | 'subtle' | 'bold';
 export type VideoTemplateAnimation = 'auto' | 'none' | 'fade' | 'subtle_scale' | 'scale' | 'move';
+export type CaptionMotionPreset = 'none' | 'word_pop' | 'karaoke_pop' | 'phrase_punch' | string;
 
 export interface VideoTemplateConfiguration {
   aspect_ratio?: AspectRatio | string;
@@ -169,6 +170,7 @@ export interface StoryCaption {
 export interface CaptionStyle {
   preset?: 'bold_social' | 'cinematic_subtitle' | 'clean_minimal' | 'playful_pop' | string;
   presentation?: 'full_text' | 'word_by_word' | string;
+  motion_preset?: CaptionMotionPreset;
   font_family?: 'inter' | 'inter-bold' | 'system' | 'system-bold' | 'noto-sans' | 'noto-sans-bold' | string;
   font_size?: number;
   text_color?: string;
@@ -296,6 +298,7 @@ export interface TimelineBRoll {
   frame: VideoTemplateFrame;
   animation: VideoTemplateAnimation;
   z_index: number;
+  generated_by?: 'hyperframes' | string;
 }
 
 export interface KenBurnsTransform {
@@ -344,7 +347,22 @@ export interface CompositionSpec {
   broll: TimelineBRoll[];
   captions: StoryCaption[];
   caption_style?: CaptionStyle;
+  hyperframes?: HyperframesCompositionMetadata;
   audio: ResolvedAudio;
+}
+
+export interface HyperframesCompositionMetadata {
+  enabled: boolean;
+  overlays: HyperframesOverlayMetadata[];
+}
+
+export interface HyperframesOverlayMetadata {
+  id: string;
+  kind: 'caption_overlay' | 'card_overlay';
+  preset: string;
+  start_ms: number;
+  duration_ms: number;
+  output_path?: string;
 }
 
 export interface CanvasSpec {

@@ -5,6 +5,7 @@ import {AwsCliQueue, type ReceivedJobMessage} from './aws-cli.js';
 import {BackendClient, isBackendRequestError, isRetryableBackendError} from './backend-client.js';
 import {EcsTaskProtectionClient, type TaskProtectionClient} from './ecs-task-protection.js';
 import {ShellFfmpegClient} from './ffmpeg/client.js';
+import {HyperframesCliRenderer} from './hyperframes/renderer.js';
 import {FfmpegCompositionRenderer, RemotionCliRenderer} from './remotion/renderer.js';
 import {AwsCliObjectStore} from './storage/object-store.js';
 import {brollTrace, DeterministicRenderWorker} from './pipeline/render-worker.js';
@@ -29,6 +30,9 @@ export interface RunnerConfig {
   maxReceiveCount: number;
   rendererMode: 'ffmpeg' | 'remotion';
   remotionEntryPoint: string;
+  hyperframesEnabled: boolean;
+  hyperframesBinary?: string;
+  hyperframesTimeoutMs: number;
 }
 
 export async function runRenderWorker(config = loadConfig()): Promise<void> {
@@ -40,6 +44,9 @@ export async function runRenderWorker(config = loadConfig()): Promise<void> {
     remotion: config.rendererMode === 'remotion'
       ? new RemotionCliRenderer({entryPoint: config.remotionEntryPoint})
       : new FfmpegCompositionRenderer(),
+    hyperframes: config.hyperframesEnabled && config.hyperframesBinary
+      ? new HyperframesCliRenderer({binary: config.hyperframesBinary, timeoutMs: config.hyperframesTimeoutMs})
+      : undefined,
     workRoot: config.workRoot,
     compositionOutputIsFinal: config.rendererMode === 'ffmpeg',
   });
@@ -63,7 +70,7 @@ export async function runRenderWorker(config = loadConfig()): Promise<void> {
         console.error(JSON.stringify({level: 'error', msg: 'render worker shutdown active message release failed', signal, job_id: message.message.jobId, project_id: message.message.projectId, error: error instanceof Error ? error.message : String(error)}));
       });
   });
-  console.info(JSON.stringify({level: 'info', msg: 'render worker started', run_once: config.runOnce, job_id: config.jobID ?? '', renderer_mode: config.rendererMode, queue_name: queueName(config.queueURL), visibility_timeout_seconds: config.visibilityTimeoutSeconds, shutdown_release_visibility_seconds: config.shutdownReleaseVisibilitySeconds}));
+  console.info(JSON.stringify({level: 'info', msg: 'render worker started', run_once: config.runOnce, job_id: config.jobID ?? '', renderer_mode: config.rendererMode, hyperframes_enabled: config.hyperframesEnabled && Boolean(config.hyperframesBinary), queue_name: queueName(config.queueURL), visibility_timeout_seconds: config.visibilityTimeoutSeconds, shutdown_release_visibility_seconds: config.shutdownReleaseVisibilitySeconds}));
 
   try {
     do {
@@ -281,6 +288,9 @@ export function loadConfig(environment = process.env): RunnerConfig {
     maxReceiveCount: number(environment.MAX_JOB_ATTEMPTS, 5),
     rendererMode,
     remotionEntryPoint: environment.REMOTION_ENTRY_POINT ?? path.join(process.cwd(), 'src/remotion/entry.tsx'),
+    hyperframesEnabled: bool(environment.HYPERFRAMES_ENABLED, false),
+    hyperframesBinary: first(environment.HYPERFRAMES_BINARY, environment.HYPERFRAMES_CLI),
+    hyperframesTimeoutMs: durationMs(environment.HYPERFRAMES_TIMEOUT, 5 * 60 * 1000),
   };
 }
 

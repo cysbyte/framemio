@@ -512,7 +512,7 @@ struct TemplatesView: View {
                 } else {
                     LazyVGrid(columns: templateGridColumns, alignment: .leading, spacing: FrameMioSpacing.md) {
                         ForEach(Array(visibleTemplates.enumerated()), id: \.element.id) { index, template in
-                            let isLocked = templateIsLocked(at: index)
+                            let isLocked = templateIsLocked(at: index, template: template)
                             TemplateCard(
                                 template: template,
                                 isSelected: selectedTemplateID == template.id,
@@ -587,8 +587,8 @@ struct TemplatesView: View {
         ]
     }
 
-    private func templateIsLocked(at index: Int) -> Bool {
-        TemplateAccessPolicy.isLocked(index: index, hasTemplateAccess: hasTemplateAccess)
+    private func templateIsLocked(at index: Int, template: VideoTemplate) -> Bool {
+        TemplateAccessPolicy.isLocked(index: index, template: template, hasTemplateAccess: hasTemplateAccess)
     }
 
     private var selectedTemplateIndex: Int? {
@@ -597,7 +597,8 @@ struct TemplatesView: View {
 
     private var selectedTemplateIsLocked: Bool {
         guard let selectedTemplateIndex else { return true }
-        return templateIsLocked(at: selectedTemplateIndex)
+        guard let selectedTemplate else { return true }
+        return templateIsLocked(at: selectedTemplateIndex, template: selectedTemplate)
     }
 
     private func useSelectedTemplate() {
@@ -929,7 +930,7 @@ struct ProjectConfigurationView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: FrameMioSpacing.md) {
                         ForEach(Array(templates.enumerated()), id: \.element.id) { index, template in
-                            let isLocked = templateIsLocked(at: index)
+                            let isLocked = templateIsLocked(at: index, template: template)
                             TemplateCard(
                                 template: template,
                                 isSelected: selectedTemplateID == template.id,
@@ -1188,13 +1189,13 @@ struct ProjectConfigurationView: View {
     }
 
     private func select(_ template: VideoTemplate) {
-        guard let index = templates.firstIndex(where: { $0.id == template.id }), !templateIsLocked(at: index) else { return }
+        guard let index = templates.firstIndex(where: { $0.id == template.id }), !templateIsLocked(at: index, template: template) else { return }
         selectedTemplateID = template.id
         templateConfiguration = compatibleConfiguration(templateConfiguration, with: template)
     }
 
-    private func templateIsLocked(at index: Int) -> Bool {
-        TemplateAccessPolicy.isLocked(index: index, hasTemplateAccess: hasTemplateAccess)
+    private func templateIsLocked(at index: Int, template: VideoTemplate) -> Bool {
+        TemplateAccessPolicy.isLocked(index: index, template: template, hasTemplateAccess: hasTemplateAccess)
     }
 
     private func compatibleConfiguration(_ previous: VideoTemplateConfiguration?, with template: VideoTemplate) -> VideoTemplateConfiguration {

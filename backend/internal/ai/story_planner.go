@@ -579,7 +579,7 @@ func captionStyleFor(storyType models.StoryType, visualStyle models.VisualStyle)
 		}
 	case visualStyle == models.VisualStyleCinematic || visualStyle == models.VisualStyleWarm:
 		return &models.CaptionStyle{
-			Preset: "bold_social", Presentation: "word_by_word", FontFamily: "inter-bold", FontSize: 72, TextColor: "#FFD60A", HighlightColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 4,
+			Preset: "bold_social", Presentation: "word_by_word", MotionPreset: "word_pop", FontFamily: "inter-bold", FontSize: 72, TextColor: "#FFD60A", HighlightColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 4,
 			BackgroundEnabled: true, BackgroundColor: "#000000", BackgroundOpacity: 0.24, Position: "bottom", BottomOffset: 170, MaxLines: 1, MaxCharactersPerLine: 18,
 		}
 	default:
@@ -600,7 +600,7 @@ func captionStyleForProject(projectType models.ProjectType, storyType models.Sto
 		}
 	case models.ProjectTypeReel:
 		return &models.CaptionStyle{
-			Preset: "bold_social", Presentation: "word_by_word", FontFamily: "inter-bold", FontSize: 72, TextColor: "#FFD60A", HighlightColor: "#FFFFFF",
+			Preset: "bold_social", Presentation: "word_by_word", MotionPreset: "word_pop", FontFamily: "inter-bold", FontSize: 72, TextColor: "#FFD60A", HighlightColor: "#FFFFFF",
 			StrokeColor: "#000000", StrokeWidth: 4, BackgroundEnabled: true, BackgroundColor: "#000000",
 			BackgroundOpacity: 0.24, Position: "bottom", BottomOffset: 170, MaxLines: 1, MaxCharactersPerLine: 18,
 		}
@@ -628,7 +628,7 @@ func captionStylePresetForProject(preset string, projectType models.ProjectType,
 	case "cinematic_subtitle":
 		if projectType == models.ProjectTypeStory {
 			return &models.CaptionStyle{
-				Preset: "bold_social", Presentation: "word_by_word", FontFamily: "inter-bold", FontSize: 72, TextColor: "#FFD60A", HighlightColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 4,
+				Preset: "bold_social", Presentation: "word_by_word", MotionPreset: "word_pop", FontFamily: "inter-bold", FontSize: 72, TextColor: "#FFD60A", HighlightColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 4,
 				BackgroundEnabled: true, BackgroundColor: "#000000", BackgroundOpacity: 0.24, Position: "bottom", BottomOffset: 170, MaxLines: 1, MaxCharactersPerLine: 18,
 			}
 		}
@@ -638,7 +638,7 @@ func captionStylePresetForProject(preset string, projectType models.ProjectType,
 		}
 	case "bold_social":
 		return &models.CaptionStyle{
-			Preset: "bold_social", Presentation: "word_by_word", FontFamily: "inter-bold", FontSize: 72, TextColor: "#FFD60A", HighlightColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 4,
+			Preset: "bold_social", Presentation: "word_by_word", MotionPreset: "word_pop", FontFamily: "inter-bold", FontSize: 72, TextColor: "#FFD60A", HighlightColor: "#FFFFFF", StrokeColor: "#000000", StrokeWidth: 4,
 			BackgroundEnabled: true, BackgroundColor: "#000000", BackgroundOpacity: 0.24, Position: "bottom", BottomOffset: 170, MaxLines: 1, MaxCharactersPerLine: 18,
 		}
 	default:

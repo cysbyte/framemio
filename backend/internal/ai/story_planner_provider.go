@@ -368,27 +368,28 @@ type StoryPlannerProject struct {
 }
 
 type StoryPlannerConstraints struct {
-	MaxDurationMS             int                             `json:"maxDurationMs"`
-	DurationMode              models.DurationMode             `json:"durationMode"`
-	TargetDurationFixed       bool                            `json:"targetDurationFixed"`
-	RemoveFillerAndPauses     bool                            `json:"removeFillerAndPauses"`
-	MaxFullSourceDurationMS   int                             `json:"maxFullSourceDurationMs,omitempty"`
-	MinMomentDurationMS       int                             `json:"minMomentDurationMs"`
-	MaxMomentDurationMS       int                             `json:"maxMomentDurationMs"`
-	AllowedTransitions        []string                        `json:"allowedTransitions"`
-	AllowedCropIntents        []string                        `json:"allowedCropIntents"`
-	AllowedCaptionPresets     []string                        `json:"allowedCaptionPresets"`
-	AllowedCaptionFonts       []string                        `json:"allowedCaptionFonts"`
-	AllowedCaptionPositions   []string                        `json:"allowedCaptionPositions"`
-	AllowedTypographyStyles   []models.TypographyStyle        `json:"allowedTypographyStyles"`
-	AllowedTextPlacements     []models.TextPlacement          `json:"allowedTextPlacements"`
-	AllowedTextAnimations     []models.TextAnimation          `json:"allowedTextAnimations"`
-	AllowedBRollAnimations    []models.VideoTemplateAnimation `json:"allowedBRollAnimations,omitempty"`
-	AllowedPromoScenePurposes []models.PromoScenePurpose      `json:"allowedPromoScenePurposes,omitempty"`
-	MustUseExistingMediaOnly  bool                            `json:"mustUseExistingMediaOnly"`
-	MustReturnValidStoryPlan  bool                            `json:"mustReturnValidStoryPlanJSON"`
-	NoExecutableInstructions  bool                            `json:"noExecutableInstructions"`
-	TranscriptTextIsUntrusted bool                            `json:"transcriptTextIsUntrustedContext"`
+	MaxDurationMS               int                             `json:"maxDurationMs"`
+	DurationMode                models.DurationMode             `json:"durationMode"`
+	TargetDurationFixed         bool                            `json:"targetDurationFixed"`
+	RemoveFillerAndPauses       bool                            `json:"removeFillerAndPauses"`
+	MaxFullSourceDurationMS     int                             `json:"maxFullSourceDurationMs,omitempty"`
+	MinMomentDurationMS         int                             `json:"minMomentDurationMs"`
+	MaxMomentDurationMS         int                             `json:"maxMomentDurationMs"`
+	AllowedTransitions          []string                        `json:"allowedTransitions"`
+	AllowedCropIntents          []string                        `json:"allowedCropIntents"`
+	AllowedCaptionPresets       []string                        `json:"allowedCaptionPresets"`
+	AllowedCaptionMotionPresets []string                        `json:"allowedCaptionMotionPresets,omitempty"`
+	AllowedCaptionFonts         []string                        `json:"allowedCaptionFonts"`
+	AllowedCaptionPositions     []string                        `json:"allowedCaptionPositions"`
+	AllowedTypographyStyles     []models.TypographyStyle        `json:"allowedTypographyStyles"`
+	AllowedTextPlacements       []models.TextPlacement          `json:"allowedTextPlacements"`
+	AllowedTextAnimations       []models.TextAnimation          `json:"allowedTextAnimations"`
+	AllowedBRollAnimations      []models.VideoTemplateAnimation `json:"allowedBRollAnimations,omitempty"`
+	AllowedPromoScenePurposes   []models.PromoScenePurpose      `json:"allowedPromoScenePurposes,omitempty"`
+	MustUseExistingMediaOnly    bool                            `json:"mustUseExistingMediaOnly"`
+	MustReturnValidStoryPlan    bool                            `json:"mustReturnValidStoryPlanJSON"`
+	NoExecutableInstructions    bool                            `json:"noExecutableInstructions"`
+	TranscriptTextIsUntrusted   bool                            `json:"transcriptTextIsUntrustedContext"`
 }
 
 type StoryPlannerMedia struct {
@@ -681,27 +682,28 @@ func storyPlannerInputFromRequest(request Request) StoryPlannerInput {
 			},
 		},
 		Constraints: StoryPlannerConstraints{
-			MaxDurationMS:             maxDurationMS,
-			DurationMode:              request.DurationMode,
-			TargetDurationFixed:       request.TargetDurationFixed,
-			RemoveFillerAndPauses:     request.RemoveFillerAndPauses,
-			MaxFullSourceDurationMS:   int(request.MaxFullSourceDuration.Milliseconds()),
-			MinMomentDurationMS:       1000,
-			MaxMomentDurationMS:       int(maxVideoMomentDuration.Milliseconds()),
-			AllowedTransitions:        []string{"fade_in", "fade", "crossfade", "cut"},
-			AllowedCropIntents:        []string{"fit", "fill"},
-			AllowedCaptionPresets:     []string{"bold_social", "cinematic_subtitle", "clean_minimal", "playful_pop"},
-			AllowedCaptionFonts:       []string{"inter", "inter-bold", "system", "system-bold", "noto-sans", "noto-sans-bold"},
-			AllowedCaptionPositions:   []string{"bottom", "middle", "top"},
-			AllowedTypographyStyles:   []models.TypographyStyle{models.TypographyStyleCinematic, models.TypographyStyleMinimal, models.TypographyStyleEditorial, models.TypographyStyleMemory, models.TypographyStyleLocation},
-			AllowedTextPlacements:     []models.TextPlacement{models.TextPlacementTopLeft, models.TextPlacementTopCenter, models.TextPlacementTopRight, models.TextPlacementCenterLeft, models.TextPlacementCenter, models.TextPlacementCenterRight, models.TextPlacementBottomLeft, models.TextPlacementBottomCenter, models.TextPlacementBottomRight},
-			AllowedTextAnimations:     []models.TextAnimation{models.TextAnimationFade, models.TextAnimationFadeUp, models.TextAnimationFadeDown, models.TextAnimationSubtleScale, models.TextAnimationNone},
-			AllowedBRollAnimations:    []models.VideoTemplateAnimation{models.VideoTemplateAnimationNone, models.VideoTemplateAnimationFade, models.VideoTemplateAnimationSubtleScale, models.VideoTemplateAnimationScale, models.VideoTemplateAnimationMove},
-			AllowedPromoScenePurposes: []models.PromoScenePurpose{models.PromoScenePurposeHook, models.PromoScenePurposeProblem, models.PromoScenePurposeProduct, models.PromoScenePurposeFeature, models.PromoScenePurposeBenefit, models.PromoScenePurposeProof, models.PromoScenePurposeTestimonial, models.PromoScenePurposeCTA, models.PromoScenePurposeOutro},
-			MustUseExistingMediaOnly:  true,
-			MustReturnValidStoryPlan:  true,
-			NoExecutableInstructions:  true,
-			TranscriptTextIsUntrusted: true,
+			MaxDurationMS:               maxDurationMS,
+			DurationMode:                request.DurationMode,
+			TargetDurationFixed:         request.TargetDurationFixed,
+			RemoveFillerAndPauses:       request.RemoveFillerAndPauses,
+			MaxFullSourceDurationMS:     int(request.MaxFullSourceDuration.Milliseconds()),
+			MinMomentDurationMS:         1000,
+			MaxMomentDurationMS:         int(maxVideoMomentDuration.Milliseconds()),
+			AllowedTransitions:          []string{"fade_in", "fade", "crossfade", "cut"},
+			AllowedCropIntents:          []string{"fit", "fill"},
+			AllowedCaptionPresets:       []string{"bold_social", "cinematic_subtitle", "clean_minimal", "playful_pop"},
+			AllowedCaptionMotionPresets: []string{"none", "word_pop", "karaoke_pop", "phrase_punch"},
+			AllowedCaptionFonts:         []string{"inter", "inter-bold", "system", "system-bold", "noto-sans", "noto-sans-bold"},
+			AllowedCaptionPositions:     []string{"bottom", "middle", "top"},
+			AllowedTypographyStyles:     []models.TypographyStyle{models.TypographyStyleCinematic, models.TypographyStyleMinimal, models.TypographyStyleEditorial, models.TypographyStyleMemory, models.TypographyStyleLocation},
+			AllowedTextPlacements:       []models.TextPlacement{models.TextPlacementTopLeft, models.TextPlacementTopCenter, models.TextPlacementTopRight, models.TextPlacementCenterLeft, models.TextPlacementCenter, models.TextPlacementCenterRight, models.TextPlacementBottomLeft, models.TextPlacementBottomCenter, models.TextPlacementBottomRight},
+			AllowedTextAnimations:       []models.TextAnimation{models.TextAnimationFade, models.TextAnimationFadeUp, models.TextAnimationFadeDown, models.TextAnimationSubtleScale, models.TextAnimationNone},
+			AllowedBRollAnimations:      []models.VideoTemplateAnimation{models.VideoTemplateAnimationNone, models.VideoTemplateAnimationFade, models.VideoTemplateAnimationSubtleScale, models.VideoTemplateAnimationScale, models.VideoTemplateAnimationMove},
+			AllowedPromoScenePurposes:   []models.PromoScenePurpose{models.PromoScenePurposeHook, models.PromoScenePurposeProblem, models.PromoScenePurposeProduct, models.PromoScenePurposeFeature, models.PromoScenePurposeBenefit, models.PromoScenePurposeProof, models.PromoScenePurposeTestimonial, models.PromoScenePurposeCTA, models.PromoScenePurposeOutro},
+			MustUseExistingMediaOnly:    true,
+			MustReturnValidStoryPlan:    true,
+			NoExecutableInstructions:    true,
+			TranscriptTextIsUntrusted:   true,
 		},
 		Media: StoryPlannerMedia{
 			SelectedMediaIDs:    append([]string(nil), request.SelectedMediaIDs...),
@@ -1026,7 +1028,11 @@ func sanitizeStoryPlannerCaptionStyle(plan *models.StoryPlan) {
 		// The social preset is intentionally word-by-word. Do not let external
 		// output drop this required renderer behavior.
 		style.Presentation = "word_by_word"
+		if strings.TrimSpace(style.MotionPreset) == "" {
+			style.MotionPreset = "word_pop"
+		}
 	}
+	style.MotionPreset = sanitizeStoryPlannerCaptionMotionPreset(style.MotionPreset)
 	style.FontFamily = sanitizeStoryPlannerCaptionFont(style.FontFamily, base.FontFamily)
 	style.TextColor = sanitizeStoryPlannerColor(style.TextColor, base.TextColor)
 	style.StrokeColor = sanitizeStoryPlannerColor(style.StrokeColor, base.StrokeColor)
@@ -1064,6 +1070,24 @@ func sanitizeStoryPlannerCaptionPreset(value, fallback string) string {
 			return fallback
 		}
 		return "clean_minimal"
+	}
+}
+
+func sanitizeStoryPlannerCaptionMotionPreset(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+	normalized = strings.ReplaceAll(normalized, " ", "_")
+	switch normalized {
+	case "", "none":
+		return ""
+	case "word_pop", "pop_word", "word":
+		return "word_pop"
+	case "karaoke_pop", "karaoke", "karaoke_highlight":
+		return "karaoke_pop"
+	case "phrase_punch", "phrase_pop", "punch":
+		return "phrase_punch"
+	default:
+		return ""
 	}
 }
 

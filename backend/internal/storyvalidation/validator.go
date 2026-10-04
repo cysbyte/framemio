@@ -35,6 +35,12 @@ func New(store store.Store, objectStorage storage.ObjectStorage, config Config) 
 	if config.AllowedCaptionPresets == nil {
 		config.AllowedCaptionPresets = DefaultConfig().AllowedCaptionPresets
 	}
+	if config.AllowedCaptionPresentations == nil {
+		config.AllowedCaptionPresentations = DefaultConfig().AllowedCaptionPresentations
+	}
+	if config.AllowedCaptionMotionPresets == nil {
+		config.AllowedCaptionMotionPresets = DefaultConfig().AllowedCaptionMotionPresets
+	}
 	if config.AllowedCaptionFonts == nil {
 		config.AllowedCaptionFonts = DefaultConfig().AllowedCaptionFonts
 	}
@@ -359,6 +365,9 @@ func (v *Validator) Validate(ctx context.Context, userID string, plan models.Sto
 		if strings.TrimSpace(style.Presentation) != "" && !v.allowedCaptionPresentation(style.Presentation) {
 			problems.Add("caption_style.presentation", "unsupported_caption_presentation", "caption presentation is unsupported")
 		}
+		if strings.TrimSpace(style.MotionPreset) != "" && !v.allowedCaptionMotionPreset(style.MotionPreset) {
+			problems.Add("caption_style.motion_preset", "unsupported_caption_motion_preset", "caption motion preset is unsupported")
+		}
 		if strings.TrimSpace(style.FontFamily) != "" && !v.allowedCaptionFont(style.FontFamily) {
 			problems.Add("caption_style.font_family", "unsupported_caption_font", "caption font is unsupported")
 		}
@@ -435,6 +444,12 @@ func (v *Validator) config() Config {
 	}
 	if config.AllowedCaptionPresets == nil {
 		config.AllowedCaptionPresets = defaults.AllowedCaptionPresets
+	}
+	if config.AllowedCaptionPresentations == nil {
+		config.AllowedCaptionPresentations = defaults.AllowedCaptionPresentations
+	}
+	if config.AllowedCaptionMotionPresets == nil {
+		config.AllowedCaptionMotionPresets = defaults.AllowedCaptionMotionPresets
 	}
 	if config.AllowedCaptionFonts == nil {
 		config.AllowedCaptionFonts = defaults.AllowedCaptionFonts
@@ -640,6 +655,11 @@ func (v *Validator) allowedCaptionPreset(preset string) bool {
 
 func (v *Validator) allowedCaptionPresentation(presentation string) bool {
 	_, ok := v.config().AllowedCaptionPresentations[strings.ToLower(strings.TrimSpace(presentation))]
+	return ok
+}
+
+func (v *Validator) allowedCaptionMotionPreset(preset string) bool {
+	_, ok := v.config().AllowedCaptionMotionPresets[strings.ToLower(strings.TrimSpace(preset))]
 	return ok
 }
 

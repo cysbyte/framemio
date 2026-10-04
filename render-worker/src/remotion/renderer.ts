@@ -269,7 +269,10 @@ function brollVideoFilters(composition: CompositionSpec): {filters: string[]; ou
     const start = secondsFromFrames(overlay.start_frame, composition.fps);
     const end = secondsFromFrames(overlay.start_frame + overlay.duration_frames, composition.fps);
     if (overlay.presentation === 'full_frame') {
-      filters.push(`[${baseInput}][${sourceLabel}]overlay=0:0:enable='between(t,${start},${end})'[${outputLabel}]`);
+      const overlayExpression = overlay.generated_by === 'hyperframes'
+        ? `overlay=0:0:enable='between(t,${start},${end})'`
+        : `overlay=0:0:enable='between(t,${start},${end})'`;
+      filters.push(`[${baseInput}][${sourceLabel}]${overlayExpression}[${outputLabel}]`);
     } else {
       const layerLabel = `bo${index}`;
       filters.push(`[${sourceLabel}]${brollLayerFilter(overlay, composition)}[${layerLabel}]`);
@@ -611,6 +614,9 @@ function photoVideoFilter(clip: PhotoTimelineClip, index: number, composition: C
 }
 
 function brollSourceVideoFilter(overlay: TimelineBRoll, inputIndex: number, outputLabel: string, composition: CompositionSpec): string {
+  if (overlay.generated_by === 'hyperframes') {
+    return `[${inputIndex}:v]scale=${composition.resolution.width}:${composition.resolution.height}:force_original_aspect_ratio=decrease,pad=${composition.resolution.width}:${composition.resolution.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${composition.fps},trim=duration=${clipDurationSeconds(overlay)},setpts=PTS-STARTPTS+${secondsFromFrames(overlay.start_frame, composition.fps)}/TB[${outputLabel}]`;
+  }
   const scaleAndCrop = overlay.transform.kind === 'video' && overlay.transform.crop === 'fit'
     ? `scale=${composition.resolution.width}:${composition.resolution.height}:force_original_aspect_ratio=decrease,pad=${composition.resolution.width}:${composition.resolution.height}:(ow-iw)/2:(oh-ih)/2`
     : `scale=${composition.resolution.width}:${composition.resolution.height}:force_original_aspect_ratio=increase,crop=${composition.resolution.width}:${composition.resolution.height}`;

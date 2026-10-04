@@ -2,6 +2,8 @@ import {mkdir, rename, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {DEFAULT_FPS, ensureRenderDirs, renderFingerprint, stableBRollClipId, stableClipId} from '../determinism.js';
 import type {FfmpegClient} from '../ffmpeg/client.js';
+import {applyHyperframesOverlays, renderHyperframesOverlays} from '../hyperframes/renderer.js';
+import type {HyperframesRenderer} from '../hyperframes/renderer.js';
 import type {RemotionRenderer} from '../remotion/renderer.js';
 import type {ObjectStore} from '../storage/object-store.js';
 import type {CompositionSpec, RenderInput, RenderRecord, RenderResult, SourceMediaAsset} from '../types.js';
@@ -13,6 +15,7 @@ export interface RenderWorkerDependencies {
   objectStore: ObjectStore;
   ffmpeg: FfmpegClient;
   remotion: RemotionRenderer;
+  hyperframes?: HyperframesRenderer;
   workRoot: string;
   compositionOutputIsFinal?: boolean;
   now?: () => Date;
@@ -50,7 +53,21 @@ export class DeterministicRenderWorker {
     console.info(JSON.stringify({level: 'info', msg: 'render source assets downloaded', job_id: input.job_id, project_id: input.project_id, downloaded_count: assetPaths.size}));
     const preparedPaths = await this.prepareClips(input, assetsByID, assetPaths, paths.clips_dir);
     console.info(JSON.stringify({level: 'info', msg: 'render clips prepared', job_id: input.job_id, project_id: input.project_id, prepared_count: preparedPaths.size}));
-    const composition = buildComposition(input.story_plan, input.media_assets, assetPaths, preparedPaths, paths, {rendererVersion, fps: DEFAULT_FPS, projectType: input.project_type, projectConfiguration: input.project_configuration});
+    let composition = buildComposition(input.story_plan, input.media_assets, assetPaths, preparedPaths, paths, {rendererVersion, fps: DEFAULT_FPS, projectType: input.project_type, projectConfiguration: input.project_configuration});
+    if (this.dependencies.hyperframes) {
+      const hyperframesStartedAt = Date.now();
+      const overlays = await renderHyperframesOverlays(composition, this.dependencies.hyperframes, path.join(paths.work_dir, 'hyperframes'));
+      composition = applyHyperframesOverlays(composition, overlays);
+      console.info(JSON.stringify({
+        level: 'info',
+        msg: 'hyperframes overlays prepared',
+        job_id: input.job_id,
+        project_id: input.project_id,
+        overlay_count: overlays.length,
+        presets: overlays.map((overlay) => `${overlay.request.kind}:${overlay.request.preset}`).join(','),
+        duration_ms: Date.now() - hyperframesStartedAt,
+      }));
+    }
     await writeFile(paths.composition_file, JSON.stringify(composition, null, 2), 'utf8');
     console.info(JSON.stringify({
       level: 'info',
@@ -66,8 +83,10 @@ export class DeterministicRenderWorker {
       broll_count: composition.broll.length,
       broll_trace: timelineBRollTrace(composition.broll),
       caption_count: composition.captions.length,
+      hyperframes_overlay_count: composition.hyperframes?.overlays.length ?? 0,
       caption_style_preset: composition.caption_style?.preset ?? 'unset',
       caption_style_presentation: composition.caption_style?.presentation ?? 'unset',
+      caption_style_motion_preset: composition.caption_style?.motion_preset ?? 'unset',
       audio_source_resolved: composition.audio.source,
       audio_original_audio_resolved: composition.audio.original_audio,
       audio_original_volume_resolved: composition.audio.original_volume,

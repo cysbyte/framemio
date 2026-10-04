@@ -506,7 +506,7 @@ final class AVFoundationLocalReelRenderer: LocalReelRendering, @unchecked Sendab
         sampleRate: Double
     ) throws -> CIImage {
         let slotDuration = max(0.85, duration / Double(providers.count))
-        let transitionDuration = min(0.28, max(0.16, slotDuration * 0.14))
+        let transitionDuration = min(0.24, max(0.14, slotDuration * 0.10))
         let currentIndex = min(providers.count - 1, max(0, Int(seconds / slotDuration)))
         let localSeconds = seconds - Double(currentIndex) * slotDuration
         let currentProvider = providers[currentIndex]
@@ -519,13 +519,15 @@ final class AVFoundationLocalReelRenderer: LocalReelRendering, @unchecked Sendab
         }
 
         let progress = min(1, max(0, (localSeconds - (slotDuration - transitionDuration)) / transitionDuration))
-        let eased = easeOutCubic(progress)
+        let eased = easeInCubic(progress)
+        let punchTime = localSourceTime(seconds: max(0, slotDuration - 0.05), slotDuration: slotDuration, provider: currentProvider)
+        let punchFrame = try currentProvider.image(at: punchTime, sampleRate: sampleRate)
         return transitionComposite(
-            currentFrame,
+            punchFrame,
             in: CGRect(origin: .zero, size: canvasSize),
             over: background,
-            scale: 1 + CGFloat(eased) * 0.32,
-            blurRadius: CGFloat(eased) * 8,
+            scale: 1 + CGFloat(eased) * 0.92,
+            blurRadius: CGFloat(eased) * 6,
             opacity: 1
         )
     }
@@ -631,6 +633,11 @@ final class AVFoundationLocalReelRenderer: LocalReelRendering, @unchecked Sendab
         return 1 - pow(1 - clamped, 3)
     }
 
+    private func easeInCubic(_ value: Double) -> Double {
+        let clamped = min(1, max(0, value))
+        return clamped * clamped * clamped
+    }
+
     private static func makePixelBuffer(from pool: CVPixelBufferPool) -> CVPixelBuffer? {
         var pixelBuffer: CVPixelBuffer?
         guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer) == kCVReturnSuccess else {
@@ -715,9 +722,9 @@ final class AVFoundationLocalReelRenderer: LocalReelRendering, @unchecked Sendab
     private static func musicURL(for draft: VideoProjectDraft) -> URL? {
         let templateID = draft.templateID ?? "fast-montage"
         let trackName = switch templateID {
-        case "vertical-trio-reel", "vertical-quad-reel":
+        case "dynamic-transition-reel", "vertical-trio-reel", "vertical-quad-reel":
             "vertical-trio"
-        case "regular-reel", "dynamic-transition-reel":
+        case "regular-reel":
             "city-loop"
         case "fast-montage", "travel-highlight-reel", "reel-picture-in-picture":
             "free-fall"

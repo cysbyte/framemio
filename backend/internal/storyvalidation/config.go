@@ -7,6 +7,7 @@ type Config struct {
 	SupportedAspectRatios       map[string]struct{}
 	AllowedCaptionPresets       map[string]struct{}
 	AllowedCaptionPresentations map[string]struct{}
+	AllowedCaptionMotionPresets map[string]struct{}
 	AllowedCaptionFonts         map[string]struct{}
 	AllowedTransitions          map[string]struct{}
 	AllowedCropIntents          map[string]struct{}
@@ -64,6 +65,12 @@ func DefaultConfig() Config {
 		AllowedCaptionPresentations: map[string]struct{}{
 			"full_text":    {},
 			"word_by_word": {},
+		},
+		AllowedCaptionMotionPresets: map[string]struct{}{
+			"none":         {},
+			"word_pop":     {},
+			"karaoke_pop":  {},
+			"phrase_punch": {},
 		},
 		AllowedCaptionFonts: map[string]struct{}{
 			"inter":          {},

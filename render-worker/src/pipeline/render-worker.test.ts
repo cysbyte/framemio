@@ -4,6 +4,7 @@ import {chmod, mkdtemp, readFile, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {DeterministicFixtureFfmpegClient} from '../ffmpeg/client.js';
+import {FixtureHyperframesRenderer} from '../hyperframes/renderer.js';
 import {FfmpegCompositionRenderer, FixtureRemotionRenderer} from '../remotion/renderer.js';
 import {LocalFixtureObjectStore} from '../storage/object-store.js';
 import {canonicalJson, resolutionForAspectRatio} from '../determinism.js';
@@ -20,6 +21,7 @@ async function createHarness(compositionOutputIsFinal = false) {
   await objectStore.putText('source/video-1.mov', 'fixture video bytes');
   const ffmpeg = new DeterministicFixtureFfmpegClient();
   const remotion = new FixtureRemotionRenderer();
+  const hyperframes = new FixtureHyperframesRenderer();
   const worker = new DeterministicRenderWorker({
     objectStore,
     ffmpeg,
@@ -28,7 +30,27 @@ async function createHarness(compositionOutputIsFinal = false) {
     compositionOutputIsFinal,
     now: () => new Date('2026-08-21T12:00:00.000Z'),
   });
-  return {root, objectStore, ffmpeg, remotion, worker};
+  return {root, objectStore, ffmpeg, remotion, hyperframes, worker};
+}
+
+async function createHyperframesHarness() {
+  const root = await mkdtemp(path.join(tmpdir(), 'framemio-render-hyperframes-test-'));
+  const objectStore = new LocalFixtureObjectStore(path.join(root, 'object-store'));
+  await objectStore.putText('source/photo-1.jpg', 'fixture photo bytes');
+  await objectStore.putText('source/photo-2.jpg', 'fixture b-roll photo bytes');
+  await objectStore.putText('source/video-1.mov', 'fixture video bytes');
+  const ffmpeg = new DeterministicFixtureFfmpegClient();
+  const remotion = new FixtureRemotionRenderer();
+  const hyperframes = new FixtureHyperframesRenderer();
+  const worker = new DeterministicRenderWorker({
+    objectStore,
+    ffmpeg,
+    remotion,
+    hyperframes,
+    workRoot: path.join(root, 'work'),
+    now: () => new Date('2026-08-21T12:00:00.000Z'),
+  });
+  return {root, objectStore, ffmpeg, remotion, hyperframes, worker};
 }
 
 test('b-roll trace preserves IDs and distinguishes missing scores', () => {
@@ -65,6 +87,37 @@ test('preprocesses b-roll video without muting A-roll audio', async () => {
   assert.equal(trimOperations[1].request.endMicros, 2_000_000);
   assert.equal(trimOperations[1].request.keepAudio, false);
   assert.equal(harness.remotion.rendered[0].broll.length, 1);
+});
+
+test('renders requested caption motion through hyperframes overlays before remotion', async () => {
+  const harness = await createHyperframesHarness();
+  await harness.worker.render(fixtureRenderInput({
+    story_plan: fixtureStoryPlan({
+      captions: [{moment_id: 'moment-video-1', text: 'The biggest lesson I learned', start_ms: 3200, end_ms: 4700}],
+      caption_style: {
+        preset: 'bold_social',
+        presentation: 'word_by_word',
+        motion_preset: 'word_pop',
+        font_family: 'inter-bold',
+        font_size: 72,
+        text_color: '#FFD60A',
+        highlight_color: '#FFFFFF',
+        stroke_color: '#000000',
+        stroke_width: 4,
+        position: 'bottom',
+        bottom_offset: 170,
+        max_lines: 1,
+        max_characters_per_line: 18,
+      },
+    }),
+  }));
+
+  assert.equal(harness.hyperframes.rendered.length, 1);
+  assert.equal(harness.hyperframes.rendered[0].kind, 'caption_overlay');
+  assert.equal(harness.hyperframes.rendered[0].preset, 'word_pop');
+  assert.equal(harness.remotion.rendered[0].captions.length, 0);
+  assert.equal(harness.remotion.rendered[0].hyperframes?.overlays.length, 1);
+  assert.equal(harness.remotion.rendered[0].broll.some((overlay) => overlay.generated_by === 'hyperframes'), true);
 });
 
 test('ffmpeg fallback renderer overlays b-roll before captions', async () => {

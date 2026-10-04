@@ -116,6 +116,13 @@ function fadeDurationFrames(clip: TimelineClip, fps: number): number {
 const BRollLayer: React.FC<{overlay: TimelineBRoll}> = ({overlay}) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
+  if (overlay.generated_by === 'hyperframes') {
+    return (
+      <AbsoluteFill style={{pointerEvents: 'none'}}>
+        <OffthreadVideo src={sourceURL(overlay.prepared_path)} muted style={{width: '100%', height: '100%', objectFit: 'contain'}} />
+      </AbsoluteFill>
+    );
+  }
   const opacity = overlay.animation === 'fade'
     ? fadeValue(frame, overlay.duration_frames, fps)
     : overlay.opacity;

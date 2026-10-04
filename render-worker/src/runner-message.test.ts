@@ -18,6 +18,8 @@ const baseConfig: RunnerConfig = {
   maxReceiveCount: 5,
   rendererMode: 'ffmpeg',
   remotionEntryPoint: 'entry.tsx',
+  hyperframesEnabled: false,
+  hyperframesTimeoutMs: 300000,
 };
 
 test('deletes terminal render queue messages before rendering', async () => {

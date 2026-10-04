@@ -653,6 +653,16 @@ enum TemplateAccessPolicy {
     static func isLocked(index: Int, hasTemplateAccess: Bool) -> Bool {
         !hasTemplateAccess && index >= freeTemplateLimit
     }
+
+    static func isLocked(index: Int, projectType: VideoProjectType, hasTemplateAccess: Bool) -> Bool {
+        guard projectType != .reel else { return false }
+        return isLocked(index: index, hasTemplateAccess: hasTemplateAccess)
+    }
+
+    static func isLocked(index: Int, template: VideoTemplate, hasTemplateAccess: Bool) -> Bool {
+        guard !template.supportedProjectTypes.contains(.reel) else { return false }
+        return isLocked(index: index, hasTemplateAccess: hasTemplateAccess)
+    }
 }
 
 enum StoryStatus: String, Codable, Hashable, Sendable {
