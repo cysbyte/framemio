@@ -263,12 +263,15 @@ func TestGenericProjectCreationReservesCreditsForPromoAndReel(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		projectType models.ProjectType
-		mediaID     string
+		name          string
+		projectType   models.ProjectType
+		mediaID       string
+		wantAction    models.CreditAction
+		wantAvailable int
+		wantReserved  int
 	}{
-		{name: "promo", projectType: models.ProjectTypePromo, mediaID: "asset-credit-promo"},
-		{name: "reel", projectType: models.ProjectTypeReel, mediaID: "asset-credit-reel"},
+		{name: "promo", projectType: models.ProjectTypePromo, mediaID: "asset-credit-promo", wantAction: models.CreditActionCreateStory, wantAvailable: 60, wantReserved: 40},
+		{name: "reel", projectType: models.ProjectTypeReel, mediaID: "asset-credit-reel", wantAction: models.CreditActionCreateVideo, wantAvailable: 80, wantReserved: 20},
 	}
 
 	for _, test := range tests {
@@ -291,7 +294,7 @@ func TestGenericProjectCreationReservesCreditsForPromoAndReel(t *testing.T) {
 			}
 			var project models.VideoProject
 			decodeResponse(t, first, &project)
-			if project.CreditOperationKey != string(models.CreditActionCreateStory) {
+			if project.CreditOperationKey != string(test.wantAction) {
 				t.Fatalf("credit operation key = %q", project.CreditOperationKey)
 			}
 
@@ -299,8 +302,8 @@ func TestGenericProjectCreationReservesCreditsForPromoAndReel(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if balance.Available != 60 || balance.Reserved != 40 {
-				t.Fatalf("balance after %s creation = %+v, want 60 available and 40 reserved", test.name, balance)
+			if balance.Available != test.wantAvailable || balance.Reserved != test.wantReserved {
+				t.Fatalf("balance after %s creation = %+v, want %d available and %d reserved", test.name, balance, test.wantAvailable, test.wantReserved)
 			}
 
 			second := performJSON(t, handler, http.MethodPost, "/projects", body, "credit-"+test.name, true, nil)
@@ -316,7 +319,7 @@ func TestGenericProjectCreationReservesCreditsForPromoAndReel(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if balance.Available != 60 || balance.Reserved != 40 {
+			if balance.Available != test.wantAvailable || balance.Reserved != test.wantReserved {
 				t.Fatalf("balance after duplicate %s creation = %+v, reservation was duplicated", test.name, balance)
 			}
 		})

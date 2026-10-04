@@ -725,11 +725,11 @@ func (s *Server) createProject(response http.ResponseWriter, request *http.Reque
 			"reservation_created", reservationCreated,
 		)
 		if created.CreditOperationKey == "" && reservation.ID != "" {
-			if err := s.Store.SetProjectCreditOperationKey(request.Context(), user.ID, created.ID, string(models.CreditActionCreateStory)); err != nil {
+			if err := s.Store.SetProjectCreditOperationKey(request.Context(), user.ID, created.ID, creditOperationKeyForReservation(reservation)); err != nil {
 				s.internalError(response, err, "store generic project credit operation")
 				return
 			}
-			created.CreditOperationKey = string(models.CreditActionCreateStory)
+			created.CreditOperationKey = creditOperationKeyForReservation(reservation)
 		}
 	}
 	if err := s.saveProjectCreateAnalyses(request, user.ID, created.ID, input.Analyses); err != nil {
@@ -799,7 +799,7 @@ func (s *Server) reserveGenericProjectCredits(
 		s.internalError(response, errors.New("credit service not configured"), "credit service not configured")
 		return models.CreditReservation{}, false, false
 	}
-	action := models.CreditActionCreateStory
+	action := createProjectCreditAction(projectType)
 	quote, err := s.Credits.Quote(request.Context(), userID, action, stats)
 	if err != nil {
 		s.internalError(response, err, "quote generic project credit action")
@@ -899,7 +899,14 @@ func creditOperationKeyForReservation(reservation models.CreditReservation) stri
 	if reservation.ID == "" {
 		return ""
 	}
-	return string(models.CreditActionCreateStory)
+	return string(reservation.Action)
+}
+
+func createProjectCreditAction(projectType models.ProjectType) models.CreditAction {
+	if projectType == models.ProjectTypeReel {
+		return models.CreditActionCreateVideo
+	}
+	return models.CreditActionCreateStory
 }
 
 func stableGenericProjectID(userID, idempotencyKey string) string {

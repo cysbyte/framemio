@@ -686,7 +686,7 @@ struct ProjectConfigurationView: View {
         _templates = State(initialValue: VideoTemplate.localFallbackCatalog.filter { $0.supportedProjectTypes.contains(draft.type) })
         _selectedTemplateID = State(initialValue: draft.templateID)
         _templateConfiguration = State(initialValue: draft.templateConfiguration)
-        _creditCost = State(initialValue: CreditPricing.price(for: .createStory, stats: Self.creditStats(for: assets)))
+        _creditCost = State(initialValue: CreditPricing.price(for: Self.creditAction(for: draft.type), stats: Self.creditStats(for: assets)))
     }
 
     var body: some View {
@@ -773,15 +773,16 @@ struct ProjectConfigurationView: View {
     }
 
     private var fixedGenerateButtonTitle: String {
-        shouldCreateLocally ? "Create Reel Locally" : "\(createButtonTitle) (\(creditCost) credits)"
+        shouldCreateLocally ? "Create Reel Locally (\(creditCost) credits)" : "\(createButtonTitle) (\(creditCost) credits)"
     }
 
     private func refreshCreditQuote() {
         guard let creditService else { return }
         Task { @MainActor in
             do {
+                let action = Self.creditAction(for: draft.type)
                 async let balanceTask = creditService.balance()
-                async let quoteTask = creditService.quote(action: .createStory, stats: creditStats)
+                async let quoteTask = creditService.quote(action: action, stats: creditStats)
                 let (balance, quote) = try await (balanceTask, quoteTask)
                 creditBalance = balance.displayCredits
                 creditCost = quote.credits
@@ -796,10 +797,6 @@ struct ProjectConfigurationView: View {
 
     private func requestContinue() {
         guard !isCheckingCredits else { return }
-        if shouldCreateLocally {
-            onContinue(configuredDraft)
-            return
-        }
         guard let creditService else {
             onContinue(configuredDraft)
             return
@@ -810,10 +807,11 @@ struct ProjectConfigurationView: View {
         Task { @MainActor in
             defer { isCheckingCredits = false }
             do {
-                let quote = try await creditService.quote(action: .createStory, stats: creditStats)
+                let action = Self.creditAction(for: draft.type)
+                let quote = try await creditService.quote(action: action, stats: creditStats)
                 creditBalance = quote.balance
                 creditCost = quote.credits
-                if let issue = Self.creditIssue(from: quote, action: .createStory) {
+                if let issue = Self.creditIssue(from: quote, action: action) {
                     purchaseRoutingDebugLog("project_config_preflight_insufficient_credits type=\(draft.type.rawValue) required=\(issue.required) available=\(issue.available)")
                     onOpenPricing(.insufficientCredits)
                     return
@@ -832,6 +830,10 @@ struct ProjectConfigurationView: View {
 
     private static func creditStats(for assets: [MediaAsset]) -> CreditMediaStats {
         CreditMediaStats.createStory(assets: assets)
+    }
+
+    private static func creditAction(for projectType: VideoProjectType) -> CreditAction {
+        projectType == .reel ? .createVideo : .createStory
     }
 
     private static func creditIssue(from quote: CreditQuote, action: CreditAction) -> CreditIssue? {

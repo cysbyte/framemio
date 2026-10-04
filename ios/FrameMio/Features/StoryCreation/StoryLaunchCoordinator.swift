@@ -142,6 +142,7 @@ final class StoryLaunchCoordinator: ObservableObject {
 
             do {
                 if LocalReelPolicy.shouldRenderLocally(draft: draft, assets: assets) {
+                    try await verifyCredits(for: .createVideo, assets: assets)
                     phaseTitle = "Creating your reel on this iPhone..."
                     phaseDetail = "Using the selected template without uploading media."
                     progress = 0.12
@@ -206,7 +207,7 @@ final class StoryLaunchCoordinator: ObservableObject {
                     return
                 }
 
-                try await verifyCredits(for: .createStory, assets: assets)
+                try await verifyCredits(for: draft.type == .reel ? .createVideo : .createStory, assets: assets)
                 let selection = MediaSelection(explicitlySelectedAssetIDs: assets.map(\.id))
                 phaseTitle = "Uploading your photos and videos..."
                 phaseDetail = "Uploading originals to FrameMio. Large videos and iCloud downloads can take longer."
@@ -262,7 +263,7 @@ final class StoryLaunchCoordinator: ObservableObject {
                 let appError = AppError.from(error)
                 storyLaunchDebugLog("phase=failed progress=\(progress) error=\(appError.localizedDescription) raw=\(error.localizedDescription)")
                 if case let .insufficientCredits(required, available) = appError {
-                    insufficientCredits = CreditIssue(action: .createStory, required: required, available: available)
+                    insufficientCredits = CreditIssue(action: draft.type == .reel ? .createVideo : .createStory, required: required, available: available)
                     errorMessage = nil
                     phaseTitle = "Not enough credits"
                     storyLaunchDebugLog("phase=insufficient_credits required=\(required) available=\(available)")
@@ -276,9 +277,9 @@ final class StoryLaunchCoordinator: ObservableObject {
 
     private func verifyCredits(for action: CreditAction, assets: [MediaAsset]) async throws {
         guard let creditService else { return }
-        if action == .createStory {
+        if action == .createStory || action == .createVideo {
             let quote = try await creditService.quote(action: action, stats: .createStory(assets: assets))
-            storyLaunchDebugLog("credit_preflight type=create_story required=\(quote.credits) balance=\(quote.balance) eligible=\(quote.eligible) reason=\(quote.reason ?? "none")")
+            storyLaunchDebugLog("credit_preflight type=\(action.rawValue) required=\(quote.credits) balance=\(quote.balance) eligible=\(quote.eligible) reason=\(quote.reason ?? "none")")
             guard quote.eligible, quote.balance >= quote.credits else {
                 throw AppError.insufficientCredits(required: quote.credits, available: quote.balance)
             }

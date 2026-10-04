@@ -418,7 +418,7 @@ func (c *Coordinator) settleProjectCredits(ctx context.Context, job models.Proce
 		return nil
 	}
 	referenceID := job.ProjectID
-	if !creditActionsContain(actions, models.CreditActionCreateStory) {
+	if !creditActionsContainProjectCreation(actions) {
 		version := strings.TrimSpace(job.Configuration["story_plan_version"])
 		if version == "" {
 			if plan, planErr := c.Store.GetStoryPlan(ctx, job.UserID, job.ProjectID); planErr == nil {
@@ -649,6 +649,11 @@ func creditActionsContain(actions []models.CreditAction, target models.CreditAct
 		}
 	}
 	return false
+}
+
+func creditActionsContainProjectCreation(actions []models.CreditAction) bool {
+	return creditActionsContain(actions, models.CreditActionCreateStory) ||
+		creditActionsContain(actions, models.CreditActionCreateVideo)
 }
 
 func (c *Coordinator) AdvanceStoryPlanToRender(ctx context.Context, userID, projectID string) error {

@@ -115,17 +115,52 @@ func (s *Server) createLocalIOSReel(response http.ResponseWriter, request *http.
 	}
 
 	projectID := stableIOSProjectID(user.ID, idempotencyKey)
+	if existing, lookupErr := s.Store.GetProject(request.Context(), user.ID, projectID); lookupErr == nil {
+		s.writeJSON(response, http.StatusOK, s.makeIOSStory(request, user.ID, existing))
+		return
+	} else if !errors.Is(lookupErr, store.ErrNotFound) {
+		s.mapStoreError(response, lookupErr)
+		return
+	}
+	reservation, reservationCreated, ok := s.reserveGenericProjectCredits(
+		response,
+		request,
+		user.ID,
+		projectID,
+		models.ProjectTypeReel,
+		credits.StoryMediaStats{TotalMediaCount: 1, VideoCount: 1, TotalVideoSeconds: int(input.Duration + 0.5)},
+	)
+	if !ok {
+		return
+	}
+	cleanupReservation := reservationCreated
+	defer func() {
+		if !cleanupReservation || reservation.ID == "" {
+			return
+		}
+		if _, releaseErr := s.Credits.Release(request.Context(), user.ID, reservation.ID); releaseErr != nil &&
+			!errors.Is(releaseErr, store.ErrConflict) &&
+			!errors.Is(releaseErr, store.ErrNotFound) {
+			s.Logger.Warn("local reel credit reservation cleanup failed",
+				"user_id", user.ID,
+				"project_id", projectID,
+				"reservation_id", reservation.ID,
+				"error", releaseErr,
+			)
+		}
+	}()
 	now := s.Now().UTC()
 	project := models.VideoProject{
-		ID:        projectID,
-		UserID:    user.ID,
-		Type:      models.ProjectTypeReel,
-		Title:     input.Title,
-		Context:   input.Context,
-		MediaIDs:  []string{input.MediaID},
-		Status:    models.ProjectStatusReady,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:                 projectID,
+		UserID:             user.ID,
+		Type:               models.ProjectTypeReel,
+		Title:              input.Title,
+		Context:            input.Context,
+		MediaIDs:           []string{input.MediaID},
+		Status:             models.ProjectStatusReady,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+		CreditOperationKey: creditOperationKeyForReservation(reservation),
 		Configuration: models.VideoProjectConfiguration{
 			TemplateID:            strings.TrimSpace(input.TemplateID),
 			TemplateVersion:       input.TemplateVersion,
@@ -170,6 +205,14 @@ func (s *Server) createLocalIOSReel(response http.ResponseWriter, request *http.
 		_ = s.Store.DeleteProject(request.Context(), user.ID, created.ID)
 		s.mapStoreError(response, err)
 		return
+	}
+	if reservation.ID != "" {
+		if _, err := s.Credits.Commit(request.Context(), user.ID, reservation.ID); err != nil {
+			_ = s.Store.DeleteProject(request.Context(), user.ID, created.ID)
+			s.internalError(response, err, "commit local reel credit reservation")
+			return
+		}
+		cleanupReservation = false
 	}
 	s.writeJSON(response, http.StatusCreated, s.makeIOSStory(request, user.ID, created))
 }

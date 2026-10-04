@@ -2029,6 +2029,16 @@ func TestCreateLocalIOSReelExposesSelectedSourceAssets(t *testing.T) {
 	if len(project.Configuration.LocalReelSources) != 2 {
 		t.Fatalf("stored local reel sources = %+v", project.Configuration.LocalReelSources)
 	}
+	if project.CreditOperationKey != string(models.CreditActionCreateVideo) {
+		t.Fatalf("local reel credit operation key = %q", project.CreditOperationKey)
+	}
+	balance, err := memoryStore.GetCreditBalance(context.Background(), "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if balance.Available != 80 || balance.Reserved != 0 {
+		t.Fatalf("balance after local reel = %+v, want 80 available and 0 reserved", balance)
+	}
 }
 
 func TestMediaContentURLRequiresOwnershipAndUsesConfiguredDownloadBaseURL(t *testing.T) {
