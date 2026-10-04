@@ -85,5 +85,6 @@ fs.writeFileSync(output, 'fake webm');
   assert.equal(args[5], results[0].outputPath);
   const html = await readFile(path.join(args[1], 'index.html'), 'utf8');
   assert.match(html, /@keyframes wordPop/);
+  assert.match(html, /window\.__timelines\.main = timeline/);
   assert.match(html, /The biggest lesson/);
 });

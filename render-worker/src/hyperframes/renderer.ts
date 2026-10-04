@@ -198,6 +198,7 @@ function hyperframesHtml(request: HyperframesOverlayRequest): string {
   const style = payload.caption_style ?? {};
   const animationName = request.kind === 'caption_overlay' ? captionAnimationName(request.preset) : cardAnimationName(request.preset);
   const duration = Math.max(250, Math.round(request.duration_ms));
+  const durationSeconds = (duration / 1000).toFixed(3);
   const captionText = htmlEscape(payload.caption?.text?.trim() ?? '');
   const title = htmlEscape(payload.typography?.title?.trim() ?? '');
   const subtitle = htmlEscape(payload.typography?.subtitle?.trim() ?? '');
@@ -244,7 +245,6 @@ function hyperframesHtml(request: HyperframesOverlayRequest): string {
       background: ${background};
       border-radius: 16px;
       white-space: pre-wrap;
-      animation: ${animationName} ${duration}ms linear both;
     }
     .card {
       position: absolute;
@@ -259,7 +259,6 @@ function hyperframesHtml(request: HyperframesOverlayRequest): string {
       color: #fff;
       text-align: center;
       box-shadow: 0 16px 48px rgba(0,0,0,0.34);
-      animation: ${animationName} ${duration}ms linear both;
     }
     .card-title {
       font-size: 62px;
@@ -311,6 +310,14 @@ function hyperframesHtml(request: HyperframesOverlayRequest): string {
   <div id="root">
     ${request.kind === 'caption_overlay' ? `<div class="caption">${captionText}</div>` : `<div class="card"><div class="card-title">${title}</div>${subtitle ? `<div class="card-subtitle">${subtitle}</div>` : ''}</div>`}
   </div>
+  <script>
+    window.__timelines = window.__timelines || {};
+    const target = document.querySelector(${JSON.stringify(request.kind === 'caption_overlay' ? '.caption' : '.card')});
+    const durationSeconds = ${durationSeconds};
+    const timeline = gsap.timeline({paused: true});
+    ${request.kind === 'caption_overlay' ? gsapCaptionTimeline(request.preset) : gsapCardTimeline(request.preset)}
+    window.__timelines.main = timeline;
+  </script>
 </body>
 </html>`;
 }
@@ -334,6 +341,46 @@ function cardAnimationName(preset: string): string {
     return 'ctaPop';
   }
   return 'cardRise';
+}
+
+function gsapCaptionTimeline(preset: string): string {
+  if (preset === 'phrase_punch') {
+    return `
+    timeline.set(target, {autoAlpha: 0, xPercent: -50, scale: 1.18, filter: 'blur(2px)'});
+    timeline.to(target, {autoAlpha: 1, scale: 1, filter: 'blur(0px)', duration: durationSeconds * 0.14, ease: 'none'});
+    timeline.to(target, {autoAlpha: 1, scale: 1, filter: 'blur(0px)', duration: durationSeconds * 0.74, ease: 'none'});
+    timeline.to(target, {autoAlpha: 0, scale: 0.98, filter: 'blur(0px)', duration: durationSeconds * 0.12, ease: 'none'});`;
+  }
+  if (preset === 'karaoke_pop') {
+    return `
+    timeline.set(target, {autoAlpha: 0, xPercent: -50, scale: 0.92});
+    timeline.to(target, {autoAlpha: 1, scale: 1.08, duration: durationSeconds * 0.10, ease: 'none'});
+    timeline.to(target, {autoAlpha: 1, scale: 1, duration: durationSeconds * 0.12, ease: 'none'});
+    timeline.to(target, {autoAlpha: 1, scale: 1, duration: durationSeconds * 0.68, ease: 'none'});
+    timeline.to(target, {autoAlpha: 0, scale: 1, duration: durationSeconds * 0.10, ease: 'none'});`;
+  }
+  return `
+    timeline.set(target, {autoAlpha: 0, xPercent: -50, scale: 0.78});
+    timeline.to(target, {autoAlpha: 1, scale: 1.18, duration: durationSeconds * 0.12, ease: 'none'});
+    timeline.to(target, {autoAlpha: 1, scale: 1, duration: durationSeconds * 0.12, ease: 'none'});
+    timeline.to(target, {autoAlpha: 1, scale: 1, duration: durationSeconds * 0.64, ease: 'none'});
+    timeline.to(target, {autoAlpha: 0, scale: 0.98, duration: durationSeconds * 0.12, ease: 'none'});`;
+}
+
+function gsapCardTimeline(preset: string): string {
+  if (preset === 'cta_pop') {
+    return `
+    timeline.set(target, {autoAlpha: 0, xPercent: -50, yPercent: -50, scale: 0.82});
+    timeline.to(target, {autoAlpha: 1, scale: 1.06, duration: durationSeconds * 0.18, ease: 'none'});
+    timeline.to(target, {autoAlpha: 1, scale: 1, duration: durationSeconds * 0.10, ease: 'none'});
+    timeline.to(target, {autoAlpha: 1, scale: 1, duration: durationSeconds * 0.60, ease: 'none'});
+    timeline.to(target, {autoAlpha: 0, scale: 0.98, duration: durationSeconds * 0.12, ease: 'none'});`;
+  }
+  return `
+    timeline.set(target, {autoAlpha: 0, xPercent: -50, yPercent: -50, y: 34, scale: 0.94});
+    timeline.to(target, {autoAlpha: 1, y: 0, scale: 1, duration: durationSeconds * 0.20, ease: 'none'});
+    timeline.to(target, {autoAlpha: 1, y: 0, scale: 1, duration: durationSeconds * 0.68, ease: 'none'});
+    timeline.to(target, {autoAlpha: 0, y: -10, scale: 1, duration: durationSeconds * 0.12, ease: 'none'});`;
 }
 
 function cssColor(value: unknown, fallback: string): string {
