@@ -221,6 +221,8 @@ function hyperframesHtml(request: HyperframesOverlayRequest): string {
   const subtitle = htmlEscape(payload.typography?.subtitle?.trim() ?? '');
   const backgroundOpacity = clampNumber(style.background_opacity ?? 0.24, 0, 1);
   const captionBackground = style.background_enabled === true ? `rgba(0,0,0,${backgroundOpacity.toFixed(3)})` : 'transparent';
+  const strokeColor = cssColor(style.stroke_color, '#000000');
+  const strokeWidth = clampNumber(style.stroke_width ?? 1.5, 0, 1.5);
   return `<!doctype html>
 <html>
 <head>
@@ -253,12 +255,17 @@ function hyperframesHtml(request: HyperframesOverlayRequest): string {
       opacity: 0;
       color: ${cssColor(style.text_color, '#FFD60A')};
       font-size: ${clampNumber(style.font_size ?? 72, 20, 112)}px;
-      font-weight: 900;
+      font-weight: 850;
       line-height: 1.02;
       text-align: center;
       text-transform: uppercase;
-      -webkit-text-stroke: ${clampNumber(style.stroke_width ?? 4, 0, 8)}px ${cssColor(style.stroke_color, '#000000')};
-      text-shadow: 0 3px 12px rgba(0,0,0,0.55);
+      -webkit-text-stroke: ${strokeWidth.toFixed(1)}px ${strokeColor};
+      text-shadow:
+        0 2px 0 ${strokeColor},
+        2px 0 0 ${strokeColor},
+        0 -2px 0 ${strokeColor},
+        -2px 0 0 ${strokeColor},
+        0 4px 12px rgba(0,0,0,0.55);
       background: ${captionBackground};
       border-radius: 16px;
       white-space: pre-wrap;
@@ -266,7 +273,7 @@ function hyperframesHtml(request: HyperframesOverlayRequest): string {
     }
     .emphasis {
       color: ${cssColor(style.highlight_color, '#FF3B30')};
-      -webkit-text-stroke-color: ${cssColor(style.stroke_color, '#000000')};
+      -webkit-text-stroke-color: ${strokeColor};
     }
     .card {
       position: absolute;
