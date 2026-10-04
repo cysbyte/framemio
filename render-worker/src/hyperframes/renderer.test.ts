@@ -80,7 +80,7 @@ fs.writeFileSync(output, 'fake webm');
   assert.equal(args[0], 'render');
   assert.match(args[1], /hf-caption-0-.*-project$/);
   assert.equal(args[2], '-c');
-  assert.match(args[3], /index\.html$/);
+  assert.equal(args[3], 'index.html');
   assert.equal(args[4], '-o');
   assert.equal(args[5], results[0].outputPath);
   const html = await readFile(path.join(args[1], 'index.html'), 'utf8');
