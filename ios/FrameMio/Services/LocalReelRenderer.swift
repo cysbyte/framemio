@@ -391,6 +391,14 @@ final class AVFoundationLocalReelRenderer: LocalReelRendering, @unchecked Sendab
                 background: background,
                 sampleRate: template.sourceFrameSampleRate
             )
+        case .brushPaint:
+            return try brushPaintFrame(
+                at: seconds,
+                duration: duration,
+                providers: providers,
+                background: background,
+                sampleRate: template.sourceFrameSampleRate
+            )
         case .montage:
             return try montageFrame(at: seconds, duration: duration, providers: providers, background: background, sampleRate: template.sourceFrameSampleRate)
         }
@@ -563,6 +571,100 @@ final class AVFoundationLocalReelRenderer: LocalReelRendering, @unchecked Sendab
             .composited(over: background)
     }
 
+    private func brushPaintFrame(
+        at seconds: TimeInterval,
+        duration: TimeInterval,
+        providers: [LocalFrameProvider],
+        background: CIImage,
+        sampleRate: Double
+    ) throws -> CIImage {
+        let slotDuration = max(0.85, duration / Double(providers.count))
+        let transitionDuration = min(0.72, max(0.42, slotDuration * 0.24))
+        let currentIndex = min(providers.count - 1, max(0, Int(seconds / slotDuration)))
+        let localSeconds = seconds - Double(currentIndex) * slotDuration
+        let currentProvider = providers[currentIndex]
+        let currentFrame = try currentProvider.image(
+            at: localSourceTime(seconds: localSeconds, slotDuration: slotDuration, provider: currentProvider),
+            sampleRate: sampleRate
+        )
+        let rect = CGRect(origin: .zero, size: canvasSize)
+
+        guard currentIndex < providers.count - 1,
+              localSeconds >= slotDuration - transitionDuration else {
+            return composite(currentFrame, in: rect, over: background)
+        }
+
+        let nextProvider = providers[currentIndex + 1]
+        let nextLocalSeconds = max(0, localSeconds - (slotDuration - transitionDuration))
+        let nextFrame = try nextProvider.image(
+            at: localSourceTime(seconds: nextLocalSeconds, slotDuration: slotDuration, provider: nextProvider),
+            sampleRate: sampleRate
+        )
+        let progress = easeInOut(nextLocalSeconds / transitionDuration)
+        return brushComposite(
+            from: currentFrame,
+            to: nextFrame,
+            in: rect,
+            over: background,
+            progress: progress
+        )
+    }
+
+    private func brushComposite(
+        from outgoing: CIImage,
+        to incoming: CIImage,
+        in rect: CGRect,
+        over background: CIImage,
+        progress: Double
+    ) -> CIImage {
+        let outgoingLayer = aspectFill(outgoing, in: rect.size).transformed(by: CGAffineTransform(translationX: rect.minX, y: rect.minY))
+        let incomingLayer = aspectFill(incoming, in: rect.size).transformed(by: CGAffineTransform(translationX: rect.minX, y: rect.minY))
+        let base = outgoingLayer.composited(over: background)
+        let mask = brushMask(size: rect.size, progress: progress)
+            .transformed(by: CGAffineTransform(translationX: rect.minX, y: rect.minY))
+        return incomingLayer
+            .applyingFilter("CIBlendWithMask", parameters: [
+                kCIInputBackgroundImageKey: base,
+                kCIInputMaskImageKey: mask
+            ])
+    }
+
+    private func brushMask(size: CGSize, progress: Double) -> CIImage {
+        let clamped = min(1, max(0, progress))
+        let revealX = size.width * CGFloat(clamped)
+        let softness = max(24, size.width * 0.08)
+        let edge = CIImage.linearGradient(
+            start: CGPoint(x: revealX - softness, y: 0),
+            end: CGPoint(x: revealX + softness, y: 0),
+            color0: CIColor(red: 1, green: 1, blue: 1),
+            color1: CIColor(red: 0, green: 0, blue: 0)
+        )
+        let stripes = CIImage(
+            color: CIColor(red: 0.5, green: 0.5, blue: 0.5)
+        )
+        .cropped(to: CGRect(origin: .zero, size: size))
+        .applyingFilter("CIRandomGenerator")
+        .applyingFilter("CIAffineTransform", parameters: [
+            kCIInputTransformKey: CGAffineTransform(scaleX: 0.018, y: 0.15)
+                .translatedBy(x: -CGFloat(clamped) * 180, y: 0)
+        ])
+        .cropped(to: CGRect(origin: .zero, size: size))
+        .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 5])
+        .applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: 0.28, y: 0, z: 0, w: 0),
+            "inputGVector": CIVector(x: 0.28, y: 0, z: 0, w: 0),
+            "inputBVector": CIVector(x: 0.28, y: 0, z: 0, w: 0),
+            "inputBiasVector": CIVector(x: 0.36, y: 0.36, z: 0.36, w: 0)
+        ])
+        return stripes
+            .applyingFilter("CIAdditionCompositing", parameters: [kCIInputBackgroundImageKey: edge])
+            .applyingFilter("CIColorControls", parameters: [
+                kCIInputContrastKey: 1.8,
+                kCIInputBrightnessKey: CGFloat(clamped) < 0.98 ? 0 : 0.2
+            ])
+            .cropped(to: CGRect(origin: .zero, size: size))
+    }
+
     private func panelIsVisible(
         index: Int,
         panelCount: Int,
@@ -705,6 +807,8 @@ final class AVFoundationLocalReelRenderer: LocalReelRendering, @unchecked Sendab
             LocalReelTemplate.Layout.montage
         case "dynamic-transition-reel":
             LocalReelTemplate.Layout.transitionMontage
+        case "brush-paint-reel":
+            LocalReelTemplate.Layout.brushPaint
         case "fast-montage", "reel-picture-in-picture":
             LocalReelTemplate.Layout.grid
         case "vertical-trio-reel":
@@ -724,6 +828,8 @@ final class AVFoundationLocalReelRenderer: LocalReelRendering, @unchecked Sendab
         let trackName = switch templateID {
         case "dynamic-transition-reel", "vertical-trio-reel", "vertical-quad-reel":
             "vertical-trio"
+        case "brush-paint-reel":
+            "free-fall"
         case "regular-reel":
             "city-loop"
         case "fast-montage", "travel-highlight-reel", "reel-picture-in-picture":
@@ -861,6 +967,7 @@ private struct LocalReelTemplate {
         case verticalTrio
         case verticalQuad
         case transitionMontage
+        case brushPaint
     }
 
     let name: String
@@ -880,6 +987,8 @@ private struct LocalReelTemplate {
             "vertical_quad"
         case .transitionMontage:
             "transition_montage"
+        case .brushPaint:
+            "brush_paint"
         }
     }
 
@@ -891,7 +1000,7 @@ private struct LocalReelTemplate {
             [0, 1]
         case .grid:
             [2, 3, 1, 0]
-        case .verticalTrio, .verticalQuad, .transitionMontage:
+        case .verticalTrio, .verticalQuad, .transitionMontage, .brushPaint:
             nil
         }
     }
@@ -904,7 +1013,7 @@ private struct LocalReelTemplate {
         switch layout {
         case .montage:
             24
-        case .split, .grid, .verticalTrio, .verticalQuad, .transitionMontage:
+        case .split, .grid, .verticalTrio, .verticalQuad, .transitionMontage, .brushPaint:
             24
         }
     }
@@ -915,7 +1024,7 @@ private struct LocalReelTemplate {
             2_400_000
         case .split, .grid, .verticalTrio, .verticalQuad:
             2_000_000
-        case .transitionMontage:
+        case .transitionMontage, .brushPaint:
             2_400_000
         }
     }

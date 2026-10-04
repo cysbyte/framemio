@@ -94,9 +94,13 @@ interface ConcatFilter {
 }
 
 interface CaptionOverlay {
+  text: string;
   textFilePath: string;
   startSeconds: string;
   endSeconds: string;
+  sequenceStartSeconds: string;
+  sequenceEndSeconds: string;
+  motionPreset: 'none' | 'word_pop' | 'karaoke_pop' | 'phrase_punch';
 }
 
 interface TypographyOverlay {
@@ -118,7 +122,9 @@ interface ResolvedCaptionStyle {
   fontFamily?: string;
   fontSize: number;
   textColor: string;
+  highlightColor: string;
   presentation: 'full_text' | 'word_by_word';
+  motionPreset: 'none' | 'word_pop' | 'karaoke_pop' | 'phrase_punch';
   strokeColor: string;
   strokeWidth: number;
   backgroundEnabled: boolean;
@@ -147,7 +153,9 @@ interface ResolvedTypographyStyle {
 const DEFAULT_CAPTION_STYLE: ResolvedCaptionStyle = {
   fontSize: 44,
   textColor: 'white',
+  highlightColor: '0xFFD60A',
   presentation: 'full_text',
+  motionPreset: 'none',
   strokeColor: 'black',
   strokeWidth: 3,
   backgroundEnabled: true,
@@ -372,8 +380,8 @@ function drawtextOptions(caption: CaptionOverlay, style: ResolvedCaptionStyle): 
     options.push(`font='${style.fontFamily}'`);
   }
   options.push(
-    `fontcolor=${style.textColor}`,
-    `fontsize=${style.fontSize}`,
+    `fontcolor=${captionFontColor(caption, style)}`,
+    `fontsize=${captionFontSizeExpression(caption, style)}`,
     `borderw=${style.strokeWidth}`,
     `bordercolor=${style.strokeColor}@0.72`,
   );
@@ -389,9 +397,59 @@ function drawtextOptions(caption: CaptionOverlay, style: ResolvedCaptionStyle): 
   options.push(
     'x=(w-text_w)/2',
     `y=${captionYExpression(style)}`,
+    `alpha='${captionAlphaExpression(caption, style)}'`,
     `enable='between(t,${caption.startSeconds},${caption.endSeconds})'`,
   );
   return options.join(':');
+}
+
+function captionFontColor(caption: CaptionOverlay, style: ResolvedCaptionStyle): string {
+  if (style.motionPreset === 'karaoke_pop') {
+    return caption.motionPreset === 'karaoke_pop' ? style.highlightColor : style.textColor;
+  }
+  return style.textColor;
+}
+
+function captionFontSizeExpression(caption: CaptionOverlay, style: ResolvedCaptionStyle): string {
+  if (style.motionPreset === 'word_pop') {
+    const progress = captionMotionProgress(caption, 0.16);
+    return `'${style.fontSize}*(1.18-0.18*${progress})'`;
+  }
+  if (style.motionPreset === 'phrase_punch') {
+    const progress = captionMotionProgress(caption, 0.22);
+    return `'${style.fontSize}*(1.10-0.10*${progress})'`;
+  }
+  if (style.motionPreset === 'karaoke_pop') {
+    const progress = captionMotionProgress(caption, 0.12);
+    return `'${style.fontSize}*(1.08-0.08*${progress})'`;
+  }
+  return String(style.fontSize);
+}
+
+function captionAlphaExpression(caption: CaptionOverlay, style: ResolvedCaptionStyle): string {
+  if (style.motionPreset === 'none') {
+    return '1';
+  }
+  const fadeInSeconds = style.motionPreset === 'phrase_punch' ? 0.12 : 0.08;
+  const fadeOutSeconds = style.motionPreset === 'phrase_punch' ? 0.16 : 0.10;
+  const start = Number.parseFloat(caption.startSeconds);
+  const end = Number.parseFloat(caption.endSeconds);
+  const duration = Math.max(0.001, end - start);
+  const fadeIn = Math.min(fadeInSeconds, duration / 3);
+  const fadeOut = Math.min(fadeOutSeconds, duration / 3);
+  if (duration <= fadeIn + fadeOut + 0.02) {
+    return '1';
+  }
+  const relative = `(t-${caption.startSeconds})`;
+  return `if(lt(${relative}\\,${ffmpegNumber(fadeIn)})\\,${relative}/${ffmpegNumber(fadeIn)}\\,if(gt(${relative}\\,${ffmpegNumber(duration - fadeOut)})\\,(${ffmpegNumber(duration)}-${relative})/${ffmpegNumber(fadeOut)}\\,1))`;
+}
+
+function captionMotionProgress(caption: CaptionOverlay, maxRampSeconds: number): string {
+  const start = Number.parseFloat(caption.startSeconds);
+  const end = Number.parseFloat(caption.endSeconds);
+  const duration = Math.max(0.001, end - start);
+  const ramp = Math.min(maxRampSeconds, Math.max(0.04, duration / 2));
+  return `min(max((t-${caption.startSeconds})/${ffmpegNumber(ramp)}\\,0)\\,1)`;
 }
 
 function typographyDrawtextOptions(overlay: TypographyOverlay): string {
@@ -532,7 +590,9 @@ function resolveCaptionStyle(style?: CaptionStyle): ResolvedCaptionStyle {
     fontFamily: fontFamily(style?.font_family),
     fontSize: wholeNumber(style?.font_size, presentation === 'word_by_word' ? 72 : DEFAULT_CAPTION_STYLE.fontSize, 12, presentation === 'word_by_word' ? 112 : 96),
     textColor: ffmpegColor(style?.text_color, defaultTextColor),
+    highlightColor: ffmpegColor(style?.highlight_color, DEFAULT_CAPTION_STYLE.highlightColor),
     presentation,
+    motionPreset: captionMotionPreset(style?.motion_preset),
     strokeColor: ffmpegColor(style?.stroke_color, DEFAULT_CAPTION_STYLE.strokeColor),
     strokeWidth: wholeNumber(style?.stroke_width, DEFAULT_CAPTION_STYLE.strokeWidth, 0, 12),
     backgroundEnabled: style?.background_enabled ?? DEFAULT_CAPTION_STYLE.backgroundEnabled,
@@ -543,6 +603,17 @@ function resolveCaptionStyle(style?: CaptionStyle): ResolvedCaptionStyle {
     maxLines: wholeNumber(style?.max_lines, DEFAULT_CAPTION_STYLE.maxLines, 1, 4),
     maxCharactersPerLine: wholeNumber(style?.max_characters_per_line, DEFAULT_CAPTION_STYLE.maxCharactersPerLine, 16, 48),
   };
+}
+
+function captionMotionPreset(value: unknown): ResolvedCaptionStyle['motionPreset'] {
+  if (typeof value !== 'string') {
+    return DEFAULT_CAPTION_STYLE.motionPreset;
+  }
+  const normalized = value.trim().toLowerCase().replace(/[-\s]+/g, '_');
+  if (normalized === 'word_pop' || normalized === 'karaoke_pop' || normalized === 'phrase_punch') {
+    return normalized;
+  }
+  return DEFAULT_CAPTION_STYLE.motionPreset;
 }
 
 function fontFamily(value: unknown): string | undefined {
@@ -775,11 +846,11 @@ function captionTiming(caption: StoryCaption, composition: CompositionSpec): {st
   return {startSeconds: (startMs / 1000).toFixed(3), endSeconds: (endMs / 1000).toFixed(3)};
 }
 
-function expandCaptionTextAndTiming(text: string, timing: {startSeconds: string; endSeconds: string}, style: ResolvedCaptionStyle): Array<{text: string; startSeconds: string; endSeconds: string}> {
+function expandCaptionTextAndTiming(text: string, timing: {startSeconds: string; endSeconds: string}, style: ResolvedCaptionStyle): Array<Omit<CaptionOverlay, 'textFilePath'>> {
   if (style.presentation !== 'word_by_word') {
     const pages = captionPages(text, style);
     if (pages.length <= 1) {
-      return [{text: normalizeCaptionText(text, style), startSeconds: timing.startSeconds, endSeconds: timing.endSeconds}];
+      return [{text: normalizeCaptionText(text, style), startSeconds: timing.startSeconds, endSeconds: timing.endSeconds, sequenceStartSeconds: timing.startSeconds, sequenceEndSeconds: timing.endSeconds, motionPreset: style.motionPreset}];
     }
     const start = Number.parseFloat(timing.startSeconds);
     const end = Number.parseFloat(timing.endSeconds);
@@ -789,20 +860,27 @@ function expandCaptionTextAndTiming(text: string, timing: {startSeconds: string;
       text: page,
       startSeconds: (start + (step * index)).toFixed(3),
       endSeconds: (index === pages.length - 1 ? end : start + (step * (index + 1))).toFixed(3),
+      sequenceStartSeconds: (start + (step * index)).toFixed(3),
+      sequenceEndSeconds: (index === pages.length - 1 ? end : start + (step * (index + 1))).toFixed(3),
+      motionPreset: style.motionPreset,
     }));
   }
   const words = text.trim().replace(/\s+/g, ' ').split(' ').map((word) => word.trim()).filter(Boolean);
   if (words.length <= 1) {
-    return [{text: words[0] ?? '', startSeconds: timing.startSeconds, endSeconds: timing.endSeconds}];
+    return [{text: words[0] ?? '', startSeconds: timing.startSeconds, endSeconds: timing.endSeconds, sequenceStartSeconds: timing.startSeconds, sequenceEndSeconds: timing.endSeconds, motionPreset: style.motionPreset}];
   }
   const start = Number.parseFloat(timing.startSeconds);
   const end = Number.parseFloat(timing.endSeconds);
   const duration = Math.max(0.25, end - start);
   const step = duration / words.length;
+  const normalizedText = normalizeCaptionText(text, style);
   return words.map((word, index) => ({
-    text: word,
+    text: style.motionPreset === 'karaoke_pop' ? normalizedText : word,
     startSeconds: (start + (step * index)).toFixed(3),
     endSeconds: (index === words.length - 1 ? end : start + (step * (index + 1))).toFixed(3),
+    sequenceStartSeconds: timing.startSeconds,
+    sequenceEndSeconds: timing.endSeconds,
+    motionPreset: style.motionPreset,
   }));
 }
 
@@ -918,6 +996,8 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
       caption_style_preset: composition.caption_style?.preset ?? 'unset',
       caption_style_presentation_requested: composition.caption_style?.presentation ?? 'unset',
       caption_style_presentation_resolved: captionStyle.presentation,
+      caption_style_motion_requested: composition.caption_style?.motion_preset ?? 'unset',
+      caption_style_motion_resolved: captionStyle.motionPreset,
     }));
     const filter = concatFilter(composition, captions, typography);
     console.info(JSON.stringify({
@@ -981,7 +1061,7 @@ export class FfmpegCompositionRenderer implements RemotionRenderer {
         }
         const textFilePath = path.join(captionsDir, `caption-${index}-${partIndex}-${stableHash(part).slice(0, 12)}.txt`);
         await writeFile(textFilePath, part.text, 'utf8');
-        overlays.push({textFilePath, startSeconds: part.startSeconds, endSeconds: part.endSeconds});
+        overlays.push({...part, textFilePath});
       }
     }
     return overlays;

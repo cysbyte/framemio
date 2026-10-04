@@ -24,6 +24,7 @@ func TestCatalogContainsVersionedInitialTemplates(t *testing.T) {
 		"premium-brand-story":            {},
 		"regular-reel":                   {},
 		"dynamic-transition-reel":        {},
+		"brush-paint-reel":               {},
 		"fast-montage":                   {},
 		"vertical-trio-reel":             {},
 		"vertical-quad-reel":             {},
@@ -55,7 +56,7 @@ func TestCatalogHasExpectedTemplateCountsPerProjectType(t *testing.T) {
 	tests := map[models.ProjectType]int{
 		models.ProjectTypeStory: 6,
 		models.ProjectTypePromo: 6,
-		models.ProjectTypeReel:  10,
+		models.ProjectTypeReel:  11,
 	}
 	for projectType, expectedCount := range tests {
 		templates := CatalogForProjectType(projectType)

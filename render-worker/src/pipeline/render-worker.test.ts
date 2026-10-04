@@ -166,6 +166,65 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
   }
 });
 
+test('ffmpeg fallback renderer applies caption motion presets', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'framemio-caption-motion-render-test-'));
+  const fakeFfmpeg = path.join(root, 'fake-ffmpeg.cjs');
+  const argsPath = path.join(root, 'ffmpeg-args.json');
+  const outputPath = path.join(root, 'story.mp4');
+  await writeFile(fakeFfmpeg, `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.writeFileSync(process.env.FRAMEMIO_FFMPEG_ARGS_PATH, JSON.stringify(args));
+fs.writeFileSync(args[args.length - 1], 'fake mp4');
+`, 'utf8');
+  await chmod(fakeFfmpeg, 0o755);
+
+  const previousArgsPath = process.env.FRAMEMIO_FFMPEG_ARGS_PATH;
+  process.env.FRAMEMIO_FFMPEG_ARGS_PATH = argsPath;
+  try {
+    const assets = fixtureMediaAssets();
+    const assetPaths = new Map(assets.map((asset) => [asset.id, `/asset/${asset.file_name}`]));
+    const composition = buildComposition(fixtureStoryPlan({
+      captions: [{moment_id: 'moment-video-1', text: 'The biggest lesson I learned', start_ms: 3200, end_ms: 4700}],
+      caption_style: {
+        preset: 'bold_social',
+        presentation: 'word_by_word',
+        motion_preset: 'word_pop',
+        font_family: 'inter-bold',
+        font_size: 72,
+        text_color: '#FFD60A',
+        highlight_color: '#FFFFFF',
+        stroke_color: '#000000',
+        stroke_width: 4,
+        position: 'bottom',
+        bottom_offset: 170,
+        max_lines: 1,
+        max_characters_per_line: 18,
+      },
+    }), assets, assetPaths, new Map(), {
+      work_dir: root,
+      assets_dir: path.join(root, 'assets'),
+      clips_dir: path.join(root, 'clips'),
+      output_file: outputPath,
+      composition_file: path.join(root, 'composition.json'),
+    });
+
+    await new FfmpegCompositionRenderer({ffmpegBinary: fakeFfmpeg}).renderComposition(composition, outputPath);
+
+    const args = JSON.parse(await readFile(argsPath, 'utf8')) as string[];
+    const filterComplex = args[args.indexOf('-filter_complex') + 1];
+    assert.match(filterComplex, /fontsize='72\*\(1\.18-0\.18\*min\(max\(\(t-3\.200\)\/0\.1500\\,0\)\\,1\)\)'/);
+    assert.match(filterComplex, /alpha='if\(lt\(\(t-3\.200\)\\,0\.0800\)/);
+    assert.match(filterComplex, /enable='between\(t,3\.200,3\.500\)'/);
+  } finally {
+    if (previousArgsPath === undefined) {
+      delete process.env.FRAMEMIO_FFMPEG_ARGS_PATH;
+    } else {
+      process.env.FRAMEMIO_FFMPEG_ARGS_PATH = previousArgsPath;
+    }
+  }
+});
+
 test('normalizes a photo-over-video overlay without replacing the base video', () => {
   const assets = fixtureMediaAssets();
   const basePlan = fixtureStoryPlan({
