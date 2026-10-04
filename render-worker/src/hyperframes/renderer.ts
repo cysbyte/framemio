@@ -11,6 +11,8 @@ import type {
   TextOverlay,
 } from '../types.js';
 
+const MAX_HYPERFRAMES_OVERLAYS = 24;
+
 export interface HyperframesOverlayRequest {
   id: string;
   kind: 'caption_overlay' | 'card_overlay';
@@ -231,7 +233,7 @@ export function hyperframesOverlayRequests(composition: CompositionSpec): Hyperf
       });
     }
   }
-  return requests.slice(0, 12);
+  return requests.slice(0, MAX_HYPERFRAMES_OVERLAYS);
 }
 
 export function hyperframesOverlayPlan(composition: CompositionSpec): HyperframesOverlayPlan {

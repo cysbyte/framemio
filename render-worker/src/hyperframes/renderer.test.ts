@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {chmod, mkdtemp, readFile, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {HyperframesCliRenderer, hyperframesOverlayRequests, renderHyperframesOverlays} from './renderer.js';
+import {applyHyperframesOverlays, HyperframesCliRenderer, hyperframesOverlayRequests, renderHyperframesOverlays} from './renderer.js';
 import type {CompositionSpec} from '../types.js';
 
 function composition(overrides: Partial<CompositionSpec> = {}): CompositionSpec {
@@ -67,6 +67,25 @@ test('splits long hyperframes captions into short phrase overlays', () => {
   ]);
   assert.deepEqual(requests.map((request) => request.duration_ms), [800, 800, 800]);
   assert.equal(requests.every((request) => request.source_caption?.text === 'Remember when the strawberries spilled on the picnic blanket'), true);
+});
+
+test('keeps hyperframes caption styling through the end of typical stories', () => {
+  const captions = Array.from({length: 8}, (_, index) => ({
+    moment_id: 'moment-1',
+    text: `Caption ${index + 1} keeps this ending styled`,
+    start_ms: index * 600,
+    end_ms: index * 600 + 550,
+  }));
+  const source = composition({
+    caption_style: {preset: 'bold_social', presentation: 'word_by_word', motion_preset: 'word_pop'},
+    captions,
+  });
+  const requests = hyperframesOverlayRequests(source);
+
+  assert.equal(requests.length, 16);
+  const withOverlays = applyHyperframesOverlays(source, requests.map((request) => ({request, outputPath: `/tmp/${request.id}.webm`})));
+  assert.equal(withOverlays.captions.length, 0);
+  assert.equal(withOverlays.hyperframes?.overlays.length, 16);
 });
 
 test('renders hyperframes overlays through generated project and webm output', async () => {
