@@ -686,7 +686,7 @@ function photoVideoFilter(clip: PhotoTimelineClip, index: number, composition: C
 
 function brollSourceVideoFilter(overlay: TimelineBRoll, inputIndex: number, outputLabel: string, composition: CompositionSpec): string {
   if (overlay.generated_by === 'hyperframes') {
-    return `[${inputIndex}:v]scale=${composition.resolution.width}:${composition.resolution.height}:force_original_aspect_ratio=decrease,pad=${composition.resolution.width}:${composition.resolution.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${composition.fps},trim=duration=${clipDurationSeconds(overlay)},setpts=PTS-STARTPTS+${secondsFromFrames(overlay.start_frame, composition.fps)}/TB[${outputLabel}]`;
+    return `[${inputIndex}:v]scale=${composition.resolution.width}:${composition.resolution.height}:force_original_aspect_ratio=decrease,pad=${composition.resolution.width}:${composition.resolution.height}:(ow-iw)/2:(oh-ih)/2,format=rgba,setsar=1,fps=${composition.fps},trim=duration=${clipDurationSeconds(overlay)},setpts=PTS-STARTPTS+${secondsFromFrames(overlay.start_frame, composition.fps)}/TB[${outputLabel}]`;
   }
   const scaleAndCrop = overlay.transform.kind === 'video' && overlay.transform.crop === 'fit'
     ? `scale=${composition.resolution.width}:${composition.resolution.height}:force_original_aspect_ratio=decrease,pad=${composition.resolution.width}:${composition.resolution.height}:(ow-iw)/2:(oh-ih)/2`

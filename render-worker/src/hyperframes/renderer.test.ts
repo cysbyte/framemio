@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {hyperframesOverlayRequests} from './renderer.js';
+import {chmod, mkdtemp, readFile, writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {HyperframesCliRenderer, hyperframesOverlayRequests, renderHyperframesOverlays} from './renderer.js';
 import type {CompositionSpec} from '../types.js';
 
 function composition(overrides: Partial<CompositionSpec> = {}): CompositionSpec {
@@ -48,4 +51,37 @@ test('builds hyperframes requests only for whitelisted caption motion presets', 
   assert.equal(requests[0].preset, 'word_pop');
   assert.equal(requests[0].start_ms, 1000);
   assert.equal(requests[0].duration_ms, 1400);
+});
+
+test('renders hyperframes overlays through generated project and webm output', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'framemio-hyperframes-cli-test-'));
+  const fakeHyperframes = path.join(root, 'fake-hyperframes.cjs');
+  const argsPath = path.join(root, 'args.json');
+  await writeFile(fakeHyperframes, `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.writeFileSync(${JSON.stringify(argsPath)}, JSON.stringify(args));
+const output = args[args.indexOf('-o') + 1];
+fs.writeFileSync(output, 'fake webm');
+`, 'utf8');
+  await chmod(fakeHyperframes, 0o755);
+
+  const results = await renderHyperframesOverlays(
+    composition({caption_style: {preset: 'bold_social', presentation: 'word_by_word', motion_preset: 'word_pop'}}),
+    new HyperframesCliRenderer({binary: fakeHyperframes, timeoutMs: 5000}),
+    root,
+  );
+
+  assert.equal(results.length, 1);
+  assert.match(results[0].outputPath, /\.webm$/);
+  const args = JSON.parse(await readFile(argsPath, 'utf8')) as string[];
+  assert.equal(args[0], 'render');
+  assert.match(args[1], /hf-caption-0-.*-project$/);
+  assert.equal(args[2], '-c');
+  assert.match(args[3], /index\.html$/);
+  assert.equal(args[4], '-o');
+  assert.equal(args[5], results[0].outputPath);
+  const html = await readFile(path.join(args[1], 'index.html'), 'utf8');
+  assert.match(html, /@keyframes wordPop/);
+  assert.match(html, /The biggest lesson/);
 });

@@ -71,9 +71,16 @@ export class HyperframesCliRenderer implements HyperframesRenderer {
 
   async renderOverlay(request: HyperframesOverlayRequest, outputPath: string): Promise<void> {
     await mkdir(path.dirname(outputPath), {recursive: true});
-    const requestPath = path.join(path.dirname(outputPath), `${request.id}-${stableHash(request).slice(0, 12)}.hyperframes.json`);
-    await writeFile(requestPath, canonicalJson(request), 'utf8');
-    await run(this.options.binary, ['render', '--input', requestPath, '--output', outputPath], this.timeoutMs);
+    const projectDir = path.join(path.dirname(outputPath), `${request.id}-${stableHash(request).slice(0, 12)}-project`);
+    await writeHyperframesProject(request, projectDir);
+    await run(this.options.binary, [
+      'render',
+      projectDir,
+      '-c',
+      path.join(projectDir, 'index.html'),
+      '-o',
+      outputPath,
+    ], this.timeoutMs);
   }
 }
 
@@ -89,7 +96,7 @@ export async function renderHyperframesOverlays(
   }
   await mkdir(outputDir, {recursive: true});
   for (const request of requests) {
-    const outputPath = path.join(outputDir, `${request.id}-${stableHash(request).slice(0, 12)}.mp4`);
+    const outputPath = path.join(outputDir, `${request.id}-${stableHash(request).slice(0, 12)}.webm`);
     await renderer.renderOverlay(request, outputPath);
     results.push({request, outputPath});
   }
@@ -173,6 +180,171 @@ export function hyperframesOverlayPlan(composition: CompositionSpec): Hyperframe
     card_request_count: requests.filter((request) => request.kind === 'card_overlay').length,
     presets: requests.map((request) => `${request.kind}:${request.preset}`).join(','),
   };
+}
+
+async function writeHyperframesProject(request: HyperframesOverlayRequest, projectDir: string): Promise<void> {
+  await mkdir(projectDir, {recursive: true});
+  await writeFile(path.join(projectDir, 'package.json'), canonicalJson({
+    private: true,
+    scripts: {render: 'hyperframes render index.html'},
+    dependencies: {},
+  }), 'utf8');
+  await writeFile(path.join(projectDir, 'index.html'), hyperframesHtml(request), 'utf8');
+}
+
+function hyperframesHtml(request: HyperframesOverlayRequest): string {
+  const payload = publicOverlayPayload(request);
+  const style = payload.caption_style ?? {};
+  const animationName = request.kind === 'caption_overlay' ? captionAnimationName(request.preset) : cardAnimationName(request.preset);
+  const duration = Math.max(250, Math.round(request.duration_ms));
+  const captionText = htmlEscape(payload.caption?.text?.trim() ?? '');
+  const title = htmlEscape(payload.typography?.title?.trim() ?? '');
+  const subtitle = htmlEscape(payload.typography?.subtitle?.trim() ?? '');
+  const backgroundOpacity = clampNumber(style.background_opacity ?? 0.24, 0, 1);
+  const background = style.background_enabled === false ? 'transparent' : `rgba(0,0,0,${backgroundOpacity.toFixed(3)})`;
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=${request.width},initial-scale=1">
+  <style>
+    html, body {
+      width: ${request.width}px;
+      height: ${request.height}px;
+      margin: 0;
+      overflow: hidden;
+      background: transparent;
+    }
+    body {
+      font-family: Inter, Arial, sans-serif;
+    }
+    #root {
+      position: relative;
+      width: ${request.width}px;
+      height: ${request.height}px;
+      background: transparent;
+    }
+    .caption {
+      position: absolute;
+      left: 50%;
+      bottom: ${clampNumber(style.bottom_offset ?? 170, 40, 420)}px;
+      max-width: 92%;
+      padding: 10px 20px;
+      transform: translateX(-50%);
+      opacity: 0;
+      color: ${cssColor(style.text_color, '#FFD60A')};
+      font-size: ${clampNumber(style.font_size ?? 72, 20, 112)}px;
+      font-weight: 900;
+      line-height: 1.02;
+      text-align: center;
+      text-transform: uppercase;
+      -webkit-text-stroke: ${clampNumber(style.stroke_width ?? 4, 0, 8)}px ${cssColor(style.stroke_color, '#000000')};
+      text-shadow: 0 3px 12px rgba(0,0,0,0.55);
+      background: ${background};
+      border-radius: 16px;
+      white-space: pre-wrap;
+      animation: ${animationName} ${duration}ms linear both;
+    }
+    .card {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 78%;
+      padding: 36px;
+      transform: translate(-50%, -50%);
+      opacity: 0;
+      border-radius: 18px;
+      background: rgba(0,0,0,0.58);
+      color: #fff;
+      text-align: center;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.34);
+      animation: ${animationName} ${duration}ms linear both;
+    }
+    .card-title {
+      font-size: 62px;
+      font-weight: 850;
+      line-height: 1.06;
+    }
+    .card-subtitle {
+      margin-top: 16px;
+      font-size: 34px;
+      font-weight: 600;
+      line-height: 1.18;
+    }
+    @keyframes wordPop {
+      0% { opacity: 0; transform: translateX(-50%) scale(0.78); }
+      12% { opacity: 1; transform: translateX(-50%) scale(1.18); }
+      24% { opacity: 1; transform: translateX(-50%) scale(1); }
+      88% { opacity: 1; transform: translateX(-50%) scale(1); }
+      100% { opacity: 0; transform: translateX(-50%) scale(0.98); }
+    }
+    @keyframes karaokePop {
+      0% { opacity: 0; transform: translateX(-50%) scale(0.92); }
+      10% { opacity: 1; transform: translateX(-50%) scale(1.08); }
+      22% { opacity: 1; transform: translateX(-50%) scale(1); }
+      90% { opacity: 1; transform: translateX(-50%) scale(1); }
+      100% { opacity: 0; transform: translateX(-50%) scale(1); }
+    }
+    @keyframes phrasePunch {
+      0% { opacity: 0; transform: translateX(-50%) scale(1.18); filter: blur(2px); }
+      14% { opacity: 1; transform: translateX(-50%) scale(1); filter: blur(0); }
+      88% { opacity: 1; transform: translateX(-50%) scale(1); filter: blur(0); }
+      100% { opacity: 0; transform: translateX(-50%) scale(0.98); filter: blur(0); }
+    }
+    @keyframes cardRise {
+      0% { opacity: 0; transform: translate(-50%, -50%) translateY(34px) scale(0.94); }
+      20% { opacity: 1; transform: translate(-50%, -50%) translateY(0) scale(1); }
+      88% { opacity: 1; transform: translate(-50%, -50%) translateY(0) scale(1); }
+      100% { opacity: 0; transform: translate(-50%, -50%) translateY(-10px) scale(1); }
+    }
+    @keyframes ctaPop {
+      0% { opacity: 0; transform: translate(-50%, -50%) scale(0.82); }
+      18% { opacity: 1; transform: translate(-50%, -50%) scale(1.06); }
+      28% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+      88% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+      100% { opacity: 0; transform: translate(-50%, -50%) scale(0.98); }
+    }
+  </style>
+</head>
+<body>
+  <div id="root">
+    ${request.kind === 'caption_overlay' ? `<div class="caption">${captionText}</div>` : `<div class="card"><div class="card-title">${title}</div>${subtitle ? `<div class="card-subtitle">${subtitle}</div>` : ''}</div>`}
+  </div>
+</body>
+</html>`;
+}
+
+function publicOverlayPayload(request: HyperframesOverlayRequest): HyperframesOverlayRequest {
+  return request;
+}
+
+function captionAnimationName(preset: string): string {
+  if (preset === 'karaoke_pop') {
+    return 'karaokePop';
+  }
+  if (preset === 'phrase_punch') {
+    return 'phrasePunch';
+  }
+  return 'wordPop';
+}
+
+function cardAnimationName(preset: string): string {
+  if (preset === 'cta_pop') {
+    return 'ctaPop';
+  }
+  return 'cardRise';
+}
+
+function cssColor(value: unknown, fallback: string): string {
+  return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value.trim()) ? value.trim() : fallback;
+}
+
+function htmlEscape(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : min;
 }
 
 function hyperframesOverlayToBRoll(composition: CompositionSpec, overlay: HyperframesOverlayResult): CompositionSpec['broll'][number] {
