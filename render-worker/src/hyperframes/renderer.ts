@@ -124,6 +124,17 @@ export async function renderHyperframesOverlays(
       duration_ms: request.duration_ms,
       concurrency,
     }));
+    if (request.kind === 'caption_overlay') {
+      console.info(JSON.stringify({
+        level: 'info',
+        msg: 'hyperframes caption style resolved',
+        job_id: options.logContext?.job_id ?? '',
+        project_id: options.logContext?.project_id ?? '',
+        overlay_id: request.id,
+        preset: request.preset,
+        ...captionStyleDebugMetadata(request),
+      }));
+    }
     await renderer.renderOverlay(request, outputPath);
     results[index] = {request, outputPath};
     console.info(JSON.stringify({
@@ -256,7 +267,7 @@ function hyperframesHtml(request: HyperframesOverlayRequest): string {
   const backgroundOpacity = clampNumber(style.background_opacity ?? 0.24, 0, 1);
   const captionBackground = style.background_enabled === true ? `rgba(0,0,0,${backgroundOpacity.toFixed(3)})` : 'transparent';
   const strokeColor = cssColor(style.stroke_color, '#000000');
-  const strokeWidth = clampNumber(style.stroke_width ?? 1.5, 0, 1.5);
+  const outlineWidth = captionShadowOutlineWidth(style.stroke_width);
   return `<!doctype html>
 <html>
 <head>
@@ -293,12 +304,16 @@ function hyperframesHtml(request: HyperframesOverlayRequest): string {
       line-height: 1.02;
       text-align: center;
       text-transform: uppercase;
-      -webkit-text-stroke: ${strokeWidth.toFixed(1)}px ${strokeColor};
+      -webkit-text-stroke: 0 transparent;
       text-shadow:
-        0 2px 0 ${strokeColor},
-        2px 0 0 ${strokeColor},
-        0 -2px 0 ${strokeColor},
-        -2px 0 0 ${strokeColor},
+        0 ${outlineWidth}px 0 ${strokeColor},
+        ${outlineWidth}px 0 0 ${strokeColor},
+        0 -${outlineWidth}px 0 ${strokeColor},
+        -${outlineWidth}px 0 0 ${strokeColor},
+        ${outlineWidth}px ${outlineWidth}px 0 ${strokeColor},
+        -${outlineWidth}px ${outlineWidth}px 0 ${strokeColor},
+        ${outlineWidth}px -${outlineWidth}px 0 ${strokeColor},
+        -${outlineWidth}px -${outlineWidth}px 0 ${strokeColor},
         0 4px 12px rgba(0,0,0,0.55);
       background: ${captionBackground};
       border-radius: 16px;
@@ -307,7 +322,6 @@ function hyperframesHtml(request: HyperframesOverlayRequest): string {
     }
     .emphasis {
       color: ${cssColor(style.highlight_color, '#FF3B30')};
-      -webkit-text-stroke-color: ${strokeColor};
     }
     .card {
       position: absolute;
@@ -423,6 +437,25 @@ function captionHtml(text: string): string {
   }).join(' ');
 }
 
+function captionStyleDebugMetadata(request: HyperframesOverlayRequest): Record<string, unknown> {
+  const style = request.caption_style ?? {};
+  const words = request.caption?.text?.trim().split(/\s+/).filter(Boolean) ?? [];
+  return {
+    caption_word_count: words.length,
+    font_family: style.font_family ?? 'default',
+    font_size: clampNumber(style.font_size ?? 72, 20, 112),
+    font_weight: 850,
+    text_color: cssColor(style.text_color, '#FFD60A'),
+    highlight_color: cssColor(style.highlight_color, '#FF3B30'),
+    stroke_color: cssColor(style.stroke_color, '#000000'),
+    requested_stroke_width: Number.isFinite(style.stroke_width) ? style.stroke_width : null,
+    css_text_stroke_px: 0,
+    shadow_outline_px: captionShadowOutlineWidth(style.stroke_width),
+    background_enabled: style.background_enabled === true,
+    bottom_offset: clampNumber(style.bottom_offset ?? 170, 40, 420),
+  };
+}
+
 function emphasisWordIndex(words: string[]): number {
   let bestIndex = -1;
   let bestScore = -1;
@@ -454,6 +487,10 @@ function htmlEscape(value: string): string {
 
 function clampNumber(value: number, min: number, max: number): number {
   return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : min;
+}
+
+function captionShadowOutlineWidth(value: unknown): number {
+  return Math.round(clampNumber(typeof value === 'number' ? value : 2, 1, 3));
 }
 
 function hyperframesOverlayToBRoll(composition: CompositionSpec, overlay: HyperframesOverlayResult): CompositionSpec['broll'][number] {
