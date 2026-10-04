@@ -120,6 +120,50 @@ test('renders requested caption motion through hyperframes overlays before remot
   assert.equal(harness.remotion.rendered[0].broll.some((overlay) => overlay.generated_by === 'hyperframes'), true);
 });
 
+test('logs hyperframes overlay plan when hyperframes is disabled', async () => {
+  const harness = await createHarness(true);
+  const previousInfo = console.info;
+  const messages: string[] = [];
+  console.info = (message?: unknown) => {
+    messages.push(String(message));
+  };
+  try {
+    await harness.worker.render(fixtureRenderInput({
+      story_plan: fixtureStoryPlan({
+        captions: [{moment_id: 'moment-video-1', text: 'The biggest lesson I learned', start_ms: 3200, end_ms: 4700}],
+        caption_style: {
+          preset: 'bold_social',
+          presentation: 'word_by_word',
+          motion_preset: 'word_pop',
+          font_family: 'inter-bold',
+          font_size: 72,
+          text_color: '#FFD60A',
+          highlight_color: '#FFFFFF',
+          stroke_color: '#000000',
+          stroke_width: 4,
+          position: 'bottom',
+          bottom_offset: 170,
+          max_lines: 2,
+          max_characters_per_line: 24,
+        },
+      }),
+    }));
+  } finally {
+    console.info = previousInfo;
+  }
+  const log = messages.map((message) => {
+    try {
+      return JSON.parse(message) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }).find((entry) => entry.msg === 'hyperframes overlay plan skipped');
+  assert.equal(log?.hyperframes_enabled, false);
+  assert.equal(log?.request_count, 1);
+  assert.equal(log?.caption_request_count, 1);
+  assert.equal(log?.presets, 'caption_overlay:word_pop');
+});
+
 test('ffmpeg fallback renderer overlays b-roll before captions', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'framemio-broll-render-test-'));
   const fakeFfmpeg = path.join(root, 'fake-ffmpeg.cjs');
@@ -213,9 +257,13 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
 
     const args = JSON.parse(await readFile(argsPath, 'utf8')) as string[];
     const filterComplex = args[args.indexOf('-filter_complex') + 1];
-    assert.match(filterComplex, /fontsize='72\*\(1\.18-0\.18\*min\(max\(\(t-3\.200\)\/0\.1500\\,0\)\\,1\)\)'/);
+    assert.match(filterComplex, /fontsize='72\*\(1\.18-0\.18\*min\(max\(\(t-3\.200\)\/0\.1600\\,0\)\\,1\)\)'/);
     assert.match(filterComplex, /alpha='if\(lt\(\(t-3\.200\)\\,0\.0800\)/);
-    assert.match(filterComplex, /enable='between\(t,3\.200,3\.500\)'/);
+    assert.match(filterComplex, /enable='between\(t,3\.200,3\.700\)'/);
+    const captionFileMatches = [...filterComplex.matchAll(/textfile='([^']*caption-0-\d-[^']+)'/g)];
+    assert.equal(captionFileMatches.length, 3);
+    const captionTexts = await Promise.all(captionFileMatches.map((match) => readFile(match[1], 'utf8')));
+    assert.deepEqual(captionTexts, ['The biggest', 'lesson I', 'learned']);
   } finally {
     if (previousArgsPath === undefined) {
       delete process.env.FRAMEMIO_FFMPEG_ARGS_PATH;
@@ -780,10 +828,9 @@ fs.writeFileSync(args[args.length - 1], 'fake mp4');
     assert.match(filterComplex, /bordercolor=0x101010@0\.72/);
     assert.match(filterComplex, /box=0/);
     assert.match(filterComplex, /y=42/);
-    assert.match(filterComplex, /caption-0-0-/);
-    assert.match(filterComplex, /caption-0-1-/);
-    assert.match(filterComplex, /enable='between\(t,3\.200,3\.950\)'/);
-    assert.match(filterComplex, /enable='between\(t,3\.950,4\.700\)'/);
+    const captionFileMatches = [...filterComplex.matchAll(/textfile='([^']*caption-0-\d-[^']+)'/g)];
+    assert.equal(captionFileMatches.length, 1);
+    assert.match(filterComplex, /enable='between\(t,3\.200,4\.700\)'/);
   } finally {
     if (previousArgsPath === undefined) {
       delete process.env.FRAMEMIO_FFMPEG_ARGS_PATH;

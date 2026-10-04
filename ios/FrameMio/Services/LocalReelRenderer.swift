@@ -633,12 +633,15 @@ final class AVFoundationLocalReelRenderer: LocalReelRendering, @unchecked Sendab
         let clamped = min(1, max(0, progress))
         let revealX = size.width * CGFloat(clamped)
         let softness = max(24, size.width * 0.08)
-        let edge = CIImage.linearGradient(
-            start: CGPoint(x: revealX - softness, y: 0),
-            end: CGPoint(x: revealX + softness, y: 0),
-            color0: CIColor(red: 1, green: 1, blue: 1),
-            color1: CIColor(red: 0, green: 0, blue: 0)
-        )
+        let edge = CIImage(color: CIColor.black)
+            .cropped(to: CGRect(origin: .zero, size: size))
+            .applyingFilter("CILinearGradient", parameters: [
+                "inputPoint0": CIVector(x: revealX - softness, y: 0),
+                "inputPoint1": CIVector(x: revealX + softness, y: 0),
+                "inputColor0": CIColor(red: 1, green: 1, blue: 1),
+                "inputColor1": CIColor(red: 0, green: 0, blue: 0)
+            ])
+            .cropped(to: CGRect(origin: .zero, size: size))
         let stripes = CIImage(
             color: CIColor(red: 0.5, green: 0.5, blue: 0.5)
         )

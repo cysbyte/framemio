@@ -200,7 +200,7 @@ struct HomeView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .shadow(color: FrameMioColors.ink.opacity(0.28), radius: 14, x: 0, y: 8)
 
-                Text("AI helps shape raw media into finished stories, promos, and reels.")
+                Text("AI helps shape stories and promos. Reels are created locally from fast templates.")
                     .font(FrameMioTypography.callout)
                     .foregroundStyle(FrameMioColors.inverseInk.opacity(0.86))
                     .fixedSize(horizontal: false, vertical: true)

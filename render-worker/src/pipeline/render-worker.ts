@@ -2,7 +2,7 @@ import {mkdir, rename, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {DEFAULT_FPS, ensureRenderDirs, renderFingerprint, stableBRollClipId, stableClipId} from '../determinism.js';
 import type {FfmpegClient} from '../ffmpeg/client.js';
-import {applyHyperframesOverlays, renderHyperframesOverlays} from '../hyperframes/renderer.js';
+import {applyHyperframesOverlays, hyperframesOverlayPlan, renderHyperframesOverlays} from '../hyperframes/renderer.js';
 import type {HyperframesRenderer} from '../hyperframes/renderer.js';
 import type {RemotionRenderer} from '../remotion/renderer.js';
 import type {ObjectStore} from '../storage/object-store.js';
@@ -54,6 +54,19 @@ export class DeterministicRenderWorker {
     const preparedPaths = await this.prepareClips(input, assetsByID, assetPaths, paths.clips_dir);
     console.info(JSON.stringify({level: 'info', msg: 'render clips prepared', job_id: input.job_id, project_id: input.project_id, prepared_count: preparedPaths.size}));
     let composition = buildComposition(input.story_plan, input.media_assets, assetPaths, preparedPaths, paths, {rendererVersion, fps: DEFAULT_FPS, projectType: input.project_type, projectConfiguration: input.project_configuration});
+    const hyperframesPlan = hyperframesOverlayPlan(composition);
+    console.info(JSON.stringify({
+      level: 'info',
+      msg: this.dependencies.hyperframes ? 'hyperframes overlay plan ready' : 'hyperframes overlay plan skipped',
+      job_id: input.job_id,
+      project_id: input.project_id,
+      hyperframes_enabled: Boolean(this.dependencies.hyperframes),
+      request_count: hyperframesPlan.request_count,
+      caption_request_count: hyperframesPlan.caption_request_count,
+      card_request_count: hyperframesPlan.card_request_count,
+      presets: hyperframesPlan.presets,
+      caption_style_motion_preset: composition.caption_style?.motion_preset ?? 'unset',
+    }));
     if (this.dependencies.hyperframes) {
       const hyperframesStartedAt = Date.now();
       const overlays = await renderHyperframesOverlays(composition, this.dependencies.hyperframes, path.join(paths.work_dir, 'hyperframes'));
@@ -65,6 +78,9 @@ export class DeterministicRenderWorker {
         project_id: input.project_id,
         overlay_count: overlays.length,
         presets: overlays.map((overlay) => `${overlay.request.kind}:${overlay.request.preset}`).join(','),
+        caption_count_after_apply: composition.captions.length,
+        broll_count_after_apply: composition.broll.length,
+        applied: overlays.length > 0,
         duration_ms: Date.now() - hyperframesStartedAt,
       }));
     }

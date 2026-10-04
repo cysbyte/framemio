@@ -457,7 +457,7 @@ func TestPlannerDefaultsCinematicStoriesToWordByWordCaptions(t *testing.T) {
 		plan.CaptionStyle.Preset != "bold_social" ||
 		plan.CaptionStyle.Presentation != "word_by_word" ||
 		plan.CaptionStyle.FontSize != 72 ||
-		plan.CaptionStyle.MaxLines != 1 {
+		plan.CaptionStyle.MaxLines != 2 {
 		t.Fatalf("expected TikTok-style default captions, got %+v", plan.CaptionStyle)
 	}
 }

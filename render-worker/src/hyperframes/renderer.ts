@@ -34,6 +34,13 @@ export interface HyperframesRenderer {
   renderOverlay(request: HyperframesOverlayRequest, outputPath: string): Promise<void>;
 }
 
+export interface HyperframesOverlayPlan {
+  request_count: number;
+  caption_request_count: number;
+  card_request_count: number;
+  presets: string;
+}
+
 export class DisabledHyperframesRenderer implements HyperframesRenderer {
   async renderOverlay(): Promise<void> {
     throw new Error('HyperFrames renderer is disabled');
@@ -156,6 +163,16 @@ export function hyperframesOverlayRequests(composition: CompositionSpec): Hyperf
     }
   }
   return requests.slice(0, 12);
+}
+
+export function hyperframesOverlayPlan(composition: CompositionSpec): HyperframesOverlayPlan {
+  const requests = hyperframesOverlayRequests(composition);
+  return {
+    request_count: requests.length,
+    caption_request_count: requests.filter((request) => request.kind === 'caption_overlay').length,
+    card_request_count: requests.filter((request) => request.kind === 'card_overlay').length,
+    presets: requests.map((request) => `${request.kind}:${request.preset}`).join(','),
+  };
 }
 
 function hyperframesOverlayToBRoll(composition: CompositionSpec, overlay: HyperframesOverlayResult): CompositionSpec['broll'][number] {

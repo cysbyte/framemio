@@ -278,7 +278,7 @@ const CaptionLayer: React.FC<{caption: StoryCaption; styleSpec?: CaptionStyle; f
     return null;
   }
   const presentation = captionPresentation(styleSpec);
-  const displayText = presentation === 'word_by_word' ? activeCaptionWord(text, frame, start, end) : text;
+  const displayText = presentation === 'word_by_word' ? activeCaptionPhrase(text, frame, start, end) : text;
   if (!displayText) {
     return null;
   }
@@ -306,16 +306,35 @@ function captionPresentation(styleSpec?: CaptionStyle): 'full_text' | 'word_by_w
   return 'full_text';
 }
 
-function activeCaptionWord(text: string, frame: number, startFrame: number, endFrame: number): string {
+function activeCaptionPhrase(text: string, frame: number, startFrame: number, endFrame: number): string {
   const words = text.split(/\s+/).map((word) => word.trim()).filter(Boolean);
   if (words.length === 0) {
     return '';
   }
-  if (words.length === 1 || endFrame <= startFrame) {
-    return words[0];
+  const chunks = captionPhraseChunks(words);
+  if (chunks.length === 1 || endFrame <= startFrame) {
+    return chunks[0].join(' ');
   }
   const progress = clamp((frame - startFrame) / Math.max(1, endFrame - startFrame), 0, 0.999999);
-  return words[Math.min(words.length - 1, Math.floor(progress * words.length))] ?? words[0];
+  return chunks[Math.min(chunks.length - 1, Math.floor(progress * chunks.length))]?.join(' ') ?? chunks[0].join(' ');
+}
+
+function captionPhraseChunks(words: string[]): string[][] {
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  for (const word of words) {
+    const next = [...current, word];
+    if (current.length > 0 && (next.length > 3 || next.join(' ').length > 18)) {
+      chunks.push(current);
+      current = [word];
+      continue;
+    }
+    current = next;
+  }
+  if (current.length > 0) {
+    chunks.push(current);
+  }
+  return chunks.length > 0 ? chunks : [words];
 }
 
 const BrandLayer: React.FC<{composition: CompositionSpec}> = ({composition}) => {

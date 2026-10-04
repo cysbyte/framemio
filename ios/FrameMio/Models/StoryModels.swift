@@ -17,7 +17,7 @@ enum VideoProjectType: String, Codable, CaseIterable, Hashable, Sendable {
         switch self {
         case .story: "AI finds the feeling in your photos and videos, then shapes a cinematic memory story"
         case .promo: "AI turns product, app, or business media into a polished promo with text and CTA"
-        case .reel: "AI cuts highlights into a short social edit with pacing, captions, and framing"
+        case .reel: "Create a short social edit on your iPhone with template pacing, music, and framing"
         }
     }
 

@@ -872,16 +872,43 @@ function expandCaptionTextAndTiming(text: string, timing: {startSeconds: string;
   const start = Number.parseFloat(timing.startSeconds);
   const end = Number.parseFloat(timing.endSeconds);
   const duration = Math.max(0.25, end - start);
-  const step = duration / words.length;
+  const chunks = captionWordChunks(words, style);
+  const step = duration / chunks.length;
   const normalizedText = normalizeCaptionText(text, style);
-  return words.map((word, index) => ({
-    text: style.motionPreset === 'karaoke_pop' ? normalizedText : word,
+  return chunks.map((chunk, index) => ({
+    text: style.motionPreset === 'karaoke_pop' ? normalizedText : chunk.join(' '),
     startSeconds: (start + (step * index)).toFixed(3),
-    endSeconds: (index === words.length - 1 ? end : start + (step * (index + 1))).toFixed(3),
+    endSeconds: (index === chunks.length - 1 ? end : start + (step * (index + 1))).toFixed(3),
     sequenceStartSeconds: timing.startSeconds,
     sequenceEndSeconds: timing.endSeconds,
     motionPreset: style.motionPreset,
   }));
+}
+
+function captionWordChunks(words: string[], style: ResolvedCaptionStyle): string[][] {
+  if (style.maxLines <= 1 && style.maxCharactersPerLine <= 18) {
+    return chunkWords(words, 2, style.maxCharactersPerLine);
+  }
+  return chunkWords(words, 3, Math.max(18, style.maxCharactersPerLine));
+}
+
+function chunkWords(words: string[], maxWords: number, maxCharacters: number): string[][] {
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  for (const word of words) {
+    const next = [...current, word];
+    const nextText = next.join(' ');
+    if (current.length > 0 && (next.length > maxWords || nextText.length > maxCharacters)) {
+      chunks.push(current);
+      current = [word];
+      continue;
+    }
+    current = next;
+  }
+  if (current.length > 0) {
+    chunks.push(current);
+  }
+  return chunks.length > 0 ? chunks : [words];
 }
 
 function clampNumber(value: number, min: number, max: number): number {
