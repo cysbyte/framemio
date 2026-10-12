@@ -230,6 +230,27 @@ func TestLoadConfigurationAllowsProcessingQueueFallback(t *testing.T) {
 	}
 }
 
+func TestLoadConfigurationValidatesClipGenerationToken(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("S3_MEDIA_BUCKET", "bucket")
+	t.Setenv("SQS_PROCESSING_QUEUE_URL", "processing-queue")
+	t.Setenv("AUTH_HMAC_SECRET", "12345678901234567890123456789012")
+	t.Setenv("INTERNAL_API_TOKEN", "12345678901234567890123456789012")
+	t.Setenv("CLIP_GENERATION_TOKEN", "short")
+	if _, err := loadConfiguration(); err == nil || !strings.Contains(err.Error(), "CLIP_GENERATION_TOKEN") {
+		t.Fatalf("expected short clip token rejection, got %v", err)
+	}
+	t.Setenv("CLIP_GENERATION_TOKEN", "12345678901234567890123456789012")
+	if _, err := loadConfiguration(); err == nil || !strings.Contains(err.Error(), "must differ") {
+		t.Fatalf("expected shared token rejection, got %v", err)
+	}
+	t.Setenv("CLIP_GENERATION_TOKEN", "different-clip-token-with-thirty-two-characters")
+	configuration, err := loadConfiguration()
+	if err != nil || configuration.ClipGenerationToken != "different-clip-token-with-thirty-two-characters" {
+		t.Fatalf("expected configured clip token, got %+v, %v", configuration, err)
+	}
+}
+
 func TestLoadConfigurationRejectsIncompleteExternalStoryPlanner(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://example")
 	t.Setenv("S3_MEDIA_BUCKET", "bucket")

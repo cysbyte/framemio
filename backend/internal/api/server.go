@@ -42,7 +42,9 @@ type Server struct {
 	Logger                  *slog.Logger
 	Now                     func() time.Time
 	InternalToken           string
+	ClipGenerationToken     string
 	ExpensiveLimiter        ExpensiveOperationLimiter
+	ClipGenerationLimiter   ExpensiveOperationLimiter
 	PromptTranscriber       PromptTranscriber
 	VideoProviderBaseURL    string
 	VideoProviderAPIKey     string
@@ -70,6 +72,9 @@ func NewServer(dependencies Server) *Server {
 	}
 	if dependencies.ExpensiveLimiter == nil {
 		dependencies.ExpensiveLimiter = NewInMemoryExpensiveOperationLimiter(ExpensiveOperationLimits{})
+	}
+	if dependencies.ClipGenerationLimiter == nil {
+		dependencies.ClipGenerationLimiter = NewInMemoryExpensiveOperationLimiter(ExpensiveOperationLimits{MaxPerMinute: 2, MaxPerDay: 20})
 	}
 	if dependencies.PromptTranscriber == nil {
 		dependencies.PromptTranscriber = NewDeepgramPromptTranscriberFromEnv()
@@ -127,6 +132,10 @@ func (s *Server) dispatch(response http.ResponseWriter, request *http.Request) {
 			}
 		}
 		s.writeError(response, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if request.URL.Path == "/internal/clip-videos" || strings.HasPrefix(request.URL.Path, "/internal/clip-videos/") || strings.HasPrefix(request.URL.Path, "/internal/clip-media/") {
+		s.dispatchInternalClipVideo(response, request)
 		return
 	}
 
@@ -441,6 +450,10 @@ func (s *Server) createUploadSession(response http.ResponseWriter, request *http
 	}
 	input.FileName = strings.TrimSpace(input.FileName)
 	input.ContentType = strings.TrimSpace(input.ContentType)
+	if request.URL.Path == "/internal/clip-media/upload-session" && (input.MediaType != models.MediaTypePhoto || input.FileSizeBytes > 10*1024*1024 || (input.ContentType != "image/jpeg" && input.ContentType != "image/png" && input.ContentType != "image/webp")) {
+		s.writeError(response, http.StatusBadRequest, "invalid_clip_image", "clip source must be a JPEG, PNG, or WebP photo no larger than 10 MB")
+		return
+	}
 	if input.FileName == "" || input.FileSizeBytes <= 0 || input.ContentType == "" || !validMediaType(input.MediaType) {
 		s.writeError(response, http.StatusBadRequest, "invalid_media", "file name, positive file size, content type, and valid media type are required")
 		return

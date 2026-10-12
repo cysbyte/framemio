@@ -93,6 +93,7 @@ func main() {
 		StoryPlanValidator:   storyPlanValidator,
 		Authenticator:        api.HMACTokenAuthenticator{Secret: []byte(configuration.AuthHMACSecret)},
 		InternalToken:        configuration.InternalAPIToken,
+		ClipGenerationToken:  configuration.ClipGenerationToken,
 		VideoProviderBaseURL: configuration.VideoProviderBaseURL,
 		VideoProviderAPIKey:  configuration.VideoProviderAPIKey,
 		VideoProviderModel:   configuration.VideoProviderModel,
@@ -134,6 +135,7 @@ type configuration struct {
 	SQSQueueURLs                      queue.QueueURLs
 	AuthHMACSecret                    string
 	InternalAPIToken                  string
+	ClipGenerationToken               string
 	PartSizeBytes                     int64
 	MultipartThresholdBytes           int64
 	DeadLetterQueueURL                string
@@ -190,6 +192,7 @@ func loadConfiguration() (configuration, error) {
 		},
 		AuthHMACSecret:                    os.Getenv("AUTH_HMAC_SECRET"),
 		InternalAPIToken:                  os.Getenv("INTERNAL_API_TOKEN"),
+		ClipGenerationToken:               os.Getenv("CLIP_GENERATION_TOKEN"),
 		PartSizeBytes:                     environmentInt64("UPLOAD_PART_SIZE_BYTES", 8*1024*1024),
 		MultipartThresholdBytes:           environmentInt64("UPLOAD_MULTIPART_THRESHOLD_BYTES", 16*1024*1024),
 		DeadLetterQueueURL:                os.Getenv("SQS_DEAD_LETTER_QUEUE_URL"),
@@ -252,6 +255,12 @@ func loadConfiguration() (configuration, error) {
 	}
 	if len(result.InternalAPIToken) < 32 {
 		return configuration{}, errors.New("INTERNAL_API_TOKEN must contain at least 32 characters")
+	}
+	if result.ClipGenerationToken != "" && len(result.ClipGenerationToken) < 32 {
+		return configuration{}, errors.New("CLIP_GENERATION_TOKEN must contain at least 32 characters when configured")
+	}
+	if result.ClipGenerationToken != "" && result.ClipGenerationToken == result.InternalAPIToken {
+		return configuration{}, errors.New("CLIP_GENERATION_TOKEN must differ from INTERNAL_API_TOKEN")
 	}
 	if isGeminiStoryPlannerProvider(result.StoryPlannerProvider) {
 		if strings.TrimSpace(result.StoryPlannerGeminiAPIKey) == "" {

@@ -148,6 +148,10 @@ func (s *Server) createTextVideo(response http.ResponseWriter, request *http.Req
 		s.internalError(response, errors.New("credit service not configured"), "reserve text video credits")
 		return
 	}
+	if request.URL.Path == "/internal/clip-videos" && !s.ClipGenerationLimiter.Allow(user.ID, "create_clip_video", s.Now().UTC()) {
+		s.writeError(response, http.StatusTooManyRequests, "rate_limited", "too many clip generation requests")
+		return
+	}
 
 	generation := models.TextVideoGeneration{
 		ID:           models.NewID("text-video"),
@@ -220,7 +224,7 @@ func (s *Server) getTextVideo(response http.ResponseWriter, request *http.Reques
 		return
 	}
 	generation, err := s.Store.GetTextVideoGeneration(request.Context(), user.ID, generationID)
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrInvalidOwner) {
 		s.writeError(response, http.StatusNotFound, "text_video_not_found", "text video generation not found")
 		return
 	}
@@ -390,7 +394,7 @@ func (s *Server) getTextVideoContent(response http.ResponseWriter, request *http
 		return
 	}
 	generation, err := s.Store.GetTextVideoGeneration(request.Context(), user.ID, generationID)
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrInvalidOwner) {
 		s.writeError(response, http.StatusNotFound, "text_video_not_found", "text video generation not found")
 		return
 	}
